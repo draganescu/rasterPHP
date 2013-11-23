@@ -214,6 +214,11 @@ class controller {
 		$this->routes[$this->current_config_route] = $template;
 		return $this;
 	}
+
+	public function from($theme)
+	{
+		config::set('theme')->to( $theme );
+	}
 	
 	public function output() {
 		$template = template::instance();
