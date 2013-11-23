@@ -9,6 +9,7 @@ class controller {
     public $forced_route = array();
     public $current_route = '';
     public $current_config_route = '';
+    private $changed_themes = array();
     
     protected $models = array();
 
@@ -57,6 +58,11 @@ class controller {
 			}
 			
 			if(preg_match("%".$url."$%", config::get('uri_string'))) {
+
+				if(isset($this->changed_themes[$url])) {
+					config::set('theme')->to($this->changed_themes[$url]);
+				}
+
 				$template = $file;
 				break;
 			}
@@ -217,7 +223,7 @@ class controller {
 
 	public function from($theme)
 	{
-		config::set('theme')->to( $theme );
+		$this->changed_themes[$this->current_config_route] = $theme;
 	}
 	
 	public function output() {
