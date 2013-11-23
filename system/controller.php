@@ -112,7 +112,7 @@ class controller {
 		
 		$template = template::instance();
 		
-		$template::set('views_path')->to(config::get('views_path'));
+		$template::set('views_path')->to(boot::$appname.DIRECTORY_SEPARATOR.config::get('views_path'));
 		$template::set('theme')->to(config::get('theme'));
 		$template::set('view_ext')->to(config::get('views_ext'));
 		$template::set('base_uri')->to(config::get('base_uri'));

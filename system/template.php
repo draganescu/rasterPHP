@@ -51,7 +51,7 @@ class template {
 		$template->output = str_replace(array('/*-', '-*/'), array('<!--', '-->'), $template->output);
 		
 		
-		$template->base_tag = $template->base_uri.$template->views_path.DIRECTORY_SEPARATOR.$template->theme;
+		$template->base_tag = $template->base_uri.$template->views_path.'/'.$template->theme.'/';
 		
 		if(stripos($template->output,'<base') === false)
 				$base = "<base href='".$template->base_tag."' />\n<script type='text/javascript'>var BASE = '".$template->link_uri."'</script>";
