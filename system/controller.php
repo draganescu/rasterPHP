@@ -57,7 +57,7 @@ class controller {
 				break;
 			}
 			
-			if(preg_match("%".$url."$%", config::get('uri_string'))) {
+			if(preg_match("%".$url."%", config::get('uri_string'))) {
 
 				if(isset($this->changed_themes[$url])) {
 					config::set('theme')->to($this->changed_themes[$url]);
@@ -158,7 +158,7 @@ class controller {
 	
 	protected function fix_links() {
 		$template = template::instance();
-		$template->output = preg_replace("/(href|action)=(\"|')([a-zA-Z0-9\-\._\?\,\'\/\\\+&amp;%\$#\=~]*)\?".template::get('tpl_uri')."=(.*?)(\"|')/", '$1="'.template::get('link_uri').'$4"', $template->output);
+		$template->output = preg_replace("/(href|action|src)=(\"|')([a-zA-Z0-9\-\._\?\,\'\/\\\+&amp;%\$#\=~]*)\?".template::get('tpl_uri')."=(.*?)(\"|')/", '$1="'.template::get('link_uri').'$4"', $template->output);
 		$template->output = str_replace(template::get('link_uri')."__", template::get('link_uri').template::get('pad_uri'), $template->output);
 		return $template;
 	} 

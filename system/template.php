@@ -91,74 +91,73 @@ class template {
     }
     
         
-    public function _print($print, $model, $method) {
+    public function _print($data, $model, $method) {
     	$this->current_action = 'print';
-		$isalt = false;
-		$start = "<!-- print.$model.$method -->";
-		$end = "<!-- /print.$model.$method -->";
-		$alt = "<!-- print.$model.$method /-->";
-		$pos1 = strpos($this->output, $start);
-		if($pos1 === false)
-		{
-			$start = $alt;
-			$end = $alt;
-			$pos1 = strpos($this->output, $alt);
-			$pos2 = strlen($alt);
-			$isalt = true;
-		}
-		else
-		{
-			$pos2 = strpos($this->output, $end) - $pos1 + strlen($end);
-		}
-
-		self::$model = $model;
-
-		if($pos1 === false) return false;
-
-		if(!$isalt)
-		{
-			$this->current_block = substr($this->output, $pos1+strlen($start), $pos2 - 2*strlen($end));
-			$render_template = substr($this->output, $pos1+strlen($start), $pos2 - 2*strlen($end) + 1);
-		}
-		else
-		{
-			$this->current_block = '';
-			$render_template = '';
-		}
-
-		if($model == 'session')
-		{
-			if(array_key_exists($method, $_SESSION))
-				$this->output = substr_replace($this->output, $_SESSION[$method], $pos1, $pos2);
+			$isalt = false;
+			$start = "<!-- print.$model.$method -->";
+			$end = "<!-- /print.$model.$method -->";
+			$alt = "<!-- print.$model.$method /-->";
+			$pos1 = strpos($this->output, $start);
+			if($pos1 === false)
+			{
+				$start = $alt;
+				$end = $alt;
+				$pos1 = strpos($this->output, $alt);
+				$pos2 = strlen($alt);
+				$isalt = true;
+			}
 			else
-				$this->output = substr_replace($this->output, "", $pos1, $pos2);
-			return 'session';
-		}
+			{
+				$pos2 = strpos($this->output, $end) - $pos1 + strlen($end);
+			}
 
-		if($model == 'self')
-		{
-			$this->output = substr_replace($this->output, $this->$method, $pos1, $pos2);
-			continue;
-		}
+			self::$model = $model;
 
-		// @TODO implement else
-		if($model == 'if')
-		{
-			if($this->$method === true) 
+			if($pos1 === false) return false;
+
+			if(!$isalt)
+			{
+				$this->current_block = substr($this->output, $pos1+strlen($start), $pos2 - 2*strlen($end));
+				$render_template = substr($this->output, $pos1+strlen($start), $pos2 - 2*strlen($end) + 1);
+			}
+			else
+			{
+				$this->current_block = '';
+				$render_template = '';
+			}
+
+			if($model == 'session')
+			{
+				if(array_key_exists($method, $_SESSION))
+					$this->output = substr_replace($this->output, $_SESSION[$method], $pos1, $pos2);
+				else
+					$this->output = substr_replace($this->output, "", $pos1, $pos2);
+				return 'session';
+			}
+
+			if($model == 'self')
+			{
+				$this->output = substr_replace($this->output, $this->$method, $pos1, $pos2);
+				return 'self';
+			}
+
+			// @TODO implement else
+			if($model == 'if')
+			{
+				if($this->$method === true) 
+					$this->output = substr_replace($this->output, $render_template, $pos1, $pos2);
+				else
+					$this->output = substr_replace($this->output, '', $pos1, $pos2);
+
+				return 'if';
+			}
+
+			if($data === false)
 				$this->output = substr_replace($this->output, $render_template, $pos1, $pos2);
 			else
-				$this->output = substr_replace($this->output, '', $pos1, $pos2);
+				$this->output = substr_replace($this->output, $data, $pos1, $pos2);
 
-			return 'if';
-		}
-
-
-		if($data === false)
-			$this->output = substr_replace($this->output, $render_template, $pos1, $pos2);
-		else
-			$this->output = substr_replace($this->output, $data, $pos1, $pos2);
-
-		unset($object);
+			unset($object);
     }
     
     public function render_results($model, $method, $index = 0)
@@ -369,7 +368,7 @@ class template {
 		$this->current_block = substr($this->output, $pos1+strlen($start), $pos2 - 2*strlen($end));
 
 		$render_template = substr($this->output, $pos1+strlen($start), $pos2 - 2*strlen($end)+1);
-		$res = preg_match_all('/<!-- print\.([@\+,a-z,A-Z,_,-,\.]*) (\/?)-->/', $render_template, $datastarts);
+		$res = preg_match_all('/<!-- print\.([@\+,a-z,A-Z,_,-,\.,0-9]*) (\/?)-->/', $render_template, $datastarts);
 		$rendered_data = "";
 
 		if($data_arr === false)
@@ -395,7 +394,7 @@ class template {
 				continue;
 
 			$rendered_tpl = $render_template;
-			foreach ($datastarts[0] as $key => $value) {					
+			foreach ($datastarts[0] as $key => $value) {
 
 				//not very elegant but it is a special case that has to be out of the loop
 				// this should be moved in the regexp above
@@ -512,7 +511,7 @@ class template {
     
     
     function view_path($view) {
-    	return $this->views_path.DIRECTORY_SEPARATOR.$this->theme.DIRECTORY_SEPARATOR.$view.$view_ext;
+    	return $this->views_path.DIRECTORY_SEPARATOR.$this->theme.DIRECTORY_SEPARATOR.$view.$this->view_ext;
     }
     
     function dry_template(){
@@ -522,7 +521,6 @@ class template {
 
 		$this->output = preg_replace('/<!-- (\/?)res\.([a-z,_,-]*) -->/', "", $this->output);
 		$res = preg_match_all('/<!-- dry\.([a-z,_,-,\/]*)\.([a-z,_,-]*) (\/?)-->/', $this->output, $datastarts);
-		
 		$loaded_files = array();
 		arsort($datastarts);
 		foreach ($datastarts[0] as $key => $value) {					
