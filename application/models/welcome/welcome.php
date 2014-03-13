@@ -3,7 +3,10 @@
 class welcome {
 	function hello() {
 		return array(
-			array('var'=>'Tested!')
+			array(
+			      'heading'=>'Welcome!',
+			      'message'=>'Tested!'
+			)
 		);
 	}
 }

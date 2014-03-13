@@ -57,12 +57,17 @@ class event {
 		$subscribers = $this->events[$this->current_event];
 		unset($this->events[$this->current_event]);
 		$this->current_event = 'core_'.$this->current_event;
-		$this->events[$this->current_event] = $subscribers;
+		$core_subscribers = $this->events[$this->current_event];
+		if(empty($core_subscribers)) {
+			$core_subscribers = array();
+		}
+		$this->events[$this->current_event] = array_merge($core_subscribers, $subscribers);
 		return true;
 	}
 	
 	public static function dispatch($the_event) {
 		
+		log::info('Event: '.$the_event);
 		$event = event::instance();
 		
 		if(!is_array($event->events))
@@ -71,6 +76,7 @@ class event {
 		if(!array_key_exists($the_event, $event->events))
 			if(!array_key_exists('core_'.$the_event, $event->events))
 				return true;
+
 		if(array_key_exists('core_'.$the_event, $event->events))
 			$the_event = 'core_'.$the_event;
 		

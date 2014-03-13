@@ -39,6 +39,8 @@ class controller {
 
 	function respond() {
 		
+		event::dispatch('finding_route');
+
 		$route = '';
 		$template = '';
 		config::load('routes');

@@ -65,7 +65,8 @@ class config {
 		$folder_path = str_replace($config->index_file, '', $_SERVER["SCRIPT_NAME"]);
 		$config->folder_path = $folder_path;
 		
-		$request_uri = str_replace($folder_path, '', $request_uri);
+    if($folder_path != '/')
+  		$request_uri = str_replace($folder_path, '', $request_uri);
 		
     	if ($config->protocol == '') {
 			$config->protocol = 'http' . ((isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] == 'on') ? 's' : '');

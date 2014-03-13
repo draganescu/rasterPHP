@@ -51,6 +51,7 @@ class database {
         }
         
         $query = call_user_func_array('sprintf', $args);
+        log::info('Query: '. $query);
         return R::getAll( $query );
     }
 

@@ -401,7 +401,11 @@ class template {
 				if(strpos($value, '.if.') !== false) continue;
 				
 				$start = $value;
-				$end = str_replace("<!-- ", "<!-- /", $value);
+				if($datastarts[2][$key] == '/')
+					$end = $value;
+				else
+					$end = str_replace("<!-- ", "<!-- /", $value);
+
 				$rpos1 = strpos($rendered_tpl, $start);
 				if($rpos1 === false)
 				{
@@ -471,9 +475,9 @@ class template {
 								$attrchange = preg_replace("% ".$dataattr."(.*?)=(.*?)('|\")(.*?)('|\")%", ' ', $current_item);			                	
 			                else {
 			                	if($is_append)
-				                	$attrchange = preg_replace("% ".$dataattr."(.*?)=(.*?)('|\")(.*?)('|\")%", " ".$dataattr.'="$4 '.$data[$datakey].'"', $current_item);
+				                	$attrchange = preg_replace("% ".$dataattr."(.*?)=(.*?)('|\")(.*?)('|\")%", " ".$dataattr.'="$4 '.str_replace('$', '\$', $data[$datakey]).'"', $current_item);
 			                	else
-				                	$attrchange = preg_replace("% ".$dataattr."(.*?)=(.*?)('|\")(.*?)('|\")%", " ".$dataattr.'="'.$data[$datakey].'"', $current_item);
+				                	$attrchange = preg_replace("% ".$dataattr."(.*?)=(.*?)('|\")(.*?)('|\")%", " ".$dataattr.'="'.str_replace('$', '\$', $data[$datakey]).'"', $current_item);
 			                }
 
 			                $rendered_tpl = substr_replace($rendered_tpl, $attrchange, $rpos1, $rpos2);
