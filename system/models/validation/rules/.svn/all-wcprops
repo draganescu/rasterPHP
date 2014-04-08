@@ -1,0 +1,23 @@
+K 25
+svn:wc:ra_dav:version-url
+V 55
+/artweb/login/!svn/ver/23/trunk/models/validation/rules
+END
+cant_be.php
+K 25
+svn:wc:ra_dav:version-url
+V 67
+/artweb/login/!svn/ver/23/trunk/models/validation/rules/cant_be.php
+END
+not_empty.php
+K 25
+svn:wc:ra_dav:version-url
+V 69
+/artweb/login/!svn/ver/23/trunk/models/validation/rules/not_empty.php
+END
+email_format.php
+K 25
+svn:wc:ra_dav:version-url
+V 72
+/artweb/login/!svn/ver/23/trunk/models/validation/rules/email_format.php
+END
