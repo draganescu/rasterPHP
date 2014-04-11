@@ -1,9 +1,18 @@
 <?php
+// #Boot class
 
+// This class handles the bootstrapping by loading needed configuration files,
+// system classes and dispatches the first event ```launch``` which triggers 
+// application execution
 class boot {
 	
+	// The name of the application is also the name of the folder
+	// where the application files are located. For instance, if ```$appname```,
+	// which is defined in the index file as ```boot::appname = 'xxxx'``` is say basecamp then
+	// the application folder will be ```/basecamp/```
 	static $appname;
 	
+	// ##Initialization
 	static function up()
 	{
 		boot::file_system_setup();
@@ -79,3 +88,5 @@ class boot {
 	}
 	
 }
+
+// Next source to read: ```/system/config.php```

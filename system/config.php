@@ -160,3 +160,5 @@ class config {
     }
 
 }
+
+// Next source to read: ```/system/config/events.php```

@@ -19,8 +19,6 @@ You've got one single thin controller. Anorexic thin. All it  does is controllin
 
 ## How it works
 
-Now don't go wasting my precious time!
-
 1. You make a nice html page of how you want the UI to look.
 
 ~~~
@@ -132,7 +130,7 @@ We got Em in the place who likes it in your face.
 
 ### Boot up!
 
-The Boot class initialises the global configuration, detects where the files are on the filesystem and also takes care to load your precious configuration amd extended or replaced core classes.
+The Boot class initialises the global configuration, detects where the files are on the filesystem and also takes care to load your precious configuration and extended or replaced core classes.
 
 You got G like MC who likes it on a...
 
@@ -165,7 +163,7 @@ then it will be available as:
 
 ~~~
 <?php
-$valentinesday = $config::get('theme');
+$valentinesday = config::get('theme');
 ?>
 ~~~
 
