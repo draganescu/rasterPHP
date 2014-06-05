@@ -1,12 +1,19 @@
 <?php
 
+// Raster's most notable feature is this templating class that parses html
+// comments and makes possible the MVC pull system by exposing template injection
+// methods for the data provided by the models. OMG thats a twisted way to put it.
 class template {
+	// this is just singleton boilerplate :)
 	private static $instances = array();
     protected function __construct() {}
     protected function __clone() {}
     
+
     protected $replace = array();
     protected $template_data = '';
+
+    // 
     protected $current_config_setting = '';
     
     public $current_action = '';

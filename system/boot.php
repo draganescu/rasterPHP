@@ -13,12 +13,20 @@ class boot {
 	static $appname;
 	
 	// ##Initialization
+	// The application does the following bootstrap sequence:
 	static function up()
 	{
+		// where it is on the file system to reference its files properly
 		boot::file_system_setup();
+		// loads and instanced the main system classes (/system/*.php)
 		boot::load_core_files();
+		// loads default configuration (can be easily overriden)
 		boot::load_core_config();
+		// configuration initialization sets up the current used hostname,
+		// determines the index file and the rewrite procedure
+		// and figures out if its development or production or whatever
 		config::initialize();
+		// the first event (hook) that our system launches
 		event::dispatch('launch');
 	}
 	

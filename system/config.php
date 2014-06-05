@@ -1,16 +1,22 @@
 <?php
+// #Config class
+
+// The config class is a singleton, like all the other classes
 class config {
 
-
+	// this is the normal singleton boilerplate
+	// we do not have a base class because ... well not sure exactly why.
 	private static $instances = array();
     protected function __construct() {}
     protected function __clone() {}
     
+    // these are mainly defaults and we define them here 
+    // so that we can set them later on to a new value
     public $rewrite = false;
     protected $config = array();
     static $extension = '.php';
     
-    
+    // given a parameter
     static function set($varname) {
     	$config = config::instance();
     	$config->$varname = '';
@@ -65,8 +71,9 @@ class config {
 		$folder_path = str_replace($config->index_file, '', $_SERVER["SCRIPT_NAME"]);
 		$config->folder_path = $folder_path;
 		
-    if($folder_path != '/')
-  		$request_uri = str_replace($folder_path, '', $request_uri);
+	    if($folder_path != '/') {
+	  		$request_uri = str_replace($folder_path, '', $request_uri);
+		}
 		
     	if ($config->protocol == '') {
 			$config->protocol = 'http' . ((isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] == 'on') ? 's' : '');

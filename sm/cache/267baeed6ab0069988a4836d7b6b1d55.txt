@@ -1,0 +1,4 @@
+<tr class="docu"><td class="comment">
+</td><td class="code"><pre class="linenumbers">1
+2</pre><pre class="prettyprint">&lt;?php
+controller::route( 'help' )-&gt;to( 'user_guide' )-&gt;from( 'default' );</pre></td></tr>

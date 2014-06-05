@@ -1,0 +1,12 @@
+<tr class="docu"><td class="comment">
+</td><td class="code"><pre class="linenumbers">1
+2
+3
+4
+5
+6</pre><pre class="prettyprint">&lt;?php
+config::set('theme')-&gt;to('default');
+config::set('default_view')-&gt;to('index');
+config::set('views_path')-&gt;to('views');
+config::set('views_ext')-&gt;to('.html');
+config::set('models_path')-&gt;to('models');</pre></td></tr>

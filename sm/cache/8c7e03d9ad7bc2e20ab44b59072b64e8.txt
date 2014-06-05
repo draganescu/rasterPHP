@@ -1,0 +1,444 @@
+<tr class="docu"><td class="comment"><p>The controller singleton handles the main sequence for a standard
+request that Raster receives. Its a singleton because one of the main
+tennets of this architecture is to have one and only one controller</p>
+</td><td class="code"><pre class="linenumbers">5</pre><pre class="prettyprint">class controller {</pre></td></tr><tr class="docu"><td class="comment"><p>standard singleton boilerplate repeated because
+there is no singleton inherited and i am commenting this
+in every file to remember not coding when i am sleepy</p>
+</td><td class="code"><pre class="linenumbers">10
+11
+12</pre><pre class="prettyprint">    private static $instances = array();
+    protected function __construct() {}
+    protected function __clone() {}</pre></td></tr><tr class="docu"><td class="comment"><p>The routes property is matching the</p>
+</td><td class="code"><pre class="linenumbers">15</pre><pre class="prettyprint">    protected $routes = array();</pre></td></tr><tr class="docu"><td class="comment"><p>Ohh bad programing, but it works this is set when
+we want to make the controller think the request's URL
+is different</p>
+</td><td class="code"><pre class="linenumbers">19</pre><pre class="prettyprint">    public $forced_route = array();</pre></td></tr><tr class="docu"><td class="comment"><p>Whatever the controller matched</p>
+</td><td class="code"><pre class="linenumbers">21</pre><pre class="prettyprint">    public $current_route = '';</pre></td></tr><tr class="docu"><td class="comment"><p>Manual routes holder uset by controller::route('a')->to('b');</p>
+</td><td class="code"><pre class="linenumbers">23</pre><pre class="prettyprint">    public $current_config_route = '';</pre></td></tr><tr class="docu"><td class="comment"><p>Memory property to keep track in case themes are changed in a
+single request</p>
+</td><td class="code"><pre class="linenumbers">26</pre><pre class="prettyprint">    private $changed_themes = array();</pre></td></tr><tr class="docu"><td class="comment"><p>this is a holder for all the loaded models <em>as requested by the view</em></p>
+</td><td class="code"><pre class="linenumbers">29</pre><pre class="prettyprint">    protected $models = array();</pre></td></tr><tr class="docu"><td class="comment"><p>singleton boilerplate stuff</p>
+</td><td class="code"><pre class="linenumbers">32
+33
+34
+35
+36
+37
+38
+39
+40</pre><pre class="prettyprint">    public static function instance()
+    {
+        $cls = __CLASS__;
+        if( class_exists('the_' . $cls) ) $cls = 'the_' . $cls;
+        if (!isset(self::$instances[$cls])) {
+            self::$instances[$cls] = new $cls;
+        }
+        return self::$instances[$cls];
+    }</pre></td></tr><tr class="docu"><td class="comment"><p>So, the views can be taken out of the application's directory for
+-paranoid- sorry security reasons. This is why you can
+config::set('views<em>path')->to('hidden</em>dir<em>relative</em>to_'.APPBASE)
+and APPBASE is always relative to system.</p>
+</td><td class="code"><pre class="linenumbers">46
+47
+48
+49
+50
+51</pre><pre class="prettyprint">    static function build_view_path($view)
+    {
+        return APPBASE . config::get('views_path') . DIRECTORY_SEPARATOR .
+                        config::get('theme') . DIRECTORY_SEPARATOR .
+                        $view . config::get('views_ext');
+    }</pre></td></tr><tr class="docu"><td class="comment"><p>Just as the views the models can live outsite the app
+being just classes the code is reusable so maybe you can have a separate
+library outside the application and integrate it in other
+projects that do not use Raster</p>
+
+<p>the method takes $model (string) as a param and based on
+configuration returns $paths (array) containing all possible
+filesystem locations for a model</p>
+</td><td class="code"><pre class="linenumbers">61</pre><pre class="prettyprint">    static function build_model_paths( $model ) {</pre></td></tr><tr class="docu"><td class="comment"><p>app_path is for a model built for the application</p>
+</td><td class="code"><pre class="linenumbers">63</pre><pre class="prettyprint">        $paths['app_path'] = APPBASE . config::get('models_path') . DIRECTORY_SEPARATOR . $model . DIRECTORY_SEPARATOR . $model . '.php';</pre></td></tr><tr class="docu"><td class="comment"><p>system_path is for default Raster models</p>
+</td><td class="code"><pre class="linenumbers">65</pre><pre class="prettyprint">        $paths['system_path'] = BASE . config::get('models_path') . DIRECTORY_SEPARATOR . $model . DIRECTORY_SEPARATOR . $model . '.php';</pre></td></tr><tr class="docu"><td class="comment"><p>extended_path is for replaced or extended system models</p>
+</td><td class="code"><pre class="linenumbers">67
+68
+69</pre><pre class="prettyprint">        $paths['extended_path'] = APPBASE . config::get('models_path') . DIRECTORY_SEPARATOR . 'the_' . $model . DIRECTORY_SEPARATOR . 'the_' . $model . '.php';
+        return $paths;
+    }</pre></td></tr><tr class="docu"><td class="comment"><p>The respond method is attached to the launch event and its main role
+is to look up the current url and find a matching view</p>
+</td><td class="code"><pre class="linenumbers">73</pre><pre class="prettyprint">    function respond() {</pre></td></tr><tr class="docu"><td class="comment"><p>this event allows work to be done before the route is found</p>
+</td><td class="code"><pre class="linenumbers">76
+77
+78
+79</pre><pre class="prettyprint">        event::dispatch('finding_route');
+
+        $route = '';
+        $template = '';</pre></td></tr><tr class="docu"><td class="comment"><p>loading the routes config which is in system/config by default
+but you can override it easily with a file in application/config</p>
+</td><td class="code"><pre class="linenumbers">83
+84
+85</pre><pre class="prettyprint">        config::load('routes');
+        
+        $controller = controller::instance();</pre></td></tr><tr class="docu"><td class="comment"><p>the default view to load matches the url exactly
+so a request to index.php/products will load views/products.html
+while a request to index.php/products/car will load views/products/car.html
+this is by deafault but can be overridden with routes</p>
+</td><td class="code"><pre class="linenumbers">91</pre><pre class="prettyprint">        $default_file = controller::build_view_path(implode('/', config::get('uri_segments')));</pre></td></tr><tr class="docu"><td class="comment"><p>set the route to the default</p>
+</td><td class="code"><pre class="linenumbers">94
+95
+96</pre><pre class="prettyprint">        if(file_exists($default_file)) {
+            $route = $default_file;
+        }</pre></td></tr><tr class="docu"><td class="comment"><p>then we look up routes to see if the author specifically requested
+a different view trough controller::route( 'url/param' )->to( 'view' );</p>
+</td><td class="code"><pre class="linenumbers">100
+101</pre><pre class="prettyprint">        foreach ($this-&gt;routes as $url=&gt;$file)
+        {</pre></td></tr><tr class="docu"><td class="comment"><p>the $forced<em>route is when we want to emulate a different url
+than the one found by the controller in $</em>SERVER</p>
+</td><td class="code"><pre class="linenumbers">104
+105
+106
+107
+108
+109
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119</pre><pre class="prettyprint">            if($this-&gt;forced_route == $url)
+            {
+                $template = $file;
+                break;
+            }
+            
+            if(preg_match(&quot;%&quot;.$url.&quot;%&quot;, config::get('uri_string'))) {
+
+                if(isset($this-&gt;changed_themes[$url])) {
+                    config::set('theme')-&gt;to($this-&gt;changed_themes[$url]);
+                }
+
+                $template = $file;
+                break;
+            }
+        }</pre></td></tr><tr class="docu"><td class="comment"><p>the route is the filesystem address to the view</p>
+</td><td class="code"><pre class="linenumbers">122
+123</pre><pre class="prettyprint">        if($template != '') 
+            $route = controller::build_view_path($template);</pre></td></tr><tr class="docu"><td class="comment"><p>if no file exists for neither default or manual route
+the default view is loaded</p>
+</td><td class="code"><pre class="linenumbers">127
+128
+129
+130</pre><pre class="prettyprint">        if($template == '' &amp;&amp; $route == '') {
+            event::dispatch('route not found');
+            $route = controller::build_view_path(config::get('default_view'));
+        }</pre></td></tr><tr class="docu"><td class="comment"><p>obvious right?</p>
+</td><td class="code"><pre class="linenumbers">133</pre><pre class="prettyprint">        $this-&gt;current_route = $route;</pre></td></tr><tr class="docu"><td class="comment"><p>just a hook</p>
+</td><td class="code"><pre class="linenumbers">136
+137
+138
+139</pre><pre class="prettyprint">        event::dispatch('route_found');
+
+        return $this;
+    }</pre></td></tr><tr class="docu"><td class="comment"><p>internal method of the controller used in handle_response</p>
+</td><td class="code"><pre class="linenumbers">142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291</pre><pre class="prettyprint">    private function call_method($object, $method) {
+
+        
+        $model = get_class( $object );
+        $test = explode(&quot;(&quot;, $method);
+        event::dispatch('executing_'.$model.&quot;_&quot;.$method);
+        
+        if(!is_callable(array($object, $test[0]))) return false;
+        
+        $db = database::instance(  );
+        $db-&gt;current_model = $model;
+
+        if(strpos($method, &quot;(&quot;) === false)
+            $data = $object-&gt;$method();
+        else
+            if(@eval('$data = $object-&gt;'.$method.';') === false)
+                exit(&quot;Malformed tag at &quot;.htmlentities($model.'.'.$method).&quot; !&quot;);
+        
+        event::dispatch('executed_'.$model.&quot;_&quot;.$method);
+        
+        return $data;
+    }
+    
+    public function handle_response() {
+        
+        $data = file_get_contents($this-&gt;current_route);
+        
+        $template = template::instance();
+        
+        $template::set('views_path')-&gt;to(boot::$appname.DIRECTORY_SEPARATOR.config::get('views_path'));
+        $template::set('theme')-&gt;to(config::get('theme'));
+        $template::set('view_ext')-&gt;to(config::get('views_ext'));
+        $template::set('base_uri')-&gt;to(config::get('base_uri'));
+        $template::set('link_uri')-&gt;to(config::get('link_uri'));
+        
+        $template = template::parse($data);
+
+        foreach($template-&gt;models as $model) {
+            controller::load_model($model);
+        }
+        
+        foreach($template-&gt;models_methods_render as $action) {
+            $model = $action[0];
+            $method = $action[1];
+
+            $object = controller::get_object($model);
+            $data = $this-&gt;call_method($object, $method);
+            
+            event::dispatch(&quot;before_render&quot;);
+            $template-&gt;_render($data, $model, $method);
+            event::dispatch(&quot;after_render&quot;);
+        }
+        
+        foreach($template-&gt;models_methods_print as $action) {
+            $model = $action[0];
+            $method = $action[1];
+            
+            $object = controller::get_object($model);
+            $data = $this-&gt;call_method($object, $method);
+            
+            event::dispatch(&quot;before_print&quot;);
+            $template-&gt;_print($data, $model, $method);
+            event::dispatch(&quot;after_print&quot;);
+        }
+        
+        $this-&gt;fix_links();
+                
+        event::dispatch('done');
+        
+        return $this;
+        
+    }
+    
+    protected function fix_links() {
+        $template = template::instance();
+        $template-&gt;output = preg_replace(&quot;/(href|action|src)=(\&quot;|')([a-zA-Z0-9\-\._\?\,\'\/\\\+&amp;amp;%\$#\=~]*)\?&quot;.template::get('tpl_uri').&quot;=(.*?)(\&quot;|')/&quot;, '$1=&quot;'.template::get('link_uri').'$4&quot;', $template-&gt;output);
+        $template-&gt;output = str_replace(template::get('link_uri').&quot;__&quot;, template::get('link_uri').template::get('pad_uri'), $template-&gt;output);
+        return $template;
+    } 
+    
+    static function get_object($model) {
+        $controller = controller::instance();
+        return $controller-&gt;objects[$model];
+    }
+    
+    static function load_model($model) {
+        
+        $controller = controller::instance();
+        $controller-&gt;loading_model = $model;
+        $continue_loading = event::dispatch('loading_model_'.$model);
+        
+        if(array_key_exists($model, (array)$controller-&gt;objects)) return true;
+        
+        if(!$continue_loading) return false;
+        if($model == 'session') return true;
+        if($model == 'if') return true;
+        if($model == 'self') return true;
+        
+        $possible_paths = controller::build_model_paths($model);
+
+        $model_path = null;
+        $base_model = $model;
+        if( file_exists($possible_paths['system_path']) ) {
+            $model_path = $possible_paths['system_path'];
+        }
+        if( file_exists($possible_paths['extended_path']) ) {
+            require_once $model_path;
+            $model_path = $possible_paths['extended_path'];
+            $model = 'the_'.$model;
+        }
+        if( file_exists($possible_paths['app_path']) ) {
+            $model_path = $possible_paths['app_path'];
+        }
+
+        if(is_null($model_path)) return false;
+        
+        require_once $model_path;
+        $object = new $model();
+        $controller-&gt;objects[$base_model] = $object;
+        
+        return true;
+        
+    }
+    
+
+    public function route($uri)
+    {
+        $controller = controller::instance();
+        $controller-&gt;current_config_route = $uri;
+        return $controller;        
+    }
+    
+    public function to($template)
+    {
+        $this-&gt;routes[$this-&gt;current_config_route] = $template;
+        return $this;
+    }
+
+    public function from($theme)
+    {
+        $this-&gt;changed_themes[$this-&gt;current_config_route] = $theme;
+    }
+    
+    public function output() {
+        $template = template::instance();
+        echo $template-&gt;output;
+        event::dispatch('land');
+    }
+    
+}</pre></td></tr>

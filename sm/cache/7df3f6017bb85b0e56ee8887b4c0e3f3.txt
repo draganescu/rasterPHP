@@ -1,0 +1,183 @@
+<tr class="docu"><td class="comment"><p>in Raster the database class is just a small utility that provides easier access
+to Red Bean PHP which is the default ORM for Raster
+The nicest feature is the sql externalisation to standalone files that can be called
+by name as methods of the database class (see __call below)</p>
+</td><td class="code"><pre class="linenumbers">7</pre><pre class="prettyprint">class database {</pre></td></tr><tr class="docu"><td class="comment"><p>the current<em>model is a holder that we use so we know where to take
+the sql from when overriden methods are called
+as in $db->get</em>my_stuff();</p>
+</td><td class="code"><pre class="linenumbers">12</pre><pre class="prettyprint">    public $current_model = null;</pre></td></tr><tr class="docu"><td class="comment"><p>singleton boilerplate</p>
+</td><td class="code"><pre class="linenumbers">15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25</pre><pre class="prettyprint">    private static $instances = array();
+    protected function __clone() {}
+    public static function instance(  )
+    {
+        $cls = __CLASS__;
+        if( class_exists('the_' . $cls) ) $cls = 'the_' . $cls;
+        if (!isset(self::$instances[$cls])) {
+            self::$instances[$cls] = new $cls;
+        }
+        return self::$instances[$cls];
+    }</pre></td></tr><tr class="docu"><td class="comment"><p>by default we load the Red Bean library and connect to the db when
+a new instance of the database singleton is called</p>
+</td><td class="code"><pre class="linenumbers">29
+30
+31
+32</pre><pre class="prettyprint">    protected function __construct() {
+        require BASE.'libraries/rb.php';
+        database::setup(  );
+    }</pre></td></tr><tr class="docu"><td class="comment"><p>Raster offers a simple way to get rid of SQL text syntax in you PHP files
+by allowing you to create sql files in the model folder and then call those
+querries by using the name of the file as a method of the db object
+and parameters to be placed inside the query</p>
+
+<h2 id="example">Example</h2>
+
+<ul>
+<li>say you have a model called products</li>
+<li>inside it you make a folder named sql</li>
+<li>in that folder you make a file called get_all.sql</li>
+<li>in the sql file you'd have something like
+<code>SELECT * FROM products</code>
+in your products.php model you can now do:
+<code>$db = database::instance(); $products = $db-&gt;get_all();</code></li>
+</ul>
+</td><td class="code"><pre class="linenumbers">46
+47
+48
+49
+50
+51
+52
+53
+54
+55
+56
+57</pre><pre class="prettyprint">    public function __call($name, $arguments) {
+        $sqlfile = APPBASE.'models/'.$this-&gt;current_model.'/sql/'.$name.'.sql';
+
+        if(file_exists($sqlfile))
+        {
+            return $this-&gt;query(file_get_contents($sqlfile), $arguments);
+        } else {
+            return false;
+        }
+
+        return $this;
+    }</pre></td></tr><tr class="docu"><td class="comment"><p>This is just a helper function that runs a query trough
+R::getAll( $query ) and has parameter the classic escaping built in</p>
+</td><td class="code"><pre class="linenumbers">61
+62
+63
+64
+65
+66
+67
+68
+69
+70
+71
+72
+73
+74
+75
+76
+77
+78
+79
+80
+81</pre><pre class="prettyprint">    public function query(  ) {
+        $args = func_get_args();
+
+        if (count($args) &lt; 2)
+        {
+            $args = $args[0];
+        }
+        else
+        {
+            $query = array_shift($args);
+            if($this-&gt;escape === true)
+                $args = array_map('mysql_escape_string', $args[0]);
+            else
+                $args = $args[0];
+            array_unshift($args, $query);
+        }
+        
+        $query = call_user_func_array('sprintf', $args);
+        log::info('Query: '. $query);
+        return R::getAll( $query );
+    }</pre></td></tr><tr class="docu"><td class="comment"><p>each connection config in APPBASE.'config/db/' is parsed and if
+its active the R library is made aware of the new connection</p>
+</td><td class="code"><pre class="linenumbers">85
+86
+87
+88
+89
+90
+91
+92
+93
+94
+95
+96
+97
+98</pre><pre class="prettyprint">    public static function setup(  ) {
+        $active_connections = array(  );
+        $db_config_files = database::get_db_config(  );
+
+        if( count( $db_config_files ) == 0 ) return false;
+
+        foreach ($db_config_files as $file) {
+            require_once APPBASE.'config/db/'.$file;
+            $key = basename($file, &quot;.php&quot;);
+            if( $active )
+                R::addDatabase($key,$dsn,$user,$password,$frozen);
+            if( $active )
+                $active_connections[  ] = $key;
+        }</pre></td></tr><tr class="docu"><td class="comment"><p>Raster supports seamless deployement on multiple
+servers which can have different tags attached such as
+development, local, staging, pre-production, live etc.</p>
+</td><td class="code"><pre class="linenumbers">103
+104
+105</pre><pre class="prettyprint">        $env = config::get( 'environment' );
+
+        if( !in_array($env, $active_connections) ) return false;</pre></td></tr><tr class="docu"><td class="comment"><p>depending on what the current environment is we use R to make
+a new connection to the DB</p>
+</td><td class="code"><pre class="linenumbers">109
+110
+111</pre><pre class="prettyprint">        R::selectDatabase($env);
+        return true;
+    }</pre></td></tr><tr class="docu"><td class="comment"><p>the database config loader looks up all the files in APPBASE.'config/db/'</p>
+</td><td class="code"><pre class="linenumbers">114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126</pre><pre class="prettyprint">    static function get_db_config() {
+        $db_config_files = array(  );
+        $files = scandir(APPBASE.'config/db/'); 
+        foreach($files as $file) {
+            if(!is_dir(BASE.$file.'/') &amp;&amp; strpos($file,'.php') !== false) {
+                $db_config_files[] = $file;
+            }
+        }        
+        return $db_config_files;
+    }
+
+
+}</pre></td></tr>

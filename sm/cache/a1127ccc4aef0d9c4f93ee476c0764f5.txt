@@ -1,0 +1,240 @@
+<tr class="docu"><td class="comment">
+</td><td class="code"><pre class="linenumbers">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+42
+43
+44
+45
+46
+47
+48
+49
+50
+51
+52
+53
+54
+55
+56
+57
+58
+59
+60
+61
+62
+63
+64
+65
+66
+67
+68
+69
+70
+71
+72
+73
+74
+75
+76
+77
+78
+79
+80
+81
+82
+83
+84
+85
+86
+87
+88
+89
+90
+91
+92
+93
+94
+95
+96
+97
+98
+99
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120</pre><pre class="prettyprint">&lt;?php
+
+class event {
+    
+    private static $instances = array();
+    protected function __construct() {}
+    protected function __clone() {}
+    protected $events = array();
+    protected $current_event = '';
+    protected $event_data = array();
+
+    public static function instance()
+    {
+        $cls = __CLASS__;
+        if( class_exists('the_' . $cls) ) $cls = 'the_' . $cls;
+        if (!isset(self::$instances[$cls])) {
+            self::$instances[$cls] = new $cls;
+        }
+        return self::$instances[$cls];
+    }
+    
+    static function bind($event)
+    {
+        $events = event::instance();
+        $events-&gt;current_event = $event;
+        return $events;
+    }
+    
+    function to($model, $method) {
+        $this-&gt;events[$this-&gt;current_event][] = array($model, $method);
+        return $this;
+    }
+
+    static function unbind($event)
+    {
+        $events = event::instance();
+        $events-&gt;current_event = $event;
+        return $events;
+    }
+    
+    function from($model, $method) {
+        $unbind = null;
+        $binds = $this-&gt;events[$this-&gt;current_event];
+        foreach (( array )$binds as $key =&gt; $bind) {
+            if( $model == $bind[ 0 ] &amp;&amp; $model == $bind[ 1 ] ) {
+                $unbind = $key;
+            }
+        }
+        if( !is_null($unbind) ) {
+            unset( $this-&gt;events[$this-&gt;current_event][ $unbind ] );
+        }
+        return $this;
+    }
+    
+    function core() {
+        if(strpos($this-&gt;current_event, 'core_') !== false) return false;
+        $subscribers = $this-&gt;events[$this-&gt;current_event];
+        unset($this-&gt;events[$this-&gt;current_event]);
+        $this-&gt;current_event = 'core_'.$this-&gt;current_event;
+        $core_subscribers = $this-&gt;events[$this-&gt;current_event];
+        if(empty($core_subscribers)) {
+            $core_subscribers = array();
+        }
+        $this-&gt;events[$this-&gt;current_event] = array_merge($core_subscribers, $subscribers);
+        return true;
+    }
+    
+    public static function dispatch($the_event) {
+        
+        log::info('Event: '.$the_event);
+        $event = event::instance();
+        
+        if(!is_array($event-&gt;events))
+            return true;
+
+        if(!array_key_exists($the_event, $event-&gt;events))
+            if(!array_key_exists('core_'.$the_event, $event-&gt;events))
+                return true;
+
+        if(array_key_exists('core_'.$the_event, $event-&gt;events))
+            $the_event = 'core_'.$the_event;
+        
+        $event-&gt;current_event = $the_event;
+        $current_event_binds = $event-&gt;events[$the_event];
+        foreach ($current_event_binds as $index =&gt; $bind) {
+            $model = $bind[0];
+            $method = $bind[1];
+            $event-&gt;current_model = $model;
+            $event-&gt;current_method = $method;
+            
+            if($model == NULL) {
+                function_exists($method) ? $event-&gt;data($method($event)) : $event-&gt;data(NULL);
+            }
+            
+            if(strpos($the_event, 'core_') !== false) {
+                $object = $model::instance();
+            } else {
+                controller::load_model($model);
+                $object = controller::get_object($model);
+            }
+            
+            if(!is_callable(array($object, $method))) $event-&gt;data(false);
+            
+            $event-&gt;data($object-&gt;$method());
+        }
+        
+        return true;
+    }
+    
+    function data($value) {
+        $this-&gt;event_data[$this-&gt;current_event][$this-&gt;current_model.$this-&gt;current_method] = $value;
+        return true;
+    }
+    
+    static function result($event, $model, $method) {
+        $event = event::instance();
+        return $event-&gt;event_data[$event][$model.$method];
+    }
+    
+}</pre></td></tr>

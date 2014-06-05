@@ -1,0 +1,10 @@
+<tr class="docu"><td class="comment"><p>By default the launch event is handled by the single controller</p>
+</td><td class="code"><pre class="linenumbers">3</pre><pre class="prettyprint">event::bind('launch')-&gt;to('controller','respond')-&gt;core();</pre></td></tr><tr class="docu"><td class="comment"><p>The api model executes a model's method before loading a view
+therefore api calls can be viewless.
+To end the execution for an api call just exit;</p>
+</td><td class="code"><pre class="linenumbers">7</pre><pre class="prettyprint">event::bind('finding_route')-&gt;to('api','load');</pre></td></tr><tr class="docu"><td class="comment"><p>If there is no api call then the single controller will start controlling
+Which is actually routing the URI to a view</p>
+</td><td class="code"><pre class="linenumbers">10</pre><pre class="prettyprint">event::bind('route_found')-&gt;to('controller','handle_response')-&gt;core();</pre></td></tr><tr class="docu"><td class="comment"><p>After the view has pulled all the model data in
+the default action is to output it to the browser</p>
+</td><td class="code"><pre class="linenumbers">13</pre><pre class="prettyprint">event::bind('done')-&gt;to('controller','output')-&gt;core();</pre></td></tr><tr class="docu"><td class="comment"><p>And if we log to browser's console, append that to the output</p>
+</td><td class="code"><pre class="linenumbers">15</pre><pre class="prettyprint">event::bind('done')-&gt;to('log','output')-&gt;core();</pre></td></tr>

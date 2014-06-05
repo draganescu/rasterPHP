@@ -1,0 +1,119 @@
+<tr class="docu"><td class="comment"><p>the util class is aimed at making the work with Raster easier
+providing a view wrappers for often uses situations</p>
+</td><td class="code"><pre class="linenumbers">5</pre><pre class="prettyprint">class util {</pre></td></tr><tr class="docu"><td class="comment"><p>get the value from a key/value set passed in the url</p>
+</td><td class="code"><pre class="linenumbers">8
+9
+10
+11
+12
+13
+14
+15
+16
+17</pre><pre class="prettyprint">    static function param($name, $v = false)
+    {
+        $uri_segments=config::get('uri_segments');
+        $value=false;
+        if(in_array($name, $uri_segments))
+            if(array_key_exists(array_search($name, $uri_segments) + 1, $uri_segments))
+                $value = $uri_segments[array_search($name, $uri_segments) + 1];
+        (!$value) ? $ret = $v : $ret = $value;
+        return $ret;
+    }</pre></td></tr><tr class="docu"><td class="comment"><p>redirect to a location within the app</p>
+</td><td class="code"><pre class="linenumbers">20
+21
+22
+23
+24
+25
+26
+27</pre><pre class="prettyprint">    static function redirect($location)
+    {
+        $base = config::get('base_url');
+        header(&quot;Location: &quot;.$base.$location);
+        exit;
+    }
+
+    /* these are used for forms management and to be able to hook xss filters */</pre></td></tr><tr class="docu"><td class="comment"><p>get a value of the $_POST array</p>
+</td><td class="code"><pre class="linenumbers">30
+31
+32
+33
+34
+35
+36
+37</pre><pre class="prettyprint">    static function post($index_name)
+    {
+        config::set('post_pointer')-&gt;to($index_name);
+        if(!array_key_exists($index_name, $_POST))
+            return false;
+        event::dispatch(&quot;read_post_data&quot;);
+        return $_POST[$index_name];
+    }</pre></td></tr><tr class="docu"><td class="comment"><p>get a value of the $_COOKIE array</p>
+</td><td class="code"><pre class="linenumbers">40
+41
+42
+43
+44
+45
+46
+47</pre><pre class="prettyprint">    static function cookie($index_name)
+    {
+        config::set('cookie_pointer')-&gt;to($index_name);
+        if(!array_key_exists($index_name, $_COOKIE))
+            return false;
+        event::dispatch(&quot;read_cookie_data&quot;);
+        return $_COOKIE[$index_name];
+    }</pre></td></tr><tr class="docu"><td class="comment"><p>get a value of the $_GET array</p>
+</td><td class="code"><pre class="linenumbers">50
+51
+52
+53
+54
+55
+56
+57</pre><pre class="prettyprint">    static function get($index_name)
+    {
+        config::set('get_pointer')-&gt;to($index_name);
+        if(!array_key_exists($index_name, $_GET))
+            return false;
+        event::dispatch(&quot;read_get_data&quot;);
+        return $_GET[$index_name];
+    }</pre></td></tr><tr class="docu"><td class="comment"><p>retrieve a portion of the $_POST array</p>
+</td><td class="code"><pre class="linenumbers">59
+60
+61
+62
+63</pre><pre class="prettyprint">    static function post_filter()
+    {
+        $args = func_get_args();
+        return array_intersect_key($_POST, array_flip($args));
+    }</pre></td></tr><tr class="docu"><td class="comment"><p>boolean check if there is any data in $_GET</p>
+</td><td class="code"><pre class="linenumbers">65
+66
+67
+68
+69
+70
+71</pre><pre class="prettyprint">    static function no_get_data()
+    {
+        if(count($_GET) &gt; 0)
+            return false;
+        else
+            return true;
+    }</pre></td></tr><tr class="docu"><td class="comment"><p>boolean check if there is any data in $_POST</p>
+</td><td class="code"><pre class="linenumbers">73
+74
+75
+76
+77
+78
+79
+80</pre><pre class="prettyprint">    static function no_post_data()
+    {
+        if(count($_POST) &gt; 0)
+            return false;
+        else
+            return true;
+    }
+}</pre></td></tr>

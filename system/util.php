@@ -1,6 +1,10 @@
 <?php
 
+// the util class is aimed at making the work with Raster easier
+// providing a view wrappers for often uses situations
 class util {
+
+	// get the value from a key/value set passed in the url
 	static function param($name, $v = false)
 	{
 		$uri_segments=config::get('uri_segments');

@@ -1,18 +1,34 @@
 <?php
+// The controller singleton handles the main sequence for a standard
+// request that Raster receives. Its a singleton because one of the main
+// tennets of this architecture is to have one and only one controller
 class controller {
 	
+	// standard singleton boilerplate repeated because
+	// there is no singleton inherited and i am commenting this
+	// in every file to remember not coding when i am sleepy
 	private static $instances = array();
     protected function __construct() {}
     protected function __clone() {}
     
+    // The routes property is matching the 
     protected $routes = array();
+    // Ohh bad programing, but it works this is set when
+    // we want to make the controller think the request's URL
+    // is different
     public $forced_route = array();
+    // Whatever the controller matched
     public $current_route = '';
+    // Manual routes holder uset by controller::route('a')->to('b');
     public $current_config_route = '';
+    // Memory property to keep track in case themes are changed in a 
+    // single request
     private $changed_themes = array();
     
+    // this is a holder for all the loaded models *as requested by the view*
     protected $models = array();
 
+    // singleton boilerplate stuff
     public static function instance()
     {
         $cls = __CLASS__;
@@ -23,6 +39,10 @@ class controller {
         return self::$instances[$cls];
     }
 	
+	// So, the views can be taken out of the application's directory for
+	// -paranoid- sorry security reasons. This is why you can 
+	// config::set('views_path')->to('hidden_dir_relative_to_'.APPBASE) 
+	// and APPBASE is always relative to system.
 	static function build_view_path($view)
 	{
 		return APPBASE . config::get('views_path') . DIRECTORY_SEPARATOR .
@@ -30,29 +50,57 @@ class controller {
 						$view . config::get('views_ext');
 	}
 	
+	// Just as the views the models can live outsite the app
+	// being just classes the code is reusable so maybe you can have a separate
+	// library outside the application and integrate it in other
+	// projects that do not use Raster
+	// 
+	// the method takes $model (string) as a param and based on 
+	// configuration returns $paths (array) containing all possible
+	// filesystem locations for a model
 	static function build_model_paths( $model ) {
+		// app_path is for a model built for the application
 		$paths['app_path'] = APPBASE . config::get('models_path') . DIRECTORY_SEPARATOR . $model . DIRECTORY_SEPARATOR . $model . '.php';
+		// system_path is for default Raster models
 		$paths['system_path'] = BASE . config::get('models_path') . DIRECTORY_SEPARATOR . $model . DIRECTORY_SEPARATOR . $model . '.php';
+		// extended_path is for replaced or extended system models
 		$paths['extended_path'] = APPBASE . config::get('models_path') . DIRECTORY_SEPARATOR . 'the_' . $model . DIRECTORY_SEPARATOR . 'the_' . $model . '.php';
 		return $paths;
 	}
 
+	// The respond method is attached to the launch event and its main role
+	// is to look up the current url and find a matching view
 	function respond() {
 		
+		// this event allows work to be done before the route is found
 		event::dispatch('finding_route');
 
 		$route = '';
 		$template = '';
+		
+		// loading the routes config which is in system/config by default
+		// but you can override it easily with a file in application/config
 		config::load('routes');
+		
 		$controller = controller::instance();
+
+		// the default view to load matches the url exactly
+		// so a request to index.php/products will load views/products.html
+		// while a request to index.php/products/car will load views/products/car.html
+		// this is by deafault but can be overridden with routes
 		$default_file = controller::build_view_path(implode('/', config::get('uri_segments')));
 		
+		// set the route to the default
 		if(file_exists($default_file)) {
 			$route = $default_file;
 		}
 		
+		// then we look up routes to see if the author specifically requested
+		// a different view trough controller::route( 'url/param' )->to( 'view' );
 		foreach ($this->routes as $url=>$file)
 		{
+			// the $forced_route is when we want to emulate a different url
+			// than the one found by the controller in $_SERVER
 			if($this->forced_route == $url)
 			{
 				$template = $file;
@@ -70,24 +118,30 @@ class controller {
 			}
 		}
 		
+		// the route is the filesystem address to the view
 		if($template != '') 
 			$route = controller::build_view_path($template);
 		
-		
+		// if no file exists for neither default or manual route
+		// the default view is loaded
 		if($template == '' && $route == '') {
 			event::dispatch('route not found');
 			$route = controller::build_view_path(config::get('default_view'));
 		}
 		
+		// obvious right?
 		$this->current_route = $route;
 		
+		// just a hook
 		event::dispatch('route_found');
 
 		return $this;
 	}
 	
+	// internal method of the controller used in handle_response
 	private function call_method($object, $method) {
 
+		
 		$model = get_class( $object );
 		$test = explode("(", $method);
 		event::dispatch('executing_'.$model."_".$method);

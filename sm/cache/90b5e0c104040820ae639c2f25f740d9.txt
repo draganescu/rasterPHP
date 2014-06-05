@@ -1,0 +1,25 @@
+<tr class="docu"><td class="comment"><h1 id="the-index-file">The index file</h1>
+
+<p>Raster is a normal web framework so all requests have a single
+entry point, which is the index.php file. It can be renamed and it serves
+as the entry point for one application.</p>
+</td><td class="code"><pre class="linenumbers"></pre><pre class="prettyprint"></pre></td></tr><tr class="docu"><td class="comment"><h3 id="bootstrap">Bootstrap</h3>
+
+<p>The first thing we load is the boot class
+which handles auto magic and also wires up the framework</p>
+</td><td class="code"><pre class="linenumbers">11</pre><pre class="prettyprint">require_once 'system/boot.php';</pre></td></tr><tr class="docu"><td class="comment"><h3 id="app-name">App name</h3>
+
+<p>We give the application a name.
+By updating the name you can have more than one application
+using the same codebase, for example, add a blog.php file, update it like:</p>
+
+<p><code>boot::$appname = 'blog';</code></p>
+
+<p>and then in .htaccess direct all requests to blog.php.</p>
+</td><td class="code"><pre class="linenumbers">23</pre><pre class="prettyprint">boot::$appname = 'application';</pre></td></tr><tr class="docu"><td class="comment"><h3 id="were-away">We're away!</h3>
+
+<p>The static boot::up() method is all it takes to have
+Raster load and execute all the proper files for the
+current request</p>
+</td><td class="code"><pre class="linenumbers">29</pre><pre class="prettyprint">boot::up();</pre></td></tr><tr class="docu"><td class="comment"><p>Next source to read: <code>/system/boot.php</code></p>
+</td><td class="code"><pre class="linenumbers"></pre><pre class="prettyprint"></pre></td></tr>
