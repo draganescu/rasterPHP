@@ -50,7 +50,16 @@ class database {
         {
             return $this->query(file_get_contents($sqlfile), $arguments);
         } else {
-            return false;
+            if(file_exists(APPBASE.'models/sql.php')) {
+                include APPBASE.'models/sql.php';
+                if(array_key_exists($name, $querries)) {
+                    return $this->query($querries[$name], $arguments);
+                } else {
+                    return false;
+                }
+            } else {
+                return false;
+            }
         }
 
         return $this;

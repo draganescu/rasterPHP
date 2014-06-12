@@ -7,11 +7,11 @@ class authentication
 
 	function authentication()
 	{
-		$p = my::app();
-		if($p->get('do') == 'logout' && $p->no_post_data())
+		$p = controller::instance();
+		if(util::get('do') == 'logout' && util::no_post_data())
 		{
 			session_destroy();
-			$p->route('login');
+			util::redirect('login');
 			exit;
 		}
 	}
@@ -29,14 +29,14 @@ class authentication
 
 	function list_users()
 	{
-		$app = my::app();
-		$db = my::database();
+		$app = controller::instance();
+		$db = database::instance();
 		//$db->escape(false);
 
 		if($pagination)
 		{
 			$limit = $this->paged_users;
-			$page = $app->param("page", 1);
+			$page = util::param("page", 1);
 			return array("total"=>$db->fetch_total('customers'),"current"=>$page,"perpage"=>$limit);
 		}
 
