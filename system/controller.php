@@ -151,11 +151,13 @@ class controller {
 		$db = database::instance(  );
 		$db->current_model = $model;
 
-		if(strpos($method, "(") === false)
+		if(strpos($method, "(") === false) {
 			$data = $object->$method();
-		else
-			if(@eval('$data = $object->'.$method.';') === false)
+		} else {
+			if(@eval('$data = $object->'.$method.';') === false) {
 				exit("Malformed tag at ".htmlentities($model.'.'.$method)." !");
+			}
+		}
 		
 		event::dispatch('executed_'.$model."_".$method);
 		
@@ -184,6 +186,8 @@ class controller {
 			$model = $action[0];
 			$method = $action[1];
 
+			$template->set_current_block($model, $method, 'render');
+
 			$object = controller::get_object($model);
 			$data = $this->call_method($object, $method);
 			
@@ -196,6 +200,8 @@ class controller {
 			$model = $action[0];
 			$method = $action[1];
 			
+			$template->set_current_block($model, $method, 'print');
+
 			$object = controller::get_object($model);
 			$data = $this->call_method($object, $method);
 			
@@ -215,6 +221,7 @@ class controller {
 	protected function fix_links() {
 		$template = template::instance();
 		$template->output = preg_replace("/(href|action|src)=(\"|')([a-zA-Z0-9\-\._\?\,\'\/\\\+&amp;%\$#\=~]*)\?".template::get('tpl_uri')."=(.*?)(\"|')/", '$1="'.template::get('link_uri').'$4"', $template->output);
+		$template->output = preg_replace("/(href|action|src)=(\"|')([a-zA-Z0-9\-\._\?\,\'\/\\\+&amp;%\$#\=~]*)\.html/", '$1="'.template::get('link_uri').'$3"', $template->output);
 		$template->output = str_replace(template::get('link_uri')."__", template::get('link_uri').template::get('pad_uri'), $template->output);
 		return $template;
 	} 

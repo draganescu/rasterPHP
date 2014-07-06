@@ -6,40 +6,40 @@
 class template {
 	// this is just singleton boilerplate :)
 	private static $instances = array();
-    protected function __construct() {}
-    protected function __clone() {}
-    
+  protected function __construct() {}
+  protected function __clone() {}
+  
 
-    protected $replace = array();
-    protected $template_data = '';
+  public $replace = array();
+  public $template_data = '';
 
-    // 
-    protected $current_config_setting = '';
+  // 
+  public $current_config_setting = '';
+  
+  public $current_action = '';
+  public $models = array();
+  public $models_methods_render = array();
+  public $models_methods_print = array();
+  public $tpl_uri = 'su';
+  
+  public $views_path = '';
+  public $theme = '';
+  public $view_ext = '';
+  public $base_uri = '';
+  public $link_uri = '';
+  
+  public static $model = '';
+  public $render_results = array();
+  public $current_block = '';
+  public $pad_uri = "";
     
-    public $current_action = '';
-    public $models = array();
-    public $models_methods_render = array();
-    public $models_methods_print = array();
-    public $tpl_uri = 'su';
-    
-    public $views_path = '';
-    public $theme = '';
-    public $view_ext = '';
-    public $base_uri = '';
-    public $link_uri = '';
-    
-    public static $model = '';
-    private $render_results = array();
-    private $current_block = '';
-    private $pad_uri = "";
-    
-    // set data to be replaced in all templates
+  // set data to be replaced in all templates
 	function replace($what, $with, $where = ".*")
 	{
 		$this->replace[$where][] = array($what,$with);
 	}
     
-    static function parse($data) {
+  static function parse($data) {
     	
     	$template = template::instance();
     	$template->template_data = $data;
@@ -84,23 +84,13 @@ class template {
 		
 		return $template;
 		
-    }
-    
-    function remove() {
-    	$res = preg_match_all('/<!-- remove -->/', $this->output, $removesStarts);
-		foreach ($removesStarts[0] as $key => $value) {
-			$start = $value;
-			$end = str_replace("<!-- ", "<!-- /", $value);
-			$rpos1 = strpos($this->output, $start);
-			$rpos2 = strpos($this->output, $end) - $rpos1 + strlen($end);
-			$this->output = substr_replace($this->output, "", $rpos1, $rpos2);
-		}
-    }
-    
-        
-    public function _print($data, $model, $method) {
-    	$this->current_action = 'print';
-			$isalt = false;
+  }
+
+  public function set_current_block($model, $method, $action) {
+  	self::$model = $model;
+  	if ($action == 'print') {
+  		$this->current_action = 'print';
+  		$isalt = false;
 			$start = "<!-- print.$model.$method -->";
 			$end = "<!-- /print.$model.$method -->";
 			$alt = "<!-- print.$model.$method /-->";
@@ -117,9 +107,7 @@ class template {
 			{
 				$pos2 = strpos($this->output, $end) - $pos1 + strlen($end);
 			}
-
-			self::$model = $model;
-
+			
 			if($pos1 === false) return false;
 
 			if(!$isalt)
@@ -132,6 +120,42 @@ class template {
 				$this->current_block = '';
 				$render_template = '';
 			}
+			$this->current_params['render_template'] = $render_template;
+			$this->current_params['pos1'] = $pos1;
+			$this->current_params['pos2'] = $pos2;
+  	} elseif ($action == 'render') {
+  		$this->current_action = 'render';
+			$start = "<!-- render.$model.$method -->";
+			$end = "<!-- /render.$model.$method -->";
+			$pos1 = strpos($this->output, $start);
+			$pos2 = strpos($this->output, $end) - $pos1 + strlen($end);
+			
+			$this->current_block = substr($this->output, $pos1+strlen($start), $pos2 - 2*strlen($end));
+
+			$render_template = substr($this->output, $pos1+strlen($start), $pos2 - 2*strlen($end)+1);
+			$res = preg_match_all('/<!-- print\.([@\+,a-z,A-Z,_,-,\.,0-9]*) (\/?)-->/', $render_template, $datastarts);
+			$this->current_params['render_template'] = $render_template;
+			$this->current_params['pos1'] = $pos1;
+			$this->current_params['pos2'] = $pos2;
+			$this->current_params['datastarts'] = $datastarts;
+  	}
+  }
+    
+  function remove() {
+    	$res = preg_match_all('/<!-- remove -->/', $this->output, $removesStarts);
+		foreach ($removesStarts[0] as $key => $value) {
+			$start = $value;
+			$end = str_replace("<!-- ", "<!-- /", $value);
+			$rpos1 = strpos($this->output, $start);
+			$rpos2 = strpos($this->output, $end) - $rpos1 + strlen($end);
+			$this->output = substr_replace($this->output, "", $rpos1, $rpos2);
+		}
+  }
+    
+        
+  public function _print($data, $model, $method) {
+    	
+  		extract($this->current_params);
 
 			if($model == 'session')
 			{
@@ -167,7 +191,7 @@ class template {
 			unset($object);
     }
     
-    public function render_results($model, $method, $index = 0)
+  public function render_results($model, $method, $index = 0)
 	{
 		if($index === false)
 			return $this->render_results[$model][$method];
@@ -363,20 +387,10 @@ class template {
 		return $ret;
 	}
     
-    public function _render($data_arr, $model, $method) {
-    	
-    	$this->current_action = 'render';
-		$start = "<!-- render.$model.$method -->";
-		$end = "<!-- /render.$model.$method -->";
-		$pos1 = strpos($this->output, $start);
-		$pos2 = strpos($this->output, $end) - $pos1 + strlen($end);
-		self::$model = $model;
-
-		$this->current_block = substr($this->output, $pos1+strlen($start), $pos2 - 2*strlen($end));
-
-		$render_template = substr($this->output, $pos1+strlen($start), $pos2 - 2*strlen($end)+1);
-		$res = preg_match_all('/<!-- print\.([@\+,a-z,A-Z,_,-,\.,0-9]*) (\/?)-->/', $render_template, $datastarts);
-		$rendered_data = "";
+   public function _render($data_arr, $model, $method) {
+    
+    extract($this->current_params);
+    $rendered_data = "";
 
 		if($data_arr === false)
 		{
@@ -462,7 +476,7 @@ class template {
 								$rpos2 = strpos($rendered_tpl, $end) - $rpos1 + strlen($end);
 
 								$loop = $this->_loop($rendered_tpl, $data[$datakey], $datastarts[0][$key]);
-				            	$rendered_tpl = substr_replace($rendered_tpl, $loop, $rpos1, $rpos2);
+				        $rendered_tpl = substr_replace($rendered_tpl, $loop, $rpos1, $rpos2);
 							}
 						}
 		            	continue;

@@ -1,7 +1,7 @@
 <?php
-$active		=	false;
-$dsn		= 	"mysql:host=localhost;dbname=shade";
+$active		=	true;
+$dsn		= 	"mysql:host=localhost;dbname=raster";
 $user		= 	'root';
-$password	= 	'root';
+$password	= 	'';
 $frozen		= 	false;
 log::enable();

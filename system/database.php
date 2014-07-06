@@ -14,14 +14,18 @@ class database {
     // singleton boilerplate
 	private static $instances = array();
     protected function __clone() {}
-    public static function instance(  )
-    {
+    public static function instance( $model = false )
+    {  
         $cls = __CLASS__;
         if( class_exists('the_' . $cls) ) $cls = 'the_' . $cls;
         if (!isset(self::$instances[$cls])) {
             self::$instances[$cls] = new $cls;
         }
-        return self::$instances[$cls];
+        $database = self::$instances[$cls];
+        if ($model) {
+            $database->current_model = $model;
+        }
+        return $database;
     }
 
     // by default we load the Red Bean library and connect to the db when 
@@ -110,7 +114,7 @@ class database {
         // servers which can have different tags attached such as 
         // development, local, staging, pre-production, live etc.
     	$env = config::get( 'environment' );
-
+        
         if( !in_array($env, $active_connections) ) return false;
         
         // depending on what the current environment is we use R to make

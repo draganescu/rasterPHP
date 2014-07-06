@@ -18,3 +18,5 @@ config::set('default_view')->to('index');
 // Some people like to be very specific and name their templates with a .tpl .stl .view etc
 // type of suffix
 config::set('views_ext')->to('.html');
+// the cms flag enables Raster's builtin cms
+config::set('cms_enabled')->to(true);
