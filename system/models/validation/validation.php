@@ -7,8 +7,8 @@ class validation
 	
 	function __call($method, $args)
 	{	
-		$app = the::app();
-		if($app->no_post_data())
+		$app = controller::instance();;
+		if(util::no_post_data())
 			return "<!-- unset -->";
 		
 		if(!function_exists("validate_".$method))
@@ -37,8 +37,8 @@ class validation
 
 	function is_valid()
 	{
-		$app = the::app();
-		if($app->no_post_data() && $app->no_get_data())
+		$app = controller::instance();;
+		if(util::no_post_data() && $app->no_get_data())
 			return "<!-- unset -->";
 		else
 		{
@@ -64,7 +64,7 @@ class validation
 		$args = func_get_args();
 		$file = array_shift($args);
 		
-		$app = the::app();
+		$app = controller::instance();
 		
 		if(!file_exists(BASE.'/../views/'.$app->theme.'/validation/'.$file.".html"))
 			return "<!-- message not found \n
@@ -83,13 +83,13 @@ class validation
 	
 	function alert($name)
 	{
-		$app = the::app();
+		$app = controller::instance();
 		if(array_key_exists($name, $this->messages) && $this->messages[$name] == false)
 			return false;
 		else if(array_key_exists($name, $this->messages) && $this->messages[$name] != false)
 			return $this->messages[$name];
 		else if(!array_key_exists($name, $this->messages))
-			$this->messages[$name] = $app->current_block;
+			$this->messages[$name] = template::get('current_block');
 		return "<!-- alert set -->";
 	}
 	

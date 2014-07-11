@@ -10,11 +10,9 @@ class pagination
 	
 	function paginate($modelMethod)
 	{
-		$app = the::app();
+		$app = controller::instance();
 		list($model, $method) = explode(".", $modelMethod);
-		if(!class_exists($model))
-			$app->dependency($model);
-		$data = $app->factory($model)->$method(true) and extract($data);
+		$data = controller::get_object($model)->$method(true) and extract($data);
 		
 		if(($pages = $total/$perpage) < 1) return "";
 				
@@ -62,14 +60,14 @@ class pagination
 	
 	function page_template()
 	{
-		$app = the::app();
+		$app = controller::instance();
 		$this->page_template = $app->current_block;
 		return "<!-- template set -->";
 	}
 		
 	function current_page_template()
 	{
-		$app = the::app();
+		$app = controller::instance();
 		$this->current_page_template = $app->current_block;
 		return "<!-- template set -->";
 	}

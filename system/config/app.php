@@ -3,7 +3,7 @@
 // in index.php you have a line boot::$appname = 'application'; which is basically 
 // setting the name of the folder of the application. The views_path and the models_path
 // configuration directives below are relative to that.
-
+config::set('rewrite')->to('true');
 // Where are your views located relative to application
 config::set('views_path')->to('views');
 // where are the models located relative to the application

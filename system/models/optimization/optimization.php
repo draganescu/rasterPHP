@@ -8,21 +8,21 @@ class optimization
 	
 	function start($event)
 	{
-		$app = the::app();
+		$app = controller::instance();
 		$this->start[$event] = $this->microtime_float();
 		return true;
 	}
 	
 	function end($event)
 	{
-		$app = the::app();
+		$app = controller::instance();
 		$this->end[$event] = $this->microtime_float();
 		return true;
 	}
 	
 	function setup()
 	{
-		$app = the::app();
+		$app = controller::instance();
 		
 		if(file_exists(BASE."../models/optimization/stats.php") === false)
 			$app->observe('clean_log_file', 'optimization','no_stats');
@@ -46,7 +46,7 @@ class optimization
 	
 	function log_profile()
 	{
-		$app = the::app();
+		$app = controller::instance();
 		$results = '<br/><br/>';
 		
 		foreach($this->stats as $stat=>$events)
@@ -55,7 +55,7 @@ class optimization
 			$results .= ucfirst(str_replace("_"," ",$stat))." executed in ".$diff." seconds<br/>\n";
 		}
 		
-		$app->log($results);
+		//$app->log($results);
 		return true;
 	}
 	
@@ -67,15 +67,15 @@ class optimization
 	
 	function no_stats()
 	{
-		$app = the::app();
-		$app->log("What to measure? There is no stats.php file in the optimization directory or it is malformed.");
+		$app = controller::instance();
+		//$app->log("What to measure? There is no stats.php file in the optimization directory or it is malformed.");
 		return true;
 	}
 
 	function the_indices()
 	{
-		$app = the::app();
-		$app->log($this->indices);
+		$app = controller::instance();
+		//$app->log($this->indices);
 		return true;
 	}
 	

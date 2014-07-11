@@ -1,0 +1,169 @@
+.rtoolbar {
+	position: absolute;
+	right: 20px;
+	top: 20px;
+	font-size: 14px;
+}
+	.rtoolbar ul{
+		float: left;
+	}
+		.rtoolbar ul li {
+			list-style: none;
+			font-family: sans-serif;
+			padding: 4px;
+		}
+		.rtoolbar ul li.rlabel {
+			font-weight: bold;		
+		}
+		.rtoolbar ul li.raction {
+			font-weight: normal;
+			cursor: pointer;
+			border-top: 1px #efefef solid;
+		}
+			.rtoolbar ul li.raction:hover {
+				background-color: #efefef;
+				color: #888888;
+			}
+
+
+.modal {
+  position: relative;
+  background-color: rgba(0, 0, 0, 0.4);
+  width: 100%;
+  min-height: 666px;
+  z-index: 10000; }
+  .modal .popup {
+    display: block; }
+
+.popup {
+  -webkit-border-radius: 0.5em;
+  -moz-border-radius: 0.5em;
+  border-radius: 0.5em;
+  -webkit-box-shadow: 0.1em 0.1em 3px 2px rgba(0, 0, 0, 0.3);
+  -moz-box-shadow: 0.1em 0.1em 3px 2px rgba(0, 0, 0, 0.3);
+  box-shadow: 0.1em 0.1em 3px 2px rgba(0, 0, 0, 0.3);
+  display: none;
+  background-color: #fff;
+  width: 80%;
+  position: relative;
+  margin: 0 auto;
+  margin-top: 2%;
+  margin-bottom: 10%;
+  overflow: hidden; }
+  .popup .header {
+    background-color: #fff; }
+    .popup .header h4 {
+      margin: 0;
+      font-family: 'Open Sans';
+      font-size: 24px;
+      font-weight: bold;
+      color: #000;
+      padding-top: 10px;
+      padding-left: 20px;
+      padding-bottom: 10px; }
+  .popup .body {
+    padding: 0px;
+    background-color: #fff; 
+  	padding: 20px;}
+    .popup .body p {
+      margin: 0;
+      padding: 20px; }
+  .popup .footer {
+    background-color: #fff;
+    position: relative;
+    padding: 10px; }
+    .popup .footer:before, .popup .footer:after {
+      content: "";
+      display: table; }
+    .popup .footer:after {
+      clear: both; }
+    .popup .footer .button {
+    	-webkit-border-radius: 0.5em;
+		  -moz-border-radius: 0.5em;
+		  border-radius: 0.5em;
+      color: #000;
+      border: 1px solid #303030;
+      padding: 10px;
+      font-size: 14px;
+      float: right; }
+
+      /* #### bootstrap Form #### */
+.bootstrap-frm {
+    margin-left:auto;
+    margin-right:auto;
+
+    max-width: 100%;
+    background: #FFF;
+    padding: 20px 30px 20px 30px;
+    font: 12px "Helvetica Neue", Helvetica, Arial, sans-serif;
+    color: #888;
+    text-shadow: 1px 1px 1px #FFF;
+    border:1px solid #DDD;
+    border-radius: 5px;
+    -webkit-border-radius: 5px;
+    -moz-border-radius: 5px;
+}
+.bootstrap-frm h1 {
+    font: 25px "Helvetica Neue", Helvetica, Arial, sans-serif;
+    padding: 0px 0px 10px 40px;
+    display: block;
+    border-bottom: 1px solid #DADADA;
+    margin: -10px -30px 30px -30px;
+    color: #888;
+}
+.bootstrap-frm h1>span {
+    display: block;
+    font-size: 11px;
+}
+.bootstrap-frm label {
+    display: block;
+    margin: 0px 0px 5px;
+}
+.bootstrap-frm input[type="text"], .bootstrap-frm input[type="email"], .bootstrap-frm textarea, .bootstrap-frm select{
+    border: 1px solid #CCC;
+    color: #888;
+    height: 20px;
+    line-height:15px;
+    margin-bottom: 16px;
+    margin-right: 6px;
+    margin-top: 2px;
+    outline: 0 none;
+    padding: 5px 0px 5px 5px;
+    width: 70%;
+    border-radius: 4px;
+    -webkit-border-radius: 4px;
+    -moz-border-radius: 4px;    
+    -webkit-box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.075);
+    box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.075);
+    -moz-box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.075);
+}
+.bootstrap-frm select {
+    background: #FFF url('down-arrow.png') no-repeat right;
+    background: #FFF url('down-arrow.png') no-repeat right;
+    appearance:none;
+    -webkit-appearance:none; 
+    -moz-appearance: none;
+    text-indent: 0.01px;
+    text-overflow: '';
+    width: 70%;
+    height: 35px;
+    line-height:15px;
+}
+.bootstrap-frm textarea{
+    height:240px;
+    width: 100%;
+    padding: 5px 0px 0px 5px;
+}
+.bootstrap-frm .button {
+    background: #FFF;
+    border: 1px solid #CCC;
+    padding: 10px 25px 10px 25px;
+    color: #333;
+    border-radius: 4px;
+    cursor: pointer;
+}
+.bootstrap-frm .button:hover {
+    color: #333;
+    background-color: #EBEBEB;
+    border-color: #ADADAD;
+}

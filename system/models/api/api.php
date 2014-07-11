@@ -17,7 +17,10 @@
       controller::load_model($model);
       $obj = controller::get_object($model);
 
-      echo json_encode(call_user_func_array(array($obj, $method), array_slice(config::get('uri_segments'), 3)));
+      $result = call_user_func_array(array($obj, $method), array_slice(config::get('uri_segments'), 3));
+      if ($result !== false) {
+        echo json_encode($result);  
+      }
       exit;
     }
   }

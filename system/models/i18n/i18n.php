@@ -8,14 +8,14 @@ class i18n
 	// check by domain and so on
 	function i18n()
 	{
-		$app = the::app();
+		$app = controller::instance();
 		$app->detected_language = $this->detect_language();	
 	}
 
 	// gets the required string depending on detected language
 	function __call($method, $args)
 	{
-		$app = the::app();
+		$app = controller::instance();
 		$language = $this->get_lang();
 		$lang = array();
 		
@@ -44,12 +44,12 @@ class i18n
 	// or if our magic cookie exists
 	function detect_language()
 	{
-		$app = the::app();
+		$app = controller::instance();
 
 		foreach($app->domain_language as $server=>$lang)
 			if(strpos($app->uri_string, $server) !== false) return $lang;
 		
-		$cookie_lang = $app->cookie($app->language_cookie);
+		$cookie_lang = util::cookie($app->language_cookie);
 		if ( $cookie_lang )
 			return $cookie_lang;
 
@@ -93,7 +93,7 @@ class i18n
 
 	function get_lang()
 	{
-		$app = the::app();
+		$app = controller::instance();
 		$app->detected_language != '' ? $language = $app->detected_language : $language = $app->default_language;
 		return $language;
 	}

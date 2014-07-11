@@ -45,9 +45,13 @@ class controller {
 	// and APPBASE is always relative to system.
 	static function build_view_path($view)
 	{
-		return APPBASE . config::get('views_path') . DIRECTORY_SEPARATOR .
-						config::get('theme') . DIRECTORY_SEPARATOR .
+		$view_file = config::get('theme') . DIRECTORY_SEPARATOR .
 						$view . config::get('views_ext');
+		if (!file_exists(APPBASE . config::get('views_path') . DIRECTORY_SEPARATOR . $view_file)) {
+			return BASE . 'views/' . $view_file;
+		} else {
+			return APPBASE . config::get('views_path') . DIRECTORY_SEPARATOR . $view_file;
+		}
 	}
 	
 	// Just as the views the models can live outsite the app
@@ -220,6 +224,7 @@ class controller {
 	
 	protected function fix_links() {
 		$template = template::instance();
+		$autofix = config::get('autofix', false);
 		$template->output = preg_replace("/(href|action|src)=(\"|')([a-zA-Z0-9\-\._\?\,\'\/\\\+&amp;%\$#\=~]*)\?".template::get('tpl_uri')."=(.*?)(\"|')/", '$1="'.template::get('link_uri').'$4"', $template->output);
 		$template->output = preg_replace("/(href|action|src)=(\"|')([a-zA-Z0-9\-\._\?\,\'\/\\\+&amp;%\$#\=~]*)\.html/", '$1="'.template::get('link_uri').'$3"', $template->output);
 		$template->output = str_replace(template::get('link_uri')."__", template::get('link_uri').template::get('pad_uri'), $template->output);

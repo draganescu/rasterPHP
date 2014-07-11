@@ -9,12 +9,15 @@ class cms
 	private $page = NULL;
 	private $page_name = NULL;
 	private $page_variables = array();
+	private $page_data = array();
 
 	private $data_name = NULL;
 
 	// Setup routes for the admin section
 	public function setup()
 	{
+		session_start();
+		include 'routes.php';
 
 		$db = database::instance('cms');
 
@@ -30,10 +33,17 @@ class cms
 			$slug = 'home';
 		}
 
+		if ($slug == '/login') {
+			return;
+		}
+
+		$this->create_cms_data();
+
+
 		$page_name = str_replace('/', '', $slug).'page';
 		$page_name = str_replace('_', '', $page_name);
 
-		$page = R::findOne($page_name, ' slug = ? ', array($slug));
+		$page = R::findOne($page_name, '1 ORDER BY id DESC');
 		if (empty($page)) {
 			$page = R::dispense($page_name);
 			// default page properties
@@ -44,6 +54,9 @@ class cms
 			R::store($page);
 		}
 
+		$this->save_page();
+		$this->save_data();
+
 		$this->page = $page;
 		$this->page_name = $page_name;
 		$this->slug = $slug;
@@ -53,13 +66,14 @@ class cms
 	{
 			$template = template::instance();
 			$fields = R::inspect($this->page_name);
-			$page = R::findOne($this->page_name, ' slug = ? ', array($this->slug));
+			$page = R::findOne($this->page_name, '1 ORDER BY id DESC');
 			$action = template::get('current_action');
 
 			switch ($action) {
 				case 'print':
+					$this->page_variables[] = $name;
 					if (!array_key_exists($name, $fields)) {
-						$page->$name = template::get('current_block');
+						$page->$name = trim(template::get('current_block'));
 						R::store($page);
 					}
 					if (!empty($page->$name) && $page->live) {
@@ -69,6 +83,7 @@ class cms
 					}
 
 				case 'render':
+					$this->page_data[] = $name;
 					$this->data_name = $name.'data';
 					if (empty($arguments)) {
 						$data = R::findAll($this->data_name);
@@ -79,7 +94,7 @@ class cms
 						foreach ($datastarts[1] as $key=>$value) {
 							if(strpos($value, 'if.') !== false) continue;
 							list($property, $content) = $this->detect_data($key, $value);
-							$item->$property = $content;
+							$item->$property = trim($content);
 						}
 						$item->updated_at = R::isoDateTime();
 						$id = R::store($item);
@@ -91,12 +106,171 @@ class cms
 			}
 	}
 
-	/**
-	 * The sitemap functiom builds an associative array of pages and slugs
-	 * based on relationships trough the parent field
-	 */
-	public function sitemap() {
+	function create_cms_data() {
+		$settings = R::findOne('settings', '1 ORDER BY id DESC');
+		if (empty($settings)) {
+			$settings = R::dispense('settings');
+			$settings->key_name = 'default_page_parameter';
+			$settings->key_value = 'page';
+			R::store($settings);
 
+			$settings = R::dispense('settings');
+			$settings->key_name = 'default_URL_key';
+			$settings->key_value = 'id';
+			R::store($settings);
+		}
+		$users = R::findOne('users', '1 ORDER BY id DESC');
+		if (empty($users)) {
+			$users = R::dispense('users');
+			$users->username = 'admin';
+			$users->password = md5('admin');
+			R::store($users);
+		}
+	}
+
+	function get_page_variable($page, $variable) {
+		$db = database::instance('cms');
+		$data = R::findOne($page, '1 ORDER BY id DESC');
+		return array(
+			"type" => $data->getMeta('type'),
+			"value" => $data->$variable
+		);
+	}
+
+	function list_data($data, $start, $offset) {
+
+	}
+
+	function edit_data() {
+		echo 'bleh';
+		return false;
+	}
+
+	function edit_variable() {
+		extract($this->get_page_variable(util::post('page'), util::post('name')));
+		include BASE.'models/cms/editor/page.php';
+		return false;	
+	}
+
+	function style() {
+		if (!util::param('output', false)) {
+				return config::get('link_uri').'api/cms/style/output/true';
+		}
+		header("Content-Type: text/css");
+		header("X-Content-Type-Options: nosniff");
+		echo file_get_contents(BASE.'/views/cms_admin/style.css');
+		return false;
+	}
+
+	public function css() {
+		$file = util::param('raster_file', 'raster_cms');
+		header("Content-Type: text/css");
+		header("X-Content-Type-Options: nosniff");
+		echo file_get_contents(BASE.'/models/cms/css/'.$file.'.css');
+		return false;
+	}
+
+	public function script() {
+		$file = util::param('raster_file', 'raster_cms');
+		header("content-type: application/javascript");
+		echo file_get_contents(BASE.'/models/cms/js/'.$file.'.js');
+		return false;
+	}
+
+	public function logout() {
+		if (util::param('logout') === 'fromraster') {
+			session_destroy();
+			util::redirect('/');
+			exit;
+		}
+		return false;
+	}
+
+	public function login() {
+
+		$this->logout();
+
+		if (cms::loggedin()) {
+			util::redirect('/');
+		}
+
+		$db = database::instance('cms');
+
+		$this->default_check();
+		
+		$username = util::post('username');
+		$password = md5(util::post('password'));
+
+		$user = R::findOne('users', ' username = ? AND password = ?', array( $username, $password ));
+		if (empty($user)) {
+			return false;
+		}
+		$_SESSION['uid'] = $user->id;
+		session_write_close();
+		util::redirect('/');
+		exit;
+	}
+
+	function default_check() {
+		if (R::count('users') == 1) {
+			$user = R::load('users', 1);
+		}
+		if (!empty($user)) {
+			if ($user->password == md5($user->username) && $user->username == 'admin') {
+				$validation = controller::get_object('validation');
+				echo $validation->raise('default_setup_detected');
+				return true;
+			}
+		}
+		return false;
+	}
+
+	static function loggedin() {
+		return !empty($_SESSION['uid']);
+	}
+
+	function save_page() {
+		if (!util::post('raster_action', false)) {
+			return false;
+		}
+		if (util::post('raster_action', false) !== 'save_page') {
+			return false;
+		}
+		$page = util::post('page_name');
+		$variable = util::post('variable_name');
+		$value = util::post('raster_page_value');
+		$db = database::instance('cms');
+		$data = R::findOne($page, '1 ORDER BY id DESC');
+		$new_data = R::dup($data);
+		$new_data->$variable = $value;
+		R::store($new_data);
+	}
+
+	function save_data() {
+		if (!util::post('raster_action', false)) {
+			return false;
+		}
+		if (util::post('raster_action', false) !== 'save_data') {
+			return false;
+		}
+	}
+
+	public function buttons() {
+
+		if (!cms::loggedin()) {
+			return null;
+		}
+
+		return '
+				<link rel="stylesheet" href="'.config::get('link_uri').'api/cms/css">
+				<script language="javascript">
+					var Raster_Admin = {};
+					Raster_Admin.page_data = '.json_encode($this->page_data).';
+					Raster_Admin.page_variables = '.json_encode($this->page_variables).';
+					Raster_Admin.page_name = '.json_encode($this->page_name).';
+				</script>
+				<script language="javascript" src="'.config::get('link_uri').'api/cms/script"></script>
+		';
 	}
 
 	private function detect_data($key, $value) {

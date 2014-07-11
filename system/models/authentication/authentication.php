@@ -29,7 +29,7 @@ class authentication
 
 	function list_users()
 	{
-		$app = controller::instance();
+		$app = controller::instance();;
 		$db = database::instance();
 		//$db->escape(false);
 
@@ -46,19 +46,19 @@ class authentication
 
 	function register()
 	{
-		$app = the::app();
+		$app = controller::instance();
 		$db = the::database();
-		$validation = $app->factory('validation');
+		$validation = controller::get_object('validation');
 		
-		if(!$app->post('register_action')) $validation->reset();
-		if($app->post('login_action')) return '';
+		if(!util::post('register_action')) $validation->reset();
+		if(util::post('login_action')) return '';
 		
-		if($app->no_post_data()  || !$app->post('register_action')) return false;
+		if(util::no_post_data()  || !util::post('register_action')) return false;
 		
 		if($validation->invalid == true) return $app->form_state();
 
-		$email = $app->post('reg_email');
-		$password = $app->post('password');
+		$email = util::post('reg_email');
+		$password = util::post('password');
 		
 		$existing = $db->get_by('users', 'email', $email);
 		if($existing) return $validation->raise('email_exists') . $app->form_state();
@@ -78,12 +78,12 @@ class authentication
 	{
 		$app = my::app();
 		$db  = my::database();
-		$validation = $app->factory('validation');
+		$validation = controller::get_object('validation');
 
-		if($app->no_post_data()) return false;
+		if(util::no_post_data()) return false;
 		if($validation->invalid) return $app->form_state();
 
-		$email = $app->post('email');
+		$email = util::post('email');
 		$db->get_by('users', 'email', $email);
 
 		if(!$user) return $validation->raise('details_sent');
@@ -139,7 +139,7 @@ class authentication
 		$users = $db->get_by('users','id',$uid[0]['uid']);
 		$users[0]['password_repeat'] = $users[0]['password'];
 
-		if($app->no_post_data())
+		if(util::no_post_data())
 			return $app->form_state($users[0]);
 
 		
@@ -148,13 +148,13 @@ class authentication
 	function is_logged_in()
 	{
 		$app = my::app();
-		$app->logged_in = false;
-		$app->logged_out = true;
+		//$app->logged_in = false;
+		//$app->logged_out = true;
 
 		if($_SESSION['loggedin'] == true)
 		{
-			$app->logged_out = false;
-			$app->logged_in = true;
+			//$app->logged_out = false;
+			//$app->logged_in = true;
 		}
 		
 		return $_SESSION['loggedin'];
@@ -165,32 +165,32 @@ class authentication
 
 		$app = my::app();
 		$db = my::database();
-		$validation = $app->factory('validation');
+		$validation = controller::get_object('validation');
 		
-		$app->logged_in = false;
-		$app->logged_out = true;
+		//$app->logged_in = false;
+		//$app->logged_out = true;
 
 		if($_SESSION['loggedin'] == true)
 		{
-			$app->logged_out = false;
-			$app->logged_in = true;
+			//$app->logged_out = false;
+			//$app->logged_in = true;
 		}
 		
-		if(!$app->post('login_action')) $validation->reset();
-		if($app->post('register_action')) return '';
+		if(!util::post('login_action')) $validation->reset();
+		if(util::post('register_action')) return '';
 		
-		if($app->no_post_data() || !$app->post('login_action')) return $app->current_block;
+		if(util::no_post_data() || !util::post('login_action')) return $app->current_block;
 		
 		if($validation->invalid == true) return $app->form_state();
 
-		$user = $db->get_user($app->post('email'), $app->post('password'));
+		$user = $db->get_user(util::post('email'), util::post('password'));
 		if(!$user) return $validation->raise('bad_login') . $app->current_block;
 
 		$existing = $db->get_by('users', 'id', $user[0]['id']);
 		$this->isin($existing[0]['id'],$existing[0]['email'],$existing[0]['password']);
 
-		$app->logged_out = false;
-		$app->logged_in = true;
+		//$app->logged_out = false;
+		//$app->logged_in = true;
 
 		return $validation->raise('success');
 		
