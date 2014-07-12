@@ -33,7 +33,7 @@ class cms
 			$slug = 'home';
 		}
 
-		if ($slug == '/login') {
+		if (strpos($slug, '/login') !== false || $slug == "/raster_guide") {
 			return;
 		}
 
@@ -49,8 +49,6 @@ class cms
 			// default page properties
 			$page->slug = $slug;
 			$page->updated_at = R::isoDateTime();
-			$page->parent = '/';
-			$page->live = true;
 			R::store($page);
 		}
 
@@ -85,21 +83,39 @@ class cms
 				case 'render':
 					$this->page_data[] = $name;
 					$this->data_name = $name.'data';
+					extract(template::get('current_params'));
+					foreach ($datastarts[1] as $key=>$value) {
+						if(strpos($value, 'if.') !== false) continue;
+						list($property, $content) = $this->detect_data($key, $value);
+						$expected_properties[$property] = $content;
+					}
 					if (empty($arguments)) {
 						$data = R::findAll($this->data_name);
 					}
 					if (empty($data)) {
 						$item = R::dispense($this->data_name);
-						extract(template::get('current_params'));
-						foreach ($datastarts[1] as $key=>$value) {
-							if(strpos($value, 'if.') !== false) continue;
-							list($property, $content) = $this->detect_data($key, $value);
+						foreach ($expected_properties as $property=>$content) {
 							$item->$property = trim($content);
 						}
 						$item->updated_at = R::isoDateTime();
+						$item->enabled = true;
 						$id = R::store($item);
 						$data = R::load($this->data_name, $id);
 					}
+
+					// we should check for new fields
+					$fields = R::inspect($this->data_name);
+					if (count($expected_properties) > count($fields) - 3) {
+						$latest = R::findOne($this->data_name, '1 ORDER BY id DESC');
+						foreach ($expected_properties as $key => $value) {
+							if (!array_key_exists($key, $fields)) {
+								$latest->$key = trim($value);
+							}
+						}
+						R::store($latest);
+					}
+
+
 					return R::exportAll( $data );
 				default:
 					return false;
