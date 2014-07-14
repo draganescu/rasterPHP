@@ -20,3 +20,4 @@ config::set('default_view')->to('index');
 config::set('views_ext')->to('.html');
 // the cms flag enables Raster's builtin cms
 config::set('cms_enabled')->to(true);
+config::set("raster_page_size")->to(10);

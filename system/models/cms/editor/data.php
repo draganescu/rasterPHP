@@ -20,7 +20,7 @@
 			<?php foreach ($data as $key => $item): ?>
 			<tr>
 				<?php foreach ($fields as $name => $details): ?>
-				<td><?php echo $item->$name ?></td>
+				<td><?php echo substr(strip_tags($item->$name), 0, 20) ?></td>
 				<?php endforeach ?>	
 				<td>
 					<a href="#" class="data_editor" data-rel='<?php echo $item->id ?>' data-name='<?php echo util::post('name') ?>'>Edit</a>

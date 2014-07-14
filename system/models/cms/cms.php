@@ -29,10 +29,6 @@ class cms
 			return;
 		}
 
-		if (controller::instance()->current_route == false) {
-			return;
-		}
-
 		$uri_string = config::get('uri_string');
 		$index_file = config::get('index_file');
 		$slug = str_replace($index_file, '', $uri_string);
@@ -45,6 +41,16 @@ class cms
 			return;
 		}
 
+		if (strpos($slug, '_item') !== false) {
+			preg_match_all('%/([a-z]+)/([a-z]+)_(item)(s?)%', $slug, $matches);
+			$slug = $matches[0][0];
+		}
+
+		if (controller::instance()->current_route == false) {
+			return;
+		}
+
+		// creates the page and adds new fields if any
 		$this->create_cms_data();
 
 
@@ -82,24 +88,70 @@ class cms
 						$page->$name = trim(template::get('current_block'));
 						R::store($page);
 					}
-					if (!empty($page->$name) && $page->live) {
+					if (!empty($page->$name)) {
 						return $page->$name;
 					} else {
 						return false;
 					}
 
 				case 'render':
+					$filter_link_params = array();
 					$this->page_data[] = $name;
 					$this->data_name = $name.'data';
+					$filters = array();
+
 					extract(template::get('current_params'));
 					foreach ($datastarts[1] as $key=>$value) {
 						if(strpos($value, 'if.') !== false) continue;
+						if(strpos($value, 'raster_filter') !== false) {
+							$params = explode("raster_filter@", $value);
+							$filter_link_params[$params[1]] = explode('@', $params[1]);
+							continue;
+						}
 						list($property, $content) = $this->detect_data($key, $value);
+						if ($property == "raster_detail_link") {
+							continue;
+						}
 						$expected_properties[$property] = $content;
 					}
-					if (empty($arguments)) {
-						$data = R::findAll($this->data_name);
+
+					// pagination
+					$page_size = config::get($name."_page_size");
+					if ($page_size == '') {
+						$page_size = config::get("raster_page_size");
+						if ($page_size == '') {
+							$page_size = 10;
+						}
 					}
+					
+					$page = util::param($name.'_page', false);
+					if ($page) {
+						$roffset = ($page-1)*$page_size;
+					} else {
+						$roffset = 0;
+					}
+					
+					// filter by id
+					if (util::param($name) == $name.'_item') {
+						$filters['id'] = util::param('item');
+					}
+
+					// uri filters
+					if (util::param($name) == $name.'_items') {
+						$uri_segments = config::get('uri_segments');
+						$start_key = array_search($name.'_items', $uri_segments);
+						foreach ($uri_segments as $key => $value) {
+							if ($key > $start_key) {
+								if (($key - $start_key)%2 == 0) {
+									$filters[$uri_segments[$key-1]] = $value;
+								}
+							}
+						}
+					}
+					unset($filters[$name.'_page']); // removing the uri filter
+
+					$data = R::findLast($this->data_name);
+
 					if (empty($data)) {
 						$item = R::dispense($this->data_name);
 						foreach ($expected_properties as $property=>$content) {
@@ -109,9 +161,23 @@ class cms
 						$item->enabled = true;
 						$id = R::store($item);
 						$data = R::load($this->data_name, $id);
+					} else {
+						// param filters
+						if (!empty($arguments)) {
+								$filters = $this->make_filters($arguments[0], $expected_properties, $filters);
+						}
+						$sql = '1 = 1';
+						foreach ($filters as $key => $value) {
+							$sql .= ' AND '.$key." = :".$key;
+							$rb_filters[':'.$key] = $value;
+						}	
+						$filters["rlength"] = $page_size;
+						$filters["roffset"] = $roffset;
+						$sql .= ' LIMIT :roffset, :rlength';
+						$data = R::find($this->data_name, $sql, $filters);
 					}
-
-					// we should check for new fields
+					
+					// we check for new fields just like for pages
 					$fields = R::inspect($this->data_name);
 					if (count($expected_properties) > count($fields) - 3) {
 						$latest = R::findOne($this->data_name, '1 ORDER BY id DESC');
@@ -123,22 +189,57 @@ class cms
 						R::store($latest);
 					}
 
+					$data = R::exportAll( $data );
 
-					return R::exportAll( $data );
+					// building auto detail links
+					foreach ($data as $key => $item) {
+						$base = config::get("link_uri");
+						$detail_link = $base.substr($this->data_name, 0, -4).'/'.$name.'_item/'.$item['id'];
+						$data[$key]['raster_detail_link'] = $detail_link;
+						if (count($filter_link_params) > 0) {
+							foreach ($filter_link_params as $at_key => $filters) {
+								$filter_link = config::get('link_uri').$name.'/'.$name.'_items/';
+								foreach ($filters as $field) {
+									$filter_link .= $field.'/'.$item[$field].'/';
+								}
+								$data[$key]['raster_filter@'.$at_key] = $filter_link;
+							}
+						}
+					}
+
+					return $data;
+
 				default:
 					return false;
 			}
 	}
 
+	// parses the filters and adds new fields if any
+	function make_filters($filters, &$expected_properties, &$data_filter) {
+		$params = array();
+		$fields = R::inspect($this->data_name);
+		$latest = R::findOne($this->data_name, '1 ORDER BY id DESC');
+
+		foreach (explode('&', $filters) as $k=>$chunk) {
+	    $params[$k] = explode("=", $chunk);
+	    $data_filter[$params[$k][0]] = $params[$k][1];
+		}
+
+		foreach ($data_filter as $key=>$value) {
+			$expected_properties[$key] = $value;
+		}
+		return $data_filter;
+	}
+
 	function create_cms_data() {
-		$settings = R::findOne('settings', '1 ORDER BY id DESC');
+		$settings = R::findOne('rasterdata', '1 ORDER BY id DESC');
 		if (empty($settings)) {
-			$settings = R::dispense('settings');
+			$settings = R::dispense('rasterdata');
 			$settings->key_name = 'default_page_parameter';
 			$settings->key_value = 'page';
 			R::store($settings);
 
-			$settings = R::dispense('settings');
+			$settings = R::dispense('rasterdata');
 			$settings->key_name = 'default_URL_key';
 			$settings->key_value = 'id';
 			R::store($settings);

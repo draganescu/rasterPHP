@@ -9,14 +9,14 @@ if (!window.jQuery) {
 			"name" : 'Logout',
 			"link" : 'login/logout/fromraster'
 		},
-		{
-			"name" : 'Settings',
-			"link" : 'login/settings'
-		}
+		// {
+		// 	"name" : 'Settings',
+		// 	"link" : 'login/settings'
+		// }
 	];
 
 	function build_buttons() {
-		var holder = $('<div class="raster rtoolbar"></ul>');
+		var holder = $('<div id="raster_tools" class="raster rtoolbar"></ul>');
 		var data = $('<ul class="raster rbutton"><li class="raster rlabel">Page Data</li></ul>');
 		var variables = $('<ul class="raster rbutton"><li class="raster rlabel">Page Content</li></ul>');
 		var account = $('<ul class="raster rbutton"><li class="raster rlabel">Account</li></ul>');

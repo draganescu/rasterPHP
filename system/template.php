@@ -444,9 +444,9 @@ class template {
 		            {
 		               $is_attr = true;
 		               $is_append = false;
-		               $pointers = explode('.', str_replace('@','',$datastarts[1][$key]));
+		               $pointers = explode('.', $datastarts[1][$key]);
 		               $datakey = $pointers[1];
-		               $dataattr = $pointers[0];
+		               $dataattr = str_replace('@', '', $pointers[0]);
 		            }
 		            elseif(strpos($datastarts[1][$key], '+') !== false)
 		            {
@@ -466,24 +466,26 @@ class template {
 		            	$loop = $this->_loop($render_template, $data[$datakey], $datastarts[0][$key]);
 		            	$rendered_tpl = substr_replace($rendered_tpl, $loop, $rpos1, $rpos2);
 		            	$occurences = substr_count($rendered_tpl, $datastarts[0][$key]);
-						if($occurences > 0)
-						{
-							for ($i=0; $i < $occurences; $i++) { 
-								$value = $datastarts[0][$key];
-								$start = $value;
-								$end = str_replace("<!-- ", "<!-- /", $value);
-								$rpos1 = strpos($rendered_tpl, $start);
-								$rpos2 = strpos($rendered_tpl, $end) - $rpos1 + strlen($end);
+									if($occurences > 0)
+									{
+										for ($i=0; $i < $occurences; $i++) { 
+											$value = $datastarts[0][$key];
+											$start = $value;
+											$end = str_replace("<!-- ", "<!-- /", $value);
+											$rpos1 = strpos($rendered_tpl, $start);
+											$rpos2 = strpos($rendered_tpl, $end) - $rpos1 + strlen($end);
 
-								$loop = $this->_loop($rendered_tpl, $data[$datakey], $datastarts[0][$key]);
-				        $rendered_tpl = substr_replace($rendered_tpl, $loop, $rpos1, $rpos2);
-							}
-						}
+											$loop = $this->_loop($rendered_tpl, $data[$datakey], $datastarts[0][$key]);
+							        $rendered_tpl = substr_replace($rendered_tpl, $loop, $rpos1, $rpos2);
+										}
+									}
 		            	continue;
 		            }
-
-		            if(!array_key_exists($datakey, $data)) continue;
+		            
+		            if(!array_key_exists($datakey, $data)) {	
+		            	continue;
 		              // $rendered_tpl = substr_replace($rendered_tpl, "missing_".$datakey, $rpos1, $rpos2);
+		            }
 		            else
 		            {
 		              if(!$is_attr && $data[$datakey] === false)

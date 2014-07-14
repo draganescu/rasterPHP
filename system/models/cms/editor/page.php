@@ -5,15 +5,11 @@
 	<input type="hidden" name='variable_name' value='<?php echo util::post('name') ?>'>
 	<h1>Edit <?php echo ucfirst(str_replace('_', ' ', util::post('name'))) ?>
 	<span>Please change the data in the box below</span></h1>
-	<p>
-		<label>
-			<textarea name="raster_page_value">
-<?php echo $value ?>
-			</textarea>
-		</label>
-		<label>
-			<span>&nbsp;</span>
-			<input type="submit" class="button" value="Save">
-		</label>
-	</p>
+	<label>
+		<textarea name="raster_page_value"><?php echo $value ?></textarea>
+	</label>
+	<label>
+		<span>&nbsp;</span>
+		<input type="submit" class="button" value="Save">
+	</label>
 </form>

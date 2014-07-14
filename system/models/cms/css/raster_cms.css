@@ -1,26 +1,27 @@
-.rtoolbar {
+#raster_tools {
 	position: absolute;
 	right: 20px;
 	top: 20px;
 	font-size: 14px;
 }
-	.rtoolbar ul{
+	#raster_tools ul{
 		float: left;
+    margin-right: 5px;
 	}
-		.rtoolbar ul li {
+		#raster_tools ul li {
 			list-style: none;
 			font-family: sans-serif;
 			padding: 4px;
 		}
-		.rtoolbar ul li.rlabel {
+		#raster_tools ul li.rlabel {
 			font-weight: bold;		
 		}
-		.rtoolbar ul li.raction {
+		#raster_tools ul li.raction {
 			font-weight: normal;
 			cursor: pointer;
 			border-top: 1px #efefef solid;
 		}
-			.rtoolbar ul li.raction:hover {
+			#raster_tools ul li.raction:hover {
 				background-color: #efefef;
 				color: #888888;
 			}
@@ -88,7 +89,7 @@
       float: right; }
 
       /* #### bootstrap Form #### */
-.bootstrap-frm {
+#raster_editor .bootstrap-frm {
     margin-left:auto;
     margin-right:auto;
 
@@ -103,7 +104,7 @@
     -webkit-border-radius: 5px;
     -moz-border-radius: 5px;
 }
-.bootstrap-frm h1 {
+#raster_editor .bootstrap-frm h1 {
     font: 25px "Helvetica Neue", Helvetica, Arial, sans-serif;
     padding: 0px 0px 10px 40px;
     display: block;
@@ -111,15 +112,15 @@
     margin: -10px -30px 30px -30px;
     color: #888;
 }
-.bootstrap-frm h1>span {
+#raster_editor .bootstrap-frm h1>span {
     display: block;
     font-size: 11px;
 }
-.bootstrap-frm label {
+#raster_editor .bootstrap-frm label {
     display: block;
     margin: 0px 0px 5px;
 }
-.bootstrap-frm input[type="text"], .bootstrap-frm input[type="email"], .bootstrap-frm textarea, .bootstrap-frm select{
+#raster_editor .bootstrap-frm input[type="text"], #raster_editor .bootstrap-frm input[type="email"], #raster_editor .bootstrap-frm textarea, #raster_editor .bootstrap-frm select{
     border: 1px solid #CCC;
     color: #888;
     height: 20px;
@@ -137,7 +138,7 @@
     box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.075);
     -moz-box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.075);
 }
-.bootstrap-frm select {
+#raster_editor .bootstrap-frm select {
     background: #FFF url('down-arrow.png') no-repeat right;
     background: #FFF url('down-arrow.png') no-repeat right;
     appearance:none;
@@ -149,12 +150,12 @@
     height: 35px;
     line-height:15px;
 }
-.bootstrap-frm textarea{
+#raster_editor .bootstrap-frm textarea{
     height:240px;
     width: 100%;
     padding: 5px 0px 0px 5px;
 }
-.bootstrap-frm .button {
+#raster_editor .bootstrap-frm .button {
     background: #FFF;
     border: 1px solid #CCC;
     padding: 10px 25px 10px 25px;
@@ -162,8 +163,184 @@
     border-radius: 4px;
     cursor: pointer;
 }
-.bootstrap-frm .button:hover {
+#raster_editor .bootstrap-frm .button:hover {
     color: #333;
     background-color: #EBEBEB;
     border-color: #ADADAD;
 }
+
+#raster_editor h1, #raster_editor h2, #raster_editor h3, #raster_editor h4, #raster_editor h5, #raster_editor h6 {
+    color:#222;
+    margin:0 0 20px;
+  }
+
+  #raster_editor p, #raster_editor ul, #raster_editor ol, #raster_editor table, #raster_editor pre, #raster_editor dl {
+    margin:0 0 20px;
+  }
+
+  #raster_editor h1, #raster_editor h2, #raster_editor h3 {
+    line-height:1.1;
+  }
+
+  #raster_editor h1 {
+    font-size:28px;
+  }
+
+  #raster_editor h2 {
+    color:#393939;
+  }
+
+  #raster_editor h3, #raster_editor h4, #raster_editor h5, #raster_editor h6 {
+    color:#494949;
+  }
+
+  #raster_editor a {
+    color:#39c;
+    font-weight:400;
+    text-decoration:none;
+  }
+
+  #raster_editor a small {
+    font-size:11px;
+    color:#777;
+    margin-top:-0.6em;
+    display:block;
+  }
+
+  #raster_editor .wrapper {
+    width:860px;
+    margin:0 auto;
+  }
+
+  #raster_editor blockquote {
+    border-left:1px solid #e5e5e5;
+    margin:0;
+    padding:0 0 0 20px;
+    font-style:italic;
+  }
+
+  #raster_editor code, #raster_editor pre {
+    font-family:Monaco, Bitstream Vera Sans Mono, Lucida Console, Terminal;
+    color:#333;
+    font-size:12px;
+  }
+
+  #raster_editor pre {
+    padding:8px 15px;
+    background: #f8f8f8;  
+    border-radius:5px;
+    border:1px solid #e5e5e5;
+    overflow-x: auto;
+  }
+
+  #raster_editor table {
+    width:100%;
+    border-collapse:collapse;
+  }
+
+  #raster_editor th, #raster_editor td {
+    text-align:left;
+    padding:5px 10px;
+    border-bottom:1px solid #e5e5e5;
+  }
+
+  #raster_editor dt {
+    color:#444;
+    font-weight:700;
+  }
+
+  #raster_editor th {
+    color:#444;
+  }
+
+  #raster_editor img {
+    max-width:100%;
+  }
+
+  #raster_editor header {
+    width:270px;
+    float:left;
+    position:fixed;
+  }
+
+  #raster_editor header ul {
+    list-style:none;
+    height:40px;
+    
+    padding:0;
+    
+    background: #eee;
+    background: -moz-linear-gradient(top, #f8f8f8 0%, #dddddd 100%);
+    background: -webkit-gradient(linear, left top, left bottom, color-stop(0%,#f8f8f8), color-stop(100%,#dddddd));
+    background: -webkit-linear-gradient(top, #f8f8f8 0%,#dddddd 100%);
+    background: -o-linear-gradient(top, #f8f8f8 0%,#dddddd 100%);
+    background: -ms-linear-gradient(top, #f8f8f8 0%,#dddddd 100%);
+    background: linear-gradient(top, #f8f8f8 0%,#dddddd 100%);
+    
+    border-radius:5px;
+    border:1px solid #d2d2d2;
+    box-shadow:inset #fff 0 1px 0, inset rgba(0,0,0,0.03) 0 -1px 0;
+    width:270px;
+  }
+
+  #raster_editor header li {
+    width:89px;
+    float:left;
+    border-right:1px solid #d2d2d2;
+    height:40px;
+  }
+
+  #raster_editor header ul a {
+    line-height:1;
+    font-size:11px;
+    color:#999;
+    display:block;
+    text-align:center;
+    padding-top:6px;
+    height:40px;
+  }
+
+  #raster_editor strong {
+    color:#222;
+    font-weight:700;
+  }
+
+  #raster_editor header ul li + li {
+    width:88px;
+    border-left:1px solid #fff;
+  }
+
+  #raster_editor header ul li + li + li {
+    border-right:none;
+    width:89px;
+  }
+
+  #raster_editor header ul a strong {
+    font-size:14px;
+    display:block;
+    color:#222;
+  }
+
+  #raster_editor section {
+    width:500px;
+    float:right;
+    padding-bottom:50px;
+  }
+
+  #raster_editor small {
+    font-size:11px;
+  }
+
+  #raster_editor hr {
+    border:0;
+    background:#e5e5e5;
+    height:1px;
+    margin:0 0 20px;
+  }
+
+  #raster_editor footer {
+    width:270px;
+    float:left;
+    position:fixed;
+    bottom:50px;
+  }
