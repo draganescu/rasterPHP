@@ -7,12 +7,19 @@ if (!window.jQuery) {
 	Raster_Admin.system = [
 		{
 			"name" : 'Logout',
-			"link" : 'login/logout/fromraster'
+			"link" : 'login/logout/fromraster',
+			"type" : 'navigable'
 		},
-		// {
-		// 	"name" : 'Settings',
-		// 	"link" : 'login/settings'
-		// }
+		{
+			"name" : 'Settings',
+			"data" : 'raster',
+			"type" : 'data'
+		},
+		{
+			"name" : 'Users',
+			"data" : 'users',
+			"type" : 'data'
+		}
 	];
 
 	function build_buttons() {
@@ -33,7 +40,13 @@ if (!window.jQuery) {
 		for (var i = Raster_Admin.system.length - 1; i >= 0; i--) {
 			var nice_name = Raster_Admin.system[i].name;
 			var data_rel = Raster_Admin.system[i].link;
-			account.append('<li class="raction" data-type="system" data-rel="'+data_rel+'">'+nice_name+'</li>');
+			if (Raster_Admin.system[i].type == 'navigable') {
+				account.append('<li class="raction" data-type="system" data-rel="'+data_rel+'">'+nice_name+'</li>');	
+			} else {
+				var data_type = Raster_Admin.system[i].data;
+				account.append('<li class="raction" data-type="data" data-rel="'+data_type+'">'+nice_name+'</li>');
+			}
+			
 		};
 		holder.append(data);
 		holder.append(variables);
@@ -94,6 +107,18 @@ if (!window.jQuery) {
 		})
 	}
 
+	function do_add(e) {
+		e.preventDefault();
+		var name = $(this).data('name');
+		$('#raster_editor .body').html('<span>This is the beginning of a beautiful friendship!</span>');
+		var info = {
+			"name":name
+		};
+		$.post(BASE + 'api/cms/add_item', info, function(data){
+			$('#raster_editor .body').html(data);
+		})
+	}
+
 	function setup_modals() {
 		create_popup();
 		// popup modals
@@ -122,6 +147,7 @@ if (!window.jQuery) {
 	function hook_events() {
 		$('.raction').click(do_action);
 		$(document).on('click', '.data_editor', do_edit);
+		$(document).on('click', '.data_adder', do_add);
 	}
 
 	function capitaliseFirstLetter(string)

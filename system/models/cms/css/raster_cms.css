@@ -169,6 +169,12 @@
     border-color: #ADADAD;
 }
 
+#raster_editor .bootstrap-frm .data_adder {
+  float: right;
+  display: block;
+  margin-right: 20px;
+}
+
 #raster_editor h1, #raster_editor h2, #raster_editor h3, #raster_editor h4, #raster_editor h5, #raster_editor h6 {
     color:#222;
     margin:0 0 20px;

@@ -68,6 +68,7 @@ class cms
 
 		$this->save_page();
 		$this->save_data();
+		$this->add_data();
 
 		$this->page = $page;
 		$this->page_name = $page_name;
@@ -162,6 +163,20 @@ class cms
 						$id = R::store($item);
 						$data = R::load($this->data_name, $id);
 					} else {
+
+						// we check for new fields just like for pages
+						$fields = R::inspect($this->data_name);
+						//if (count($expected_properties) > count($fields) - 3) {
+							$latest = R::findOne($this->data_name, '1 ORDER BY id DESC');
+							foreach ($expected_properties as $key => $value) {
+								if (!array_key_exists($key, $fields)) {
+									$latest->$key = trim($value);
+								}
+							}
+							R::store($latest);
+						//}
+
+
 						// param filters
 						if (!empty($arguments)) {
 								$filters = $this->make_filters($arguments[0], $expected_properties, $filters);
@@ -176,18 +191,8 @@ class cms
 						$sql .= ' LIMIT :roffset, :rlength';
 						$data = R::find($this->data_name, $sql, $filters);
 					}
-					
-					// we check for new fields just like for pages
-					$fields = R::inspect($this->data_name);
-					if (count($expected_properties) > count($fields) - 3) {
-						$latest = R::findOne($this->data_name, '1 ORDER BY id DESC');
-						foreach ($expected_properties as $key => $value) {
-							if (!array_key_exists($key, $fields)) {
-								$latest->$key = trim($value);
-							}
-						}
-						R::store($latest);
-					}
+
+
 
 					$data = R::exportAll( $data );
 
@@ -244,9 +249,9 @@ class cms
 			$settings->key_value = 'id';
 			R::store($settings);
 		}
-		$users = R::findOne('users', '1 ORDER BY id DESC');
+		$users = R::findOne('usersdata', '1 ORDER BY id DESC');
 		if (empty($users)) {
-			$users = R::dispense('users');
+			$users = R::dispense('usersdata');
 			$users->username = 'admin';
 			$users->password = md5('admin');
 			R::store($users);
@@ -288,6 +293,20 @@ class cms
 		$fields = R::inspect($item_type);
 
 		include BASE.'models/cms/editor/item.php';
+
+		return false;
+	}
+
+	function add_item() {
+
+		$db = database::instance('cms');
+		$item_type = util::post('name').'data';
+
+		
+		$data = R::dispense($item_type);
+		$fields = R::inspect($item_type);
+
+		include BASE.'models/cms/editor/add.php';
 
 		return false;
 	}
@@ -404,6 +423,28 @@ class cms
 		$data_type = util::post('data_name').'data';
 		$did = util::post('data_id');
 		$item = R::load($data_type, $did);
+
+		$fields = R::inspect($data_type);
+		foreach ($fields as $key => $value) {
+			if ($key == 'id') {
+				continue;
+			}
+			$item->$key = util::post($key);
+		}
+		R::store($item);
+	}
+
+	function add_data() {
+		if (!util::post('raster_action', false)) {
+			return false;
+		}
+		if (util::post('raster_action', false) !== 'add_data') {
+			return false;
+		}
+		$db = database::instance('cms');
+
+		$data_type = util::post('data_name').'data';
+		$item = R::dispense($data_type);
 
 		$fields = R::inspect($data_type);
 		foreach ($fields as $key => $value) {

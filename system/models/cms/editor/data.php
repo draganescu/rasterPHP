@@ -4,6 +4,7 @@
 	<input type="hidden" name='page_name' value='<?php echo $type ?>'>
 	<input type="hidden" name='variable_name' value='<?php echo util::post('name') ?>'>
 	<h1>Edit <?php echo ucfirst(str_replace('_', ' ', util::post('name'))) ?>
+	<a class="data_adder" href="#" data-name='<?php echo util::post('name') ?>'>Add <?php echo ucfirst(str_replace('_', ' ', util::post('name'))) ?></a>
 	<span>Using the list below you can edit and delete <?php echo ucfirst(str_replace('_', ' ', util::post('name'))) ?> data</span></h1>
 	<table width="100%" class="data_list">
 		<thead>
