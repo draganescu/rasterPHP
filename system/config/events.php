@@ -5,8 +5,9 @@ event::bind('launch')->to('controller','respond')->core();
 // therefore api calls can be viewless.
 // To end the execution for an api call just exit;
 event::bind('finding_route')->to('api','load');
+event::bind('finding_route')->to('cms','route');
 // If there is no api call then the single controller will start controlling
-event::bind('finding_route')->to('cms','setup');
+event::bind('route_set')->to('cms','setup');
 // Which is actually routing the URI to a view
 event::bind('route_found')->to('controller','handle_response')->core();
 // After the view has pulled all the model data in

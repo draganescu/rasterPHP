@@ -13,15 +13,23 @@ class cms
 
 	private $data_name = NULL;
 
+	// custom cms routes for admin panels
+	public function route() {
+		include 'routes.php';
+	}
+
 	// Setup routes for the admin section
 	public function setup()
 	{
 		session_start();
-		include 'routes.php';
 
 		$db = database::instance('cms');
 
 		if (config::get('cms_enabled') == false) {
+			return;
+		}
+
+		if (controller::instance()->current_route == false) {
 			return;
 		}
 
@@ -153,12 +161,33 @@ class cms
 		);
 	}
 
-	function list_data($data, $start, $offset) {
-
-	}
 
 	function edit_data() {
-		echo 'bleh';
+
+		$db = database::instance('cms');
+		$data_type = util::post('name').'data';
+
+		
+		$data = R::findAll($data_type);
+		$fields = R::inspect($data_type);
+
+		include BASE.'models/cms/editor/data.php';
+
+		return false;
+	}
+
+	function edit_item() {
+
+		$db = database::instance('cms');
+		$item_type = util::post('name').'data';
+		$item_id = util::post('did');
+
+		
+		$data = R::load($item_type, $item_id);
+		$fields = R::inspect($item_type);
+
+		include BASE.'models/cms/editor/item.php';
+
 		return false;
 	}
 
@@ -269,6 +298,20 @@ class cms
 		if (util::post('raster_action', false) !== 'save_data') {
 			return false;
 		}
+		$db = database::instance('cms');
+
+		$data_type = util::post('data_name').'data';
+		$did = util::post('data_id');
+		$item = R::load($data_type, $did);
+
+		$fields = R::inspect($data_type);
+		foreach ($fields as $key => $value) {
+			if ($key == 'id') {
+				continue;
+			}
+			$item->$key = util::post($key);
+		}
+		R::store($item);
 	}
 
 	public function buttons() {

@@ -80,6 +80,20 @@ if (!window.jQuery) {
 		})
 	}
 
+	function do_edit(e) {
+		e.preventDefault();
+		var did = $(this).data('rel');
+		var name = $(this).data('name');
+		$('#raster_editor .body').html('<span>42 is the answer!</span>');
+		var info = {
+			"did":did,
+			"name":name
+		};
+		$.post(BASE + 'api/cms/edit_item', info, function(data){
+			$('#raster_editor .body').html(data);
+		})
+	}
+
 	function setup_modals() {
 		create_popup();
 		// popup modals
@@ -107,6 +121,7 @@ if (!window.jQuery) {
 
 	function hook_events() {
 		$('.raction').click(do_action);
+		$(document).on('click', '.data_editor', do_edit);
 	}
 
 	function capitaliseFirstLetter(string)

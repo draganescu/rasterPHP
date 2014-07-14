@@ -125,21 +125,42 @@ class controller {
 		// the route is the filesystem address to the view
 		if($template != '') 
 			$route = controller::build_view_path($template);
-		
+
+		// index route
+		if (implode('/', config::get('uri_segments')) == '/') {
+			$route = controller::build_view_path(config::get('default_view'));
+		}
+
+
 		// if no file exists for neither default or manual route
 		// the default view is loaded
 		if($template == '' && $route == '') {
-			event::dispatch('route not found');
-			$route = controller::build_view_path(config::get('default_view'));
+			event::dispatch('route_not_found');
+			$route = controller::error('404');
 		}
-		
+
 		// obvious right?
 		$this->current_route = $route;
+		event::dispatch('route_set');
+
+		if (!$route) {
+			exit;
+		}
 		
 		// just a hook
 		event::dispatch('route_found');
 
 		return $this;
+	}
+
+	public static function error($error, $document = false) {
+		if ($error == '404') {
+			header('HTTP/1.0 404 Not Found');
+		}
+		if (!$document) {
+			$document = config::get('error_document_'.$error, false);
+		}
+		return $document;
 	}
 	
 	// internal method of the controller used in handle_response
