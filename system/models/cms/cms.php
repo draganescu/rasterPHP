@@ -164,6 +164,11 @@ class cms
 						$data = R::load($this->data_name, $id);
 					} else {
 
+						// param filters
+						if (!empty($arguments)) {
+								$filters = $this->make_filters($arguments[0], $expected_properties, $filters);
+						}
+						
 						// we check for new fields just like for pages
 						$fields = R::inspect($this->data_name);
 						//if (count($expected_properties) > count($fields) - 3) {
@@ -177,10 +182,6 @@ class cms
 						//}
 
 
-						// param filters
-						if (!empty($arguments)) {
-								$filters = $this->make_filters($arguments[0], $expected_properties, $filters);
-						}
 						$sql = '1 = 1';
 						foreach ($filters as $key => $value) {
 							$sql .= ' AND '.$key." = :".$key;

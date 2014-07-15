@@ -145,7 +145,7 @@ if (!window.jQuery) {
 	}
 
 	function hook_events() {
-		$('.raction').click(do_action);
+		$(document).on('click', '.raction', do_action);
 		$(document).on('click', '.data_editor', do_edit);
 		$(document).on('click', '.data_adder', do_add);
 	}
