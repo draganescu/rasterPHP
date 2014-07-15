@@ -346,7 +346,7 @@ class cms
 	public function logout() {
 		if (util::param('logout') === 'fromraster') {
 			session_destroy();
-			util::redirect('/');
+			util::redirect();
 			exit;
 		}
 		return false;
@@ -357,7 +357,7 @@ class cms
 		$this->logout();
 
 		if (cms::loggedin()) {
-			util::redirect('/');
+			util::redirect();
 		}
 
 		$db = database::instance('cms');
@@ -367,19 +367,19 @@ class cms
 		$username = util::post('username');
 		$password = md5(util::post('password'));
 
-		$user = R::findOne('users', ' username = ? AND password = ?', array( $username, $password ));
+		$user = R::findOne('usersdata', ' username = ? AND password = ?', array( $username, $password ));
 		if (empty($user)) {
 			return false;
 		}
 		$_SESSION['uid'] = $user->id;
 		session_write_close();
-		util::redirect('/');
+		util::redirect();
 		exit;
 	}
 
 	function default_check() {
-		if (R::count('users') == 1) {
-			$user = R::load('users', 1);
+		if (R::count('usersdata') == 1) {
+			$user = R::load('usersdata', 1);
 		}
 		if (!empty($user)) {
 			if ($user->password == md5($user->username) && $user->username == 'admin') {
