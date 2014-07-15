@@ -19,7 +19,7 @@ class util {
 	// redirect to a location within the app
 	static function redirect($location)
 	{
-		$base = config::get('base_url');
+		$base = config::get('base_uri');
 		header("Location: ".$base.$location);
 		exit;
 	}

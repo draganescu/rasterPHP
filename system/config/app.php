@@ -22,3 +22,4 @@ config::set('views_ext')->to('.html');
 config::set('cms_enabled')->to(true);
 // the default page size for all CMS data types
 config::set("raster_page_size")->to(10);
+config::set('raster_media_folder')->to('media');

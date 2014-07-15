@@ -102,9 +102,36 @@ if (!window.jQuery) {
 			"did":did,
 			"name":name
 		};
+		
+		var media = [];
 		$.post(BASE + 'api/cms/edit_item', info, function(data){
-			$('#raster_editor .body').html(data);
+			$('.modal #raster_editor .body').html(data);
 		})
+	}
+
+	function media_control() {
+		Raster_Admin.media = {}; 
+		var croppicHeaderOptions = {
+			uploadUrl:BASE+'api/cms/upload_media',
+			cropData:{
+				"dummyData":1,
+				"dummyData2":"asdas"
+			},
+			// customUploadButtonId:'',
+			cropUrl:BASE+'api/cms/crop_media',
+			modal:false,
+			loaderHtml:'<div class="loader">Watson!</div> ',
+			onBeforeImgUpload: function(){ console.log('onBeforeImgUpload') },
+			onAfterImgUpload: function(){ console.log('onAfterImgUpload') },
+			onImgDrag: function(){ console.log('onImgDrag') },
+			onImgZoom: function(){ console.log('onImgZoom') },
+			onBeforeImgCrop: function(){ console.log('onBeforeImgCrop') },
+			onAfterImgCrop:function(){ console.log('onAfterImgCrop') }
+		}
+		var id = $(this).attr('id');
+		// croppicHeaderOptions.customUploadButtonId = id + '_upload';
+		croppicHeaderOptions.outputUrlId = "input_"+id;
+		Raster_Admin.media[id] = new Croppic(id, croppicHeaderOptions);
 	}
 
 	function do_add(e) {
@@ -148,6 +175,7 @@ if (!window.jQuery) {
 		$(document).on('click', '.raction', do_action);
 		$(document).on('click', '.data_editor', do_edit);
 		$(document).on('click', '.data_adder', do_add);
+		$(document).on('click', '.media_object', media_control);
 	}
 
 	function capitaliseFirstLetter(string)

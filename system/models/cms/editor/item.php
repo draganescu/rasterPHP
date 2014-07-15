@@ -14,8 +14,15 @@
 	<label>
 		<h4>
 			<?php echo ucfirst(str_replace('_', ' ', $key)) ?>
+			<br>
+			<small>Click image to update it</small>
 		</h4>
-		<?php if ($value == 'text'): ?>
+		<?php if (preg_match("/media_([0-9]+)_([0-9]+)/", $key, $media_object)): ?>
+		<div id="<?php echo $key ?>" style="position:relative; width: <?php echo $media_object[1] ?>px; height: <?php echo $media_object[2] ?>px; box-sizing: content-box; -moz-box-sizing: content-box; border-radius: 2px; background-image: url(<?php echo $data->$key ?>); background-repeat: no-repeat; background-position: center; box-shadow: 8px 8px 0px rgba(0,0,0,0.1);" class='media_object'>
+		</div>
+		<input type="hidden" id='input_<?php echo $key ?>' name='<?php echo $key ?>' value='<?php echo $data->$key ?>' />
+		<!-- <span href="#" class="button" id='<?php echo $key ?>_upload' style='width: <?php echo $media_object[1] ?>px;'>Update image</span> -->
+		<?php elseif ($value == 'text'): ?>
 		<textarea name="<?php echo $key ?>">
 <?php echo $data->$key ?>
 		</textarea>

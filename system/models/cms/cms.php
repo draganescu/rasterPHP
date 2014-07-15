@@ -464,6 +464,7 @@ class cms
 		}
 
 		return '
+				<link rel="stylesheet" href="'.config::get('link_uri').'api/cms/css/raster_file/croppic">
 				<link rel="stylesheet" href="'.config::get('link_uri').'api/cms/css">
 				<script language="javascript">
 					var Raster_Admin = {};
@@ -471,8 +472,103 @@ class cms
 					Raster_Admin.page_variables = '.json_encode($this->page_variables).';
 					Raster_Admin.page_name = '.json_encode($this->page_name).';
 				</script>
+				<script language="javascript" src="'.config::get('link_uri').'api/cms/script/raster_file/croppic.min"></script>
 				<script language="javascript" src="'.config::get('link_uri').'api/cms/script"></script>
 		';
+	}
+
+	public function upload_media() {
+		$imagePath = BASE.'../'.config::get('raster_media_folder').'/';
+		$allowedExts = array("gif", "jpeg", "jpg", "png", "GIF", "JPEG", "JPG", "PNG");
+		$temp = explode(".", $_FILES["img"]["name"]);
+		$extension = end($temp);
+
+		if ( in_array($extension, $allowedExts)) {
+		  if ($_FILES["img"]["error"] > 0) {
+				 $response = array(
+					"status" => 'error',
+					"message" => 'ERROR Return Code: '. $_FILES["img"]["error"],
+				);
+				echo "Return Code: " . $_FILES["img"]["error"] . "<br>";
+			} else {	
+			  $filename = $_FILES["img"]["tmp_name"];
+			  list($width, $height) = getimagesize( $filename );
+
+			  move_uploaded_file($filename,  $imagePath . $_FILES["img"]["name"]);
+
+			  $response = array(
+					"status" => 'success',
+					"url" => config::get('base_uri').config::get('raster_media_folder').'/'.$_FILES["img"]["name"],
+					"width" => $width,
+					"height" => $height
+			  );
+			}
+		} else {
+		   $response = array(
+				"status" => 'error',
+				"message" => 'something went wrong',
+			);
+		}
+		  
+		return $response;
+	}
+
+	public function crop_media() {
+
+		$imagePath = BASE.'../'.config::get('raster_media_folder').'/';
+		$imgUrl = 		util::post('imgUrl');
+		$imgInitW = 	util::post('imgInitW');
+		$imgInitH = 	util::post('imgInitH');
+		$imgW = 			util::post('imgW');
+		$imgH = 			util::post('imgH');
+		$imgY1 = 			util::post('imgY1');
+		$imgX1 = 			util::post('imgX1');
+		$cropW = 			util::post('cropW');
+		$cropH = 			util::post('cropH');
+
+		$jpeg_quality = 100;
+
+		$filename = "croppedImg_".time().md5($imgUrl);
+		$output_filename = $imagePath."/".$filename;
+
+		$what = getimagesize($imgUrl);
+		switch(strtolower($what['mime']))
+		{
+			case 'image/png':
+				$img_r = imagecreatefrompng($imgUrl);
+				$source_image = imagecreatefrompng($imgUrl);
+				$type = '.png';
+				break;
+			case 'image/jpeg':
+				$img_r = imagecreatefromjpeg($imgUrl);
+				$source_image = imagecreatefromjpeg($imgUrl);
+				$type = '.jpeg';
+				break;
+			case 'image/gif':
+				$img_r = imagecreatefromgif($imgUrl);
+				$source_image = imagecreatefromgif($imgUrl);
+				$type = '.gif';
+				break;
+			default: die('image type not supported');
+		}
+
+		$resizedImage = imagecreatetruecolor($imgW, $imgH);
+		imagecopyresampled($resizedImage, $source_image, 0, 0, 0, 0, $imgW, 
+		$imgH, $imgInitW, $imgInitH);	
+
+
+		$dest_image = imagecreatetruecolor($cropW, $cropH);
+		imagecopyresampled($dest_image, $resizedImage, 0, 0, $imgX1, $imgY1, $cropW, 
+		$cropH, $cropW, $cropH);	
+
+
+		imagejpeg($dest_image, $output_filename.$type, $jpeg_quality);
+
+		$response = array(
+		"status" => 'success',
+		"url" => config::get('base_uri').config::get('raster_media_folder').'/'.$filename.$type 
+		);
+		return $response;
 	}
 
 	private function detect_data($key, $value) {
