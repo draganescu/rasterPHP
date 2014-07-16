@@ -1,0 +1,278 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="chrome=1">
+    <title>Raster by draganescu</title>
+
+    <link rel="stylesheet" href="stylesheets/styles.css">
+    <link rel="stylesheet" href="stylesheets/pygment_trac.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+    <!--[if lt IE 9]>
+    <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+  </head>
+  <body>
+    <div class="wrapper">
+      <header>
+        <h1>Raster</h1>
+        <p>A framework that makes happy developers happier</p>
+
+        <p class="view"><a href="https://github.com/draganescu/raster">View the Project on GitHub <small>draganescu/raster</small></a></p>
+
+
+        <ul>
+          <li><a href="https://github.com/draganescu/raster/zipball/master">Download <strong>ZIP File</strong></a></li>
+          <li><a href="https://github.com/draganescu/raster/tarball/master">Download <strong>TAR Ball</strong></a></li>
+          <li><a href="https://github.com/draganescu/raster">View On <strong>GitHub</strong></a></li>
+        </ul>
+      </header>
+      <section>
+        <h1>
+<a name="raster" class="anchor" href="#raster"><span class="octicon octicon-link"></span></a>Raster</h1>
+
+<h1>
+<a name="hi-im-raster" class="anchor" href="#hi-im-raster"><span class="octicon octicon-link"></span></a>Hi i'm Raster!</h1>
+
+<p>So here's the story from A to Z, you wanna get with me, you gotta listen carefully.</p>
+
+<h2>
+<a name="basics" class="anchor" href="#basics"><span class="octicon octicon-link"></span></a>Basics</h2>
+
+<p>Opa MVC style! Oops \o/ wrong song. </p>
+
+<p>You've got views in HTML. All HTML and nothing else. All templating is done via HTML comments. Clear?</p>
+
+<blockquote>
+<p>Comments! Why? Because its lovely not to mess around with the finely built work of a front end developer by adding non semantic stuff, ruining tags by breaking them in loops and also its great to see things in the browser as they're meant to be without accolades or php code artifacts killing your retina.</p>
+</blockquote>
+
+<p>You've got models in PHP. Nothing but PHP. All the models return   just data like arrays, strings and booleans.</p>
+
+<p>You've got one single thin controller. Anorexic thin. All it  does is controlling: routing and mapping models to views. </p>
+
+<h2>
+<a name="how-it-works" class="anchor" href="#how-it-works"><span class="octicon octicon-link"></span></a>How it works</h2>
+
+<ol>
+<li>You make a nice html page of how you want the UI to look.</li>
+</ol><pre><code>&lt;html&gt;
+    ...
+    &lt;ul class='vehicles'&gt;
+        &lt;li&gt;Volvo&lt;/li&gt;
+        &lt;li&gt;Mercedes&lt;/li&gt;
+        &lt;li&gt;WV&lt;/li&gt;
+        &lt;li&gt;Audi&lt;/li&gt;
+    &lt;/ul&gt;
+&lt;/html&gt;
+</code></pre>
+
+<ol>
+<li>You open that html look at its parts (you know HTML is structured right?) and start thinking about one thing: where does the data come from? And always answer the same thing: from a model.</li>
+</ol><pre><code>&lt;html&gt;
+    ...
+    &lt;!-- the vehicles list comes from the vehicles model! --&gt;
+    &lt;ul class='vehicles'&gt;
+        &lt;li&gt;Volvo&lt;/li&gt;
+        &lt;li&gt;Mercedes&lt;/li&gt;
+        &lt;li&gt;WV&lt;/li&gt;
+        &lt;li&gt;Audi&lt;/li&gt;
+    &lt;/ul&gt;
+    &lt;!-- amaizing! --&gt;
+&lt;/html&gt;
+</code></pre>
+
+<ol>
+<li>You make that model and you code in the logic to get the data then you return it.</li>
+</ol><pre><code>&lt;?php
+class vehicles {
+
+    function thelist {
+        return array (
+            array('name' =&gt; 'Aeroplane'),
+            array('name' =&gt; 'Rickshaw'),
+            array('name' =&gt; 'Train'),
+            array('name' =&gt; 'Bicycle'),
+        );
+    }
+}
+</code></pre>
+
+<ol>
+<li>You go to the html file and code in the comment to output the data.</li>
+</ol><pre><code>&lt;html&gt;
+    ...
+    &lt;!-- render.vehicles.thelist --&gt;
+    &lt;ul class='vehicles'&gt;
+        &lt;li&gt;&lt;!-- print.name --&gt;Volvo&lt;!-- /print.name --&gt;&lt;/li&gt;
+        &lt;!-- remove --&gt;
+        &lt;li&gt;Mercedes&lt;/li&gt;
+        &lt;li&gt;WV&lt;/li&gt;
+        &lt;li&gt;Audi&lt;/li&gt;
+        &lt;!-- /remove --&gt;
+    &lt;/ul&gt;
+    &lt;!-- /render.vehicles.thelist --&gt;
+&lt;/html&gt;
+</code></pre>
+
+<ol>
+<li>I wanna really, really, really wanna zigazig ah</li>
+</ol><pre><code>&lt;html&gt;
+    ...
+    &lt;ul class='vehicles'&gt;
+        &lt;li&gt;Aeroplane&lt;/li&gt;
+        &lt;li&gt;Rickshaw&lt;/li&gt;
+        &lt;li&gt;Train&lt;/li&gt;
+        &lt;li&gt;Bicycle&lt;/li&gt;
+    &lt;/ul&gt;
+&lt;/html&gt;
+</code></pre>
+
+<h3>
+<a name="now-dont-go-wasting-my-precious-time" class="anchor" href="#now-dont-go-wasting-my-precious-time"><span class="octicon octicon-link"></span></a>Now don't go wasting my precious time</h3>
+
+<p>You've got two primary kind of comments: print and render. Print will only output the result of the model's work. Render will loop trough an array of items returned by the model's work. </p>
+
+<blockquote>
+<p>If the model returns false the the html in the template remains intact.</p>
+</blockquote>
+
+<p>You've got some secondary kind of comments: remove, res and dry. Remove is used to wipe out lorem ipsum and other nonsense. Res specifies a reusable part of a template. Dry specifies a DRY operation: take something from somewhere else and DRY.</p>
+
+<p>Get your act together we could be just fine.</p>
+
+<h2>
+<a name="environment" class="anchor" href="#environment"><span class="octicon octicon-link"></span></a>Environment</h2>
+
+<blockquote>
+<p>I won't be hasty, I'll give you a try, If you really bug me then I'll say goodbye</p>
+</blockquote>
+
+<p>First, just in case, in the application's index.php you can set the name of the folder where your application lives:</p>
+
+<pre><code>&lt;?php
+
+require_once 'system/boot.php';
+boot::$appname = 'application'; // &lt;- here! here!
+boot::up();
+
+?&gt;
+</code></pre>
+
+<h2>
+<a name="the-core-classes" class="anchor" href="#the-core-classes"><span class="octicon octicon-link"></span></a>The core classes</h2>
+
+<p>We got Em in the place who likes it in your face.</p>
+
+<h3>
+<a name="boot-up" class="anchor" href="#boot-up"><span class="octicon octicon-link"></span></a>Boot up!</h3>
+
+<p>The Boot class initialises the global configuration, detects where the files are on the filesystem and also takes care to load your precious configuration and extended or replaced core classes.</p>
+
+<p>You got G like MC who likes it on a...</p>
+
+<h3>
+<a name="events-are-awesome" class="anchor" href="#events-are-awesome"><span class="octicon octicon-link"></span></a>Events are awesome!</h3>
+
+<p>What does it Em like it on? I could never figure it out man.
+But the Events class glues together all the wonderful singletons Raster is made of. For example, the default events are in /system/config/events.php:</p>
+
+<pre><code>&lt;?php
+event::bind('launch')-&gt;to('controller','respond')-&gt;core();
+event::bind('route_found')-&gt;to('controller','handle_response')-&gt;core();
+event::bind('done')-&gt;to('controller','output')-&gt;core();
+?&gt;
+</code></pre>
+
+<p>Easy V doesn't come for free, she's a real lady</p>
+
+<h3>
+<a name="configuration-is-a-global-object-in-your-app" class="anchor" href="#configuration-is-a-global-object-in-your-app"><span class="octicon octicon-link"></span></a>Configuration is a global object in your app</h3>
+
+<p>To configure a Raster application you create files in your config directory of your application and issue directives such as:</p>
+
+<pre><code>&lt;?php
+config::set('theme')-&gt;to('roses');
+?&gt;
+</code></pre>
+
+<p>then it will be available as:</p>
+
+<pre><code>&lt;?php
+$valentinesday = config::get('theme');
+?&gt;
+</code></pre>
+
+<p>And as for me, ha you'll see</p>
+
+<h3>
+<a name="im-utility" class="anchor" href="#im-utility"><span class="octicon octicon-link"></span></a>I'm utility</h3>
+
+<p>The Utility class has some methods that help you while developing with Raster such as getting url parameters, detecting if you have or not post/get data and so forth. Its very useful in models where you can for example not continue the method if there is no data passed to it:</p>
+
+<pre><code>&lt;?php
+    ...
+    function save_user() {
+        if(util::no_post_data()) return false;
+    }
+?&gt;
+</code></pre>
+
+<h2>
+<a name="oh-yes-database" class="anchor" href="#oh-yes-database"><span class="octicon octicon-link"></span></a>Oh yes, Database</h2>
+
+<p>If you wanna be my lover, you gotta get with my friends.</p>
+
+<p>My friend is <a href="http://www.redbeanphp.com">Red Bean</a>. Its a nice ORM that handles table creation and mapping of database data to PHP objects. Its my friend because its rock solid, fast, configurable and i was too damn lazy to write database adapters and whatnot.</p>
+
+<h2>
+<a name="oh-oh-and-automatic-form-management" class="anchor" href="#oh-oh-and-automatic-form-management"><span class="octicon octicon-link"></span></a>Oh, oh and automatic form management</h2>
+
+<p>Raster handles forms automatically because the templating class has this awesome method called <em>form_state</em>.</p>
+
+<pre><code>&lt;?php
+class users {
+    ...
+    function add_or_edit_user() {
+
+        $page = template::instance();   
+        $db = database::instance();
+
+        $uid = util::param('id', false);
+        if(!$uid) return false;     
+
+        $user = $db-&gt;get_user_by_id($uid);
+        return $page-&gt;form_state($user);
+    }
+}
+?&gt;
+</code></pre>
+
+<p>That code above will handle autocompletion of <em>value</em> attributes and <em>selected</em> attributes by matching the <em>name</em> of the form fields to the keys of the $user array. In your template you'll have:</p>
+
+<pre><code>&lt;!-- render.users.add_or_edit_user --&gt;
+&lt;form&gt;
+    &lt;input type='text' name='username' /&gt;
+&lt;/form&gt;
+&lt;!-- /render.users.add_or_edit_user --&gt;
+</code></pre>
+
+<p>And for all this convenience all you have to remember is to put type before name in the html :)</p>
+
+<p>Slam your body down and wind it all around!</p>
+
+<h2>
+<a name="aaaaaand-fork" class="anchor" href="#aaaaaand-fork"><span class="octicon octicon-link"></span></a>Aaaaaand Fork!</h2>
+
+<p>If you wanna be my lover, you have got to give
+Taking is too easy, but that's the way it is.</p>
+      </section>
+      <footer>
+        <p>This project is maintained by <a href="https://github.com/draganescu">draganescu</a></p>
+        <p><small>Hosted on GitHub Pages &mdash; Theme by <a href="https://github.com/orderedlist">orderedlist</a></small></p>
+      </footer>
+    </div>
+    <script src="javascripts/scale.fix.js"></script>
+    
+  </body>
+</html>
