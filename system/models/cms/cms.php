@@ -50,13 +50,13 @@ class cms
 			return;
 		}
 
-		// creates the page and adds new fields if any
+		// adds users and settings to the db 
 		$this->create_cms_data();
-
 
 		$page_name = str_replace('/', '', $slug).'page';
 		$page_name = str_replace('_', '', $page_name);
 
+		// creates the page and adds new fields if any
 		$page = R::findOne($page_name, '1 ORDER BY id DESC');
 		if (empty($page)) {
 			$page = R::dispense($page_name);
