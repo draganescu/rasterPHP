@@ -1,7 +1,7 @@
 Raster PHP
 ======
 
-Raster PHP is the php implementation of the raster specification that implements the RTO design pattern. [more details, more details I hear you say](http://draganescu.github.com)
+Raster PHP is the php implementation of the raster specification that implements the RTO design pattern. [more details](https://draganescu.github.io/rto/specs/2014/06/29/rto.html)
 
 # Hi i'm Raster!
 
