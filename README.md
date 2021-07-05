@@ -17,7 +17,7 @@ You've got views in HTML. All HTML and nothing else. All templating is done via 
 
 You've got models in PHP. Nothing but PHP. All the models return   just data like arrays, strings and booleans.
 
-You've got one single thin controller. Anorexic thin. All it  does is controlling: routing and mapping models to views. 
+You've got one single thin controller. Very thin. All it  does is controlling: routing and mapping models to views. 
 
 ## How it works
 
