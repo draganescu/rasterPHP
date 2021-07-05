@@ -5,19 +5,15 @@ Raster PHP is the php implementation of the raster specification that implements
 
 # Hi i'm Raster!
 
-So here's the story from A to Z, you wanna get with me, you gotta listen carefully.
-
 ## Basics
 
-Opa MVC style! Oops \o/ wrong song. 
-
-You've got views in HTML. All HTML and nothing else. All templating is done via HTML comments. Clear?
+Views in HTML. All HTML and nothing else. All templating is done via HTML comments. Clear?
 
 > Comments! Why? Because its lovely not to mess around with the finely built work of a front end developer by adding non semantic stuff, ruining tags by breaking them in loops and also its great to see things in the browser as they're meant to be without accolades or php code artifacts killing your retina.
 
-You've got models in PHP. Nothing but PHP. All the models return   just data like arrays, strings and booleans.
+Models in PHP. Nothing but PHP. All the models return   just data like arrays, strings and booleans.
 
-You've got one single thin controller. Very thin. All it  does is controlling: routing and mapping models to views. 
+One single thin controller. Very thin. All it  does is controlling: routing and mapping models to views. 
 
 ## How it works
 
@@ -86,7 +82,7 @@ class vehicles {
 </html>
 ~~~
 
-5. I wanna really, really, really wanna zigazig ah
+5. There we go:
 
 ~~~
 <html>
@@ -108,11 +104,7 @@ You've got two primary kind of comments: print and render. Print will only outpu
 
 You've got some secondary kind of comments: remove, res and dry. Remove is used to wipe out lorem ipsum and other nonsense. Res specifies a reusable part of a template. Dry specifies a DRY operation: take something from somewhere else and DRY.
 
-Get your act together we could be just fine.
-
 ## Environment
-
-> I won't be hasty, I'll give you a try, If you really bug me then I'll say goodbye
 
 First, just in case, in the application's index.php you can set the name of the folder where your application lives:
 
@@ -128,18 +120,13 @@ boot::up();
 
 ## The core classes
 
-We got Em in the place who likes it in your face.
-
 ### Boot up!
 
 The Boot class initialises the global configuration, detects where the files are on the filesystem and also takes care to load your precious configuration and extended or replaced core classes.
 
-You got G like MC who likes it on a...
-
 ### Events are awesome!
 
-What does it Em like it on? I could never figure it out man.
-But the Events class glues together all the wonderful singletons Raster is made of. For example, the default events are in /system/config/events.php:
+The Events class glues together all the wonderful singletons Raster is made of. For example, the default events are in /system/config/events.php:
 
 ~~~
 <?php
@@ -148,8 +135,6 @@ event::bind('route_found')->to('controller','handle_response')->core();
 event::bind('done')->to('controller','output')->core();
 ?>
 ~~~
-
-Easy V doesn't come for free, she's a real lady
 
 ### Configuration is a global object in your app
 
@@ -169,8 +154,6 @@ $valentinesday = config::get('theme');
 ?>
 ~~~
 
-And as for me, ha you'll see
-
 ### I'm utility
 
 The Utility class has some methods that help you while developing with Raster such as getting url parameters, detecting if you have or not post/get data and so forth. Its very useful in models where you can for example not continue the method if there is no data passed to it:
@@ -186,9 +169,7 @@ The Utility class has some methods that help you while developing with Raster su
 
 ## Oh yes, Database
 
-If you wanna be my lover, you gotta get with my friends.
-
-My friend is [Red Bean](http://www.redbeanphp.com). Its a nice ORM that handles table creation and mapping of database data to PHP objects. Its my friend because its rock solid, fast, configurable and i was too damn lazy to write database adapters and whatnot.
+The ORM of choice is [Red Bean](http://www.redbeanphp.com). Its a nice ORM that handles table creation and mapping of database data to PHP objects. Its rock solid, fast, configurable and i was too damn lazy to write database adapters and whatnot.
 
 ## Oh, oh and automatic form management
 
@@ -224,12 +205,5 @@ That code above will handle autocompletion of _value_ attributes and _selected_ 
 ~~~
 
 And for all this convenience all you have to remember is to put type before name in the html :)
-
-Slam your body down and wind it all around!
-
-## Aaaaaand Fork!
-
-If you wanna be my lover, you have got to give
-Taking is too easy, but that's the way it is.
 
 
