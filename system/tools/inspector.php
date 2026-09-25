@@ -691,6 +691,39 @@ class raster_inspector {
 		return $out;
 	}
 
+	// ##Named queries
+	// database::instance('cafe')->count_category(...) needs
+	// models/cafe/sql/count_category.sql or $queries['count_category'] in
+	// models/sql.php. Without a model name, the calling model's folder counts.
+	function lint_queries() {
+		$problems = array();
+		$models = APPBASE.config::get('models_path', 'models');
+		if (!is_dir($models)) return $problems;
+		$own = array_map('strtolower', get_class_methods('database'));
+		$named = database::named_queries();
+		$iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($models, FilesystemIterator::SKIP_DOTS));
+		foreach ($iterator as $file) {
+			if (substr($file->getFilename(), -4) !== '.php') continue;
+			$relative = substr($file->getPathname(), strlen($models) + 1);
+			$folder = strpos($relative, '/') !== false ? strstr($relative, '/', true) : null;
+			$source = $this->without_comments(file_get_contents($file->getPathname()));
+			if (!preg_match_all('/database::instance\(\s*(?:([\'"])([a-z0-9_]+)\1)?\s*\)\s*->\s*([a-z_][a-z0-9_]*)\s*\(/i', $source, $calls, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) continue;
+			foreach ($calls as $call) {
+				$name = $call[3][0];
+				if (in_array(strtolower($name), $own)) continue;
+				$model = isset($call[2]) && $call[2][0] !== '' ? $call[2][0] : ($folder !== null ? preg_replace('/^the_/', '', $folder) : null);
+				if (($model && is_file("$models/$model/sql/$name.sql")) || isset($named[$name])) continue;
+				$where = $model ? config::get('models_path', 'models')."/$model/sql/$name.sql" : "models/<model>/sql/$name.sql";
+				$problems[] = array(
+					'severity' => 'error', 'file' => self::short($file->getPathname()),
+					'line' => substr_count(substr($source, 0, $call[0][1]), "\n") + 1, 'column' => 1,
+					'message' => "No query named '$name': add $where, or \$queries['$name'] in models/sql.php",
+				);
+			}
+		}
+		return $problems;
+	}
+
 	function lint($themes = null) {
 		$problems = array();
 		$themes = $themes ?: array($this->theme);
@@ -699,7 +732,7 @@ class raster_inspector {
 				$problems = array_merge($problems, $this->lint_file($view, $theme));
 			}
 		}
-		return array_merge($problems, $this->lint_routes(), $this->lint_events());
+		return array_merge($problems, $this->lint_routes(), $this->lint_events(), $this->lint_queries());
 	}
 
 	static function short($path) {

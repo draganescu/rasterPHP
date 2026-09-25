@@ -156,6 +156,14 @@ class cafe
 		return $rows ? implode(', ', array_map(function ($r) { return $r['name']; }, $rows)) : 'none';
 	}
 
+	// an SQL file with :named placeholders (models/cafe/sql/dishes_between.sql);
+	// called from a template, database::instance() already looks in this
+	// model's sql/ folder
+	function dishes_between($low, $high) {
+		$rows = database::instance()->dishes_between(array(':low' => $low, ':high' => $high));
+		return $rows ? implode(', ', array_column($rows, 'name')) : 'none';
+	}
+
 	// a key from the URL: /lab/color/red
 	function color() {
 		return util::param('color', 'none');

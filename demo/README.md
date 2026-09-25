@@ -90,6 +90,7 @@ php tests/demo.php                        # the whole matrix
 | C40 | `executed_<model>_<method>` uses the model's own name (also under a `the_` override) and carries the result |
 | C41 | bundled models send events from every path: cms over MCP, authentication.registered |
 | C42 | lint checks event bindings: missing models and methods, events nothing sends |
+| C43 | named queries: `:name` placeholders, the calling model's `sql/` by default, a missing name is an error that lint finds |
 | D1 | raster_form and honeypot on every post form |
 | D2 | the session token on forms for logged in users |
 | D3 | posts from other sites refused (Origin, Sec-Fetch-Site, Referer, /api too) |
