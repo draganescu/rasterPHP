@@ -23,14 +23,29 @@
 */
 class pagination
 {
-	protected function state($source) {
+	protected function state($source, $filter = '') {
 		if (!preg_match('/^([a-z0-9_]+)\.([a-z0-9_]+)$/', (string)$source, $m)) {
 			throw new InvalidArgumentException("pagination needs 'model.method' or 'cms.collection', got '$source'");
 		}
 		list(, $model, $name) = $m;
 		if ($model === 'cms') {
 			$type = cms::collection_type($name);
-			$total = cms_store::table_exists($type) ? cms_store::count_published($type) : 0;
+			$filters = array();
+			// /news/news_items/tag/php narrows the list, and so the pages
+			$segments = (array)config::get('uri_segments');
+			$start = array_search($name.'_items', $segments);
+			if ($start !== false) {
+				for ($i = $start + 1; $i + 1 < count($segments); $i += 2) {
+					if (preg_match('/^'.preg_quote($name, '/').'_page$/', $segments[$i])) break;
+					$filters[$segments[$i]] = $segments[$i + 1];
+				}
+			}
+			// the same filters as the list: pagination.links('cms.news', 'featured=1')
+			foreach (explode('&', (string)$filter) as $pair) {
+				$parts = explode('=', $pair, 2);
+				if ($parts[0] !== '' && !in_array($parts[0], array('order', 'limit'))) $filters[$parts[0]] = isset($parts[1]) ? $parts[1] : '';
+			}
+			$total = cms_store::table_exists($type) ? cms_store::count_published($type, $filters) : 0;
 			$perpage = (int)config::get($name.'_page_size') ?: ((int)config::get('raster_page_size') ?: 10);
 			$current = max(1, (int)util::param($name.'_page', 1));
 			$uri = (string)config::get('uri_string');
@@ -56,8 +71,8 @@ class pagination
 	}
 
 	// one row per page: number, url, state ("current" or "")
-	function pages($source) {
-		$s = $this->state($source);
+	function pages($source, $filter = '') {
+		$s = $this->state($source, $filter);
 		if ($s['pages'] < 2) return array();
 		$rows = array();
 		for ($n = 1; $n <= $s['pages']; $n++) {
@@ -67,8 +82,8 @@ class pagination
 	}
 
 	// one row: prev_url, next_url, current, total, prev_state and next_state ("disabled" at the ends)
-	function links($source) {
-		$s = $this->state($source);
+	function links($source, $filter = '') {
+		$s = $this->state($source, $filter);
 		if ($s['pages'] < 2) return array();
 		return array(array(
 			'current' => (string)$s['current'],
@@ -81,7 +96,7 @@ class pagination
 	}
 
 	// the name older Raster sites used
-	function paginate($source) {
-		return $this->links($source);
+	function paginate($source, $filter = '') {
+		return $this->links($source, $filter);
 	}
 }

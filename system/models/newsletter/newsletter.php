@@ -33,6 +33,14 @@ class newsletter
 		if (!database::configured()) throw new RuntimeException('No database for the '.config::get('environment').' environment');
 	}
 
+	// the tables this model uses, for `raster schema --apply`
+	static function schema() {
+		return array(
+			'subscriber' => array('email' => '', 'name' => '', 'status' => '', 'token' => '', 'source' => '', 'created_at' => '', 'confirmed_at' => '', 'unsubscribed_at' => ''),
+			'newsletterissue' => array('url' => '', 'subject' => '', 'recipients' => 0, 'sent_at' => ''),
+		);
+	}
+
 	static function table_ready() {
 		try { return in_array('subscriber', R::inspect()); } catch (Exception $e) { return false; }
 	}

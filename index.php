@@ -11,7 +11,7 @@
 // configuration and data are never exposed (the same rules as .htaccess).
 if (PHP_SAPI === 'cli-server') {
 	$path = preg_replace('#/+#', '/', rawurldecode((string)parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH)));
-	$blocked = '#(^|/)\.|^/(system|bin|tests)(/|$)|^/application/(config|models|data)(/|$)|^/application/views/.*\.html$|\.(php|sqlite|sql|md)$|-(journal|wal|shm)$#i';
+	$blocked = '#(^|/)\.|^/(system|bin|tests)(/|$)|^/application/(config|models|data)(/|$)|^/application/views/.*\.(html|rss|atom|xml|json|txt)$|\.(php|sqlite|sql|md)$|-(journal|wal|shm)$#i';
 	if (preg_match($blocked, $path) && $path !== '/index.php') {
 		http_response_code(403);
 		exit('Forbidden');

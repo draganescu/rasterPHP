@@ -46,7 +46,7 @@ class cms
 	// names that can't be used for page fields or collections
 	static function reserved($name, $kind) {
 		if ($kind === 'collection') return in_array($name, array('users', 'raster'));
-		return method_exists('cms', $name) || $name === 'slug' || $name === 'id' || $name === 'updated_at' || $name === 'enabled';
+		return method_exists('cms', $name) || in_array($name, array('slug', 'id', 'updated_at', 'enabled', 'published_at'));
 	}
 
 	// the table holding the items of a collection
@@ -83,6 +83,8 @@ class cms
 		// /news/news_items/tag/php -> news.html
 		$uri = config::get('uri_string');
 		if (preg_match('#^/(.+?)/([a-z0-9_]+)_(item|items|page)(/|$)#', (string)$uri, $m)) {
+			// item URLs live under the collection's own name: /news/news_item/x
+			if ($m[3] === 'item' && $m[1] !== $m[2]) return;
 			$candidates = $m[3] === 'item' ? array($m[2].'_item', $m[1]) : array($m[1]);
 			foreach ($candidates as $view) {
 				if (strpos($view, '..') !== false || strpos(basename($view), '_') === 0) continue;

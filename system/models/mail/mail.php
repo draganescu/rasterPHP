@@ -26,6 +26,7 @@ class mail
 
 	static function from() {
 		$from = getenv('RASTER_MAIL_FROM') ?: config::get('mail_from');
+		if (!$from && !util::trusted_links()) $from = 'site@localhost';
 		if (!$from) $from = 'site@'.preg_replace('/:\d+$/', '', (string)config::get('host', 'localhost'));
 		return self::clean_header($from);
 	}
@@ -40,6 +41,11 @@ class mail
 
 	// Renders a view and sends it. Returns true when it was handed over.
 	static function send_view($view, $to, $vars = array(), $headers = array()) {
+		if (!util::trusted_links()) {
+			self::$last_error = 'Set RASTER_URL (or config site_url) to the site address before sending email from the site';
+			log::error('Mail: '.self::$last_error);
+			return false;
+		}
 		$html = controller::render_view($view, $vars);
 		$subject = preg_match('/<title>(.*?)<\/title>/is', $html, $m) ? html_entity_decode(trim(strip_tags($m[1])), ENT_QUOTES) : 'Message from '.config::get('host');
 		return self::send($to, $subject, $html, null, $headers);
@@ -153,6 +159,11 @@ class mail
 		$helo = preg_replace('/:\d+$/', '', (string)config::get('host', 'localhost'));
 		$command(null, 220);
 		$ehlo = $command("EHLO $helo", 250);
+		$local = in_array($parts['host'], array('localhost', '127.0.0.1', '::1'));
+		$insecure = isset($parts['query']) && strpos($parts['query'], 'insecure=1') !== false;
+		if (!$secure && stripos($ehlo, 'STARTTLS') === false && !$local && !$insecure) {
+			throw new RuntimeException('The SMTP server does not offer STARTTLS; use smtps:// or add ?insecure=1 if you really mean it');
+		}
 		if (!$secure && stripos($ehlo, 'STARTTLS') !== false) {
 			$command('STARTTLS', 220);
 			if (!stream_socket_enable_crypto($socket, true, STREAM_CRYPTO_METHOD_TLS_CLIENT)) throw new RuntimeException('STARTTLS failed');

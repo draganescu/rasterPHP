@@ -57,8 +57,14 @@ class cms_store {
 		return array($sql, $bindings);
 	}
 
-	static function count_published($type) {
-		list($sql, $bindings) = self::published_sql(self::columns($type));
+	static function count_published($type, $filters = array()) {
+		$columns = self::columns($type);
+		list($sql, $bindings) = self::published_sql($columns);
+		foreach ($filters as $key => $value) {
+			if (!array_key_exists($key, $columns) || !preg_match('/^[a-z0-9_]+$/', $key)) continue;
+			$sql .= ' AND '.$key.' = :f_'.$key.' ';
+			$bindings[':f_'.$key] = $value;
+		}
 		return (int)R::count($type, $sql, $bindings);
 	}
 
@@ -204,6 +210,9 @@ class cms_store {
 		}
 		foreach ($values as $field => $value) {
 			$bean->$field = self::clean_value($value);
+		}
+		if (!empty($bean->published_at) && strtotime($bean->published_at) > time()) {
+			raster_cache::schedule(strtotime($bean->published_at));
 		}
 		if (empty($bean->slug)) {
 			$bean->slug = self::unique_slug($type, self::slug_source($bean->export()), (int)$bean->id);

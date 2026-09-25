@@ -48,7 +48,8 @@ class util {
 	{
 		if (PHP_SAPI === 'cli' || session_status() !== PHP_SESSION_NONE) return;
 		if ($force || isset($_COOKIE[session_name()])) {
-			session_start(array('cookie_httponly' => true, 'cookie_samesite' => 'Lax', 'use_strict_mode' => true));
+			session_start(array('cookie_httponly' => true, 'cookie_samesite' => 'Lax', 'use_strict_mode' => true,
+				'cookie_secure' => config::get('protocol') === 'https'));
 		}
 	}
 
@@ -65,6 +66,14 @@ class util {
 		if (PHP_SAPI === 'cli') return $location;
 		header('Location: '.$location, true, 303);
 		exit;
+	}
+
+	// Absolute links are safe to email when the site's address is configured
+	// (RASTER_URL or site_url), or in development. Otherwise the address
+	// would come from the visitor's Host header and could be forged.
+	static function trusted_links()
+	{
+		return (bool)config::get('trusted_url') || config::get('environment') === 'development' || PHP_SAPI === 'cli';
 	}
 
 	// call after changing content so cached pages are rebuilt
@@ -168,7 +177,7 @@ class raster_cache {
 	static function key() {
 		// multilingual sites cache one copy per language
 		$language = config::get('languages') ? i18n::detect() : '';
-		return sha1(config::get('host').'|'.config::get('uri_string').'|'.$language);
+		return sha1(config::get('protocol').'://'.config::get('host').'|'.config::get('uri_string').'|'.$language);
 	}
 
 	static function cacheable() {
@@ -195,8 +204,22 @@ class raster_cache {
 		@file_put_contents(self::dir().'version', (string)(self::version() + 1), LOCK_EX);
 	}
 
+	// an item scheduled for later: the cache is thrown away at that time
+	static function schedule($timestamp) {
+		if ($timestamp <= time()) return;
+		if (!is_dir(self::dir())) @mkdir(self::dir(), 0775, true);
+		$file = self::dir().'next';
+		$next = is_file($file) ? (int)file_get_contents($file) : 0;
+		if ($next === 0 || $next <= time() || $timestamp < $next) @file_put_contents($file, (string)$timestamp, LOCK_EX);
+	}
+
 	static function serve() {
 		if (!self::cacheable()) return;
+		$next = self::dir().'next';
+		if (is_file($next) && (int)file_get_contents($next) <= time()) {
+			@unlink($next);
+			self::bump();
+		}
 		$file = self::dir().self::key();
 		if (!is_file($file)) return;
 		$handle = fopen($file, 'r');

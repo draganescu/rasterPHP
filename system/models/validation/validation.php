@@ -62,6 +62,8 @@ class validation
 		$posted = self::posted_form();
 		if ($posted === null) return false;
 		$owner = $owner === null ? template::instance()->current_call : $owner;
+		// outside a template (e.g. /api) there is no form, so nothing was submitted
+		if ($owner === '' || $owner === null) return false;
 		if ($posted !== '') return $posted === $owner;
 		// posts without the hidden field (scripts, tests, mail apps): the form
 		// counts as sent when the post has one of its fields

@@ -342,7 +342,7 @@ class raster_inspector {
 			// CMS helpers used by templates are written self-closing; a helper name
 			// wrapping default content is a field that would never be stored
 			$reserved = (in_array($method, $info['methods']) && (!in_array($method, $template_methods) || ($block['keyword'] === 'print' && $block['type'] !== 'self')))
-				|| ($block['keyword'] === 'print' && in_array($method, array('slug', 'id', 'updated_at', 'enabled')))
+				|| ($block['keyword'] === 'print' && in_array($method, array('slug', 'id', 'updated_at', 'enabled', 'published_at')))
 				|| ($block['keyword'] === 'render' && in_array($method, array('users', 'raster')));
 			if ($reserved) {
 				$problems[] = self::problem('error', $block, "'$method' is reserved by the CMS and can't be used as a ".($block['keyword'] === 'print' ? 'field' : 'collection')." name; pick another name");

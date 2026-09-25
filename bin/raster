@@ -118,6 +118,14 @@ switch ($command) {
 					echo '    '.$paint("renamed? php bin/raster schema --rename={$table['table']}.{$rename['from']}:{$rename['to']}", '36')."\n";
 				}
 			}
+			foreach ($status['system_tables'] as $table) {
+				if ($table['missing']) {
+					echo $paint("table {$table['table']}", '1').'  '.$paint(($table['exists'] ? 'missing '.implode(', ', $table['missing']) : 'not in database').($status['frozen'] ? ' (run --apply)' : ' (created when first used)'), '33')."\n";
+				}
+			}
+			if ($status['environment'] === 'production' && !$status['site_url']) {
+				echo $paint('Set RASTER_URL (or config site_url) to the site address: emails with links are not sent without it.', '33')."\n";
+			}
 			foreach ($status['unused_tables'] as $table) {
 				echo $paint("table $table", '1')."  ".$paint("not used by any template (php bin/raster schema --drop=$table)", '2')."\n";
 			}
@@ -168,6 +176,10 @@ switch ($command) {
 		$url = isset($positional[0]) ? $positional[0] : null;
 		if (!$url) {
 			fwrite(STDERR, "Usage: php bin/raster send <url> [--to=email] [--subject=...] [--dry-run] [--again]\n");
+			exit(2);
+		}
+		if (!getenv('RASTER_URL') && !config::get('site_url')) {
+			fwrite(STDERR, "Set RASTER_URL to the site address (e.g. RASTER_URL=https://example.com/) so links in the email point to the site.\n");
 			exit(2);
 		}
 		$env = getenv();

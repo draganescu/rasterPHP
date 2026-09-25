@@ -53,6 +53,9 @@ class feed
 			$name = substr($view, 0, -strlen($inspector->ext));
 			if (preg_match('/^([a-z0-9_]+)_item$/', basename($name), $m)) { $item_views[] = $m[1]; continue; }
 			if (in_array($name, $skip)) continue;
+			foreach ((array)config::get('protected', array()) as $pattern => $role) {
+				if (preg_match('%^/'.ltrim($pattern, '/').'%', '/'.$name)) continue 2;
+			}
 			$updated = date('Y-m-d', filemtime($inspector->theme_dir().'/'.$view));
 			$rows[] = array('url' => $name === config::get('default_view', 'index') ? $link.'/' : $link.'/'.$name, 'updated' => $updated);
 		}

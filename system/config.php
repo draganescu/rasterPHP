@@ -80,6 +80,14 @@ class config {
     		$host = isset($_SERVER["HTTP_HOST"]) ? strtolower($_SERVER["HTTP_HOST"]) : 'localhost';
     		$config->host = preg_match('/^(\[[0-9a-f:]+\]|[a-z0-9.\-]+)(:\d{1,5})?$/', $host) ? $host : 'localhost';
     	}
+    	// The site's real address (RASTER_URL or config site_url). When it is
+    	// set, links in pages and emails never depend on the Host header.
+    	$site = getenv('RASTER_URL') ?: $config->site_url;
+    	if ($site && ($parts = parse_url($site)) && !empty($parts['host'])) {
+    		$config->host = strtolower($parts['host']).(isset($parts['port']) ? ':'.$parts['port'] : '');
+    		if ($config->protocol == '') $config->protocol = isset($parts['scheme']) ? strtolower($parts['scheme']) : 'https';
+    		$config->trusted_url = true;
+    	}
     	
     	// an attempt to find the name of the index file
     	$script_name = isset($_SERVER["SCRIPT_NAME"]) ? $_SERVER["SCRIPT_NAME"] : '/index.php';

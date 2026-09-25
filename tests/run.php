@@ -463,6 +463,67 @@ test('page cache in production', function () use ($root, $db) {
 	}
 });
 
+// ## Regressions from review
+
+test('forged Host header never gets a reset link', function () use ($base, $maildir) {
+	$before = count(glob("$maildir/*.eml") ?: array());
+	form_post("$base/forgot", array('raster_form' => 'authentication.forgot', 'email' => 'ada@example.com'), array('Host: evil.example'));
+	$after = glob("$maildir/*.eml") ?: array();
+	check(count($after) === $before || strpos(file_get_contents(end($after)), 'evil.example') === false, 'reset link used the forged host');
+});
+test('/api does not run form models', function () use ($base) {
+	same(403, form_post("$base/api/cms/login", array('login' => 'editor', 'password' => 'correct horse'), array('Origin: https://evil.example'))[0]);
+	list(, , $headers) = form_post("$base/api/cms/login", array('login' => 'editor', 'password' => 'correct horse'));
+	check(!preg_grep('/^Set-Cookie/i', $headers), 'logged in through /api');
+});
+test('item URLs only under their collection', function () use ($base) {
+	same(404, http('GET', "$base/zzz/news_item/raster-runs-on-php-8")[0]);
+});
+test('a password reset ends other sessions', function () use ($base, $maildir) {
+	list(, , $headers) = form_post("$base/login", array('raster_form' => 'authentication.login', 'login' => 'ada@example.com', 'password' => 'brand new pass'));
+	$cookie = preg_replace('/^Set-Cookie:\s*([^;]+).*$/i', '$1', current(preg_grep('/^Set-Cookie/i', $headers)));
+	check(strpos(http('GET', "$base/account", null, array("Cookie: $cookie"))[1], 'Logged in as') !== false, 'session A works');
+	form_post("$base/forgot", array('raster_form' => 'authentication.forgot', 'email' => 'ada@example.com'));
+	preg_match('/token=([a-f0-9]{48})/', last_mail()['text'], $t);
+	form_post("$base/reset?token={$t[1]}", array('raster_form' => 'authentication.reset', 'token' => $t[1], 'password' => 'third password', 'password_again' => 'third password'));
+	same(303, http('GET', "$base/account", null, array("Cookie: $cookie"))[0], 'old session still logged in');
+});
+test('feed links, raw views and json lists', function () use ($base, $root) {
+	check(strpos(http('GET', "$base/")[1], 'href="'.$base.'/news.rss"') !== false, 'rss link rewritten');
+	same(403, http('GET', "$base/application/views/default/news.rss")[0]);
+	$view = "$root/application/views/default/zz_feed.json";
+	file_put_contents($view, "[<!-- render.feed.items('news') -->{\"title\": \"<!-- print.headline -->x<!-- /print.headline -->\"}<!-- /render.feed.items('news') -->]");
+	try {
+		list($status, $body) = http('GET', "$base/zz_feed.json");
+		same(200, $status);
+		$list = json_decode($body, true);
+		check(is_array($list) && count($list) > 1, "json list: $body");
+	} finally {
+		unlink($view);
+	}
+});
+test('pagination follows filters', function () use ($base) {
+	list(, $body) = http('GET', "$base/news/news_items/headline/Filler%201");
+	check(strpos($body, 'news_page/2') === false, 'filtered list shows extra pages');
+});
+test('frozen database: accounts and newsletter after schema --apply', function () use ($root) {
+	$db = sys_get_temp_dir().'/raster-frozen-'.getmypid().'.sqlite';
+	$env = 'RASTER_ENV=production RASTER_DB='.escapeshellarg($db).' RASTER_URL=http://example.test/';
+	$raster = escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster");
+	try {
+		exec("$env $raster schema --apply 2>&1", $out, $code);
+		same(0, $code, implode("\n", $out));
+		exec("$env $raster user admin@example.test --password=secret-pass 2>&1", $out, $code);
+		same(0, $code, implode("\n", $out));
+		$result = shell_exec("$env ".escapeshellarg(PHP_BINARY).' -r '.escapeshellarg('require "'.$root.'/system/boot.php"; boot::$appname = "application"; boot::cli(); authentication::connect(); echo authentication::check_login("admin@example.test", "secret-pass") ? "ok" : "fail";').' 2>&1');
+		same('ok', trim($result));
+		exec("$env $raster schema --check 2>&1", $out, $code);
+		same(0, $code, 'drift after apply');
+	} finally {
+		@unlink($db);
+	}
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";
 exit($failed ? 1 : 0);

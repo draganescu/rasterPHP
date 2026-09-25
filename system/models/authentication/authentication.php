@@ -91,6 +91,25 @@ class authentication
 		return (int)$user->id;
 	}
 
+	// bookkeeping must never block a login, even on a schema that lacks
+	// the columns (run `raster schema --apply` to add them)
+	protected static function store_quietly($bean) {
+		try {
+			R::store($bean);
+		} catch (Exception $e) {
+			log::warning('authentication: '.$e->getMessage());
+		}
+	}
+
+	// the columns this model uses, for `raster schema --apply`
+	static function schema() {
+		return array('user' => array(
+			'email' => '', 'username' => '', 'name' => '', 'password' => '', 'role' => 'member',
+			'created_at' => '', 'last_login' => '', 'failed_count' => 0, 'failed_at' => '',
+			'reset_hash' => '', 'reset_expires' => '',
+		));
+	}
+
 	static function has_users() {
 		return self::table_ready() && R::count('user') > 0;
 	}
@@ -106,7 +125,7 @@ class authentication
 		if (!$ok) {
 			$user->failed_count = (int)$user->failed_count + 1;
 			$user->failed_at = R::isoDateTime();
-			R::store($user);
+			self::store_quietly($user);
 			return false;
 		}
 		if (preg_match('/^[a-f0-9]{32}$/', $hash) || password_needs_rehash($hash, PASSWORD_DEFAULT)) {
@@ -114,14 +133,22 @@ class authentication
 		}
 		$user->failed_count = 0;
 		$user->last_login = R::isoDateTime();
-		R::store($user);
+		self::store_quietly($user);
 		return (int)$user->id;
+	}
+
+	// ties a session to the password it was opened with, so changing the
+	// password ends every other session
+	static function fingerprint($hash) {
+		return substr(hash('sha256', 'raster-session|'.(string)$hash), 0, 24);
 	}
 
 	static function log_in($id) {
 		util::session(true);
 		session_regenerate_id(true);
+		$bean = R::load('user', (int)$id);
 		$_SESSION['uid'] = (int)$id;
+		$_SESSION['uid_check'] = self::fingerprint($bean->password);
 		self::$user = false;
 	}
 
@@ -146,7 +173,7 @@ class authentication
 		try {
 			self::connect();
 			$bean = self::table_ready() ? R::load('user', (int)$_SESSION['uid']) : null;
-			if ($bean && $bean->id) {
+			if ($bean && $bean->id && isset($_SESSION['uid_check']) && hash_equals(self::fingerprint($bean->password), (string)$_SESSION['uid_check'])) {
 				self::$user = array('id' => (int)$bean->id, 'name' => (string)$bean->name, 'email' => (string)$bean->email, 'username' => (string)$bean->username, 'role' => (string)$bean->role ?: 'member');
 			}
 		} catch (Exception $e) {
@@ -339,6 +366,8 @@ class authentication
 		}
 		if (util::post('name') !== false) $bean->name = trim((string)util::post('name'));
 		R::store($bean);
+		// a new password ends other sessions; this one continues
+		if ($password !== '') self::log_in($bean->id);
 		util::done('account_saved');
 		return false;
 	}
@@ -356,6 +385,6 @@ class authentication
 	// the logged in user: name, email, role
 	function me() {
 		$user = self::user();
-		return $user ? array(array('name' => $user['name'] ?: ($user['username'] ?: $user['email']), 'email' => $user['email'], 'role' => $user['role'])) : array();
+		return $user ? array(array('name' => util::e($user['name'] ?: ($user['username'] ?: $user['email'])), 'email' => util::e($user['email']), 'role' => util::e($user['role']))) : array();
 	}
 }

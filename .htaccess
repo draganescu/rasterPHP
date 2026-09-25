@@ -4,7 +4,7 @@ RewriteEngine on
 RewriteRule (^|/)\. - [F,L]
 RewriteRule ^(system|bin|tests)(/|$) - [F,L]
 RewriteRule ^application/(config|models|data)(/|$) - [F,L]
-RewriteRule ^application/views/.*\.html$ - [F,L]
+RewriteRule ^application/views/.*\.(html|rss|atom|xml|json|txt)$ - [F,L]
 RewriteRule ^(?!index\.php$).*\.(php|sqlite|sql|md)$ - [F,L]
 RewriteRule -(journal|wal|shm)$ - [F,L]
 

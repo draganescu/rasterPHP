@@ -402,7 +402,10 @@ class template {
 
 			if($model == 'self')
 			{
-				$this->output = substr_replace($this->output, $this->escape((string)$this->$method), $pos1, $pos2);
+				// values handed to a view (emails) are data, so they are escaped
+				$value = (string)$this->$method;
+				$value = $this->format === 'html' ? htmlspecialchars($value, ENT_QUOTES, 'UTF-8', false) : $this->escape($value);
+				$this->output = substr_replace($this->output, $value, $pos1, $pos2);
 				return 'self';
 			}
 
@@ -776,7 +779,8 @@ class template {
 			$rendered_tpl = preg_replace_callback('/<!-- \/?print\.([@+][a-zA-Z0-9_\-:]+\.)?([A-Za-z0-9_\-]+) \/?-->/', function ($m) {
 				return $m[2] === '' ? $m[0] : '';
 			}, $rendered_tpl);
-			$rendered_data .= "\n".$rendered_tpl;
+			// rows of a JSON view are list items
+			$rendered_data .= ($this->format === 'json' && $rendered_data !== '' ? ',' : '')."\n".$rendered_tpl;
 		}
 
 		$this->render_results[$model][$method][] = $rendered_data;

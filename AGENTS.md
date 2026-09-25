@@ -52,8 +52,11 @@ media/                        uploads from the CMS
   print values as they are.
 - Files and folders starting with `_` are never pages: `_layout.html` for
   partials, `_email/` for emails.
-- Unknown URLs return 404. View files themselves are not served (403); theme
-  assets are.
+- Unknown URLs return 404. View files themselves (`.html`, `.rss`, `.xml`,
+  `.json`, `.txt` under `application/views/`) are never served raw (403); other
+  theme assets are. Links like `href="news.rss"` are rewritten to `/news.rss`.
+- In `.json` views, the rows of a render block are separated by commas, so a
+  block inside `[ … ]` makes a JSON list.
 - Link to pages by file name, `href="about.html"`. Raster rewrites that to
   `/about`, and `index.html` becomes `/`, so the file still works as a static
   mock-up. Asset paths are relative to the theme folder.
@@ -130,7 +133,9 @@ first use, so they can call each other directly (`mail::send_view(...)`,
 
 Every public method of an application model is also JSON at
 `/api/<model>/<method>/<arg>/…`. Of the system models, only `cms` is
-reachable. Keep anything that changes data behind a check.
+reachable. Posts there pass the same site check as forms, but they are not
+form submissions: `validation::get()->submitted()` is false, so form models
+do nothing over `/api`. Keep anything else that changes data behind a check.
 
 The database is RedBeanPHP (`R::find`, `R::dispense`, `R::store`), or
 `database::instance()->query('… WHERE a = ?', array($a))` with bound
@@ -280,7 +285,8 @@ array('name' => 'Ada'))` uses the view's `<title>` as the subject.
   - `log://` writes to `application/data/mail/` (the development default);
     `log:///some/folder` writes to that folder instead.
   - `mail://` uses PHP's mail() (the production default).
-  - `smtp://user:pass@host:587` uses STARTTLS, and `smtps://…:465` uses TLS.
+  - `smtp://user:pass@host:587` requires STARTTLS (add `?insecure=1` to allow
+    plain SMTP; `localhost` is allowed as is), and `smtps://…:465` uses TLS.
 - Sender: `RASTER_MAIL_FROM`.
 
 **feed**:
@@ -290,7 +296,8 @@ array('name' => 'Ada'))` uses the view's `<title>` as the subject.
   `sitemap.xml`.
 - `print.feed.site_url`.
 
-**pagination**: `render.pagination.links('cms.news')` gives one row with
+**pagination**: `render.pagination.links('cms.news')` (add the list's filters
+as a second argument: `links('cms.news', 'featured=1')`) gives one row with
 `prev_url`, `next_url`, `prev_state` and `next_state` (`disabled` at the
 ends), `current` and `total`. `render.pagination.pages('cms.news')` gives one
 row per page with `number`, `url` and `state` (`current`). For your own model,
@@ -316,21 +323,27 @@ use `'model.method'`: `method(true)` returns
 - **Development** uses SQLite at `application/data/raster.sqlite`, and the
   schema is fluid.
 - **Production** is frozen: the schema only changes through
-  `schema --apply`. Missing columns show the template default.
-- **Environment variables:** `RASTER_DB=/path.sqlite` uses another database
-  file. `RASTER_URL=https://example.com/` tells the command line the site's
-  address.
+  `schema --apply`, which also creates the tables the bundled models use
+  (accounts, subscribers). Missing columns show the template default.
+- **The site's address:** set `RASTER_URL=https://example.com/` (or
+  `config::set('site_url')`). Links in pages and emails then never depend on
+  the visitor's `Host` header. In production, emails with links (password
+  reset, newsletter confirmation) are not sent without it, and
+  `raster send` needs it.
+- **Database file:** `RASTER_DB=/path.sqlite` points at another database
+  file.
 - **Page cache**, on by default in production (config `page_cache`):
   - Whole pages are cached for visitors without a session or a query string.
   - Any content change throws the cache away (`util::content_changed()` in
-    your own models).
+    your own models), and so does the moment a scheduled item is published.
   - Settings: `page_cache_ttl` (3600 seconds) and `page_cache_skip` (path
     patterns). Responses carry `X-Raster-Cache: hit|miss`.
 
 ## Editors and agents
 
 - Editors (roles editor and admin) log in at `/login` and get a toolbar on
-  every page. They also see drafts. Visitors get no cookies until they log in.
+  every page. They also see drafts. Visitors get no cookies until they log in
+  (except `lang`, when they pick a language).
 - **MCP** is available in two ways:
   - over stdio: `php bin/raster mcp`, already set up in `.mcp.json`;
   - over HTTP: POST to `/mcp` with `Authorization: Bearer $RASTER_MCP_TOKEN`.

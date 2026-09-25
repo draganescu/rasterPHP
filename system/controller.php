@@ -96,11 +96,11 @@ class controller {
 		// a cached copy of the page, when there is a fresh one
 		raster_cache::serve();
 
+		// posted forms must come from this site (/api included; /mcp has its own token)
+		if ($_SERVER['REQUEST_METHOD'] === 'POST' && $segments[0] !== 'mcp') controller::guard_post();
+
 		// this event allows work to be done before the route is found
 		event::dispatch('finding_route');
-
-		// posted forms must come from this site
-		if ($_SERVER['REQUEST_METHOD'] === 'POST') controller::guard_post();
 
 		$route = '';
 		$template = '';
@@ -395,6 +395,10 @@ class controller {
 		$template->output = preg_replace("/(href|action)=(\"|')".preg_quote(config::get('default_view'), '/')."\.html(\"|')/", '$1=$2'.template::get('link_uri').'$3', $template->output);
 		$template->output = preg_replace("/(href|action|src)=(\"|')([a-zA-Z0-9\-\._\?\,\'\/\\\+&amp;%\$#\=~]*)\?".template::get('tpl_uri')."=(.*?)(\"|')/", '$1="'.template::get('link_uri').'$4"', $template->output);
 		$template->output = preg_replace("/(href|action|src)=(\"|')([a-zA-Z0-9\-\._\?\,\'\/\\\+&amp;%\$#\=~]*)\.html/", '$1=$2'.template::get('link_uri').'$3', $template->output);
+		// links to feed and data views: href="news.rss" -> /news.rss
+		$template->output = preg_replace_callback('/(href)=(["\'])([a-zA-Z0-9\-_\/]+\.(rss|atom|xml|json))\2/', function ($m) {
+			return file_exists(controller::build_view_path(substr($m[3], 0, -strlen($m[4]) - 1), '.'.$m[4])) ? $m[1].'='.$m[2].template::get('link_uri').$m[3].$m[2] : $m[0];
+		}, $template->output);
 		$template->output = str_replace(template::get('link_uri')."__", template::get('link_uri').template::get('pad_uri'), $template->output);
 		return $template;
 	} 
