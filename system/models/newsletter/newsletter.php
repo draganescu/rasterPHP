@@ -60,28 +60,35 @@ class newsletter
 		$v = validation::get();
 		if (!$v->submitted()) return false;
 		if (!$v->valid()) return template::instance()->form_state();
-		$email = strtolower(trim((string)util::post('email')));
-		if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+		$status = self::subscribe(util::post('email'), util::post('name'), '/'.ltrim(strtok((string)config::get('uri_string'), '?'), '/'));
+		if ($status === false) {
 			$v->raise('email_invalid');
 			return template::instance()->form_state();
 		}
+		// people already subscribed get the same answer, so nobody learns who is
+		if ($status === 'pending' || ($status === 'already' && config::get('newsletter_double_opt_in', true))) util::done('check_email');
+		util::done('subscribed');
+		return false;
+	}
+
+	// Subscribes an address from anywhere (a form, another model, a
+	// listener). With double opt-in it sends the confirmation email.
+	// Returns 'pending', 'confirmed', 'already' or false for a bad address.
+	static function subscribe($email, $name = '', $source = '') {
+		$email = strtolower(trim((string)$email));
+		if (!filter_var($email, FILTER_VALIDATE_EMAIL)) return false;
 		self::connect();
 		$subscriber = self::table_ready() ? R::findOne('subscriber', ' email = ? ', array($email)) : null;
-		$double = config::get('newsletter_double_opt_in', true);
-		if ($subscriber && $subscriber->status === 'confirmed') {
-			// the same answer as for a new address, so nobody learns who is subscribed
-			util::done($double ? 'check_email' : 'subscribed');
-			return false;
-		}
+		if ($subscriber && $subscriber->status === 'confirmed') return 'already';
 		if (!$subscriber) {
 			$subscriber = R::dispense('subscriber');
 			$subscriber->email = $email;
 			$subscriber->created_at = R::isoDateTime();
 		}
-		$subscriber->name = trim((string)util::post('name'));
+		$subscriber->name = trim((string)$name);
 		$subscriber->token = bin2hex(random_bytes(20));
-		$subscriber->source = '/'.ltrim(strtok((string)config::get('uri_string'), '?'), '/');
-		if ($double) {
+		$subscriber->source = (string)$source;
+		if (config::get('newsletter_double_opt_in', true)) {
 			$subscriber->status = 'pending';
 			R::store($subscriber);
 			$sent = mail::send_view('_email/newsletter_confirm', $email, array(
@@ -89,14 +96,13 @@ class newsletter
 				'name' => $subscriber->name,
 			));
 			if (!$sent) log::error('Newsletter confirmation email failed: '.mail::$last_error);
-			util::done('check_email');
 		} else {
 			$subscriber->status = 'confirmed';
 			$subscriber->confirmed_at = R::isoDateTime();
 			R::store($subscriber);
-			util::done('subscribed');
 		}
-		return false;
+		event::dispatch('newsletter.subscribed', array('email' => $email, 'name' => $subscriber->name, 'status' => $subscriber->status, 'source' => $subscriber->source));
+		return $subscriber->status;
 	}
 
 	// the page behind the confirmation link (?token=...)
@@ -112,6 +118,7 @@ class newsletter
 			$subscriber->status = 'confirmed';
 			$subscriber->confirmed_at = R::isoDateTime();
 			R::store($subscriber);
+			event::dispatch('newsletter.confirmed', array('email' => $subscriber->email, 'name' => (string)$subscriber->name));
 		}
 		$v->raise('confirmed');
 		return array(array('email' => $subscriber->email, 'name' => (string)$subscriber->name));
@@ -136,6 +143,7 @@ class newsletter
 		$subscriber->status = 'unsubscribed';
 		$subscriber->unsubscribed_at = R::isoDateTime();
 		R::store($subscriber);
+		event::dispatch('newsletter.unsubscribed', array('email' => $subscriber->email, 'name' => (string)$subscriber->name));
 		$v->raise('unsubscribed');
 		return array();
 	}

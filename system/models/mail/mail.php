@@ -94,17 +94,21 @@ class mail
 		$scheme = strtolower((string)strstr($dsn, ':', true));
 		try {
 			switch ($scheme) {
-				case 'log': return self::via_log($all, $body);
-				case 'mail': return self::via_mail($all, $body);
+				case 'log': $sent = self::via_log($all, $body); break;
+				case 'mail': $sent = self::via_mail($all, $body); break;
 				case 'smtp':
-				case 'smtps': return self::via_smtp($dsn, $all, $body);
+				case 'smtps': $sent = self::via_smtp($dsn, $all, $body); break;
 				default: throw new RuntimeException("Unknown mail transport '$dsn'");
 			}
+			if (!$sent) throw new RuntimeException('The '.$scheme.' transport did not accept the message');
 		} catch (Exception $e) {
 			self::$last_error = $e->getMessage();
 			log::error('Mail: '.$e->getMessage());
+			event::dispatch('mail.failed', array('to' => $to, 'subject' => (string)$subject, 'error' => self::$last_error));
 			return false;
 		}
+		event::dispatch('mail.sent', array('to' => $to, 'subject' => (string)$subject));
+		return true;
 	}
 
 	protected static function header_block($headers, $skip = array()) {

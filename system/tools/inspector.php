@@ -599,6 +599,98 @@ class raster_inspector {
 		return $problems;
 	}
 
+	// ##Events
+	// Where the app listens: bindings in config/the_events.php and
+	// listens() in its models. array(event, model, method, file, line)
+	function listeners() {
+		$found = array();
+		$file = APPBASE.'config/the_events.php';
+		if (file_exists($file)) {
+			foreach (explode("\n", $this->without_comments(file_get_contents($file))) as $n => $line) {
+				if (!preg_match_all('/event::bind\(\s*([\'"])(.+?)\1\s*\)\s*->\s*to\(\s*([\'"])(.+?)\3\s*,\s*([\'"])(.+?)\5\s*\)/', $line, $matches, PREG_SET_ORDER)) continue;
+				foreach ($matches as $m) $found[] = array('event' => $m[2], 'model' => $m[4], 'method' => $m[6], 'file' => self::short($file), 'line' => $n + 1);
+			}
+		}
+		foreach (glob(APPBASE.config::get('models_path', 'models').'/*', GLOB_ONLYDIR) ?: array() as $dir) {
+			$folder = basename($dir);
+			$model_file = "$dir/$folder.php";
+			if (!is_file($model_file)) continue;
+			$source = file_get_contents($model_file);
+			$at = strpos($source, 'function listens(');
+			if ($at === false) continue;
+			if (!class_exists($folder)) require_once $model_file;
+			if (!method_exists($folder, 'listens')) continue;
+			$line = substr_count(substr($source, 0, $at), "\n") + 1;
+			$model = strpos($folder, 'the_') === 0 ? substr($folder, 4) : $folder;
+			foreach ((array)call_user_func(array($folder, 'listens')) as $event => $methods) {
+				foreach ((array)$methods as $method) $found[] = array('event' => $event, 'model' => $model, 'method' => $method, 'file' => self::short($model_file), 'line' => $line);
+			}
+		}
+		return $found;
+	}
+
+	// events something dispatches by name: the framework's and the app's
+	function dispatched_events() {
+		$names = array('launch', 'finding_route', 'route_set', 'route_found', 'route_not_found', 'before_drying', 'after_drying', 'before_render', 'after_render', 'before_print', 'after_print', 'loop', 'before_output', 'done', 'land', 'read_get_data', 'read_post_data', 'read_cookie_data');
+		foreach (array(BASE, APPBASE) as $root) {
+			$iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS));
+			foreach ($iterator as $file) {
+				if (substr($file->getFilename(), -4) !== '.php' || strpos($file->getPathname(), '/libraries/') !== false || strpos($file->getPathname(), '/data/') !== false) continue;
+				if (preg_match_all('/event::dispatch\(\s*([\'"])([a-z0-9_.]+)\1/', file_get_contents($file->getPathname()), $m)) {
+					$names = array_merge($names, $m[2]);
+				}
+			}
+		}
+		$names = array_values(array_unique($names));
+		sort($names);
+		return $names;
+	}
+
+	// is something going to send this event?
+	function event_exists($event, $known) {
+		if (in_array($event, $known, true)) return true;
+		if (preg_match('/^loading_model_([a-z0-9_]+)$/', $event, $m)) return (bool)$this->model_info($m[1]);
+		if (strpos($event, 'dried_') === 0) return true;
+		if (preg_match('/^execut(?:ing|ed)_([a-z0-9_]+)$/', $event, $m)) {
+			// executed_news_latest: some split into an existing model and method
+			$parts = explode('_', $m[1]);
+			for ($i = 1; $i < count($parts); $i++) {
+				$info = $this->model_info(implode('_', array_slice($parts, 0, $i)));
+				if ($info && ($info['magic'] || in_array(implode('_', array_slice($parts, $i)), $info['methods']))) return true;
+			}
+		}
+		return false;
+	}
+
+	function lint_events() {
+		$problems = array();
+		$known = $this->dispatched_events();
+		foreach ($this->listeners() as $l) {
+			$at = array('file' => $l['file'], 'line' => $l['line'], 'column' => 1);
+			$info = $this->model_info($l['model']);
+			if (!$info) {
+				$problems[] = $at + array('severity' => 'error', 'message' => "'{$l['event']}' is bound to model '{$l['model']}', which does not exist");
+				continue;
+			}
+			if (!$info['magic'] && !in_array($l['method'], $info['methods'])) {
+				$problems[] = $at + array('severity' => 'error', 'message' => "'{$l['event']}' is bound to {$l['model']}.{$l['method']}, which is not a public method of {$l['model']}");
+			}
+			if (!$this->event_exists($l['event'], $known)) {
+				$problems[] = $at + array('severity' => 'warning', 'message' => "Nothing sends '{$l['event']}', so {$l['model']}.{$l['method']} never runs. Events sent: ".implode(', ', array_filter($known, function ($e) { return strpos($e, '.') !== false; })).', and the request events in AGENTS.md');
+			}
+		}
+		return $problems;
+	}
+
+	protected function without_comments($code) {
+		$out = '';
+		foreach (token_get_all($code) as $token) {
+			if (is_array($token) && in_array($token[0], array(T_COMMENT, T_DOC_COMMENT))) $out .= str_repeat("\n", substr_count($token[1], "\n"));
+			else $out .= is_array($token) ? $token[1] : $token;
+		}
+		return $out;
+	}
+
 	function lint($themes = null) {
 		$problems = array();
 		$themes = $themes ?: array($this->theme);
@@ -607,7 +699,7 @@ class raster_inspector {
 				$problems = array_merge($problems, $this->lint_file($view, $theme));
 			}
 		}
-		return array_merge($problems, $this->lint_routes());
+		return array_merge($problems, $this->lint_routes(), $this->lint_events());
 	}
 
 	static function short($path) {

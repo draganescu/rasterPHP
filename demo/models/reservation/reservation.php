@@ -35,6 +35,12 @@ class reservation
 			'guests' => (string)$booking->guests,
 			'notes' => $booking->notes,
 		));
+		// other models react to a booking without this one knowing them
+		// (cafe::subscribe_guest adds the guest to the newsletter)
+		event::dispatch('reservation.booked', array(
+			'name' => $booking->name, 'email' => $booking->email, 'date' => $booking->date,
+			'guests' => (int)$booking->guests, 'newsletter' => $booking->newsletter === 'yes',
+		));
 		util::done('booked');
 		return false;
 	}

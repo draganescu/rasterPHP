@@ -155,9 +155,67 @@ SQL can live in files: `models/<model>/sql/<name>.sql` runs as
 `database::instance('<model>')-><name>($arg, …)`, with `?` placeholders bound
 to the arguments.
 
-Application events go in `config/the_events.php`:
-`event::bind('before_output')->to('cafe', 'stamp');`. Text can be replaced in
-the pages under a path: `template::instance()->replace('{{x}}', 'y', 'lab');`.
+Text can be replaced in the pages under a path:
+`template::instance()->replace('{{x}}', 'y', 'lab');`.
+
+## Events: models talking to each other
+
+A template shows what the page displays and nothing else. When one model's
+work should set off another's (a booking subscribes the guest to the
+newsletter, a new account gets a welcome email), the first model sends an
+event and the second listens. No model in the view does the wiring.
+
+```php
+// the model that knows something happened
+event::dispatch('reservation.booked', array('email' => $email, 'newsletter' => true));
+
+// a model that cares declares it next to its code
+class cafe {
+    static function listens() {
+        return array('reservation.booked' => 'subscribe_guest');   // or a list of methods
+    }
+    function subscribe_guest($booking) {
+        if ($booking['newsletter']) newsletter::subscribe($booking['email']);
+    }
+}
+```
+
+- Or bind in `config/the_events.php`:
+  `event::bind('reservation.booked')->to('cafe', 'subscribe_guest');`, and
+  `event::unbind(…)->from(…)`.
+- Listeners get the payload array and run in order: `the_events.php`, then
+  `listens()`, then the framework's own. A listener returning `false` makes
+  `event::dispatch()` return `false`; the sender decides what that means.
+- Name your events `<model>.<what happened>`, in the past tense.
+- `lint` reports bindings to models or methods that don't exist, and events
+  nothing sends. MCP `site_overview` lists who listens to what.
+
+Events the bundled models send, from forms, `/api`, MCP and the command line
+alike:
+
+| Event | Payload |
+|---|---|
+| `authentication.registered`, `logged_in`, `logged_out`, `password_changed`, `account_saved` | `id`, `email`, `name`, `role` |
+| `authentication.login_failed` | `login` |
+| `newsletter.subscribed` | `email`, `name`, `status` (`pending` or `confirmed`), `source` |
+| `newsletter.confirmed`, `newsletter.unsubscribed` | `email`, `name` |
+| `cms.item_saved` | `collection`, `created` (true for new items), `item` |
+| `cms.item_deleted` | `collection`, `item` |
+| `cms.page_saved` | `type`, `slug`, `changed` (field names), `fields` |
+| `content_changed` | none (sent by `util::content_changed()`) |
+| `mail.sent` / `mail.failed` | `to`, `subject` / and `error` |
+
+The request sends `launch`, `finding_route`, `route_set`, `route_found`,
+`route_not_found`, `before_drying`, `dried_<view>`, `after_drying`,
+`before_render`, `after_render`, `before_print`, `after_print`, `loop`,
+`before_output`, `done` and `land`. `loading_model_<name>` can stop a model
+from loading by returning false. Around every model call a template makes,
+`executing_<model>_<method>` gets `arguments` and `executed_<model>_<method>`
+gets `arguments` and `result` (the model's own name even when a `the_`
+override answers, the method's name without arguments). These say "the
+template called it", not "it happened": `executed_authentication_register`
+runs on every view of the sign-up page, so listen to
+`authentication.registered` instead.
 
 Every public method of an application model is also JSON at
 `/api/<model>/<method>/<arg>/…`. Of the system models, only `cms` is
@@ -298,6 +356,9 @@ item of a collection is the mock-up content.
   - `render.newsletter.unsubscribe`: on the page `newsletter-unsubscribe`, a
     form with a button. Mail apps' one-click unsubscribe works too.
   - `print.newsletter.count`.
+  - From code: `newsletter::subscribe($email, $name, $source)` does what the
+    form does (and sends the confirmation) and returns `pending`,
+    `confirmed`, `already` or false.
 - Alerts: `check_email`, `subscribed`, `confirmed`, `confirm_invalid`,
   `unsubscribed`, `unsubscribe_invalid`.
 - **Sending an issue:** `php bin/raster send /news/news_item/my-post
@@ -388,17 +449,9 @@ use `'model.method'`: `method(true)` returns
 
 - **Override a bundled model:** `models/the_<name>/the_<name>.php` with
   `class the_<name> extends <name>`. Templates keep calling `<name>`; your
-  class is used. Core files work the same way: `application/the_util.php`
+  class is used, and its `listens()` counts for `<name>`. Core files work the same way: `application/the_util.php`
   is loaded after `system/util.php`. So are config files (`config/the_app.php`, `the_routes.php`,
   `the_events.php` are loaded after the framework's own).
-- **Events** (`config/the_events.php`): `event::bind('done')->to('model',
-  'method')`, and `event::unbind(…)->from(…)`. Your bindings run before the
-  framework's. Events: `launch`, `finding_route`, `route_set`,
-  `route_found`, `route_not_found`, `loading_model_<name>` (return false to
-  stop that model loading), `executing_<model>_<method>`,
-  `executed_<model>_<method>`, `before_drying`, `dried_<view>`,
-  `after_drying`, `before_render`, `after_render`, `before_print`,
-  `after_print`, `loop`, `before_output`, `done`, `land`.
 - **Named queries:** `models/sql.php` sets
   `$queries['name'] = "SELECT … WHERE a = '%s'"`; call
   `database::instance('any')->name($a)`. Values are quoted by the driver.

@@ -47,6 +47,41 @@ class cafe
 		return false;
 	}
 
+	// ##Listening to other models (see event.php)
+
+	static function listens() {
+		return array(
+			'reservation.booked' => 'subscribe_guest',
+			'authentication.registered' => 'welcome',
+			'cms.item_saved' => 'remember_change',
+			'cms.item_deleted' => 'remember_change',
+		);
+	}
+
+	// guests who tick "send me the newsletter" when booking get the
+	// newsletter's own confirmation email
+	function subscribe_guest($booking) {
+		if (!$booking['newsletter']) return null;
+		newsletter::subscribe($booking['email'], $booking['name'], '/visit');
+	}
+
+	function welcome($user) {
+		mail::send_view('_email/welcome', $user['email'], array('name' => $user['name'] ?: 'there'));
+	}
+
+	// a change log in data/changes.log, whether the change came from the
+	// editor, MCP or the command line
+	function remember_change($change) {
+		$verb = isset($change['created']) ? ($change['created'] ? 'created' : 'updated') : 'deleted';
+		file_put_contents(APPBASE.'data/changes.log', $change['collection'].' '.$change['item']['id'].' '.$verb."\n", FILE_APPEND);
+	}
+
+	// executed_feed_items (config/the_events.php): the_feed overrides feed,
+	// and the event still has the model's own name
+	function count_feed($call) {
+		if (PHP_SAPI !== 'cli' && !headers_sent()) header('X-Cafe-Feed-Items: '.count($call['result']));
+	}
+
 	// ##Lab: one method per engine feature
 
 	// literal arguments: specials(3, 'soup', true, -1, null)

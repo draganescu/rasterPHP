@@ -80,6 +80,7 @@ class util {
 	static function content_changed()
 	{
 		raster_cache::bump();
+		event::dispatch('content_changed');
 	}
 
 	// a per session token that forms changing data must send back

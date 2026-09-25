@@ -27,6 +27,8 @@ class boot {
 		// and figures out if its development or production or whatever
 		config::initialize();
 		boot::autoload_models();
+		// listeners models declare in static function listens()
+		event::discover();
 		// the first event (hook) that our system launches
 		event::dispatch('launch');
 	}
@@ -49,6 +51,7 @@ class boot {
 		boot::load_core_config();
 		config::initialize();
 		boot::autoload_models();
+		event::discover();
 	}
 
 	// Model classes load on first use, so models can call each other

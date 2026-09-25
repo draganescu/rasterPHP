@@ -143,6 +143,12 @@ class authentication
 		return substr(hash('sha256', 'raster-session|'.(string)$hash), 0, 24);
 	}
 
+	// what the authentication.* events carry: id, email, name, role
+	static function payload($id) {
+		$bean = R::load('user', (int)$id);
+		return array('id' => (int)$bean->id, 'email' => (string)$bean->email, 'name' => (string)$bean->name, 'role' => (string)$bean->role);
+	}
+
 	static function log_in($id) {
 		util::session(true);
 		session_regenerate_id(true);
@@ -153,6 +159,8 @@ class authentication
 	}
 
 	static function log_out() {
+		$user = self::user();
+		if ($user) event::dispatch('authentication.logged_out', array('id' => $user['id'], 'email' => $user['email'], 'name' => $user['name'], 'role' => $user['role']));
 		util::session();
 		if (session_status() === PHP_SESSION_ACTIVE) {
 			$_SESSION = array();
@@ -244,10 +252,12 @@ class authentication
 		$id = self::check_login($login, util::post('password'));
 		if (!$id) {
 			usleep(300000);
+			event::dispatch('authentication.login_failed', array('login' => (string)$login));
 			$v->raise('login_failed');
 			return $this->form_again();
 		}
 		self::log_in($id);
+		event::dispatch('authentication.logged_in', self::payload($id));
 		$next = self::safe_next(util::get('next') ?: util::post('next'));
 		$this->redirect($next !== '' ? rtrim(config::get('link_uri'), '/').$next : (config::get('after_login') ? self::url(config::get('after_login')) : config::get('link_uri')));
 		return false;
@@ -277,6 +287,7 @@ class authentication
 		$name = trim((string)util::post('name'));
 		$id = self::save_user($email, $password, 'member', $name !== '' ? $name : null);
 		self::log_in($id);
+		event::dispatch('authentication.registered', self::payload($id));
 		util::done('registered', config::get('after_login') ? self::url(config::get('after_login')) : config::get('link_uri'));
 		return false;
 	}
@@ -332,6 +343,7 @@ class authentication
 		$user->failed_count = 0;
 		R::store($user);
 		self::log_in($user->id);
+		event::dispatch('authentication.password_changed', self::payload($user->id));
 		util::done('password_changed', config::get('after_login') ? self::url(config::get('after_login')) : config::get('link_uri'));
 		return false;
 	}
@@ -368,6 +380,8 @@ class authentication
 		R::store($bean);
 		// a new password ends other sessions; this one continues
 		if ($password !== '') self::log_in($bean->id);
+		event::dispatch('authentication.account_saved', self::payload($bean->id));
+		if ($password !== '') event::dispatch('authentication.password_changed', self::payload($bean->id));
 		util::done('account_saved');
 		return false;
 	}

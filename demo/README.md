@@ -69,7 +69,7 @@ php tests/demo.php                        # the whole matrix
 | C19 | inner blocks are evaluated first |
 | C20 | SQL files in `models/<name>/sql/` |
 | C21 | bound query parameters |
-| C22 | application events (`config/the_events.php`) |
+| C22 | application bindings in `config/the_events.php` |
 | C23 | models load each other on first use |
 | C24 | the JSON api; system and static methods private |
 | C25 | development shows template errors, partials included |
@@ -81,10 +81,15 @@ php tests/demo.php                        # the whole matrix
 | C31 | named queries in `models/sql.php`, placeholders quoted |
 | C32 | an application binding to a core event (`done`) |
 | C33 | `loading_model_<name>` returning false stops the model |
-| C34 | event::unbind |
+| C34 | events carry a payload; a listener returning false; event::unbind |
 | C35 | `the_<model>` overrides a bundled model |
 | C36 | `log::enable()` prints the log to the browser console |
 | C37 | `strict_templates` off renders broken templates anyway |
+| C38 | a model sends an event and another listens (`listens()`): a booking subscribes the guest |
+| C39 | MCP site_overview lists who listens to what |
+| C40 | `executed_<model>_<method>` uses the model's own name (also under a `the_` override) and carries the result |
+| C41 | bundled models send events from every path: cms over MCP, authentication.registered |
+| C42 | lint checks event bindings: missing models and methods, events nothing sends |
 | D1 | raster_form and honeypot on every post form |
 | D2 | the session token on forms for logged in users |
 | D3 | posts from other sites refused (Origin, Sec-Fetch-Site, Referer, /api too) |

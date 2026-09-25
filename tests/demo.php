@@ -69,7 +69,7 @@ function server($port, $env) {
 register_shutdown_function(function () use ($tmp, $root) {
 	global $servers;
 	foreach ($servers as $process) proc_terminate($process);
-	exec('rm -rf '.escapeshellarg($tmp).' '.escapeshellarg("$root/demo/data/cache").' '.escapeshellarg("$root/demo/data/mail"));
+	exec('rm -rf '.escapeshellarg($tmp).' '.escapeshellarg("$root/demo/data/cache").' '.escapeshellarg("$root/demo/data/mail").' '.escapeshellarg("$root/demo/data/changes.log"));
 	foreach (glob("$root/media/*") ?: array() as $file) if (basename($file) !== '.gitignore' && filemtime($file) > time() - 3600) @unlink($file);
 });
 
@@ -971,18 +971,6 @@ test(array('C27', 'C28', 'C29', 'C30', 'C31', 'C32', 'C33'), 'scripts, dry place
 	has(between($lab, 'events'), '<p class="secret">the secret is safe</p>');
 	lacks($lab, 'the secret leaked');
 });
-test('C34', 'event::unbind', function () {
-	event::bind('demo_test_event')->to('cafe', 'finish');
-	event::bind('demo_test_event')->to('cafe', 'keep');
-	event::unbind('demo_test_event')->from('cafe', 'keep');
-	event::dispatch('demo_test_event');
-	same(true, event::result('demo_test_event', 'cafe', 'finish'));
-	same(null, event::result('demo_test_event', 'cafe', 'keep'), 'unbound handlers do not run');
-	event::bind('loading_model_demo_thing')->to('cafe', 'deny');
-	same(false, event::dispatch('loading_model_demo_thing'));
-	event::unbind('loading_model_demo_thing')->from('cafe', 'deny');
-	same(true, event::dispatch('loading_model_demo_thing'), 'nothing left to say no');
-});
 test(array('C36', 'C37'), 'the log console, and strict templates off', function () use ($base, $db, $maildir, $views) {
 	$loud = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'CAFE_LOG' => 'on', 'CAFE_STRICT' => 'off'));
 	has(http('GET', "$loud/about")[1], 'console.log("info: Event: route_found");');
@@ -1123,6 +1111,75 @@ test(array('F7', 'H12'), 'schema --drop --force, send without a title', function
 	list($code, $out) = raster(array('send', '/hours.txt', '--dry-run'), array('RASTER_URL' => "$base/"));
 	same(2, $code, $out);
 	has($out, 'The page has no <title>');
+});
+
+
+// ## Events: models talking to each other
+
+function demo_echo($payload) {
+	return isset($payload['stop']) ? false : $payload;
+}
+test(array('C38', 'C39'), 'a booking subscribes the guest through an event; site_overview shows the wiring', function () use ($base) {
+	$book = function ($newsletter) use ($base) {
+		$fields = array('raster_form' => 'reservation.book', 'name' => 'Ioana', 'email' => 'ioana@example.com', 'phone' => '0721 000 001', 'date' => '2026-10-08', 'guests' => '2', 'seating' => 'window', 'terms' => '1');
+		if ($newsletter) $fields['newsletter'] = 'yes';
+		same(303, http('POST', "$base/visit", $fields)[0]);
+	};
+	$before = count(mails());
+	$book(false);
+	same($before + 1, count(mails()), 'only the staff email');
+	$book(true);
+	$sent = array_slice(mails(), $before + 1);
+	same(2, count($sent));
+	same('staff@cafe.test', $sent[0]['to']);
+	same('ioana@example.com', $sent[1]['to']);
+	same('Confirm your Raster Café letters', $sent[1]['subject']);
+	database::instance('cms');
+	$subscriber = R::findOne('subscriber', ' email = ? ', array('ioana@example.com'));
+	same('pending', $subscriber->status);
+	same('/visit', $subscriber->source);
+	same('Ioana', $subscriber->name);
+	$events = mcp($base, 'site_overview')['events'];
+	same(array('cafe.subscribe_guest'), $events['reservation.booked']);
+	same(array('cafe.count_feed'), $events['executed_feed_items']);
+	check(!isset($events['launch']), 'the framework\'s own plumbing is left out');
+});
+test(array('C34', 'C40'), 'payloads, vetoes, unbinding; executed_ events use the model\'s name and carry the result', function () use ($base) {
+	event::bind('demo.ping')->to(null, 'demo_echo');
+	same(true, event::dispatch('demo.ping', array('n' => 1)));
+	same(array('n' => 1), event::result('demo.ping', '', 'demo_echo'), 'the listener got the payload');
+	same(false, event::dispatch('demo.ping', array('stop' => true)), 'a listener returning false');
+	event::unbind('demo.ping')->from(null, 'demo_echo');
+	same(true, event::dispatch('demo.ping', array('stop' => true)), 'unbound');
+	list(, $rss, $headers) = http('GET', "$base/journal.rss");
+	$doc = new DOMDocument();
+	$doc->loadXML($rss);
+	same((string)$doc->getElementsByTagName('item')->length, header_value($headers, 'X-Cafe-Feed-Items'), 'executed_feed_items, though the_feed answered');
+});
+test('C41', 'the bundled models send events from every path', function () use ($base, $root) {
+	@unlink("$root/demo/data/changes.log");
+	$item = mcp($base, 'create_item', array('collection' => 'journal', 'fields' => array('title' => 'Evented', 'author' => 'Ana')));
+	mcp($base, 'update_item', array('collection' => 'journal', 'id' => $item['id'], 'fields' => array('title' => 'Evented again')));
+	mcp($base, 'delete_item', array('collection' => 'journal', 'id' => $item['id']));
+	same("journal {$item['id']} created\njournal {$item['id']} updated\njournal {$item['id']} deleted\n", file_get_contents("$root/demo/data/changes.log"), 'cms.item_saved and cms.item_deleted over MCP');
+	same(303, http('POST', "$base/register", array('raster_form' => 'authentication.register', 'name' => 'Eve <b>', 'email' => 'eve@example.com', 'password' => 'long password', 'password_again' => 'long password'))[0]);
+	$mail = last_mail();
+	same('eve@example.com', $mail['to']);
+	same('Welcome to Raster Café', $mail['subject']);
+	has($mail['html'], 'Hi Eve &lt;b&gt;,', 'authentication.registered carries the user');
+});
+test('C42', 'lint checks the event wiring', function () use ($root) {
+	$file = "$root/demo/config/the_events.php";
+	with_file($file, file_get_contents($file)."\nevent::bind('reservation.booked')->to('cafe', 'no_such_method');\nevent::bind('reservation.bookd')->to('cafe', 'welcome');\nevent::bind('done')->to('ghost', 'boo');\n", function () {
+		list($code, $out) = raster(array('lint'));
+		same(1, $code, $out);
+		has($out, "'reservation.booked' is bound to cafe.no_such_method, which is not a public method of cafe");
+		has($out, "Nothing sends 'reservation.bookd'");
+		has($out, "model 'ghost', which does not exist");
+		lacks($out, "Nothing sends 'done'");
+	});
+	list($code, $out) = raster(array('lint'));
+	same(0, $code, $out);
 });
 
 // ## L. Environments, production, cache

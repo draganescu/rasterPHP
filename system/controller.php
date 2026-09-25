@@ -264,8 +264,8 @@ class controller {
 
 		
 		if (!is_object($object)) return false;
-		$model = get_class( $object );
-		event::dispatch('executing_'.$model."_".$method);
+		// the model's own name, also when a the_<model> override answers
+		$model = preg_replace('/^the_/', '', get_class($object));
 
 		// methods can take literal arguments: render.news.latest(3, 'sports')
 		// they are parsed, never eval()-ed
@@ -274,6 +274,10 @@ class controller {
 			throw new RuntimeException("Malformed tag at ".$model.'.'.$method);
 		}
 		list($name, $arguments) = $call;
+		// executing_news_latest, whatever the arguments (and validation.field
+		// inside form 2, which runs as field__f2, is still executing_validation_field)
+		$event_name = $model.'_'.preg_replace('/__f\d+$/', '', $name);
+		event::dispatch('executing_'.$event_name, array('arguments' => $arguments));
 
 		if(!is_callable(array($object, $name))) return false;
 
@@ -284,7 +288,7 @@ class controller {
 
 		$data = call_user_func_array(array($object, $name), $arguments);
 		
-		event::dispatch('executed_'.$model."_".$method);
+		event::dispatch('executed_'.$event_name, array('arguments' => $arguments, 'result' => $data));
 		
 		return $data;
 	}

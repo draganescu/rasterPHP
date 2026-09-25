@@ -25,6 +25,11 @@ https://draganescu.github.io/rto/specs/2014/06/29/rto.html.
   i18n, validation.
 - Formats: `.rss`, `.atom`, `.xml`, `.json` and `.txt` views, escaped for
   their format.
+- Events between models: `event::dispatch('model.happened', $payload)`,
+  listeners declared with `static function listens()` or bound in
+  `config/the_events.php`, checked by `lint` and listed by MCP. The bundled
+  models send `authentication.*`, `newsletter.*`, `cms.*`, `mail.*` and
+  `content_changed`.
 - Page cache for visitors, cleared by any content change.
 - MCP over stdio and HTTP; `raster lint`, `render`, `user`, `users`.
 - Several apps in one project (`RASTER_APP`), and the demo café.

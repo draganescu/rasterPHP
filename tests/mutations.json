@@ -252,18 +252,6 @@
   "replace": "$this->theme;"
  },
  {
-  "name": "C33-loading-model-not-cancellable",
-  "file": "system/event.php",
-  "search": "if ($value === false && strpos($the_event, 'loading_model_') === 0) $result = false;",
-  "replace": ""
- },
- {
-  "name": "C32-app-core-bindings-ignored",
-  "file": "system/event.php",
-  "search": "foreach (array($the_event, 'core_'.$the_event) as $name) {",
-  "replace": "foreach (array('core_'.$the_event) as $name) {"
- },
- {
   "name": "B7-txt-links-not-rewritten",
   "file": "system/controller.php",
   "search": "[a-zA-Z0-9\\-_\\/]+\\.(rss|atom|xml|json|txt))",
@@ -280,5 +268,59 @@
   "file": "bin/raster",
   "search": "is_string($options['role']) ? $options['role'] : 'admin';",
   "replace": "is_string($options['role']) ? $options['role'] : 'member';"
+ },
+ {
+  "name": "C33-veto-ignored",
+  "file": "system/event.php",
+  "search": "if ($value === false) $result = false;",
+  "replace": ""
+ },
+ {
+  "name": "C32-core-before-app",
+  "file": "system/event.php",
+  "search": "return array_merge($app, $core);",
+  "replace": "return array_merge($core, $app);"
+ },
+ {
+  "name": "C34-no-payload",
+  "file": "system/event.php",
+  "search": "$object->$method($payload) : null;",
+  "replace": "$object->$method() : null;"
+ },
+ {
+  "name": "C38-listens-not-discovered",
+  "file": "system/boot.php",
+  "search": "\t\t// listeners models declare in static function listens()\n\t\tevent::discover();",
+  "replace": ""
+ },
+ {
+  "name": "C40-executed-uses-class-name",
+  "file": "system/controller.php",
+  "search": "$model = preg_replace('/^the_/', '', get_class($object));",
+  "replace": "$model = get_class($object);"
+ },
+ {
+  "name": "C41-no-item-deleted-event",
+  "file": "system/models/cms/store.php",
+  "search": "event::dispatch('cms.item_deleted'",
+  "replace": "array('cms.item_deleted'"
+ },
+ {
+  "name": "C41-no-registered-event",
+  "file": "system/models/authentication/authentication.php",
+  "search": "event::dispatch('authentication.registered', self::payload($id));",
+  "replace": ""
+ },
+ {
+  "name": "C42-events-not-linted",
+  "file": "system/tools/inspector.php",
+  "search": "$this->lint_routes(), $this->lint_events());",
+  "replace": "$this->lint_routes());"
+ },
+ {
+  "name": "C39-overview-without-events",
+  "file": "system/models/mcp/mcp.php",
+  "search": "'collections' => $collections, 'events' => $events);",
+  "replace": "'collections' => $collections);"
  }
 ]

@@ -150,7 +150,9 @@ class cms_store {
 		$page->updated_at = R::isoDateTime();
 		R::store($page);
 		util::content_changed();
-		return self::page_values($type);
+		$saved = self::page_values($type);
+		event::dispatch('cms.page_saved', array('type' => $type, 'slug' => (string)$page->slug, 'changed' => array_keys($values), 'fields' => $saved));
+		return $saved;
 	}
 
 	static function page_history($type, $limit = 20) {
@@ -221,15 +223,24 @@ class cms_store {
 		$bean->updated_at = R::isoDateTime();
 		R::store($bean);
 		util::content_changed();
-		return self::export_item($bean);
+		$item = self::export_item($bean);
+		event::dispatch('cms.item_saved', array('collection' => self::collection_of($type), 'created' => !$id, 'item' => $item));
+		return $item;
 	}
 
 	static function delete_item($type, $id) {
 		$bean = self::table_exists($type) ? R::findOne($type, ' id = ? ', array((int)$id)) : null;
 		if (!$bean) return false;
+		$item = self::export_item($bean);
 		R::trash($bean);
 		util::content_changed();
+		event::dispatch('cms.item_deleted', array('collection' => self::collection_of($type), 'item' => $item));
 		return true;
+	}
+
+	// newsdata -> news
+	static function collection_of($type) {
+		return preg_replace('/data$/', '', $type);
 	}
 
 	// ##Users (kept for older code; see the authentication model)
