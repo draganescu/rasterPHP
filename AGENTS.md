@@ -528,7 +528,7 @@ command-line output). They win over the settings above.
   Database changes stay with `raster schema --apply`.
 - `php bin/raster doctor` checks PHP, versions, edited framework files,
   templates, the database, uses of deprecated features
-  (`system/deprecations.php`) and, in production, the site address, mail and
+  (`system/tools/deprecations.php`) and, in production, the site address, mail and
   tokens. Exit 1 when something must be fixed.
 - `php bin/raster new <folder>` starts a new site from this copy of Raster.
 - `CHANGELOG.md` in the repository lists what changed in each release.
@@ -546,6 +546,6 @@ php tests/mutate.php              # slow: would the demo suite notice a regressi
 
 A new feature gets an ID in `demo/README.md`, a use in the demo and a test.
 A change that sites must follow gets an upgrade step, and anything it
-replaces an entry in `system/deprecations.php` (kept working until the
+replaces an entry in `system/tools/deprecations.php` (kept working until the
 version it names). Bump `system/VERSION` and add to `CHANGELOG.md` when
 releasing, and tag the release `v<version>`.

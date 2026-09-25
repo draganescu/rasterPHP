@@ -273,7 +273,7 @@ class raster_project
 	// views, models and config: array(file, line, id, message)
 	static function deprecations($root, $app) {
 		$found = array();
-		$rules = include $root.'/system/deprecations.php';
+		$rules = include $root.'/system/tools/deprecations.php';
 		$app_dir = $root.'/'.$app;
 		$iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($app_dir, FilesystemIterator::SKIP_DOTS));
 		foreach ($iterator as $file) {
