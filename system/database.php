@@ -50,41 +50,45 @@ class database {
         return self::$connected;
     }
 
-    // Raster offers a simple way to get rid of SQL text syntax in you PHP files
-    // by allowing you to create sql files in the model folder and then call those
-    // querries by using the name of the file as a method of the db object
-    // and parameters to be placed inside the query
-    // ##Example
-    // - say you have a model called products
-    // - inside it you make a folder named sql
-    // - in that folder you make a file called get_all.sql
-    // - in the sql file you'd have something like
-    // ```SELECT * FROM products```
-    // in your products.php model you can now do:
-    // ``` $db = database::instance(); $products = $db->get_all(); ```
+    // ##Named queries
+    // SQL kept out of PHP. A model's queries live in
+    // models/<model>/sql/<name>.sql, and any model's in models/sql.php
+    // ($queries['name'] = "SELECT …"). Call one as a method:
+    //
+    //   database::instance()->count_category('coffee')        // inside the model
+    //   database::instance('cafe')->count_category('coffee')  // from anywhere
+    //
+    // The arguments are bound to ? placeholders, or pass one array for :name
+    // placeholders. sprintf-style '%s' values are quoted by the driver. The
+    // result is a list of rows. A name with no query is an error.
     public function __call($name, $arguments) {
-        $sqlfile = APPBASE.'models/'.$this->current_model.'/sql/'.$name.'.sql';
-
-        if(file_exists($sqlfile))
-        {
-            return $this->query(file_get_contents($sqlfile), $arguments);
-        } else {
-            if(file_exists(APPBASE.'models/sql.php')) {
-                $queries = array();
-                $querries = array(); // the old spelling, still read
-                include APPBASE.'models/sql.php';
-                $queries = array_merge($querries, $queries);
-                if(array_key_exists($name, $queries)) {
-                    return $this->query($queries[$name], $arguments);
-                } else {
-                    return false;
-                }
-            } else {
-                return false;
-            }
+        $sql = self::find_query($this->current_model, $name);
+        if ($sql === null) {
+            throw new BadMethodCallException("No query named '$name': add ".config::get('models_path', 'models').'/'.($this->current_model ?: '<model>')."/sql/$name.sql, or \$queries['$name'] in models/sql.php");
         }
+        return $this->query($sql, $arguments);
+    }
 
-        return $this;
+    // the SQL of a named query, or null; the model's own file wins
+    static function find_query($model, $name) {
+        $models = APPBASE.config::get('models_path', 'models');
+        if ($model && preg_match('/^[a-z0-9_]+$/i', $model.$name) && is_file("$models/$model/sql/$name.sql")) {
+            return file_get_contents("$models/$model/sql/$name.sql");
+        }
+        $queries = self::named_queries();
+        return isset($queries[$name]) ? $queries[$name] : null;
+    }
+
+    // the queries in models/sql.php
+    static function named_queries() {
+        $file = APPBASE.config::get('models_path', 'models').'/sql.php';
+        if (!is_file($file)) return array();
+        return (function ($__file) {
+            $queries = array();
+            $querries = array(); // the old spelling, still read
+            include $__file;
+            return array_merge((array)$querries, (array)$queries);
+        })($file);
     }
 
     // Runs a query and returns all rows. Parameters are bound, never pasted:

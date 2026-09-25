@@ -966,6 +966,7 @@ test(array('C27', 'C28', 'C29', 'C30', 'C31', 'C32', 'C33'), 'scripts, dry place
 	lacks($lab, 'Mock-up banner');
 	has(between($lab, 'named-query'), '<p class="coffee">Americano, Cortado, Espresso, Flat white</p>');
 	has(between($lab, 'named-query'), '<p class="injection">none</p>', 'placeholders are quoted');
+	has(between($lab, 'named-query'), '<p class="range">Flat white</p>', ':named placeholders, the calling model\'s sql/ folder');
 	same('yes', header_value($headers, 'X-Cafe-Done'), 'an app binding to a core event');
 	same('served', header_value($headers, 'X-Cafe'));
 	has(between($lab, 'events'), '<p class="secret">the secret is safe</p>');
@@ -1180,6 +1181,33 @@ test('C42', 'lint checks the event wiring', function () use ($root) {
 	});
 	list($code, $out) = raster(array('lint'));
 	same(0, $code, $out);
+});
+
+
+test('C43', 'named queries: a missing name is an error, and lint finds it', function () use ($root) {
+	database::instance('cafe');
+	same(1, count(database::instance()->count_category('cakes')), 'the model name sticks for later calls');
+	try {
+		database::instance('cafe')->count_categry('coffee');
+		check(false, 'a misspelled query should throw');
+	} catch (BadMethodCallException $e) {
+		has($e->getMessage(), "No query named 'count_categry': add models/cafe/sql/count_categry.sql, or \$queries['count_categry'] in models/sql.php");
+	}
+	$file = "$root/demo/models/zz_queries/zz_queries.php";
+	@mkdir(dirname($file));
+	try {
+		file_put_contents($file, "<?php\nclass zz_queries {\n\tfunction a() { return database::instance('cafe')->count_category('coffee'); }\n\tfunction b() { return database::instance()->query('SELECT 1'); }\n\tfunction c() { return database::instance('cafe')->count_categry('coffee'); }\n\tfunction d() { return database::instance()->dish_names('coffee'); }\n\tfunction e() { return database::instance()->nothing_here(); }\n}\n");
+		list($code, $out) = raster(array('lint'));
+		same(1, $code, $out);
+		has($out, "demo/models/zz_queries/zz_queries.php:5:1: error: No query named 'count_categry': add models/cafe/sql/count_categry.sql");
+		has($out, "demo/models/zz_queries/zz_queries.php:7:1: error: No query named 'nothing_here': add models/zz_queries/sql/nothing_here.sql");
+		lacks($out, "'count_category'", 'the SQL file exists');
+		lacks($out, "'dish_names'", 'models/sql.php has it');
+		lacks($out, "'query'", 'database methods are not queries');
+	} finally {
+		@unlink($file);
+		@rmdir(dirname($file));
+	}
 });
 
 // ## L. Environments, production, cache

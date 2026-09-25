@@ -151,9 +151,32 @@ static function schema() {
 }
 ```
 
-SQL can live in files: `models/<model>/sql/<name>.sql` runs as
-`database::instance('<model>')-><name>($arg, …)`, with `?` placeholders bound
-to the arguments.
+### SQL in files
+
+Queries can live outside PHP, and run as methods named after them:
+
+```sql
+-- application/models/products/sql/in_category.sql
+SELECT name, price FROM product WHERE category = ? AND price <= ? ORDER BY name
+```
+
+```php
+$rows = database::instance()->in_category('chairs', 200);           // inside products
+$rows = database::instance('products')->in_category('chairs', 200); // from anywhere
+```
+
+- The result is a list of rows (arrays keyed by column).
+- `?` placeholders are bound to the arguments in order. For `:name`
+  placeholders pass one array: `->between(array(':low' => 1, ':high' => 5))`.
+- Without a model name, the query is looked up in the folder of the model
+  a template is currently calling. A name you pass stays set for later
+  calls, so pass it whenever you're not sure.
+- Queries any model can use go in `models/sql.php`:
+  `$queries['name'] = "SELECT … WHERE a = '%s'"`. Its `'%s'` values are
+  quoted by the database driver. A file in the model's `sql/` folder wins
+  over an entry there with the same name.
+- A name with no query throws `BadMethodCallException`, and `lint` reports
+  `database::instance(…)->name(…)` calls that have no query.
 
 Text can be replaced in the pages under a path:
 `template::instance()->replace('{{x}}', 'y', 'lab');`.
@@ -452,10 +475,6 @@ use `'model.method'`: `method(true)` returns
   class is used, and its `listens()` counts for `<name>`. Core files work the same way: `application/the_util.php`
   is loaded after `system/util.php`. So are config files (`config/the_app.php`, `the_routes.php`,
   `the_events.php` are loaded after the framework's own).
-- **Named queries:** `models/sql.php` sets
-  `$queries['name'] = "SELECT … WHERE a = '%s'"`; call
-  `database::instance('any')->name($a)`. Values are quoted by the driver.
-  Files in `models/<model>/sql/<name>.sql` use `?` placeholders instead.
 - **Values in scripts and styles:** `"/*- print.model.method /-*/"` is the
   same as `<!-- print.model.method /-->`, written so the file stays valid
   JavaScript or CSS.

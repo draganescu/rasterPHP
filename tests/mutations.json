@@ -322,5 +322,23 @@
   "file": "system/models/mcp/mcp.php",
   "search": "'collections' => $collections, 'events' => $events);",
   "replace": "'collections' => $collections);"
+ },
+ {
+  "name": "C43-missing-query-is-silent",
+  "file": "system/database.php",
+  "search": "if ($sql === null) {\n            throw",
+  "replace": "if ($sql === null) { return false;\n            throw"
+ },
+ {
+  "name": "C43-queries-not-linted",
+  "file": "system/tools/inspector.php",
+  "search": "$this->lint_events(), $this->lint_queries());",
+  "replace": "$this->lint_events());"
+ },
+ {
+  "name": "C43-named-params-dropped",
+  "file": "system/database.php",
+  "search": "        if (count($params) === 1 && isset($params[0]) && is_array($params[0])) {\n            $params = $params[0];\n        }",
+  "replace": ""
  }
 ]

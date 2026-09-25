@@ -3,6 +3,12 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## Unreleased
+
+- Named queries: calling one that doesn't exist throws
+  `BadMethodCallException` (it returned `false`), and `lint` reports such
+  calls. `:name` placeholders are documented.
+
 ## 2.0.0
 
 RTO v2. Raster becomes a framework for sites, small apps, blogs and
