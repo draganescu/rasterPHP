@@ -92,7 +92,7 @@ class i18n
 	// a switcher: rows with code, url and state (active or empty)
 	function languages() {
 		$current = self::detect();
-		$path = rtrim(config::get('base_uri'), '/').strtok((string)config::get('uri_string'), '?');
+		$path = rtrim(config::get('link_uri'), '/').strtok((string)config::get('uri_string'), '?');
 		$rows = array();
 		foreach (self::available() as $code) {
 			$rows[] = array('code' => $code, 'url' => $path.'?lang='.$code, 'state' => $code === $current ? 'active' : '');

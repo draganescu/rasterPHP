@@ -71,7 +71,41 @@
     </section>
 
     <section id="remove"><h2>Mock-up</h2>
-      <!-- remove --><p class="mockup">Removed before anything runs <!-- print.cafe.does_not_exist /--></p><!-- /remove -->
+      <!-- remove --><p class="mockup">Removed before anything runs: <!-- print.cafe.side_effect /--></p><!-- /remove -->
+    </section>
+
+    <section id="script"><h2>Values in scripts</h2>
+      <script>var labColor = "/*- print.cafe.color /-*/";</script>
+    </section>
+
+    <section id="dry-block"><h2>dry with a placeholder</h2>
+      <!-- dry._bits.note -->This placeholder is replaced.<!-- /dry._bits.note -->
+    </section>
+
+    <section id="tricky"><h2>Escaped attributes, removed attributes, kept mock-ups</h2>
+      <!-- render.cafe.tricky -->
+      <!-- print.@href.link --><a class="tricky" href="#"><!-- print.label -->mock-up label<!-- /print.label --></a><!-- /print.@href.link -->
+      <!-- /render.cafe.tricky -->
+    </section>
+
+    <section id="banner"><h2>A render method returning a string</h2>
+      <!-- render.cafe.banner --><p>Mock-up banner</p><!-- /render.cafe.banner -->
+    </section>
+
+    <section id="ordering"><h2>Ordering</h2>
+      <ol class="priciest"><!-- render.cms.menu('order=-price&limit=2') --><li><!-- print.name -->Dish<!-- /print.name --> <!-- print.price -->0<!-- /print.price --></li><!-- /render.cms.menu('order=-price&limit=2') --></ol>
+      <p class="oldest"><!-- render.cms.journal('order=oldest&limit=1') --><!-- print.title -->First post<!-- /print.title --><!-- /render.cms.journal('order=oldest&limit=1') --></p>
+      <div class="coffee-pager"><!-- render.pagination.links('cms.menu', 'category=coffee') --><span class="has-pages">coffee has pages</span><!-- /render.pagination.links('cms.menu', 'category=coffee') --></div>
+      <div class="menu-pager"><!-- render.pagination.links('cms.menu') --><span class="has-pages">the menu has <!-- print.total -->1<!-- /print.total --> pages</span><!-- /render.pagination.links('cms.menu') --></div>
+    </section>
+
+    <section id="named-query"><h2>A named query</h2>
+      <p class="coffee"><!-- print.cafe.dish_names('coffee') -->none<!-- /print.cafe.dish_names('coffee') --></p>
+      <p class="injection"><!-- print.cafe.dish_names("coffee' OR '1'='1") -->none<!-- /print.cafe.dish_names("coffee' OR '1'='1") --></p>
+    </section>
+
+    <section id="events"><h2>A model an event stops</h2>
+      <p class="secret"><!-- print.secret.code -->the secret is safe<!-- /print.secret.code --></p>
     </section>
   </main>
   <!-- dry._layout.footer /-->

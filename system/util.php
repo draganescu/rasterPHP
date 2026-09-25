@@ -60,7 +60,7 @@ class util {
 	{
 		$name = preg_replace('/[^a-z0-9_]/', '', strtolower($name));
 		if ($location === null) {
-			$location = config::get('base_uri').ltrim(strtok((string)config::get('uri_string'), '?'), '/');
+			$location = config::get('link_uri').ltrim(strtok((string)config::get('uri_string'), '?'), '/');
 		}
 		$location .= (strpos($location, '?') === false ? '?' : '&').'done='.$name;
 		if (PHP_SAPI === 'cli') return $location;

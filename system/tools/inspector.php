@@ -264,9 +264,35 @@ class raster_inspector {
 					}
 				}
 			}
+			// an override (the_feed extends feed) has its parent's methods too
+			if (strpos(basename(dirname($file)), 'the_') === 0) {
+				$parent = BASE.$models_path.'/'.$model.'/'.$model.'.php';
+				if (file_exists($parent)) {
+					$base_info = $this->parent_info($parent);
+					$info['methods'] = array_values(array_unique(array_merge($info['methods'], $base_info['methods'])));
+					$info['magic'] = $info['magic'] || $base_info['magic'];
+				}
+			}
 			break;
 		}
 		return $cache[$model] = $info;
+	}
+
+	// methods of a system model file, for overrides
+	protected function parent_info($file) {
+		$info = array('methods' => array(), 'magic' => false);
+		$tokens = token_get_all(file_get_contents($file));
+		foreach ($tokens as $i => $t) {
+			if (!is_array($t) || $t[0] !== T_FUNCTION) continue;
+			for ($j = $i + 1; $j < count($tokens); $j++) {
+				if (is_array($tokens[$j]) && $tokens[$j][0] === T_STRING) {
+					if ($tokens[$j][1] === '__call') $info['magic'] = true; else $info['methods'][] = $tokens[$j][1];
+					break;
+				}
+				if ($tokens[$j] === '(') break;
+			}
+		}
+		return $info;
 	}
 
 	// ##Lint
@@ -557,7 +583,7 @@ class raster_inspector {
 		$lines = explode("\n", $code);
 		foreach ($lines as $n => $line) {
 			if (!preg_match('/route\(\s*([\'"])(.*?)\1\s*\)\s*->\s*to\(\s*([\'"])(.*?)\3\s*\)(?:\s*->\s*from\(\s*([\'"])(.*?)\5\s*\))?/', $line, $m)) continue;
-			$theme = isset($m[6]) && $m[6] !== '' ? $m[6] : $this->theme;
+			$theme = isset($m[6]) && $m[6] !== '' ? $m[6] : config::get('theme', $this->theme);
 			$view = $m[4];
 			$app_file = $this->theme_dir($theme).'/'.$view.$this->ext;
 			$system_file = BASE.'views/'.$theme.'/'.$view.$this->ext;
@@ -673,6 +699,25 @@ class raster_inspector {
 			array_unshift($pages, array('view' => '*', 'url' => 'site', 'slug' => 'site', 'type' => 'sitepage', 'fields' => $site));
 		}
 		return array('pages' => $pages, 'collections' => $collections);
+	}
+
+	// the mock-up item of a collection, taken from its own view (news.html,
+	// else news_item.html): the first item stored comes from there, whichever
+	// page asks for the collection first
+	function collection_defaults($name, $theme = null) {
+		foreach (array($name, $name.'_item') as $view) {
+			$file = $this->theme_dir($theme).'/'.$view.$this->ext;
+			if (!is_file($file)) continue;
+			list($blocks) = self::blocks($this->expand(file_get_contents($file), $theme));
+			$fields = array();
+			$collections = array();
+			$this->collect_content($blocks, $fields, $collections, $view.$this->ext, array());
+			if (!isset($collections[$name])) continue;
+			$defaults = array();
+			foreach ($collections[$name]['fields'] as $key => $field) $defaults[$key] = $field['default'];
+			return $defaults;
+		}
+		return array();
 	}
 
 	protected function uses_collections($blocks) {

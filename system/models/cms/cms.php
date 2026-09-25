@@ -64,7 +64,9 @@ class cms
 		if (preg_match('#^(/.*?)?/([a-z0-9_]+)_(page|items)(/.*)?$#', $slug, $m)) {
 			$slug = $m[1] !== '' ? $m[1] : '/'.$m[2];
 		} elseif (preg_match('#^(?:/.*?)?/([a-z0-9_]+)_item(/.*)?$#', $slug, $m)) {
-			$slug = '/'.$m[1].'/'.$m[1].'_item';
+			// an item shown by the collection's own view (no news_item.html)
+			// shares that view's page fields
+			$slug = file_exists(controller::build_view_path($m[1].'_item')) ? '/'.$m[1].'/'.$m[1].'_item' : '/'.$m[1];
 		}
 		return $slug;
 	}
@@ -273,13 +275,16 @@ class cms
 			if (database::$frozen) return false;
 			// the first item is the placeholder content from the template
 			$item = R::dispense($this->data_name);
-			foreach ($expected_properties as $property=>$content) {
+			require_once BASE.'tools/inspector.php';
+			$inspector = new raster_inspector();
+			$seed = array_merge($expected_properties, $inspector->collection_defaults($name));
+			foreach ($seed as $property=>$content) {
 				$item->$property = trim($content);
 			}
 			$item->updated_at = R::isoDateTime();
 			$item->enabled = '1';
 			$item->published_at = '';
-			$item->slug = cms_store::unique_slug($this->data_name, cms_store::slug_source($expected_properties), 0);
+			$item->slug = cms_store::unique_slug($this->data_name, cms_store::slug_source($seed), 0);
 			R::store($item);
 		} elseif (!database::$frozen) {
 			// new fields in the template become new columns
@@ -462,19 +467,17 @@ class cms
 		return false;
 	}
 
-	// /login/logout/fromraster, the toolbar's logout link
+	// the toolbar's Log out: POST /api/cms/logout with the session token
 	public function logout() {
-		if (util::param('logout') === 'fromraster') {
-			authentication::log_out();
-			util::redirect();
-		}
-		return false;
+		if (!isset($_SERVER['REQUEST_METHOD']) || $_SERVER['REQUEST_METHOD'] !== 'POST') return false;
+		cms::require_admin(true);
+		authentication::log_out();
+		return true;
 	}
 
 	// the editor login page (system/views/cms_admin/login.html) uses
 	// render.authentication.login; this stays for older templates
 	public function login() {
-		$this->logout();
 		if (cms::loggedin()) util::redirect();
 		$auth = new authentication();
 		return $auth->login();

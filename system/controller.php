@@ -205,7 +205,7 @@ class controller {
 		}
 		if (isset($_POST['raster_hp']) && $_POST['raster_hp'] !== '') {
 			// pretend it worked so the bot moves on
-			header('Location: '.config::get('base_uri').ltrim((string)config::get('uri_string'), '/'), true, 303);
+			header('Location: '.config::get('link_uri').ltrim((string)config::get('uri_string'), '/'), true, 303);
 			exit;
 		}
 		util::session();
@@ -325,7 +325,16 @@ class controller {
 		try {
 			$this->render($template, $data);
 		} catch (RuntimeException $e) {
-			if (!$strict) throw $e;
+			if (!$strict) {
+				// production: log it and show a plain error, never the details
+				error_log('Raster template error: '.$e->getMessage());
+				if (!headers_sent()) {
+					http_response_code(500);
+					header('Content-Type: text/html; charset=utf-8');
+				}
+				echo "<!doctype html><meta charset='utf-8'><title>Error</title><p>This page could not be shown.</p>";
+				exit;
+			}
 			controller::template_error(array(array('file' => $template->view_file, 'line' => 0, 'column' => 0, 'severity' => 'error', 'message' => $e->getMessage())));
 		}
 
@@ -403,7 +412,7 @@ class controller {
 		$template->output = preg_replace("/(href|action|src)=(\"|')([a-zA-Z0-9\-\._\?\,\'\/\\\+&amp;%\$#\=~]*)\?".template::get('tpl_uri')."=(.*?)(\"|')/", '$1="'.template::get('link_uri').'$4"', $template->output);
 		$template->output = preg_replace("/(href|action|src)=(\"|')([a-zA-Z0-9\-\._\?\,\'\/\\\+&amp;%\$#\=~]*)\.html/", '$1=$2'.template::get('link_uri').'$3', $template->output);
 		// links to feed and data views: href="news.rss" -> /news.rss
-		$template->output = preg_replace_callback('/(href)=(["\'])([a-zA-Z0-9\-_\/]+\.(rss|atom|xml|json))\2/', function ($m) {
+		$template->output = preg_replace_callback('/(href)=(["\'])([a-zA-Z0-9\-_\/]+\.(rss|atom|xml|json|txt))\2/', function ($m) {
 			return file_exists(controller::build_view_path(substr($m[3], 0, -strlen($m[4]) - 1), '.'.$m[4])) ? $m[1].'='.$m[2].template::get('link_uri').$m[3].$m[2] : $m[0];
 		}, $template->output);
 		$template->output = str_replace(template::get('link_uri')."__", template::get('link_uri').template::get('pad_uri'), $template->output);

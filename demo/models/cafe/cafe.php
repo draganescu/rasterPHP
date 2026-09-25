@@ -30,6 +30,23 @@ class cafe
 		return true;
 	}
 
+	// a core event (done): runs before the page is sent
+	function finish() {
+		if (PHP_SAPI !== 'cli' && !headers_sent()) header('X-Cafe-Done: yes');
+		return true;
+	}
+
+	// route_not_found
+	function missing() {
+		if (PHP_SAPI !== 'cli' && !headers_sent()) header('X-Cafe-Missing: yes');
+		return true;
+	}
+
+	// loading_model_secret: false stops the model from loading
+	function deny() {
+		return false;
+	}
+
 	// ##Lab: one method per engine feature
 
 	// literal arguments: specials(3, 'soup', true, -1, null)
@@ -64,6 +81,7 @@ class cafe
 		return util::e('<script>alert("no")</script>');
 	}
 
+	// JavaScript can read values too: "/*- print.cafe.color /-*/"
 	// values for print.self and print.if, set before the print pass
 	function prepare() {
 		template::set('greeting')->to('Hello from the café');
@@ -75,6 +93,32 @@ class cafe
 	// the same self-closing tag several times in a row
 	function links() {
 		return array(array('url' => 'https://example.com/a'), array('url' => 'https://example.com/b'));
+	}
+
+	// attribute values are escaped; false removes the attribute; a false
+	// value keeps the mock-up
+	function tricky() {
+		return array(
+			array('link' => 'https://example.com/?q="quotes"&x=<y>', 'label' => 'escaped link'),
+			array('link' => false, 'label' => false),
+		);
+	}
+
+	// a render method may return a string instead of rows
+	function banner() {
+		return '<p class="banner">Open today</p>';
+	}
+
+	// runs only if a remove block doesn't stop it
+	function side_effect() {
+		if (PHP_SAPI !== 'cli' && !headers_sent()) header('X-Side-Effect: ran');
+		return 'side effect';
+	}
+
+	// a named query from models/sql.php with a quoted placeholder
+	function dish_names($category) {
+		$rows = database::instance('cafe')->dish_names($category);
+		return $rows ? implode(', ', array_map(function ($r) { return $r['name']; }, $rows)) : 'none';
 	}
 
 	// a key from the URL: /lab/color/red

@@ -3,7 +3,7 @@
 	Raster_Admin.system = [
 		{
 			"name" : 'Log out',
-			"link" : 'login/logout/fromraster',
+			"link" : 'api/cms/logout',
 			"type" : 'navigable'
 		}
 	];
@@ -62,9 +62,9 @@
 		var type = $(this).data('type');
 		if (type == 'system') {
 			$('#raster_editor .body').html('<span>Logging you out ...</span>');
-			setTimeout(function(){
-				window.location.href = BASE + rel;
-			}, 1000);
+			$.post(BASE + rel, {"csrf": Raster_Admin.csrf}, function(){
+				window.location.href = BASE;
+			});
 			return true;
 		};
 		var name = $(this).text();

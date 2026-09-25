@@ -15,7 +15,11 @@ class reservation
 	function book() {
 		$v = validation::get();
 		if (!$v->submitted()) return false;
-		if (!$v->valid()) return template::instance()->form_state();
+		if (!$v->valid()) {
+			// validation::errors() lists what failed, field by field
+			template::set('error_count')->to((string)count($v->errors()));
+			return template::instance()->form_state();
+		}
 		database::instance('cms');
 		$booking = R::dispense('reservation');
 		foreach (array('name', 'email', 'phone', 'date', 'seating', 'notes') as $field) {

@@ -9,6 +9,7 @@
   <main class="two-columns">
     <section>
       <h1>Book a table</h1>
+      <p class="error-count"><!-- print.self.error_count -->0<!-- /print.self.error_count --> problems</p>
       <!-- print.validation.alert('booked') --><p class="notice">Thank you, your table is booked. We sent the details to the staff.</p><!-- /print.validation.alert('booked') -->
       <!-- render.reservation.book -->
       <form method="post" class="stack">
@@ -24,6 +25,7 @@
         <!-- render.validation.not_monday('date') --><p class="error">We are closed on Mondays.</p><!-- /render.validation.not_monday('date') -->
         <label>Guests <input type="number" name="guests" required min="1" max="8" value="2"></label>
         <!-- render.validation.field('guests') --><p class="error">Tables are for 1 to 8 guests.</p><!-- /render.validation.field('guests') -->
+        <!-- render.validation.field('guests', 'max') --><p class="error">For groups over 8, please call us.</p><!-- /render.validation.field('guests', 'max') -->
         <label>Seating
           <select name="seating"><option value="inside">Inside</option><option value="terrace">Terrace</option><option value="window">By the window</option></select>
         </label>
@@ -48,6 +50,8 @@
         <label>Email <input type="email" name="email"></label>
         <!-- render.validation.not_empty('email') --><p class="error">Your email, please.</p><!-- /render.validation.not_empty('email') -->
         <!-- render.validation.email_format('email') --><p class="error">That email does not look right.</p><!-- /render.validation.email_format('email') -->
+        <label>Website <input type="url" name="website"></label>
+        <!-- render.validation.field('website') --><p class="error">A web address starts with https://</p><!-- /render.validation.field('website') -->
         <label>Message <textarea name="message" required maxlength="2000"></textarea></label>
         <!-- render.validation.field('message') --><p class="error">Write a message.</p><!-- /render.validation.field('message') -->
         <button>Send</button>

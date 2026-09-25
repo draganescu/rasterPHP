@@ -63,7 +63,7 @@ class pagination
 			$total = (int)(isset($info['total']) ? $info['total'] : 0);
 			$perpage = (int)(isset($info['perpage']) ? $info['perpage'] : 10);
 			$current = max(1, (int)util::get('page') ?: 1);
-			$path = rtrim(config::get('base_uri'), '/').strtok((string)config::get('uri_string'), '?');
+			$path = rtrim(config::get('link_uri'), '/').strtok((string)config::get('uri_string'), '?');
 			$url = function ($n) use ($path) { return $n <= 1 ? $path : $path.'?page='.$n; };
 		}
 		$pages = max(1, (int)ceil($total / max(1, $perpage)));

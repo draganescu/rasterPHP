@@ -3,6 +3,12 @@ RewriteEngine on
 # Never serve code, configuration, data or tooling directly
 RewriteRule (^|/)\. - [F,L]
 RewriteRule ^(system|bin|tests)(/|$) - [F,L]
+# every app folder (any top-level folder with a config/ inside)
+RewriteCond %{DOCUMENT_ROOT}/$1/config -d
+RewriteRule ^([^/]+)/(config|models|data|i18n)(/|$) - [F,L]
+RewriteCond %{DOCUMENT_ROOT}/$1/config -d
+RewriteRule ^([^/]+)/views/.*\.(html|rss|atom|xml|json|txt)$ - [F,L]
+# the same for the bundled apps when the site lives in a subfolder
 RewriteRule ^(application|demo)/(config|models|data|i18n)(/|$) - [F,L]
 RewriteRule ^(application|demo)/views/.*\.(html|rss|atom|xml|json|txt)$ - [F,L]
 RewriteRule ^(?!index\.php$).*\.(php|sqlite|sql|md)$ - [F,L]

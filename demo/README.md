@@ -16,7 +16,7 @@ php tests/demo.php                        # the whole matrix
 | `/menu`, `/menu/menu_item/<slug>` | a collection with pagination, category filter links, counts from an SQL file |
 | `/events`, `/journal` | ordering, drafts, scheduled items, author filter links |
 | `/visit` | a booking form using every validation rule, a contact form, the newsletter form: three forms on one page |
-| `/members`, `/staff`, `/account`, `/login`, `/register`, `/forgot`, `/reset` | accounts, roles and protected pages |
+| `/members`, `/staff`, `/account`, `/login`, `/register`, `/forgot`, `/password/new` | accounts, roles and protected pages |
 | `/lab` | the engine's edge cases, one section each |
 | `/journal.rss`, `/journal.atom`, `/feed.json`, `/sitemap.xml`, `/hours.txt` | formats |
 | `?lang=ro` | the Romanian translation |
@@ -37,12 +37,17 @@ php tests/demo.php                        # the whole matrix
 | A10 | theme assets served |
 | A11 | code, config, data, raw views and tooling are 403 |
 | A12 | query strings don't change the route |
+| A13 | a custom 404 page (`error_document_404`) |
+| A14 | a route to a view in another theme (`->from('print')`) |
+| A15 | `rewrite` off: every link goes through index.php |
 | B1 | RSS: content type, well-formed, escaped |
 | B2 | Atom |
 | B3 | JSON views: rows become a list |
 | B4 | sitemap.xml |
 | B5 | text views |
 | B6 | links to feed views rewritten |
+| B7 | `.txt` links rewritten |
+| B8 | `feed_limit` |
 | C1 | print with a default and with a model value |
 | C2 | self-closing print |
 | C3 | render repeats rows |
@@ -68,6 +73,18 @@ php tests/demo.php                        # the whole matrix
 | C23 | models load each other on first use |
 | C24 | the JSON api; system and static methods private |
 | C25 | development shows template errors, partials included |
+| C26 | `route_not_found` event |
+| C27 | values in scripts: `/*- print.x /-*/` |
+| C28 | a dry block with a placeholder |
+| C29 | attributes are escaped; false removes the attribute; a false value keeps the mock-up |
+| C30 | a render method returning a string |
+| C31 | named queries in `models/sql.php`, placeholders quoted |
+| C32 | an application binding to a core event (`done`) |
+| C33 | `loading_model_<name>` returning false stops the model |
+| C34 | event::unbind |
+| C35 | `the_<model>` overrides a bundled model |
+| C36 | `log::enable()` prints the log to the browser console |
+| C37 | `strict_templates` off renders broken templates anyway |
 | D1 | raster_form and honeypot on every post form |
 | D2 | the session token on forms for logged in users |
 | D3 | posts from other sites refused (Origin, Sec-Fetch-Site, Referer, /api too) |
@@ -90,6 +107,9 @@ php tests/demo.php                        # the whole matrix
 | D20 | form_state with data, spa_ classes |
 | D21 | /api never runs form models |
 | D22 | logged in posts without the token are refused |
+| D23 | type="url" |
+| D24 | `field('guests', 'max')` shows only when that rule fails |
+| D25 | validation::errors() lists what failed |
 | E1 | page fields with defaults from the markup |
 | E2 | site_ fields shared by every page |
 | E3 | collections seeded from the mock-up |
@@ -112,12 +132,17 @@ php tests/demo.php                        # the whole matrix
 | E20 | editor endpoints need an editor |
 | E21 | image upload and crop |
 | E22 | reserved names are lint errors |
+| E23 | `raster_page_size` for collections without their own |
+| E24 | order by `-field` and `oldest`; pagination follows the filter argument |
+| E25 | item pages fall back to the collection view |
+| E26 | the built-in editor login page, toolbar assets, logout by POST with the token |
 | F1 | schema status as JSON |
 | F2 | schema --check |
 | F3 | schema --apply in production, including model tables |
 | F4 | rename suggestion and --rename |
 | F5 | --drop refuses used columns; drops unused tables |
 | F6 | frozen database: templates ahead of it show defaults |
+| F7 | `--drop --force` |
 | G1 | sign up |
 | G2 | email already taken |
 | G3 | password rules |
@@ -136,6 +161,9 @@ php tests/demo.php                        # the whole matrix
 | G16 | raster user and raster users, roles |
 | G17 | md5 accounts and the old usersdata table |
 | G18 | visitors get no cookies |
+| G19 | `login_page` |
+| G20 | log in with a username |
+| G21 | `raster user` defaults: admin, random password |
 | H1 | newsletter sign up sends a confirmation |
 | H2 | the same answer for people already subscribed |
 | H3 | confirm |
@@ -146,29 +174,42 @@ php tests/demo.php                        # the whole matrix
 | H8 | the unsubscribe page |
 | H9 | issues without forms, scripts or nav, absolute links, one link per reader |
 | H10 | single opt-in |
+| H11 | `newsletter_confirm_page`, and the name is stored |
+| H12 | `raster send` refuses a page without a title |
 | I1 | emails are views; subject from the title; text version |
 | I2 | values escaped in emails; images absolute |
-| I3 | SMTP: AUTH, sender, recipient, dot lines |
+| I3 | SMTP: AUTH, sender, recipient |
 | I4 | SMTP refuses plain text to other hosts unless ?insecure=1 |
 | I5 | production without RASTER_URL sends no links |
+| I6 | `log://` defaults to `data/mail/` |
+| I7 | `mail://` uses PHP's mail() |
+| I8 | STARTTLS before the password; smtps |
+| I9 | the sender from config `mail_from` |
 | J1 | the template's language is the default |
 | J2 | ?lang= translates and sets a cookie |
 | J3 | the cookie remembers |
 | J4 | Accept-Language |
 | J5 | the language switcher |
 | J6 | one cached copy per language |
+| J7 | `domain_language` |
+| J8 | `language_cookie` |
 | K1 | a model that paginates itself (?page=) |
 | L1 | servers.php: whole names, loopback only from this machine |
 | L2 | RASTER_ENV |
 | L3 | page cache: hit, miss, query strings, logged in, cleared by edits |
 | L4 | links use RASTER_URL, not the Host header |
 | L5 | the protocol is part of the cache key |
+| L6 | `site_url` in config |
+| L7 | `page_cache_skip`, `page_cache_ttl`, `page_cache` off |
 | M1 | MCP needs its token; GET is refused |
 | M2 | initialize, ping, tools/list, batches, errors |
 | M3 | notifications get 202 |
 | M4 | every tool |
 | M5 | unknown fields and pages are errors |
 | M6 | MCP over stdio |
+| M7 | invalid requests; unknown protocol versions get the newest |
+| M8 | slug and enabled are writable on items |
+| M9 | `mcp_token` in config |
 | N1 | raster help and unknown commands |
 | N2 | raster lint and --json, --all-themes |
 | N3 | raster render and its exit codes |

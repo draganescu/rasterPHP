@@ -60,9 +60,11 @@ switch ($command) {
 				$label = $p['severity'] === 'error' ? $paint('error', '31') : $paint('warning', '33');
 				echo "{$p['file']}:{$p['line']}:{$p['column']}: $label: {$p['message']}\n";
 			}
-			$views = count($inspector->views());
+			$names = $themes ?: array($inspector->theme);
+			$views = 0;
+			foreach ($names as $name) $views += count($inspector->views($name));
 			echo $problems ? "\n" : '';
-			echo ($errors ? $paint("$errors error(s)", '31') : $paint('No errors', '32')).', '.(count($problems) - $errors)." warning(s) in theme '{$inspector->theme}' ($views views)\n";
+			echo ($errors ? $paint("$errors error(s)", '31') : $paint('No errors', '32')).', '.(count($problems) - $errors)." warning(s) in ".(count($names) > 1 ? 'themes ' : 'theme ')."'".implode("', '", $names)."' ($views views)\n";
 		}
 		exit($errors ? 1 : 0);
 

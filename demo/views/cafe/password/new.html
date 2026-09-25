@@ -12,9 +12,9 @@
     <!-- print.validation.alert('password_short') --><p class="error">Use at least 8 characters.</p><!-- /print.validation.alert('password_short') -->
     <!-- render.authentication.reset -->
     <form method="post" class="stack">
-      <label>New password <input type="password" name="password" required minlength="8"></label>
+      <label>New password <input type="password" name="password" required minlength="10"></label>
       <label>Again <input type="password" name="password_again" required></label>
-      <!-- render.validation.matches('password', 'password_again') --><p class="error">The passwords are different.</p><!-- /render.validation.matches('password', 'password_again') -->
+      <!-- render.validation.are_the_same('password', 'password_again') --><p class="error">The passwords are different.</p><!-- /render.validation.are_the_same('password', 'password_again') -->
       <button>Save</button>
     </form>
     <!-- /render.authentication.reset -->

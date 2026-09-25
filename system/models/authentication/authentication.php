@@ -249,7 +249,7 @@ class authentication
 		}
 		self::log_in($id);
 		$next = self::safe_next(util::get('next') ?: util::post('next'));
-		$this->redirect($next !== '' ? rtrim(config::get('base_uri'), '/').$next : (config::get('after_login') ? self::url(config::get('after_login')) : config::get('link_uri')));
+		$this->redirect($next !== '' ? rtrim(config::get('link_uri'), '/').$next : (config::get('after_login') ? self::url(config::get('after_login')) : config::get('link_uri')));
 		return false;
 	}
 

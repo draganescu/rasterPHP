@@ -175,16 +175,18 @@ test(array('A7', 'A8'), 'unknown pages and partials are 404', function () use ($
 	same(404, http('GET', "$base/_layout")[0]);
 	same(404, http('GET', "$base/_email/reservation")[0]);
 });
-test(array('A9', 'B6'), 'links are rewritten', function () use ($base) {
+test(array('A9', 'B6', 'B7'), 'links are rewritten', function () use ($base) {
 	$body = http('GET', "$base/about")[1];
 	has($body, 'href="'.$base.'/menu"');
 	has($body, 'href="'.$base.'/"');
 	has($body, 'href="'.$base.'/journal.rss"');
 	has($body, 'href="'.$base.'/feed.json"');
+	has($body, 'href="'.$base.'/hours.txt"');
 	has($body, 'href="'.$base.'/docs/setup"');
 });
 test(array('A10', 'A11'), 'assets are served, code and raw views are not', function () use ($base) {
 	same(200, http('GET', "$base/demo/views/cafe/style.css")[0]);
+	has(http('GET', "$base/about")[1], "<base href='$base/demo/views/cafe/' />", 'pages point assets at the theme');
 	same(200, http('GET', "$base/demo/views/cafe/img/logo.svg")[0]);
 	foreach (array('/demo/views/cafe/index.html', '/demo/views/cafe/journal.rss', '/demo/views/cafe/feed.json', '/demo/config/the_app.php', '/demo/models/cafe/cafe.php', '/demo/i18n/ro/common.php', '/demo/data/x.sqlite', '/demo//data/x.sqlite-journal', '/system/boot.php', '/bin/raster', '/.git/HEAD', '/AGENTS.md', '/docs/rto-spec.md', '/tests/demo.php') as $path) {
 		same(403, http('GET', $base.$path)[0], $path);
@@ -196,7 +198,7 @@ test('A12', 'query strings do not change the route', function () use ($base) {
 
 // ## B. Formats
 
-test('B1', 'RSS', function () use ($base) {
+test(array('B1', 'C35'), 'RSS', function () use ($base) {
 	http('GET', "$base/journal");
 	mcp($base, 'create_item', array('collection' => 'journal', 'fields' => array('title' => 'Tea & <cake>', 'summary' => '<p>Cups & saucers</p>', 'author' => 'Bogdan', 'body' => '<p>Long</p>')));
 	list($status, $body, $headers) = http('GET', "$base/journal.rss");
@@ -206,6 +208,9 @@ test('B1', 'RSS', function () use ($base) {
 	check(@$doc->loadXML($body), 'RSS is not well-formed');
 	has($body, 'Tea &amp; &lt;cake&gt;');
 	same(2, $doc->getElementsByTagName('item')->length);
+	check(preg_match('/<pubDate>[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} [+-]\d{4}<\/pubDate>/', $body), 'RFC 822 dates');
+	has($body, "<link>$base/</link>", 'print.feed.site_url');
+	has($body, '<generator>Raster Café feeds</generator>', 'the_feed override');
 });
 test('B2', 'Atom', function () use ($base) {
 	list($status, $body, $headers) = http('GET', "$base/journal.atom");
@@ -222,6 +227,7 @@ test('B3', 'JSON feed', function () use ($base) {
 	check(is_array($feed), "invalid JSON: $body");
 	same(2, count($feed['items']));
 	same('Tea & <cake>', $feed['items'][0]['title']);
+	check(preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/', $feed['items'][0]['date_published']), 'ISO dates');
 });
 test(array('B4', 'O1'), 'sitemap', function () use ($base) {
 	list(, $body) = http('GET', "$base/sitemap.xml");
@@ -250,6 +256,8 @@ test(array('C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7'), 'print, render, empty, fal
 	has(between($lab, 'empty'), 'This mock-up stays because the model returned false.');
 	has(between($lab, 'empty'), 'Default text stays too.');
 	lacks($lab, 'mockup');
+	list(, , $headers) = http('GET', "$base/lab");
+	same(null, header_value($headers, 'X-Side-Effect'), 'models inside remove never run');
 	has($lab, 'class="site-header"');
 	has($lab, 'class="site-footer"');
 });
@@ -271,7 +279,7 @@ test(array('C14', 'C15', 'C16', 'C17'), 'arguments, escaping, replace, memory', 
 	has(between($lab, 'args'), '[3,"soup",true,-1,null]');
 	has(between($lab, 'escaping'), '&lt;script&gt;alert(&quot;no&quot;)&lt;/script&gt;');
 	has(between($lab, 'replace'), 'Brewed at Raster Café.');
-	lacks(http('GET', "$base/about")[1], 'Raster Café.</p>', 'replace is scoped to /lab');
+	has(http('GET', "$base/docs/setup")[1], 'Only the lab replaces {{cafe}}.', 'replace is scoped to /lab');
 	has(between($lab, 'memory'), '<p class="recalled">remembered</p>');
 	lacks(between($lab, 'memory'), '<span>remembered</span>');
 });
@@ -287,6 +295,7 @@ test('C24', 'the JSON api', function () use ($base) {
 	same(200, $status);
 	has(header_value($headers, 'Content-Type'), 'application/json');
 	same('Monday', json_decode($body, true)[0]['day']);
+	same('"1"', http('GET', "$base/api/cafe/category_count/coffee")[1], 'URL segments become arguments');
 	same(404, http('GET', "$base/api/pagination/pages/cms.menu")[0], 'system models are private');
 	same(404, http('GET', "$base/api/mcp/handle")[0]);
 	same(404, http('GET', "$base/api/cafe/nope")[0]);
@@ -322,6 +331,8 @@ test('D3', 'posts from other sites are refused', function () use ($base) {
 	same(403, http('POST', "$base/visit", array('raster_form' => 'reservation.contact'), array('Sec-Fetch-Site: cross-site'))[0]);
 	same(403, http('POST', "$base/visit", array('raster_form' => 'reservation.contact'), array('Referer: https://evil.example/page'))[0]);
 	same(403, http('POST', "$base/api/cafe/hours", array('x' => 1), array('Origin: https://evil.example'))[0]);
+	$host = parse_url($base, PHP_URL_HOST).':'.parse_url($base, PHP_URL_PORT);
+	same(200, http('POST', "$base/visit", array('raster_form' => 'reservation.contact', 'email' => ''), array("Origin: http://$host", 'Sec-Fetch-Site: same-origin'))[0], 'browsers posting from the site are welcome');
 });
 test('D4', 'bots that fill the honeypot get a fake success', function () use ($base) {
 	$before = count(mails());
@@ -330,7 +341,7 @@ test('D4', 'bots that fill the honeypot get a fake success', function () use ($b
 	same($before, count(mails()), 'nothing sent');
 });
 $bad_booking = array('raster_form' => 'reservation.book', 'name' => 'Your name', 'email' => 'nope', 'phone' => 'abc', 'date' => '2031-01-01', 'guests' => '12', 'seating' => 'terrace', 'occasion' => 'birthday', 'newsletter' => 'yes', 'notes' => str_repeat('x', 301), 'password' => 'secret');
-test(array('D5', 'D6', 'D7', 'D8', 'D9', 'D10', 'D11', 'D12', 'C19'), 'rules from the HTML, and regions', function () use ($base, $bad_booking) {
+test(array('D5', 'D6', 'D7', 'D8', 'D9', 'D10', 'D11', 'D12', 'D24', 'D25'), 'rules from the HTML, and regions', function () use ($base, $bad_booking) {
 	list($status, $body) = http('POST', "$base/visit", $bad_booking);
 	same(200, $status);
 	has($body, 'Please replace the example name with yours.');
@@ -341,22 +352,31 @@ test(array('D5', 'D6', 'D7', 'D8', 'D9', 'D10', 'D11', 'D12', 'C19'), 'rules fro
 	has($body, 'Keep notes under 300 characters.');
 	has($body, 'Please agree to the house rules.');
 	lacks($body, 'Tell us your name', 'name is valid');
+	has($body, 'For groups over 8, please call us.', "field('guests', 'max')");
+	has($body, '<p class="error-count">7 problems</p>', 'validation::errors()');
+	list(, $body) = http('POST', "$base/visit", array('raster_form' => 'reservation.book', 'name' => 'Ana', 'email' => 'a@b.co', 'date' => '2026-10-07', 'guests' => '0', 'terms' => '1'));
+	lacks($body, 'For groups over 8', "field('guests', 'max') only for max");
 	list(, $body) = http('POST', "$base/visit", array('raster_form' => 'reservation.book', 'name' => 'A', 'email' => '', 'date' => ''));
 	has($body, 'Tell us your name (2 to 80 letters).', 'minlength');
 	has($body, 'We need a valid email to confirm.', 'required');
+	foreach (array(array('guests' => '0'), array('guests' => 'two'), array('date' => '2025-12-31'), array('date' => '31/12/2026')) as $bad) {
+		list(, $body) = http('POST', "$base/visit", array_merge(array('raster_form' => 'reservation.book', 'name' => 'Ana', 'email' => 'a@b.co', 'date' => '2026-10-07', 'guests' => '2', 'terms' => '1'), $bad));
+		has($body, isset($bad['guests']) ? 'Tables are for 1 to 8 guests.' : 'Pick a date between 2026 and 2030.', json_encode($bad));
+	}
 });
-test('D13', 'an application rule', function () use ($base) {
+test(array('D13', 'C19'), 'an application rule (its region runs before the form model)', function () use ($base) {
 	list(, $body) = http('POST', "$base/visit", array('raster_form' => 'reservation.book', 'name' => 'Ana', 'email' => 'ana@example.com', 'date' => '2026-10-05', 'guests' => '2', 'terms' => '1'));
 	has($body, 'We are closed on Mondays.');
 });
-test(array('D14', 'D19'), 'rule names from older Raster, two forms on one page', function () use ($base) {
+test(array('D14', 'D19', 'D23'), 'rule names from older Raster, two forms on one page', function () use ($base) {
 	list(, $body) = http('POST', "$base/visit", array('raster_form' => 'reservation.contact', 'email' => '', 'message' => 'Hi'));
 	has($body, 'Your email, please.');
 	lacks($body, 'That email does not look right.', 'email_format passes on empty');
 	lacks($body, 'We need a valid email to confirm.', 'the other form stays quiet');
 	lacks($body, 'Please enter a valid email address.', 'the footer form stays quiet');
-	list(, $body) = http('POST', "$base/visit", array('raster_form' => 'reservation.contact', 'email' => 'bad', 'message' => 'Hi'));
+	list(, $body) = http('POST', "$base/visit", array('raster_form' => 'reservation.contact', 'email' => 'bad', 'message' => 'Hi', 'website' => 'not a url'));
 	has($body, 'That email does not look right.');
+	has($body, 'A web address starts with https://', 'type="url"');
 });
 test('D16', 'the form is filled again, never with passwords', function () use ($base, $bad_booking) {
 	list(, $body) = http('POST', "$base/visit", $bad_booking);
@@ -386,10 +406,10 @@ test(array('D17', 'I1', 'I2', 'C23'), 'a valid booking: stored, emailed, redirec
 test('D20', 'forms filled with data and spa_ classes', function () use ($base) {
 	http('POST', "$base/about", array('raster_form' => 'newsletter.signup', 'email' => 'reader@example.com'));
 	preg_match('/token=([a-f0-9]{40})/', last_mail()['text'], $t);
-	http('GET', "$base/newsletter-confirm?token={$t[1]}");
+	http('GET', "$base/letters/confirm?token={$t[1]}");
 	database::instance('cms');
 	$token = R::findOne('subscriber', ' email = ? ', array('reader@example.com'))->token;
-	$body = http('GET', "$base/newsletter-unsubscribe?token=$token")[1];
+	$body = http('GET', "$base/letters/stop?token=$token")[1];
 	has($body, '<strong class="spa_email">reader@example.com</strong>');
 	has($body, 'name="token" value="'.$token.'"');
 });
@@ -427,7 +447,7 @@ test(array('E7', 'E9', 'E10', 'E11'), 'filter links, order, limit, template filt
 	lacks($featured[1], 'Americano', 'featured=1');
 	has($featured[1], 'Brownie');
 });
-test(array('E8', 'K1'), 'pagination for collections and for models', function () use ($base) {
+test(array('E8', 'K1', 'E9', 'E24'), 'pagination for collections and for models', function () use ($base) {
 	$page1 = http('GET', "$base/menu")[1];
 	has($page1, 'page 1 of 2');
 	has($page1, '<a class="page disabled" href="'.$base.'/menu">&larr;</a>');
@@ -438,6 +458,11 @@ test(array('E8', 'K1'), 'pagination for collections and for models', function ()
 	has($page2, '<a class="page disabled" href="'.$base.'/menu/menu_page/2">&rarr;</a>');
 	has(http('GET', "$base/menu/menu_items/category/cakes")[1], '<h1>Menu</h1>');
 	lacks(http('GET', "$base/menu/menu_items/category/cakes")[1], 'menu_page/2', 'filters shrink the pages');
+	$ordering = between(http('GET', "$base/lab")[1], 'ordering');
+	check(preg_match('#<ol class="priciest">\s*<li>Crème brûlée 18</li>\s*<li>Flat white 14</li></ol>#', $ordering), "order=-price: $ordering");
+	has($ordering, 'Opening day', 'order=oldest');
+	lacks($ordering, 'coffee has pages', 'pagination follows the filter argument');
+	has($ordering, 'the menu has 2 pages');
 	$lab = http('GET', "$base/lab?page=3")[1];
 	has(between($lab, 'guestbook'), '<li class="guest">Gabi</li>');
 	has(between($lab, 'guestbook'), '<a class="page current" href="'.$base.'/lab?page=3">3</a>');
@@ -455,6 +480,8 @@ test(array('E2', 'E14', 'E15', 'M4'), 'site-wide fields, revisions, empty values
 	mcp($base, 'update_page', array('page' => 'site', 'fields' => array('site_name' => 'Café Raster')));
 	has(http('GET', "$base/")[1], 'Café Raster</a>');
 	has(http('GET', "$base/journal")[1], 'Café Raster</a>');
+	mcp($base, 'update_page', array('page' => '/about', 'fields' => array('body' => '<p>We <em>love</em> <a href="https://example.com">coffee</a>.</p>')));
+	has(http('GET', "$base/about")[1], '<p>We <em>love</em> <a href="https://example.com">coffee</a>.</p>', 'values can be HTML');
 	mcp($base, 'update_page', array('page' => '/about', 'fields' => array('heading' => 'Our story')));
 	mcp($base, 'update_page', array('page' => 'about', 'fields' => array('heading' => '')));
 	has(http('GET', "$base/about")[1], '<h1>About us</h1>', 'an empty value shows the default');
@@ -474,7 +501,9 @@ test('E16', 'a new annotation becomes a new column in development', function () 
 // ## G. Accounts
 
 test(array('G18', 'G6'), 'no cookies for visitors; protected pages send them to log in', function () use ($base) {
-	check(cookie_from(http('GET', "$base/")[2]) === '', 'visitor got a cookie');
+	list(, $home, $headers) = http('GET', "$base/");
+	check(cookie_from($headers) === '', 'visitor got a cookie');
+	has($home, '<a href="'.$base.'/login">Log in</a>', 'if.logged_out');
 	list($status, , $headers) = http('GET', "$base/members");
 	same(303, $status);
 	same("$base/login?next=%2Fmembers", header_value($headers, 'Location'));
@@ -483,6 +512,7 @@ test(array('G1', 'G2', 'G3', 'G9', 'D15'), 'sign up', function () use ($base) {
 	list(, $body) = http('POST', "$base/register", array('raster_form' => 'authentication.register', 'email' => 'maria@example.com', 'password' => 'short', 'password_again' => 'other'));
 	has($body, 'Use at least 8 characters.');
 	has($body, 'The passwords are different.');
+	has(http('POST', "$base/register", array('raster_form' => 'authentication.register', 'email' => 'nine@example.com', 'password' => 'ninechars', 'password_again' => 'ninechars'))[1], 'For this café, passwords need at least 10 characters.', 'password_min_length');
 	list($status, , $headers) = http('POST', "$base/register", array('raster_form' => 'authentication.register', 'name' => 'Maria <i>M</i>', 'email' => 'maria@example.com', 'password' => 'long password', 'password_again' => 'long password'));
 	same(303, $status);
 	same("$base/members?done=registered", header_value($headers, 'Location'));
@@ -501,6 +531,8 @@ test(array('G4', 'G5', 'G8', 'C10', 'D2', 'D22'), 'log in, next, flags, session 
 	$members = http('GET', "$base/members", null, array("Cookie: $cookie"))[1];
 	check(preg_match('/Your session number is (\d+)\./', $members, $m) && $m[1] > 0, 'print.session.uid');
 	has($members, '<a href="'.$base.'/account">Account</a>');
+	has($members, 'Your card is active.', 'if.is_member');
+	lacks($members, 'You run this place.', 'if.is_admin');
 	lacks($members, '>Staff</a>');
 	lacks($members, 'Log in</a>');
 	$token = token_in($members);
@@ -540,23 +572,29 @@ test(array('G10', 'G11', 'G13'), 'account changes and logging out', function () 
 	same(303, http('GET', "$base/members", null, array("Cookie: $a"))[0], 'logged out');
 });
 test(array('G12'), 'forgot and reset by email', function () use ($base) {
-	same(303, http('POST', "$base/forgot", array('raster_form' => 'authentication.forgot', 'email' => 'maria@example.com'))[0]);
+	list($status, , $headers) = http('POST', "$base/forgot", array('raster_form' => 'authentication.forgot', 'email' => 'maria@example.com'));
+	same(303, $status);
+	has(http('GET', header_value($headers, 'Location'))[1], 'If there is an account with that email, a reset link is on its way.');
 	$mail = last_mail();
+	has($mail['text'], "$base/password/new?token=", 'reset_page setting');
 	same('Reset your Raster Café password', $mail['subject']);
 	has($mail['html'], 'src="'.$base.'/demo/views/cafe/img/logo.svg"', 'relative images become absolute');
 	check(preg_match('/token=([a-f0-9]{48})/', $mail['text'], $t), 'reset link');
 	same(303, http('POST', "$base/forgot", array('raster_form' => 'authentication.forgot', 'email' => 'nobody@example.com'))[0], 'same answer for unknown emails');
-	has(http('GET', "$base/reset?token=0000")[1], 'This link has expired or was already used.');
-	has(http('POST', "$base/reset?token={$t[1]}", array('raster_form' => 'authentication.reset', 'token' => $t[1], 'password' => 'reset password', 'password_again' => 'nope'))[1], 'The passwords are different.');
-	list($status, , $headers) = http('POST', "$base/reset?token={$t[1]}", array('raster_form' => 'authentication.reset', 'token' => $t[1], 'password' => 'reset password', 'password_again' => 'reset password'));
+	has(http('GET', "$base/password/new?token=0000")[1], 'This link has expired or was already used.');
+	has(http('POST', "$base/password/new?token={$t[1]}", array('raster_form' => 'authentication.reset', 'token' => $t[1], 'password' => 'reset password', 'password_again' => 'nope'))[1], 'The passwords are different.');
+	list($status, , $headers) = http('POST', "$base/password/new?token={$t[1]}", array('raster_form' => 'authentication.reset', 'token' => $t[1], 'password' => 'reset password', 'password_again' => 'reset password'));
 	same("$base/members?done=password_changed", header_value($headers, 'Location'));
-	has(http('GET', "$base/reset?token={$t[1]}")[1], 'This link has expired or was already used.');
+	has(http('GET', "$base/password/new?token={$t[1]}")[1], 'This link has expired or was already used.');
 	login($base, 'maria@example.com', 'reset password');
 });
 test('G14', 'five wrong passwords lock the account', function () use ($base) {
 	raster(array('user', 'locked@cafe.test', '--role=member', '--password=right password'));
 	for ($i = 0; $i < 5; $i++) http('POST', "$base/login", array('raster_form' => 'authentication.login', 'login' => 'locked@cafe.test', 'password' => 'wrong'));
 	has(http('POST', "$base/login", array('raster_form' => 'authentication.login', 'login' => 'locked@cafe.test', 'password' => 'right password'))[1], 'Wrong email or password.');
+	database::instance('cms');
+	R::exec("UPDATE user SET failed_at = ? WHERE email = 'locked@cafe.test'", array(date('Y-m-d H:i:s', time() - 16 * 60)));
+	same(303, http('POST', "$base/login", array('raster_form' => 'authentication.login', 'login' => 'locked@cafe.test', 'password' => 'right password'))[0], 'the lock lifts after 15 minutes');
 });
 test('G17', 'accounts from older versions', function () use ($root, $db) {
 	$code = 'require "'.$root.'/system/boot.php"; boot::$appname = "demo"; boot::cli(); authentication::connect();'
@@ -626,18 +664,23 @@ test('E21', 'media upload and crop', function () use ($base, $root) {
 
 // ## H. Newsletter
 
-test(array('H1', 'H2', 'H3', 'H4', 'H5'), 'double opt-in', function () use ($base) {
-	list($status, , $headers) = http('POST', "$base/journal", array('raster_form' => 'newsletter.signup', 'email' => 'fan@example.com'));
+test(array('H1', 'H2', 'H3', 'H4', 'H5', 'H11'), 'double opt-in', function () use ($base) {
+	list($status, , $headers) = http('POST', "$base/journal", array('raster_form' => 'newsletter.signup', 'email' => 'fan@example.com', 'name' => 'Fan Club'));
+	database::instance('cms');
+	same('Fan Club', R::findOne('subscriber', ' email = ? ', array('fan@example.com'))->name, 'the optional name is kept');
 	same("$base/journal?done=check_email", header_value($headers, 'Location'));
 	has(http('GET', "$base/journal?done=check_email")[1], 'Almost there: check your inbox to confirm.');
 	$mail = last_mail();
 	same('Confirm your Raster Café letters', $mail['subject']);
+	has($mail['text'], "$base/letters/confirm?token=", 'newsletter_confirm_page setting');
 	preg_match('/token=([a-f0-9]{40})/', $mail['text'], $t);
 	$count = count(mails());
 	same("$base/journal?done=check_email", header_value(http('POST', "$base/journal", array('raster_form' => 'newsletter.signup', 'email' => 'reader@example.com'))[2], 'Location'), 'the same answer for subscribers');
 	same($count, count(mails()), 'no mail to people already subscribed');
-	has(http('GET', "$base/newsletter-confirm?token={$t[1]}")[1], 'Letters go to fan@example.com.');
-	has(http('GET', "$base/newsletter-confirm?token=".str_repeat('a', 40))[1], 'This link is not valid');
+	$confirm = http('GET', "$base/letters/confirm?token={$t[1]}")[1];
+	has($confirm, '<h1>You are subscribed</h1>');
+	has($confirm, 'Letters go to fan@example.com.');
+	has(http('GET', "$base/letters/confirm?token=".str_repeat('a', 40))[1], 'This link is not valid');
 	has(http('GET', "$base/")[1], '2 readers get our letters.');
 });
 test(array('H6', 'H9'), 'sending an issue', function () use ($base) {
@@ -657,10 +700,14 @@ test(array('H6', 'H9'), 'sending an issue', function () use ($base) {
 	same('Our first letter', $issue['subject']);
 	foreach (array('<form', '<script', '<nav', '<base') as $gone) lacks($issue['html'], $gone);
 	has($issue['html'], 'href="'.$base.'/journal"');
-	check(preg_match('#href="'.preg_quote($base, '#').'/newsletter-unsubscribe\?token=[a-f0-9]{40}"#', $issue['html']), 'per-reader unsubscribe link');
+	check(preg_match('#href="'.preg_quote($base, '#').'/letters/stop\?token=[a-f0-9]{40}"#', $issue['html']), 'per-reader unsubscribe link');
 	check($sent[0]['html'] !== $sent[1]['html'], 'each reader has their own link');
 	has(raster(array('send', '/journal/journal_item/opening-day'), array('RASTER_URL' => "$base/"))[1], 'was already sent');
-	same(0, raster(array('send', '/journal/journal_item/opening-day', '--again', '--dry-run'), array('RASTER_URL' => "$base/"))[0]);
+	$before = count(mails());
+	list($code, $out) = raster(array('send', '/journal/journal_item/opening-day', '--again'), array('RASTER_URL' => "$base/"));
+	same(0, $code, $out);
+	same($before + 2, count(mails()), '--again sends again');
+	has(raster(array('send', '/about', '--dry-run'), array('RASTER_URL' => "$base/"))[1], 'the page has no unsubscribe link');
 });
 test(array('H7', 'H8'), 'unsubscribing', function () use ($base) {
 	$issue = last_mail();
@@ -670,7 +717,7 @@ test(array('H7', 'H8'), 'unsubscribing', function () use ($base) {
 	has($page, '<button>Unsubscribe</button>');
 	has(http('POST', $u[1], 'List-Unsubscribe=One-Click', array('Content-Type: application/x-www-form-urlencoded'))[1], 'You are unsubscribed');
 	has(http('GET', $u[1])[1], 'You are unsubscribed', 'stays unsubscribed');
-	has(http('GET', "$base/newsletter-unsubscribe?token=".str_repeat('b', 40))[1], 'This link is not valid');
+	has(http('GET', "$base/letters/stop?token=".str_repeat('b', 40))[1], 'This link is not valid');
 });
 test('H10', 'single opt-in', function () use ($db, $maildir) {
 	$single = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'CAFE_DOUBLE_OPT_IN' => 'off'));
@@ -689,29 +736,55 @@ test('G15', 'registration off', function () use ($db, $maildir) {
 
 // ## I. Mail over SMTP
 
-test(array('I3', 'I4'), 'SMTP', function () use ($root, $tmp) {
-	$port = free_port();
-	$transcript = "$tmp/smtp.log";
-	$smtp = proc_open(array(PHP_BINARY, "$root/tests/fake_smtp.php", (string)$port, $transcript), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes);
-	for ($i = 0; $i < 100 && !@fsockopen('127.0.0.1', $port); $i++) usleep(50000);
-	try {
-		$send = function ($dsn) use ($root) {
-			$code = 'require "'.$root.'/system/boot.php"; boot::$appname = "demo"; boot::cli();'
-				.' echo mail::send_view("_email/contact", "owner@cafe.test", array("email" => "a@b.co", "message" => "Hi\n.\nDot line")) ? "sent" : "failed: ".mail::$last_error;';
-			return shell_exec('RASTER_MAIL='.escapeshellarg($dsn).' RASTER_MAIL_FROM='.escapeshellarg('Café <hello@cafe.test>').' '.escapeshellarg(PHP_BINARY).' -r '.escapeshellarg($code).' 2>&1');
-		};
-		same('sent', $send("smtp://user:pass@127.0.0.1:$port"), 'localhost may skip TLS');
-		$log = file_get_contents($transcript);
-		has($log, 'C: AUTH LOGIN');
-		has($log, 'C: '.base64_encode('user'));
-		has($log, 'C: MAIL FROM:<hello@cafe.test>');
-		has($log, 'C: RCPT TO:<owner@cafe.test>');
-		has($log, 'From: Café <hello@cafe.test>');
-		has($send("smtp://user:pass@127.0.0.2:$port"), 'does not offer STARTTLS');
-		same('sent', $send("smtp://user:pass@127.0.0.2:$port?insecure=1"));
-	} finally {
-		proc_terminate($smtp);
-	}
+test(array('I3', 'I4', 'I8', 'I9'), 'SMTP: plain on localhost, STARTTLS and smtps elsewhere', function () use ($root, $tmp) {
+	// a certificate for 127.0.0.2, trusted through openssl.cafile
+	$cert = "$tmp/smtp-cert.pem";
+	exec('openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=127.0.0.2 -addext subjectAltName=IP:127.0.0.2 -keyout '.escapeshellarg($cert).' -out '.escapeshellarg("$cert.crt").' 2>/dev/null', $o, $code);
+	same(0, $code, 'openssl');
+	file_put_contents($cert, file_get_contents("$cert.crt"), FILE_APPEND);
+	$smtp = function ($mode, $host) use ($root, $tmp, $cert) {
+		$port = free_port();
+		$transcript = "$tmp/smtp-$mode-$host.log";
+		$process = proc_open(array(PHP_BINARY, "$root/tests/fake_smtp.php", (string)$port, $transcript, $mode, $cert, $host), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes);
+		for ($i = 0; $i < 100 && !@fsockopen($host, $port); $i++) usleep(50000);
+		$GLOBALS['servers'][] = $process;
+		return array($port, $transcript);
+	};
+	$send = function ($dsn, $from = true) use ($root, $cert) {
+		$code = 'require "'.$root.'/system/boot.php"; boot::$appname = "demo"; boot::cli();'
+			.' echo mail::send_view("_email/contact", "owner@cafe.test", array("email" => "a@b.co", "message" => "Hi")) ? "sent" : "failed: ".mail::$last_error;';
+		$env = 'RASTER_MAIL='.escapeshellarg($dsn).($from ? ' RASTER_MAIL_FROM='.escapeshellarg('Café <hello@cafe.test>') : ' RASTER_MAIL_FROM=');
+		return shell_exec($env.' '.escapeshellarg(PHP_BINARY).' -d openssl.cafile='.escapeshellarg("$cert.crt").' -r '.escapeshellarg($code).' 2>&1');
+	};
+	// plain text is fine on this machine
+	list($port, $log) = $smtp('plain', '127.0.0.1');
+	same('sent', $send("smtp://user:pass@127.0.0.1:$port"), 'localhost may skip TLS');
+	$transcript = file_get_contents($log);
+	has($transcript, 'AUTH IN PLAIN TEXT');
+	has($transcript, 'C: '.base64_encode('user'));
+	has($transcript, 'C: MAIL FROM:<hello@cafe.test>');
+	has($transcript, 'C: RCPT TO:<owner@cafe.test>');
+	has($transcript, 'From: Café <hello@cafe.test>');
+	// but not to another host, unless you insist
+	list($port, $log) = $smtp('plain', '127.0.0.2');
+	has($send("smtp://user:pass@127.0.0.2:$port"), 'does not offer STARTTLS');
+	lacks((string)@file_get_contents($log), 'C: AUTH', 'no password sent in plain text');
+	same('sent', $send("smtp://user:pass@127.0.0.2:$port?insecure=1"));
+	// STARTTLS upgrades before the password
+	list($port, $log) = $smtp('starttls', '127.0.0.2');
+	same('sent', $send("smtp://user:pass@127.0.0.2:$port"));
+	$transcript = file_get_contents($log);
+	has($transcript, 'TLS STARTED');
+	has($transcript, 'AUTH OVER TLS');
+	lacks($transcript, 'AUTH IN PLAIN TEXT');
+	// smtps is TLS from the first byte
+	list($port, $log) = $smtp('smtps', '127.0.0.2');
+	same('sent', $send("smtps://user:pass@127.0.0.2:$port"));
+	has(file_get_contents($log), 'AUTH OVER TLS');
+	// the sender from config mail_from when RASTER_MAIL_FROM is not set
+	list($port, $log) = $smtp('plain', '127.0.0.1');
+	same('sent', $send("smtp://127.0.0.1:$port", false));
+	has(file_get_contents($log), 'From: Raster Café <hello@cafe.test>');
 });
 
 // ## J. Languages
@@ -724,8 +797,8 @@ test(array('J1', 'J2', 'J3', 'J4', 'J5'), 'languages', function () use ($base) {
 	has(between($ro, 'language'), 'Bine ați venit la Raster Café');
 	has($ro, '>Meniu</a>');
 	has($ro, '<a class="lang active" href="'.$base.'/lab?lang=ro">ro</a>');
-	has(implode("\n", $headers), 'Set-Cookie: lang=ro');
-	has(http('GET', "$base/lab", null, array('Cookie: lang=ro'))[1], '>Meniu</a>');
+	has(implode("\n", $headers), 'Set-Cookie: cafe_lang=ro');
+	has(http('GET', "$base/lab", null, array('Cookie: cafe_lang=ro'))[1], '>Meniu</a>');
 	has(http('GET', "$base/lab", null, array('Accept-Language: ro-RO,ro;q=0.9,en;q=0.5'))[1], '>Meniu</a>');
 	has(http('GET', "$base/lab", null, array('Accept-Language: de-DE'))[1], '>Menu</a>', 'unknown languages fall back');
 });
@@ -755,7 +828,7 @@ test('M4', 'every MCP tool', function () use ($base) {
 	$urls = array_map(function ($p) { return $p['url']; }, $overview['pages']);
 	foreach (array('site', '/', '/about', '/menu', '/docs/setup') as $url) check(in_array($url, $urls), "overview lacks $url");
 	$collections = array_map(function ($c) { return $c['name']; }, $overview['collections']);
-	same(array('events', 'journal', 'menu'), $collections);
+	same(array('events', 'faq', 'journal', 'menu'), $collections);
 	same('About us', mcp($base, 'get_page', array('page' => '/about'))['fields']['heading']);
 	$item = mcp($base, 'create_item', array('collection' => 'journal', 'fields' => array('title' => 'MCP post', 'author' => 'Agent')));
 	same('Agent', mcp($base, 'get_item', array('collection' => 'journal', 'id' => $item['id']))['author']);
@@ -787,6 +860,7 @@ test('M6', 'MCP over stdio', function () use ($root) {
 // ## F. Schema, and N. the command line
 
 test(array('F1', 'F2', 'F4', 'F5'), 'schema: status, check, rename, drop', function () use ($base, $views) {
+	http('GET', "$base/faq");
 	list($code, $out) = raster(array('schema', '--json'));
 	same(0, $code, $out);
 	$status = json_decode($out, true);
@@ -823,7 +897,15 @@ test(array('N1', 'N2', 'N3', 'E22'), 'help, lint and render', function () use ($
 		has($out, "'users' is reserved");
 		has($out, 'write it exactly as');
 	});
-	has(raster(array('lint', '--all-themes'))[1], "theme 'cafe'");
+	has(raster(array('lint', '--all-themes'))[1], "themes 'cafe', 'print'");
+	has(raster(array('lint', '--theme=print'))[1], "No errors, 0 warning(s) in theme 'print' (1 views)");
+	// warnings: forms nobody handles, alerts nobody raises, emails without a view
+	with_file("$views/zz-warn.html", '<form method="post"><input name="x"></form><!-- print.validation.alert(\'nobody_raises_this\') -->x<!-- /print.validation.alert(\'nobody_raises_this\') -->', function () {
+		list($code, $out) = raster(array('lint'));
+		same(0, $code, 'warnings are not errors');
+		has($out, 'no model handles it');
+		has($out, "No model raises 'nobody_raises_this'");
+	});
 	list($code, $out) = raster(array('render', '/about'));
 	same(0, $code);
 	has($out, '<h1>About us</h1>');
@@ -839,6 +921,200 @@ test('N4', 'serve', function () use ($root) {
 		proc_terminate($process);
 		exec("pkill -f 'php -S 127.0.0.1:$port' 2>/dev/null");
 	}
+});
+
+// ## More routing, engine and CMS features
+
+test(array('A13', 'C26'), 'a custom 404 page and the route_not_found event', function () use ($base) {
+	list($status, $body, $headers) = http('GET', "$base/no/such/page");
+	same(404, $status);
+	has($body, '<h1>We looked everywhere</h1>');
+	same('yes', header_value($headers, 'X-Cafe-Missing'));
+	same(null, header_value(http('GET', "$base/about")[2], 'X-Cafe-Missing'));
+});
+test('A14', 'a route to a view in another theme', function () use ($base) {
+	list($status, $body) = http('GET', "$base/print/menu");
+	same(200, $status);
+	has($body, '<title>Menu (print)</title>');
+	has($body, "<base href='$base/demo/views/print/'");
+	has($body, '<tr><td>Flat white</td><td>14 lei</td></tr>');
+	same(200, http('GET', "$base/demo/views/print/print.css")[0], 'the other theme\'s assets');
+});
+test('A15', 'rewrite off: links go through index.php', function () use ($db, $maildir) {
+	$plain = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'CAFE_REWRITE' => 'off'));
+	list($status, $body) = http('GET', "$plain/index.php/menu");
+	same(200, $status);
+	has($body, '<h1>Menu</h1>');
+	has($body, 'href="'.$plain.'/index.php/about"');
+	has($body, 'href="'.$plain.'/index.php/menu?lang=ro"', 'the language switcher');
+	has($body, 'href="'.$plain.'/index.php/menu/menu_page/2"', 'the pager');
+	lacks($body, 'href="'.$plain.'/about"');
+});
+test(array('C27', 'C28', 'C29', 'C30', 'C31', 'C32', 'C33'), 'scripts, dry placeholders, attributes, strings, named queries, events', function () use ($base) {
+	list(, $lab, $headers) = http('GET', "$base/lab/color/red");
+	has(between($lab, 'script'), '<script>var labColor = "red";</script>');
+	has(between($lab, 'dry-block'), '<p class="note">From the _bits partial.</p>');
+	lacks($lab, 'This placeholder is replaced');
+	$tricky = between($lab, 'tricky');
+	has($tricky, '<a class="tricky" href="https://example.com/?q=&quot;quotes&quot;&amp;x=&lt;y&gt;">escaped link</a>');
+	check(preg_match('#<a class="tricky"\s*>mock-up label</a>#', $tricky), "false removes the attribute and keeps the mock-up: $tricky");
+	has(between($lab, 'banner'), '<p class="banner">Open today</p>');
+	lacks($lab, 'Mock-up banner');
+	has(between($lab, 'named-query'), '<p class="coffee">Americano, Cortado, Espresso, Flat white</p>');
+	has(between($lab, 'named-query'), '<p class="injection">none</p>', 'placeholders are quoted');
+	same('yes', header_value($headers, 'X-Cafe-Done'), 'an app binding to a core event');
+	same('served', header_value($headers, 'X-Cafe'));
+	has(between($lab, 'events'), '<p class="secret">the secret is safe</p>');
+	lacks($lab, 'the secret leaked');
+});
+test('C34', 'event::unbind', function () {
+	event::bind('demo_test_event')->to('cafe', 'finish');
+	event::bind('demo_test_event')->to('cafe', 'keep');
+	event::unbind('demo_test_event')->from('cafe', 'keep');
+	event::dispatch('demo_test_event');
+	same(true, event::result('demo_test_event', 'cafe', 'finish'));
+	same(null, event::result('demo_test_event', 'cafe', 'keep'), 'unbound handlers do not run');
+	event::bind('loading_model_demo_thing')->to('cafe', 'deny');
+	same(false, event::dispatch('loading_model_demo_thing'));
+	event::unbind('loading_model_demo_thing')->from('cafe', 'deny');
+	same(true, event::dispatch('loading_model_demo_thing'), 'nothing left to say no');
+});
+test(array('C36', 'C37'), 'the log console, and strict templates off', function () use ($base, $db, $maildir, $views) {
+	$loud = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'CAFE_LOG' => 'on', 'CAFE_STRICT' => 'off'));
+	has(http('GET', "$loud/about")[1], 'console.log("info: Event: route_found");');
+	lacks(http('GET', "$base/about")[1], 'console.log', 'only when enabled');
+	// a misspelled annotation: lint error, ignored when rendering
+	with_file("$views/zz-broken.html", '<p><!--print.cafe.hours-->still here</p>', function () use ($loud, $base) {
+		same(500, http('GET', "$base/zz-broken")[0], 'strict by default in development');
+		list($status, $body, $headers) = http('GET', "$loud/zz-broken");
+		same(200, $status, 'strict off renders anyway');
+		has($body, 'still here');
+		same(null, header_value($headers, 'X-Raster-Template-Errors'));
+	});
+	// a block that is never closed can't be rendered at all
+	with_file("$views/zz-broken.html", '<p><!-- render.cafe.hours -->unclosed</p>', function () use ($loud) {
+		list($status, $body) = http('GET', "$loud/zz-broken");
+		same(500, $status);
+		has($body, 'This page could not be shown.');
+		lacks($body, 'render.cafe.hours', 'no details for visitors');
+	});
+});
+test(array('E23', 'B8'), 'raster_page_size for collections without their own, feed_limit', function () use ($base) {
+	for ($i = 1; $i <= 5; $i++) mcp($base, 'create_item', array('collection' => 'journal', 'fields' => array('title' => "Note $i", 'author' => 'Dan')));
+	$total = mcp($base, 'list_items', array('collection' => 'journal'))['total'];
+	check($total > 5 && $total <= 10, "journal has $total items");
+	same(5, substr_count(http('GET', "$base/journal")[1], '<article class="post">'), 'raster_page_size is 5');
+	same($total - 5, substr_count(http('GET', "$base/journal/journal_page/2")[1], '<article class="post">'));
+	$doc = new DOMDocument();
+	$doc->loadXML(http('GET', "$base/journal.rss")[1]);
+	same(5, $doc->getElementsByTagName('item')->length, 'feed_limit is 5');
+});
+test('E25', 'an item page falls back to the collection view', function () use ($base) {
+	http('GET', "$base/faq");
+	mcp($base, 'create_item', array('collection' => 'faq', 'fields' => array('question' => 'Do you have oat milk?', 'answer' => '<p>Always.</p>')));
+	list($status, $body) = http('GET', "$base/faq/faq_item/is-there-wifi");
+	same(200, $status);
+	has($body, 'Is there wifi?');
+	lacks($body, 'oat milk', 'only that item');
+	has(http('GET', "$base/faq/faq_item/do-you-have-oat-milk")[1], '<p>Always.</p>');
+	same(404, http('GET', "$base/faq/faq_item/nope")[0]);
+});
+test('E26', 'the built-in editor login page, toolbar assets and logout', function () use ($base, $views) {
+	rename("$views/login.html", "$views/login.html.off");
+	try {
+		list($status, $body) = http('GET', "$base/login");
+		same(200, $status);
+		has($body, '<title>Raster CMS Login</title>');
+		list($status, , $headers) = http('POST', "$base/login", array('raster_form' => 'cms.login', 'login' => 'staff@cafe.test', 'password' => 'staff password'));
+		same(303, $status);
+		check(cookie_from($headers) !== '', 'logged in');
+		has(http('POST', "$base/login", array('raster_form' => 'cms.login', 'login' => 'staff@cafe.test', 'password' => 'wrong password'))[1], 'Wrong username or password.');
+	} finally {
+		rename("$views/login.html.off", "$views/login.html");
+	}
+	same("$base/api/cms/style/output/true", json_decode(http('GET', "$base/api/cms/style")[1], true));
+	list(, $css, $headers) = http('GET', "$base/api/cms/style/output/true");
+	has(header_value($headers, 'Content-Type'), 'text/css');
+	check(strlen($css) > 100, 'the login style');
+	has(header_value(http('GET', "$base/api/cms/css")[2], 'Content-Type'), 'text/css');
+	has(header_value(http('GET', "$base/api/cms/script")[2], 'Content-Type'), 'application/javascript');
+	check(strlen(trim(http('GET', "$base/api/cms/script/raster_file/boot")[1])) < 10, 'only the bundled files');
+	// the toolbar's Log out posts with the token
+	$staff = login($base, 'staff@cafe.test', 'staff password');
+	$token = token_in(http('GET', "$base/about", null, array("Cookie: $staff"))[1]);
+	http('GET', "$base/api/cms/logout", null, array("Cookie: $staff"));
+	same(200, http('GET', "$base/staff", null, array("Cookie: $staff"))[0], 'GET does not log out');
+	same(403, http('POST', "$base/api/cms/logout", array('x' => 1), array("Cookie: $staff"))[0], 'the token is needed');
+	same(200, http('POST', "$base/api/cms/logout", array('csrf' => $token), array("Cookie: $staff"))[0]);
+	same(303, http('GET', "$base/staff", null, array("Cookie: $staff"))[0], 'logged out');
+});
+test(array('G19', 'G20', 'G21'), 'login_page, usernames, raster user defaults', function () use ($base, $db, $maildir) {
+	$k = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'CAFE_LOGIN_PAGE' => 'visit'));
+	same("$k/visit?next=%2Fmembers", header_value(http('GET', "$k/members")[2], 'Location'));
+	same(0, raster(array('user', 'barista', '--role=member', '--password=barista password'))[0]);
+	$cookie = login($base, 'barista', 'barista password');
+	same(200, http('GET', "$base/members", null, array("Cookie: $cookie"))[0], 'logged in by username');
+	list($code, $out) = raster(array('user', 'owner@cafe.test'));
+	same(0, $code, $out);
+	check(preg_match("/saved as admin\\. Password: ([a-f0-9]{18})/", $out, $m), "admin with a random password: $out");
+	$owner = login($base, 'owner@cafe.test', $m[1]);
+	has(http('GET', "$base/members", null, array("Cookie: $owner"))[1], 'You run this place.');
+});
+test(array('I6', 'I7'), 'mail: the default log folder and PHP mail()', function () use ($root, $tmp) {
+	$send = function ($env, $ini = '') use ($root) {
+		$code = 'require "'.$root.'/system/boot.php"; boot::$appname = "demo"; boot::cli();'
+			.' echo mail::send_view("_email/contact", "owner@cafe.test", array("email" => "a@b.co", "message" => "Hello there")) ? "sent" : "failed: ".mail::$last_error;';
+		return shell_exec($env.' '.escapeshellarg(PHP_BINARY).' '.$ini.' -r '.escapeshellarg($code).' 2>&1');
+	};
+	$before = count(glob("$root/demo/data/mail/*.eml") ?: array());
+	same('sent', $send('RASTER_MAIL='));
+	same($before + 1, count(glob("$root/demo/data/mail/*.eml") ?: array()), 'development logs to data/mail');
+	$out = "$tmp/sendmail.txt";
+	same('sent', $send('RASTER_MAIL=mail://', '-d '.escapeshellarg('sendmail_path=tee -a '.$out.' >/dev/null')));
+	$message = file_get_contents($out);
+	has($message, 'To: owner@cafe.test');
+	has($message, 'From: Raster Café <hello@cafe.test>');
+	has($message, 'Subject: =?UTF-8?B?');
+});
+test(array('J7', 'J8'), 'a language per domain, the cookie name', function () use ($base) {
+	has(http('GET', "$base/lab", null, array('Host: ro.localhost'))[1], '>Meniu</a>');
+	has(http('GET', "$base/lab", null, array('Host: localhost'))[1], '>Menu</a>');
+	$headers = http('GET', "$base/lab?lang=ro")[2];
+	has(implode("\n", $headers), 'Set-Cookie: cafe_lang=ro');
+	lacks(implode("\n", $headers), 'Set-Cookie: lang=');
+});
+test('L6', 'site_url in config', function () use ($db, $maildir) {
+	$k = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'CAFE_SITE_URL' => 'https://knob.example/'));
+	$body = http('GET', "$k/about", null, array('Host: evil.example'))[1];
+	has($body, 'href="https://knob.example/menu"');
+	lacks($body, 'evil.example');
+});
+test(array('M7', 'M8', 'M9'), 'MCP: invalid requests, versions, slugs, the token in config', function () use ($base, $db, $maildir) {
+	$call = function ($url, $token, $payload) {
+		return json_decode(http('POST', "$url/mcp", json_encode($payload), array("Authorization: Bearer $token", 'Content-Type: application/json'))[1], true);
+	};
+	same(-32600, $call($base, 'demo-token', array('jsonrpc' => '2.0', 'id' => 9))['error']['code']);
+	same('2025-06-18', $call($base, 'demo-token', array('jsonrpc' => '2.0', 'id' => 1, 'method' => 'initialize', 'params' => array('protocolVersion' => '1999-01-01')))['result']['protocolVersion'], 'unknown versions get the newest');
+	$item = mcp($base, 'create_item', array('collection' => 'journal', 'fields' => array('title' => 'Slug me', 'author' => 'Ana')));
+	same('a-better-slug', mcp($base, 'update_item', array('collection' => 'journal', 'id' => $item['id'], 'fields' => array('slug' => 'a-better-slug')))['slug']);
+	has(http('GET', "$base/journal/journal_item/a-better-slug")[1], 'Slug me');
+	mcp($base, 'update_item', array('collection' => 'journal', 'id' => $item['id'], 'fields' => array('enabled' => '0')));
+	same(404, http('GET', "$base/journal/journal_item/a-better-slug")[0], 'enabled is writable');
+	mcp($base, 'delete_item', array('collection' => 'journal', 'id' => $item['id']));
+	$k = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'CAFE_MCP_TOKEN' => 'knob-token'));
+	same(array(), $call($k, 'knob-token', array('jsonrpc' => '2.0', 'id' => 1, 'method' => 'ping'))['result']);
+	same(401, http('POST', "$k/mcp", '{}', array('Authorization: Bearer demo-token'))[0]);
+});
+test(array('F7', 'H12'), 'schema --drop --force, send without a title', function () use ($base) {
+	list($code, $out) = raster(array('schema', '--drop=faqpage.heading', '--force'));
+	same(0, $code, $out);
+	has(raster(array('schema'))[1], 'heading');
+	same(1, raster(array('schema', '--check'))[0], 'the templates still want it');
+	http('GET', "$base/faq");
+	same(0, raster(array('schema', '--check'))[0], 'development adds it back');
+	list($code, $out) = raster(array('send', '/hours.txt', '--dry-run'), array('RASTER_URL' => "$base/"));
+	same(2, $code, $out);
+	has($out, 'The page has no <title>');
 });
 
 // ## L. Environments, production, cache
@@ -875,8 +1151,8 @@ test(array('F3', 'F6', 'I5', 'L3', 'L4', 'L5', 'E13', 'J6'), 'production: frozen
 	same('miss', header_value(http('GET', "$prod/docs/setup")[2], 'X-Raster-Cache'));
 	same('hit', header_value(http('GET', "$prod/docs/setup")[2], 'X-Raster-Cache'));
 	same(null, header_value(http('GET', "$prod/about?x=1")[2], 'X-Raster-Cache'), 'query strings are not cached');
-	same('miss', header_value(http('GET', "$prod/about", null, array('Cookie: lang=ro'))[2], 'X-Raster-Cache'), 'one copy per language');
-	has(http('GET', "$prod/about", null, array('Cookie: lang=ro'))[1], '>Meniu</a>');
+	same('miss', header_value(http('GET', "$prod/about", null, array('Cookie: cafe_lang=ro'))[2], 'X-Raster-Cache'), 'one copy per language');
+	has(http('GET', "$prod/about", null, array('Cookie: cafe_lang=ro'))[1], '>Meniu</a>');
 	$boss = login($prod, 'boss@cafe.example', 'boss password');
 	same(null, header_value(http('GET', "$prod/about", null, array("Cookie: $boss"))[2], 'X-Raster-Cache'), 'logged in pages are not cached');
 	$code = 'require "'.$root.'/system/boot.php"; boot::$appname = "demo"; boot::cli(); cms_store::connect(); cms_store::update_page("aboutpage", "/about", array("heading" => "Cached no more"), array("heading"));';
@@ -910,6 +1186,20 @@ test(array('F3', 'F6', 'I5', 'L3', 'L4', 'L5', 'E13', 'J6'), 'production: frozen
 	check($key(true) !== $key(false), 'http and https share a cache entry');
 });
 
+test('L7', 'page cache: skipped paths, time to live, turned off', function () use ($tmp, $maildir) {
+	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => "$tmp/prod.sqlite", 'RASTER_URL' => 'https://cafe.example/', 'RASTER_MAIL' => "log://$maildir");
+	$short = server(free_port(), array_merge($env, array('CAFE_CACHE_TTL' => '1')));
+	http('GET', "$short/lab");
+	same(null, header_value(http('GET', "$short/lab")[2], 'X-Raster-Cache'), 'page_cache_skip');
+	http('GET', "$short/faq");
+	same('hit', header_value(http('GET', "$short/faq")[2], 'X-Raster-Cache'));
+	sleep(2);
+	same('miss', header_value(http('GET', "$short/faq")[2], 'X-Raster-Cache'), 'page_cache_ttl');
+	$off = server(free_port(), array_merge($env, array('CAFE_PAGE_CACHE' => 'off')));
+	http('GET', "$off/faq");
+	same(null, header_value(http('GET', "$off/faq")[2], 'X-Raster-Cache'), 'page_cache off');
+});
+
 // ## No PHP warnings, notices or deprecations on any request
 
 $log = is_file("$tmp/php-errors.log") ? file_get_contents("$tmp/php-errors.log") : '';
@@ -922,6 +1212,8 @@ if (preg_match_all('/PHP (Warning|Notice|Deprecated|Fatal error|Parse error):.*$
 $readme = file_get_contents("$root/demo/README.md");
 preg_match_all('/^\| ([A-Z]\d+) \|/m', $readme, $ids);
 $missing = array_diff($ids[1], array_keys($covered));
+$unknown = array_diff(array_keys($covered), $ids[1]);
+if ($unknown) $failed[] = 'tests name features that demo/README.md does not list: '.implode(', ', $unknown);
 echo "\n\n$passed passed, ".count($failed)." failed; ".(count($ids[1]) - count($missing))."/".count($ids[1])." features covered\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";
 if ($missing) echo "  Not covered: ".implode(', ', $missing)."\n";

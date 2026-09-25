@@ -4,6 +4,7 @@
     <title>Raster Café journal</title>
     <link><!-- print.feed.site_url /--></link>
     <description>News from the café</description>
+    <generator><!-- print.feed.generator -->Raster<!-- /print.feed.generator --></generator>
     <!-- render.feed.items('journal') -->
     <item>
       <title><!-- print.title -->Title<!-- /print.title --></title>
