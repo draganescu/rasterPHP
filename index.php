@@ -15,7 +15,7 @@ if (PHP_SAPI === 'cli-server') {
 	$apps = array();
 	foreach (glob(__DIR__.'/*/config', GLOB_ONLYDIR) as $dir) $apps[] = preg_quote(basename(dirname($dir)), '#');
 	$apps = implode('|', $apps ?: array('application'));
-	$blocked = '#(^|/)\.|^/(system|bin|tests|docs)(/|$)|^/('.$apps.')/(config|models|data|i18n)(/|$)|^/('.$apps.')/views/.*\.(html|rss|atom|xml|json|txt)$|\.(php|sqlite|sql|md)$|-(journal|wal|shm)$#i';
+	$blocked = '#(^|/)\.|^/(system|bin|tests)(/|$)|^/('.$apps.')/(config|models|data|i18n)(/|$)|^/('.$apps.')/views/.*\.(html|rss|atom|xml|json|txt)$|\.(php|sqlite|sql|md)$|-(journal|wal|shm)$#i';
 	if (preg_match($blocked, $path) && $path !== '/index.php') {
 		http_response_code(403);
 		exit('Forbidden');

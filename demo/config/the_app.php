@@ -15,3 +15,10 @@ config::set('events_page_size')->to(3);
 
 // text replaced in pages under /lab only (template::replace)
 template::instance()->replace('{{cafe}}', 'Raster Café', 'lab');
+
+// where reservations and contact messages go
+config::set('cafe_staff_email')->to('staff@cafe.test');
+
+// knobs the demo tests turn: CAFE_REGISTRATION=off, CAFE_DOUBLE_OPT_IN=off
+if (getenv('CAFE_REGISTRATION') === 'off') config::set('registration')->to(false);
+if (getenv('CAFE_DOUBLE_OPT_IN') === 'off') config::set('newsletter_double_opt_in')->to(false);

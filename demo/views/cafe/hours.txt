@@ -1,0 +1,4 @@
+Raster Café opening hours
+<!-- render.cafe.hours -->
+<!-- print.day -->Day<!-- /print.day -->: <!-- print.time -->time<!-- /print.time -->
+<!-- /render.cafe.hours -->

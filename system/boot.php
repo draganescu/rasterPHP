@@ -63,6 +63,16 @@ class boot {
 					return;
 				}
 			}
+			// helper classes live next to their model: cms_store in models/cms/store.php
+			if (preg_match('/^([a-z0-9]+)_([a-z0-9_]+)$/', $class, $m)) {
+				foreach (array(APPBASE, BASE) as $root) {
+					$file = $root.config::get('models_path').'/'.$m[1].'/'.$m[2].'.php';
+					if (file_exists($file)) {
+						require_once $file;
+						return;
+					}
+				}
+			}
 		});
 	}
 

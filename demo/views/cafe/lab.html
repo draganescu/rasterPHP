@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <!-- dry._layout.head /-->
+  <title>Lab</title>
+</head>
+<body>
+  <!-- dry._layout.header /-->
+  <main class="lab">
+    <h1>Lab: every engine feature on one page</h1>
+    <!-- render.cafe.prepare --><!-- /render.cafe.prepare -->
+
+    <section id="replace"><h2>template::replace</h2><p>Brewed at {{cafe}}.</p></section>
+
+    <section id="args"><h2>Literal arguments</h2>
+      <p><code><!-- print.cafe.specials(3, 'soup', true, -1, null) -->[]<!-- /print.cafe.specials(3, 'soup', true, -1, null) --></code></p>
+    </section>
+
+    <section id="nested"><h2>Rows with lists of rows</h2>
+      <!-- render.cafe.sections -->
+      <h3><!-- print.section -->Section<!-- /print.section --></h3>
+      <ul><!-- print.dishes --><li><!-- print.dish -->Dish<!-- /print.dish --></li><!-- /print.dishes --></ul>
+      <!-- /render.cafe.sections -->
+    </section>
+
+    <section id="empty"><h2>Empty list and false</h2>
+      <!-- render.cafe.nothing --><p class="nothing">You should not see this.</p><!-- /render.cafe.nothing -->
+      <!-- render.cafe.keep --><p class="kept">This mock-up stays because the model returned false.</p><!-- /render.cafe.keep -->
+      <p class="default"><!-- print.cafe.keep -->Default text stays too.<!-- /print.cafe.keep --></p>
+    </section>
+
+    <section id="escaping"><h2>Escaping</h2>
+      <p class="trusted"><!-- print.cafe.trusted_html /--></p>
+      <p class="escaped"><!-- print.cafe.escaped /--></p>
+    </section>
+
+    <section id="self-if"><h2>print.self and print.if</h2>
+      <p class="greeting"><!-- print.self.greeting -->Hi<!-- /print.self.greeting --></p>
+      <!-- print.if.has_specials --><p class="if-true">Specials today.</p><!-- /print.if.has_specials -->
+      <!-- print.if.sold_out --><p class="if-false">Sold out.</p><!-- /print.if.sold_out -->
+    </section>
+
+    <section id="repeated"><h2>The same tag twice</h2>
+      <!-- render.cafe.links --><p class="twice"><!-- print.url /--> and again <!-- print.url /--></p><!-- /render.cafe.links -->
+    </section>
+
+    <section id="attributes"><h2>Attributes</h2>
+      <!-- render.cafe.hours -->
+      <!-- print.+class.state --><span class="day"><!-- print.day -->Day<!-- /print.day --></span><!-- /print.+class.state -->
+      <em class="copy"><!-- print.self.greeting -->Hi<!-- /print.self.greeting --></em>
+      <!-- /render.cafe.hours -->
+    </section>
+
+    <section id="param"><h2>A key from the URL</h2><p class="color"><!-- print.cafe.color -->none<!-- /print.cafe.color --></p></section>
+
+    <section id="database"><h2>A bound query</h2><p class="bound"><!-- print.cafe.bound /--></p></section>
+
+    <section id="memory"><h2>Rendered into memory</h2>
+      <!-- render.cafe.remember --><span><!-- print.note -->note<!-- /print.note --></span><!-- /render.cafe.remember -->
+      <p class="recalled"><!-- print.cafe.recall -->nothing<!-- /print.cafe.recall --></p>
+    </section>
+
+    <section id="language"><h2>Language</h2>
+      <p class="language"><!-- print.i18n.language /--></p>
+      <p class="welcome"><!-- print.i18n.common('welcome') -->Welcome to Raster Café<!-- /print.i18n.common('welcome') --></p>
+    </section>
+
+    <section id="guestbook"><h2>A model that paginates itself</h2>
+      <ul><!-- render.cafe.guestbook --><li class="guest"><!-- print.guest -->Guest<!-- /print.guest --></li><!-- /render.cafe.guestbook --></ul>
+      <!-- render.pagination.pages('cafe.guestbook') --><!-- print.+class.state --><!-- print.@href.url --><a class="page" href="#"><!-- print.number -->1<!-- /print.number --></a><!-- /print.@href.url --><!-- /print.+class.state --><!-- /render.pagination.pages('cafe.guestbook') -->
+    </section>
+
+    <section id="remove"><h2>Mock-up</h2>
+      <!-- remove --><p class="mockup">Removed before anything runs <!-- print.cafe.does_not_exist /--></p><!-- /remove -->
+    </section>
+  </main>
+  <!-- dry._layout.footer /-->
+</body>
+</html>

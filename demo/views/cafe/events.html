@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <!-- dry._layout.head /-->
+  <title>Events</title>
+</head>
+<body>
+  <!-- dry._layout.header /-->
+  <main>
+    <h1><!-- print.cms.heading -->Events<!-- /print.cms.heading --></h1>
+    <!-- render.cms.events('order=date') -->
+    <article class="event">
+      <h2><!-- print.@href.raster_detail_link --><a href="events/events_item/jazz-night"><!-- print.title -->Jazz night<!-- /print.title --></a><!-- /print.@href.raster_detail_link --></h2>
+      <p class="meta"><!-- print.date -->2026-10-10<!-- /print.date --></p>
+      <div><!-- print.summary --><p>Live trio from eight.</p><!-- /print.summary --></div>
+    </article>
+    <!-- /render.cms.events('order=date') -->
+    <!-- render.pagination.links('cms.events') -->
+    <nav class="pager"><!-- print.+class.prev_state --><!-- print.@href.prev_url --><a class="page" href="#">&larr; Earlier</a><!-- /print.@href.prev_url --><!-- /print.+class.prev_state --> <!-- print.+class.next_state --><!-- print.@href.next_url --><a class="page" href="#">Later &rarr;</a><!-- /print.@href.next_url --><!-- /print.+class.next_state --></nav>
+    <!-- /render.pagination.links('cms.events') -->
+  </main>
+  <!-- dry._layout.footer /-->
+</body>
+</html>

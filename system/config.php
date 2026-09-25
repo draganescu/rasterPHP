@@ -171,15 +171,24 @@ class config {
 		// The Host header is chosen by the client, so loopback names
 		// (localhost, 127.0.0.1) only count for requests from this machine.
 		// On servers, set RASTER_ENV=production rather than relying on this.
-		$host = preg_replace('/:\d+$/', '', (string)$this->host);
 		$remote = isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : '127.0.0.1';
-		$from_this_machine = PHP_SAPI === 'cli' || in_array($remote, array('127.0.0.1', '::1'));
-		foreach ((array)$servers as $key => $environment) {
+		$this->environment = config::environment_for((string)$this->host, $remote, PHP_SAPI === 'cli', $servers);
+		return $this;
+	}
+
+	// The environment for a host, from the servers map. Loopback names only
+	// count when the request comes from this machine. Unlisted hosts are
+	// production.
+	static function environment_for($host, $remote_addr, $is_cli, $servers) {
+		$host = preg_replace('/:\d+$/', '', strtolower($host));
+		$from_this_machine = $is_cli || in_array($remote_addr, array('127.0.0.1', '::1'));
+		$environment = 'production';
+		foreach ((array)$servers as $key => $candidate) {
 			if(!preg_match("|^(".$key.")$|i", $host)) continue;
 			if(preg_match('/^(localhost|127\.0\.0\.1|\[?::1\]?)$/i', $host) && !$from_this_machine) continue;
-			$this->environment = $environment;
+			$environment = $candidate;
 		}
-		return $this;
+		return $environment;
 	}
 	
 	// some code i've stolen to detect automatically and safely and always where

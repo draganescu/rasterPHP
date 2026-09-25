@@ -18,7 +18,12 @@ php bin/raster lint               # after every template edit; exit 1 on errors
 php bin/raster schema             # what the CMS will store, compared with the database
 php bin/raster render /about      # print a page without a server (exit 1 on 4xx/5xx)
 php tests/run.php                 # framework test suite
+php tests/demo.php                # the demo café: every feature, end to end
 ```
+
+`demo/` is a complete example site that uses every feature (see
+`demo/README.md`). Run it with `RASTER_APP=demo php bin/raster serve`. When
+you're unsure how something is written, look there first.
 
 In development, a view with template errors, or with errors in the partials it
 includes, returns HTTP 500 listing the problems (header
@@ -38,6 +43,7 @@ application/
   views/<theme>/              views (.html, .rss, .xml, .json), css, images
   i18n/<lang>/<file>.php      translations
   data/                       SQLite, page cache, logged mail (never served)
+demo/                         the demo café, laid out the same way
 system/                       the framework and its bundled models
 media/                        uploads from the CMS
 ```
@@ -63,7 +69,12 @@ media/                        uploads from the CMS
 - Routes, for URLs that should render a differently named view
   (`application/config/the_routes.php`):
   `controller::route('blog/post')->to('post');`. Patterns are regular
-  expressions matched from the start of the path.
+  expressions matched from the start of the path. A literal route is a page
+  of its own, with its own page fields. `/blog/post/id/7` makes
+  `util::param('id')` return `7`.
+- **Several sites in one install:** each app folder has its own config,
+  models and views. `RASTER_APP=<folder>` picks one; the default is
+  `application`.
 
 ## Annotations
 
@@ -129,7 +140,25 @@ class products {
 Models return strings for `print` and lists of rows for `render`. HTML views
 print values unescaped, so use `util::e($value)` on user input. Models load on
 first use, so they can call each other directly (`mail::send_view(...)`,
-`validation::get()`).
+`validation::get()`). A helper class named `<model>_<name>` lives in
+`models/<model>/<name>.php` and loads the same way.
+
+A model that writes its own tables declares them, so production gets them
+from `raster schema --apply`:
+
+```php
+static function schema() {
+    return array('reservation' => array('name' => '', 'guests' => 0, 'created_at' => ''));
+}
+```
+
+SQL can live in files: `models/<model>/sql/<name>.sql` runs as
+`database::instance('<model>')-><name>($arg, …)`, with `?` placeholders bound
+to the arguments.
+
+Application events go in `config/the_events.php`:
+`event::bind('before_output')->to('cafe', 'stamp');`. Text can be replaced in
+the pages under a path: `template::instance()->replace('{{x}}', 'y', 'lab');`.
 
 Every public method of an application model is also JSON at
 `/api/<model>/<method>/<arg>/…`. Of the system models, only `cms` is

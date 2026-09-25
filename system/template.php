@@ -779,7 +779,8 @@ class template {
 			$rendered_tpl = preg_replace_callback('/<!-- \/?print\.([@+][a-zA-Z0-9_\-:]+\.)?([A-Za-z0-9_\-]+) \/?-->/', function ($m) {
 				return $m[2] === '' ? $m[0] : '';
 			}, $rendered_tpl);
-			// rows of a JSON view are list items
+			// rows of a text view are lines; rows of a JSON view are list items
+			if ($this->format === 'txt') $rendered_tpl = trim($rendered_tpl, "\r\n");
 			$rendered_data .= ($this->format === 'json' && $rendered_data !== '' ? ',' : '')."\n".$rendered_tpl;
 		}
 

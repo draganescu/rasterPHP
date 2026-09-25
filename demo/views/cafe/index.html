@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <!-- dry._layout.head /-->
+  <title>Raster Café</title>
+</head>
+<body>
+  <!-- dry._layout.header /-->
+  <main>
+    <section class="hero">
+      <h1><!-- print.cms.headline -->Good coffee, slow mornings.<!-- /print.cms.headline --></h1>
+      <div class="lede"><!-- print.cms.intro --><p>A small café where the menu, the events and this very sentence are edited in the page.</p><!-- /print.cms.intro --></div>
+      <p><a class="button" href="visit.html">Book a table</a></p>
+    </section>
+    <section>
+      <h2>Featured</h2>
+      <div class="cards">
+        <!-- render.cms.menu('featured=1&order=name&limit=3') -->
+        <article class="card">
+          <h3><!-- print.@href.raster_detail_link --><a href="menu/menu_item/flat-white"><!-- print.name -->Flat white<!-- /print.name --></a><!-- /print.@href.raster_detail_link --></h3>
+          <p><!-- print.description -->Double ristretto, steamed milk.<!-- /print.description --></p>
+          <p class="price"><!-- print.price -->14<!-- /print.price --> lei</p>
+        </article>
+        <!-- remove -->
+        <article class="card"><h3>Mock-up dish</h3><p>Only here while designing.</p></article>
+        <!-- /remove -->
+        <!-- /render.cms.menu('featured=1&order=name&limit=3') -->
+      </div>
+    </section>
+    <section>
+      <h2>Coming up</h2>
+      <ul class="list">
+        <!-- render.cms.events('order=date&limit=2') -->
+        <li><!-- print.@href.raster_detail_link --><a href="events/events_item/jazz-night"><!-- print.title -->Jazz night<!-- /print.title --></a><!-- /print.@href.raster_detail_link --> · <!-- print.date -->2026-10-10<!-- /print.date --></li>
+        <!-- /render.cms.events('order=date&limit=2') -->
+      </ul>
+    </section>
+  </main>
+  <!-- dry._layout.footer /-->
+</body>
+</html>

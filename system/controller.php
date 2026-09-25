@@ -303,7 +303,7 @@ class controller {
 			// and the partials it includes with dry
 			preg_match_all('/<!-- dry\.([a-z0-9_\-\/]+)\.[a-z0-9_\-]+ \/?-->/', $data, $dried);
 			foreach (array_unique($dried[1]) as $partial) {
-				$path = template::instance()->view_path($partial);
+				$path = controller::build_view_path($partial);
 				if (strpos($partial, '..') === false && file_exists($path)) $problems = array_merge($problems, $inspector->lint_path($path));
 			}
 			$errors = array_filter($problems, function ($p) { return $p['severity'] === 'error'; });
@@ -383,6 +383,13 @@ class controller {
 			
 			event::dispatch("before_print");
 			$template->_print($data, $model, $method);
+			// a print inside a repeated render block has one copy per row:
+			// fill them all with the same value
+			for ($copies = 0; $copies < 1000; $copies++) {
+				$template->set_current_block($model, $method, 'print');
+				if ($template->current_params['pos1'] === false) break;
+				$template->_print($data, $model, $method);
+			}
 			event::dispatch("after_print");
 		}
 		

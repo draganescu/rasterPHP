@@ -294,6 +294,8 @@ class raster_inspector {
 	protected function lint_blocks($blocks, &$problems, $render, $theme) {
 		foreach ($blocks as $block) {
 			$keyword = $block['keyword'];
+			// mock-up content is removed before anything runs
+			if ($keyword === 'remove') continue;
 			if ($keyword === 'print' && $render !== null) {
 				$this->lint_data_key($block, $problems, $render);
 			} elseif ($keyword === 'print' || $keyword === 'render') {
@@ -357,7 +359,7 @@ class raster_inspector {
 				$problems[] = self::problem('warning', $block, "{$block['raw']} has no default content; use <!-- print.cms.$method -->default<!-- /print.cms.$method --> so the field starts with a value");
 			}
 		}
-		if ($block['keyword'] === 'render' && $block['type'] === 'open' && trim(strip_tags($block['inner'])) === '' && strpos($block['inner'], '<!--') === false && strpos($block['inner'], '<') === false) {
+		if ($block['keyword'] === 'render' && $block['type'] === 'open' && trim($block['inner']) !== '' && trim(strip_tags($block['inner'])) === '' && strpos($block['inner'], '<!--') === false && strpos($block['inner'], '<') === false) {
 			$problems[] = self::problem('warning', $block, "{$block['raw']} is empty; render repeats its inner HTML once per item");
 		}
 	}
@@ -366,8 +368,9 @@ class raster_inspector {
 		$key = self::data_key($block['ref']);
 		if ($key['builtin']) return;
 		if (strpos($key['key'], '.') !== false) {
-			if (strpos($block['ref'], 'if.') === 0) return;
-			$problems[] = self::problem('warning', $block, "{$block['raw']} is inside <!-- {$render['name']} --> (line {$render['line']}): it runs as a model call after that block renders, and only its first copy is filled if the block repeats. Move it outside, or make it a key of the rows");
+			// model.method inside a render block runs after the block renders,
+			// once for every copy
+			if ($key['attribute'] === null) $this->lint_model_call($block, $problems);
 			return;
 		}
 		if ($key['attribute'] !== null) {
@@ -517,6 +520,26 @@ class raster_inspector {
 		}
 	}
 
+	// the routes in config/the_routes.php: pattern, view, theme, line
+	function routes() {
+		$file = APPBASE.'config/the_routes.php';
+		$routes = array();
+		if (!file_exists($file)) return $routes;
+		$code = '';
+		foreach (token_get_all(file_get_contents($file)) as $token) {
+			if (is_array($token) && in_array($token[0], array(T_COMMENT, T_DOC_COMMENT))) {
+				$code .= str_repeat("\n", substr_count($token[1], "\n"));
+			} else {
+				$code .= is_array($token) ? $token[1] : $token;
+			}
+		}
+		foreach (explode("\n", $code) as $n => $line) {
+			if (!preg_match('/route\(\s*([\'"])(.*?)\1\s*\)\s*->\s*to\(\s*([\'"])(.*?)\3\s*\)(?:\s*->\s*from\(\s*([\'"])(.*?)\5\s*\))?/', $line, $m)) continue;
+			$routes[] = array('pattern' => $m[2], 'view' => $m[4], 'theme' => isset($m[6]) && $m[6] !== '' ? $m[6] : $this->theme, 'line' => $n + 1, 'code' => $line);
+		}
+		return $routes;
+	}
+
 	// Checks routes in application/config/the_routes.php point at views
 	function lint_routes() {
 		$problems = array();
@@ -633,6 +656,17 @@ class raster_inspector {
 				'type' => cms::page_type($slug),
 				'fields' => $fields,
 			);
+		}
+		// literal routes (controller::route('specials')->to('menu')) are pages too:
+		// each URL keeps its own page fields
+		foreach ($this->routes() as $route) {
+			if (!preg_match('#^[a-z0-9_\-/]+$#', $route['pattern']) || $route['theme'] !== $theme) continue;
+			foreach ($pages as $page) {
+				if ($page['view'] !== $route['view'].$this->ext || !$page['fields']) continue;
+				$slug = '/'.trim($route['pattern'], '/');
+				$pages[] = array('view' => $page['view'], 'url' => $slug, 'slug' => $slug, 'type' => cms::page_type($slug), 'fields' => $page['fields']);
+				break;
+			}
 		}
 		ksort($collections);
 		if ($site) {
