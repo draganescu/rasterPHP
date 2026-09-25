@@ -359,7 +359,7 @@ test(array('D5', 'D6', 'D7', 'D8', 'D9', 'D10', 'D11', 'D12', 'D24', 'D25'), 'ru
 	list(, $body) = http('POST', "$base/visit", array('raster_form' => 'reservation.book', 'name' => 'A', 'email' => '', 'date' => ''));
 	has($body, 'Tell us your name (2 to 80 letters).', 'minlength');
 	has($body, 'We need a valid email to confirm.', 'required');
-	foreach (array(array('guests' => '0'), array('guests' => 'two'), array('date' => '2025-12-31'), array('date' => '31/12/2026')) as $bad) {
+	foreach (array(array('guests' => '0'), array('guests' => '5 people'), array('date' => '2025-12-31'), array('date' => '31/12/2026')) as $bad) {
 		list(, $body) = http('POST', "$base/visit", array_merge(array('raster_form' => 'reservation.book', 'name' => 'Ana', 'email' => 'a@b.co', 'date' => '2026-10-07', 'guests' => '2', 'terms' => '1'), $bad));
 		has($body, isset($bad['guests']) ? 'Tables are for 1 to 8 guests.' : 'Pick a date between 2026 and 2030.', json_encode($bad));
 	}
@@ -865,6 +865,7 @@ test(array('F1', 'F2', 'F4', 'F5'), 'schema: status, check, rename, drop', funct
 	same(0, $code, $out);
 	$status = json_decode($out, true);
 	same(false, $status['drift'], $out);
+	mcp($base, 'update_page', array('page' => '/about', 'fields' => array('heading' => 'Our story')));
 	$original = file_get_contents("$views/about.html");
 	with_file("$views/about.html", str_replace(array('print.cms.heading', '/print.cms.heading'), array('print.cms.title', '/print.cms.title'), $original), function () use ($base) {
 		http('GET', "$base/about");
@@ -872,9 +873,11 @@ test(array('F1', 'F2', 'F4', 'F5'), 'schema: status, check, rename, drop', funct
 		list(, $out) = raster(array('schema'));
 		has($out, '--rename=aboutpage.heading:title');
 		same(0, raster(array('schema', '--rename=aboutpage.heading:title'))[0]);
-		has(http('GET', "$base/about")[1], '<h1>About us</h1>');
+		has(http('GET', "$base/about")[1], '<h1>Our story</h1>', 'the content moved');
 	});
 	raster(array('schema', '--rename=aboutpage.title:heading', '--drop=aboutpage.title'));
+	has(http('GET', "$base/about")[1], '<h1>Our story</h1>', 'and back');
+	mcp($base, 'update_page', array('page' => '/about', 'fields' => array('heading' => 'About us')));
 	list($code, $out) = raster(array('schema', '--drop=aboutpage.heading'));
 	same(1, $code);
 	has($out, 'is used by the templates');
@@ -947,7 +950,8 @@ test('A15', 'rewrite off: links go through index.php', function () use ($db, $ma
 	has($body, '<h1>Menu</h1>');
 	has($body, 'href="'.$plain.'/index.php/about"');
 	has($body, 'href="'.$plain.'/index.php/menu?lang=ro"', 'the language switcher');
-	has($body, 'href="'.$plain.'/index.php/menu/menu_page/2"', 'the pager');
+	has($body, 'href="'.$plain.'/index.php/menu/menu_page/2"', 'the collection pager');
+	has(http('GET', "$plain/index.php/lab")[1], 'href="'.$plain.'/index.php/lab?page=2"', 'a model\'s pager');
 	lacks($body, 'href="'.$plain.'/about"');
 });
 test(array('C27', 'C28', 'C29', 'C30', 'C31', 'C32', 'C33'), 'scripts, dry placeholders, attributes, strings, named queries, events', function () use ($base) {
@@ -1036,8 +1040,12 @@ test('E26', 'the built-in editor login page, toolbar assets and logout', functio
 	list(, $css, $headers) = http('GET', "$base/api/cms/style/output/true");
 	has(header_value($headers, 'Content-Type'), 'text/css');
 	check(strlen($css) > 100, 'the login style');
-	has(header_value(http('GET', "$base/api/cms/css")[2], 'Content-Type'), 'text/css');
-	has(header_value(http('GET', "$base/api/cms/script")[2], 'Content-Type'), 'application/javascript');
+	list(, $css, $headers) = http('GET', "$base/api/cms/css");
+	has(header_value($headers, 'Content-Type'), 'text/css');
+	has($css, '#raster_tools');
+	list(, $js, $headers) = http('GET', "$base/api/cms/script");
+	has(header_value($headers, 'Content-Type'), 'application/javascript');
+	has($js, 'Raster_Admin.system');
 	check(strlen(trim(http('GET', "$base/api/cms/script/raster_file/boot")[1])) < 10, 'only the bundled files');
 	// the toolbar's Log out posts with the token
 	$staff = login($base, 'staff@cafe.test', 'staff password');
@@ -1186,11 +1194,13 @@ test(array('F3', 'F6', 'I5', 'L3', 'L4', 'L5', 'E13', 'J6'), 'production: frozen
 	check($key(true) !== $key(false), 'http and https share a cache entry');
 });
 
-test('L7', 'page cache: skipped paths, time to live, turned off', function () use ($tmp, $maildir) {
+test(array('L7', 'L3'), 'page cache: skipped paths, time to live, turned off', function () use ($tmp, $maildir) {
 	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => "$tmp/prod.sqlite", 'RASTER_URL' => 'https://cafe.example/', 'RASTER_MAIL' => "log://$maildir");
 	$short = server(free_port(), array_merge($env, array('CAFE_CACHE_TTL' => '1')));
 	http('GET', "$short/lab");
 	same(null, header_value(http('GET', "$short/lab")[2], 'X-Raster-Cache'), 'page_cache_skip');
+	http('GET', "$short/login");
+	same(null, header_value(http('GET', "$short/login")[2], 'X-Raster-Cache'), 'the login page is never cached');
 	http('GET', "$short/faq");
 	same('hit', header_value(http('GET', "$short/faq")[2], 'X-Raster-Cache'));
 	sleep(2);

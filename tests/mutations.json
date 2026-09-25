@@ -1,0 +1,284 @@
+[
+ {
+  "name": "C16-replace-unscoped",
+  "file": "system/template.php",
+  "search": "if(preg_match(\"%\".$where.\"%\", config::get('uri_string')))",
+  "replace": "if(true)"
+ },
+ {
+  "name": "G3-password_short-in-register",
+  "file": "system/models/authentication/authentication.php",
+  "search": "$password = (string)util::post('password');\n\t\tif (strlen($password) < (int)config::get('password_min_length', 8)) {\n\t\t\t$v->raise('password_short');\n\t\t\treturn $this->form_again();\n\t\t}\n\t\t$name",
+  "replace": "$password = (string)util::post('password');\n\t\t$name"
+ },
+ {
+  "name": "G8-logged_out-always-false",
+  "file": "system/models/authentication/authentication.php",
+  "search": "'logged_out' => !$user",
+  "replace": "'logged_out' => false"
+ },
+ {
+  "name": "G8-is_admin-always-false",
+  "file": "system/models/authentication/authentication.php",
+  "search": "'is_admin' => self::can('admin')",
+  "replace": "'is_admin' => false"
+ },
+ {
+  "name": "G8-is_member-always-false",
+  "file": "system/models/authentication/authentication.php",
+  "search": "'is_member' => self::can('member')",
+  "replace": "'is_member' => false"
+ },
+ {
+  "name": "F4-rename-does-not-move-content",
+  "file": "system/tools/schema.php",
+  "search": "R::exec(\"UPDATE $table SET $to = $from WHERE $from IS NOT NULL\");",
+  "replace": ""
+ },
+ {
+  "name": "A10-no-base-tag",
+  "file": "system/template.php",
+  "search": "$template->output = str_replace('<head>', \"<head>\\n\".$base, $template->output);",
+  "replace": ""
+ },
+ {
+  "name": "C24-api-drops-args",
+  "file": "system/models/api/api.php",
+  "search": "array_slice($segments, 3)",
+  "replace": "array()"
+ },
+ {
+  "name": "D3-same-origin-Origin-refused",
+  "file": "system/controller.php",
+  "search": "$foreign = $host_of($origin) !== $host;",
+  "replace": "$foreign = true;"
+ },
+ {
+  "name": "G12-reset_sent-alert-never",
+  "file": "system/models/authentication/authentication.php",
+  "search": "util::done('reset_sent');",
+  "replace": "util::done('nothing');"
+ },
+ {
+  "name": "J-domain_language-ignored",
+  "file": "system/models/i18n/i18n.php",
+  "search": "foreach ((array)config::get('domain_language', array())",
+  "replace": "foreach (array()"
+ },
+ {
+  "name": "E9-desc-order-ignored",
+  "file": "system/models/cms/store.php",
+  "search": "return $field.($desc ? ' DESC' : ' ASC').', id ASC';",
+  "replace": "return $field.' ASC, id ASC';"
+ },
+ {
+  "name": "E9-oldest-is-newest",
+  "file": "system/models/cms/store.php",
+  "search": "if ($order === 'oldest' || $order === '') return 'id ASC';",
+  "replace": "if ($order === 'oldest') return 'id DESC'; if ($order === '') return 'id ASC';"
+ },
+ {
+  "name": "E8-raster_page_size-ignored",
+  "file": "system/models/cms/cms.php",
+  "search": "$page_size = (int)config::get(\"raster_page_size\");\n\t\t\tif",
+  "replace": "$page_size = 1000;\n\t\t\tif"
+ },
+ {
+  "name": "pagination-filter-arg-ignored",
+  "file": "system/models/pagination/pagination.php",
+  "search": "foreach (explode('&', (string)$filter) as $pair) {",
+  "replace": "foreach (array() as $pair) {"
+ },
+ {
+  "name": "E-item-falls-back-to-collection-view-broken",
+  "file": "system/models/cms/cms.php",
+  "search": "array($m[2].'_item', $m[1])",
+  "replace": "array($m[2].'_item')"
+ },
+ {
+  "name": "feed-date-fields-empty",
+  "file": "system/models/feed/feed.php",
+  "search": "$item['date_rfc822'] = date(DATE_RSS, $time);\n\t\t\t$item['date_iso'] = date(DATE_ATOM, $time);",
+  "replace": "$item['date_rfc822'] = '';\n\t\t\t$item['date_iso'] = '';"
+ },
+ {
+  "name": "E17-toolbar-css-empty",
+  "file": "system/models/cms/cms.php",
+  "search": "echo file_get_contents(BASE.'models/cms/css/'.$file.'.css');",
+  "replace": ""
+ },
+ {
+  "name": "E17-toolbar-js-empty",
+  "file": "system/models/cms/cms.php",
+  "search": "echo file_get_contents(BASE.'models/cms/js/'.$file.'.js');",
+  "replace": ""
+ },
+ {
+  "name": "C11-attr-value-not-escaped",
+  "file": "system/template.php",
+  "search": "if (is_string($data[$datakey])) $data[$datakey] = htmlspecialchars($data[$datakey], ENT_QUOTES, 'UTF-8', false);",
+  "replace": ""
+ },
+ {
+  "name": "row-false-keeps-mockup-broken",
+  "file": "system/template.php",
+  "search": "if(!$is_attr && $data[$datakey] === false)",
+  "replace": "if(false)"
+ },
+ {
+  "name": "D8-number-min-ignored",
+  "file": "system/models/validation/validation.php",
+  "search": "if (isset($rules['min']) && is_numeric($rules['min']) && $value < $rules['min']) $failed[] = 'min';",
+  "replace": ""
+ },
+ {
+  "name": "D8-non-numeric-accepted",
+  "file": "system/models/validation/validation.php",
+  "search": "if (!is_numeric($value)) $failed[] = 'number';\n\t\t\telse {",
+  "replace": "if (false) {} else {"
+ },
+ {
+  "name": "D9-date-min-ignored",
+  "file": "system/models/validation/validation.php",
+  "search": "if (!empty($rules['min']) && $value < $rules['min']) $failed[] = 'min';",
+  "replace": ""
+ },
+ {
+  "name": "D9-bad-date-format-accepted",
+  "file": "system/models/validation/validation.php",
+  "search": "if (!$date || $date->format('Y-m-d') !== $value) $failed[] = 'date';",
+  "replace": ""
+ },
+ {
+  "name": "H3-confirmed-alert-never",
+  "file": "system/models/newsletter/newsletter.php",
+  "search": "$v->raise('confirmed');",
+  "replace": ""
+ },
+ {
+  "name": "C19-render-order-forward",
+  "file": "system/template.php",
+  "search": "$template->models_methods_render = array_reverse($template->models_methods_render);",
+  "replace": ""
+ },
+ {
+  "name": "L3-login-page-cacheable",
+  "file": "system/util.php",
+  "search": "'#^/(api|mcp|login)(/|$)#'",
+  "replace": "'#^/(api|mcp)(/|$)#'"
+ },
+ {
+  "name": "G14-lock-never-expires",
+  "file": "system/models/authentication/authentication.php",
+  "search": "strtotime((string)$user->failed_at) > time() - 900",
+  "replace": "true"
+ },
+ {
+  "name": "newsletter-name-not-stored",
+  "file": "system/models/newsletter/newsletter.php",
+  "search": "$subscriber->name = trim((string)util::post('name'));",
+  "replace": ""
+ },
+ {
+  "name": "H6-already-sent-check-off",
+  "file": "bin/raster",
+  "search": "if ($sent_before && !isset($options['again'])) {",
+  "replace": "if (false) {"
+ },
+ {
+  "name": "E14-values-html-stripped",
+  "file": "system/models/cms/store.php",
+  "search": "$page->$field = self::clean_value($value);",
+  "replace": "$page->$field = strip_tags(self::clean_value($value));"
+ },
+ {
+  "name": "M-mcp_token-config-ignored",
+  "file": "system/models/mcp/mcp.php",
+  "search": "if (!$token) $token = config::get('mcp_token');",
+  "replace": ""
+ },
+ {
+  "name": "I-mail_from-config-ignored",
+  "file": "system/models/mail/mail.php",
+  "search": "$from = getenv('RASTER_MAIL_FROM') ?: config::get('mail_from');",
+  "replace": "$from = getenv('RASTER_MAIL_FROM');"
+ },
+ {
+  "name": "G6-login_page-config-ignored",
+  "file": "system/models/authentication/authentication.php",
+  "search": "$this->redirect(self::url(config::get('login_page', 'login')).'?next='.rawurlencode(strtok($uri, '?')));",
+  "replace": "$this->redirect(self::url('login').'?next='.rawurlencode(strtok($uri, '?')));"
+ },
+ {
+  "name": "E3-seed-from-requesting-view",
+  "file": "system/models/cms/cms.php",
+  "search": "$seed = array_merge($expected_properties, $inspector->collection_defaults($name));",
+  "replace": "$seed = $expected_properties;"
+ },
+ {
+  "name": "A15-switcher-ignores-rewrite",
+  "file": "system/models/i18n/i18n.php",
+  "search": "$path = rtrim(config::get('link_uri'), '/')",
+  "replace": "$path = rtrim(config::get('base_uri'), '/')"
+ },
+ {
+  "name": "A15-pager-ignores-rewrite",
+  "file": "system/models/pagination/pagination.php",
+  "search": "$path = rtrim(config::get('link_uri'), '/')",
+  "replace": "$path = rtrim(config::get('base_uri'), '/')"
+ },
+ {
+  "name": "E25-fallback-item-own-page-table",
+  "file": "system/models/cms/cms.php",
+  "search": "$slug = file_exists(controller::build_view_path($m[1].'_item')) ? '/'.$m[1].'/'.$m[1].'_item' : '/'.$m[1];",
+  "replace": "$slug = '/'.$m[1].'/'.$m[1].'_item';"
+ },
+ {
+  "name": "E26-logout-on-get",
+  "file": "system/models/cms/cms.php",
+  "search": "if (!isset($_SERVER['REQUEST_METHOD']) || $_SERVER['REQUEST_METHOD'] !== 'POST') return false;\n\t\tcms::require_admin(true);",
+  "replace": "cms::require_admin(false);"
+ },
+ {
+  "name": "C37-non-strict-shows-details",
+  "file": "system/controller.php",
+  "search": "echo \"<!doctype html><meta charset='utf-8'><title>Error</title><p>This page could not be shown.</p>\";",
+  "replace": "echo $e->getMessage();"
+ },
+ {
+  "name": "N2-routes-linted-against-lint-theme",
+  "file": "system/tools/inspector.php",
+  "search": "config::get('theme', $this->theme);",
+  "replace": "$this->theme;"
+ },
+ {
+  "name": "C33-loading-model-not-cancellable",
+  "file": "system/event.php",
+  "search": "if ($value === false && strpos($the_event, 'loading_model_') === 0) $result = false;",
+  "replace": ""
+ },
+ {
+  "name": "C32-app-core-bindings-ignored",
+  "file": "system/event.php",
+  "search": "foreach (array($the_event, 'core_'.$the_event) as $name) {",
+  "replace": "foreach (array('core_'.$the_event) as $name) {"
+ },
+ {
+  "name": "B7-txt-links-not-rewritten",
+  "file": "system/controller.php",
+  "search": "[a-zA-Z0-9\\-_\\/]+\\.(rss|atom|xml|json|txt))",
+  "replace": "[a-zA-Z0-9\\-_\\/]+\\.(rss|atom|xml|json))"
+ },
+ {
+  "name": "I8-auth-before-starttls",
+  "file": "system/models/mail/mail.php",
+  "search": "if (!$secure && stripos($ehlo, 'STARTTLS') !== false) {",
+  "replace": "if (false) {"
+ },
+ {
+  "name": "G21-default-role-member",
+  "file": "bin/raster",
+  "search": "is_string($options['role']) ? $options['role'] : 'admin';",
+  "replace": "is_string($options['role']) ? $options['role'] : 'member';"
+ }
+]

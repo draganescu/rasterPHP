@@ -26,7 +26,7 @@ Included:
 
 **Working on a Raster site with an AI agent?** [AGENTS.md](AGENTS.md) is the complete specification.
 
-Tests: `php tests/run.php` for the framework, and `php tests/demo.php` for [the demo café](demo/README.md), a complete site that uses every feature. Each feature has an ID, and the suite fails if any of them lacks a passing test.
+Tests: `php tests/run.php` for the framework, and `php tests/demo.php` for [the demo café](demo/README.md), a complete site that uses every feature. Each feature has an ID, and the suite fails if any of them lacks a passing test. `php tests/mutate.php` breaks the framework on purpose, one change at a time from `tests/mutations.json`, and fails if the demo suite doesn't notice.
 
 ---
 

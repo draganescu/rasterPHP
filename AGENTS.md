@@ -385,6 +385,70 @@ use `'model.method'`: `method(true)` returns
 - **Writes** are limited to fields in the templates, plus `slug`, `enabled`
   and `published_at` on items.
 
+## Extending
+
+- **Override a bundled model:** `models/the_<name>/the_<name>.php` with
+  `class the_<name> extends <name>`. Templates keep calling `<name>`; your
+  class is used. Core files work the same way: `application/the_util.php`
+  is loaded after `system/util.php`. So are config files (`config/the_app.php`, `the_routes.php`,
+  `the_events.php` are loaded after the framework's own).
+- **Events** (`config/the_events.php`): `event::bind('done')->to('model',
+  'method')`, and `event::unbind(…)->from(…)`. Your bindings run before the
+  framework's. Events: `launch`, `finding_route`, `route_set`,
+  `route_found`, `route_not_found`, `loading_model_<name>` (return false to
+  stop that model loading), `executing_<model>_<method>`,
+  `executed_<model>_<method>`, `before_drying`, `dried_<view>`,
+  `after_drying`, `before_render`, `after_render`, `before_print`,
+  `after_print`, `loop`, `before_output`, `done`, `land`.
+- **Named queries:** `models/sql.php` sets
+  `$querries['name'] = "SELECT … WHERE a = '%s'"`; call
+  `database::instance('any')->name($a)`. Values are quoted by the driver.
+  Files in `models/<model>/sql/<name>.sql` use `?` placeholders instead.
+- **Values in scripts and styles:** `"/*- print.model.method /-*/"` is the
+  same as `<!-- print.model.method /-->`, written so the file stays valid
+  JavaScript or CSS.
+- **Render into memory:** a render method whose result has the key
+  `'__' => true` next to its rows is rendered but not printed; read the HTML later from
+  `template::instance()->render_results['model']['method']`.
+- **A route to another theme:** `controller::route('print/menu')->to('menu')->from('print')`.
+- **A 404 page:** `config::set('error_document_404')->to('404')` renders
+  `404.html` with status 404.
+
+## Settings
+
+Set in `config/the_app.php` with `config::set('name')->to(value)`.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `theme` | `default` | the folder in `views/` |
+| `default_view` | `index` | the view for `/` |
+| `views_ext` | `.html` | the extension of HTML views |
+| `rewrite` | true | false puts `index.php/` in every link, for servers without rewrites |
+| `strict_templates` | true in development | template errors stop the page with a list (500) |
+| `error_document_404` | none | a view for 404s |
+| `site_url` | none | the site's address (same as `RASTER_URL`) |
+| `cms_enabled` | true | the CMS and the editor toolbar |
+| `raster_page_size`, `<name>_page_size` | 10 | items per page |
+| `raster_media_folder` | `media` | where uploads go |
+| `feed_limit` | 20 | items in `feed.items` |
+| `sitemap_skip` | login, account, … | views left out of `feed.pages` |
+| `protected` | none | `array('path' => 'role')` |
+| `registration` | true | false turns sign-up off |
+| `login_page`, `after_login`, `reset_page` | `login`, none, `reset` | account pages |
+| `password_min_length` | 8 | |
+| `newsletter_double_opt_in` | true | false subscribes without a confirmation |
+| `newsletter_confirm_page`, `newsletter_unsubscribe_page` | `newsletter-confirm`, `newsletter-unsubscribe` | |
+| `mail`, `mail_from` | see `RASTER_MAIL` | transport and sender |
+| `languages`, `domain_language`, `language_cookie` | none, none, `lang` | |
+| `page_cache`, `page_cache_ttl`, `page_cache_skip` | on in production, 3600, none | |
+| `mcp_token` | none | same as `RASTER_MCP_TOKEN` |
+| `api_system_models` | `cms` | system models reachable at `/api` |
+
+Environment variables: `RASTER_ENV`, `RASTER_URL`, `RASTER_DB`,
+`RASTER_APP` (the application folder, `application` by default),
+`RASTER_MAIL`, `RASTER_MAIL_FROM`, `RASTER_MCP_TOKEN`, `NO_COLOR` (plain
+command-line output). They win over the settings above.
+
 ## Checklist for a change
 
 1. Edit or add views in `application/views/<theme>/`. Start from static HTML
@@ -394,4 +458,7 @@ use `'model.method'`: `method(true)` returns
    views.
 3. `php bin/raster schema` shows the content model you meant to create.
 4. `php bin/raster render /the-url`, or `serve`, and check the HTML.
-5. `php tests/run.php` if you touched `system/`.
+5. If you touched `system/`: `php tests/run.php` and `php tests/demo.php`.
+   A new feature gets an ID in `demo/README.md`, a use in the demo and a
+   test; `php tests/mutate.php` (slow) checks the tests would catch a
+   regression.
