@@ -1,321 +1,396 @@
 <?php
 
+require_once __DIR__.'/store.php';
+
 /**
 * Cms
+*
+* The CMS derives its content model from the views:
+*
+*   <!-- print.cms.headline -->Hello<!-- /print.cms.headline -->
+*     a page field called "headline", stored per page, starting as "Hello"
+*
+*   <!-- render.cms.features --> ... <!-- print.title -->A<!-- /print.title --> ... <!-- /render.cms.features -->
+*     a collection called "features" whose items have a "title" field
+*
+* In development (fluid database) tables and columns are created on the first
+* request that renders a new annotation. In production (frozen database) run
+* `php bin/raster schema --apply` after deploying new templates.
 */
 class cms
 {
-	
+
 	private $page = NULL;
 	private $page_name = NULL;
 	private $page_variables = array();
 	private $page_data = array();
+	private $slug = NULL;
 
 	private $data_name = NULL;
 
-	// custom cms routes for admin panels
+	// ##Naming
+	// Bean types must be lowercase letters and digits only.
+
+	// the table holding the fields of a page, from its URL slug
+	// Single segment slugs keep a readable name (/about -> aboutpage).
+	// Anything else gets a short hash so /about-us, /aboutus and
+	// /about/us never share a table.
+	static function page_type($slug) {
+		$slug = (string)$slug;
+		if ($slug === 'home' || $slug === '/' || $slug === '') return 'homepage';
+		if (preg_match('#^/([a-z0-9]+)$#', $slug, $m) && $m[1] !== 'home') return $m[1].'page';
+		$readable = substr(strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $slug)), 0, 40);
+		return $readable.substr(md5($slug), 0, 6).'page';
+	}
+
+	// names that can't be used for page fields or collections
+	static function reserved($name, $kind) {
+		if ($kind === 'collection') return in_array($name, array('users', 'raster'));
+		return method_exists('cms', $name) || $name === 'slug' || $name === 'id' || $name === 'updated_at' || $name === 'enabled';
+	}
+
+	// the table holding the items of a collection
+	static function collection_type($name) {
+		return strtolower(preg_replace('/[^a-zA-Z0-9]/', '', (string)$name)).'data';
+	}
+
+	// The slug identifies which page's content a URL shows. Pagination and
+	// filter segments are not part of it, so /news/news_page/2 and
+	// /news/news_items/tag/x show the same page fields as /news.
+	// Item URLs (/news/news_item/3) share one slug per collection.
+	static function slug_for_uri($uri) {
+		$slug = '/'.trim(preg_replace('#/+#', '/', (string)$uri), '/');
+		if ($slug === '/' || $slug === '/'.config::get('default_view', 'index')) return 'home';
+		if (preg_match('#^(/.*?)?/([a-z0-9_]+)_(page|items)(/.*)?$#', $slug, $m)) {
+			$slug = $m[1] !== '' ? $m[1] : '/'.$m[2];
+		} elseif (preg_match('#^(?:/.*?)?/([a-z0-9_]+)_item(/.*)?$#', $slug, $m)) {
+			$slug = '/'.$m[1].'/'.$m[1].'_item';
+		}
+		return $slug;
+	}
+
+	// Visitors don't get a session cookie; editors get one when they log in.
+	static function session($force = false) {
+		if (PHP_SAPI === 'cli' || session_status() !== PHP_SESSION_NONE) return;
+		if ($force || isset($_COOKIE[session_name()])) {
+			session_start(array('cookie_httponly' => true, 'cookie_samesite' => 'Lax'));
+		}
+	}
+
+	// custom cms routes for admin panels and collection URLs
 	public function route() {
 		include 'routes.php';
+
+		// /news/news_item/3  -> news_item.html (or news.html)
+		// /news/news_page/2  -> news.html
+		// /news/news_items/tag/php -> news.html
+		$uri = config::get('uri_string');
+		if (preg_match('#^/(.+?)/([a-z0-9_]+)_(item|items|page)(/|$)#', (string)$uri, $m)) {
+			$candidates = $m[3] === 'item' ? array($m[2].'_item', $m[1]) : array($m[1]);
+			foreach ($candidates as $view) {
+				if (strpos($view, '..') !== false || strpos(basename($view), '_') === 0) continue;
+				$file = controller::build_view_path($view);
+				// only views that actually render this collection
+				if (file_exists($file) && strpos(file_get_contents($file), '<!-- render.cms.'.$m[2]) !== false) {
+					controller::route(preg_quote($m[1].'/'.$m[2].'_'.$m[3], '%').'(/|$)')->to($view);
+					break;
+				}
+			}
+		}
 	}
 
 	// Setup routes for the admin section
 	public function setup()
 	{
-		session_start();
+		if (config::get('cms_enabled') == false) {
+			return;
+		}
+
+		cms::session();
 
 		$db = database::instance('cms');
-
-		if (config::get('cms_enabled') == false) {
+		if (!database::configured()) {
 			return;
 		}
 
 		$uri_string = config::get('uri_string');
 		$index_file = config::get('index_file');
-		$slug = str_replace($index_file, '', $uri_string);
-		$slug = str_replace('//', '/', $slug);
-		if ($slug == '/') {
-			$slug = 'home';
-		}
+		$slug = cms::slug_for_uri(str_replace('/'.$index_file, '', $uri_string));
 
-		if (strpos($slug, '/login') !== false || $slug == "/raster_guide") {
+		if (strpos($slug, '/login') === 0) {
 			return;
-		}
-
-		if (strpos($slug, '_item') !== false) {
-			preg_match_all('%/([a-z]+)/([a-z]+)_(item)(s?)%', $slug, $matches);
-			$slug = $matches[0][0];
 		}
 
 		if (controller::instance()->current_route == false) {
 			return;
 		}
 
-		// adds users and settings to the db 
-		$this->create_cms_data();
-
-		$page_name = str_replace('/', '', $slug).'page';
-		$page_name = str_replace('_', '', $page_name);
-
-		// creates the page and adds new fields if any
-		$page = R::findOne($page_name, '1 ORDER BY id DESC');
-		if (empty($page)) {
-			$page = R::dispense($page_name);
-			// default page properties
-			$page->slug = $slug;
-			$page->updated_at = R::isoDateTime();
-			R::store($page);
-		}
-
-		$this->save_page();
-		$this->save_data();
-		$this->add_data();
-
-		$this->page = $page;
+		$page_name = cms::page_type($slug);
 		$this->page_name = $page_name;
 		$this->slug = $slug;
+
+		try {
+			// edits sent by the in-page editor
+			if (cms::loggedin() && util::post('raster_action')) {
+				if (!util::csrf_valid(util::post('csrf'))) {
+					http_response_code(403);
+					exit('Invalid or expired form, reload the page and try again.');
+				}
+				$this->save_page();
+				$this->save_data();
+				$this->add_data();
+			}
+
+			// creates the page the first time it is rendered
+			$page = cms_store::latest($page_name);
+			if (empty($page) && !database::$frozen) {
+				$page = R::dispense($page_name);
+				$page->slug = $slug;
+				$page->updated_at = R::isoDateTime();
+				R::store($page);
+			}
+			$this->page = $page;
+		} catch (Exception $e) {
+			// a frozen schema without this page: templates show their defaults
+			log::warning('CMS: '.$e->getMessage());
+			$this->page = null;
+		}
 	}
 
 	public function __call($name, $arguments)
 	{
-			$template = template::instance();
-			$fields = R::inspect($this->page_name);
-			$page = R::findOne($this->page_name, '1 ORDER BY id DESC');
-			$action = template::get('current_action');
+		$action = template::get('current_action');
+		if (!$this->page_name) return false;
 
+		try {
 			switch ($action) {
 				case 'print':
-					$this->page_variables[] = $name;
-					if (!array_key_exists($name, $fields)) {
-						$page->$name = trim(template::get('current_block'));
-						R::store($page);
-					}
-					if (!empty($page->$name)) {
-						return $page->$name;
-					} else {
-						return false;
-					}
-
+					return $this->page_field($name);
 				case 'render':
-					$filter_link_params = array();
-					$this->page_data[] = $name;
-					$this->data_name = $name.'data';
-					$filters = array();
-
-					extract(template::get('current_params'));
-					foreach ($datastarts[1] as $key=>$value) {
-						if(strpos($value, 'if.') !== false) continue;
-						if(strpos($value, 'raster_filter') !== false) {
-							$params = explode("raster_filter@", $value);
-							$filter_link_params[$params[1]] = explode('@', $params[1]);
-							continue;
-						}
-						list($property, $content) = $this->detect_data($key, $value);
-						if ($property == "raster_detail_link") {
-							continue;
-						}
-						$expected_properties[$property] = $content;
-					}
-
-					// pagination
-					$page_size = config::get($name."_page_size");
-					if ($page_size == '') {
-						$page_size = config::get("raster_page_size");
-						if ($page_size == '') {
-							$page_size = 10;
-						}
-					}
-					
-					$page = util::param($name.'_page', false);
-					if ($page) {
-						$roffset = ($page-1)*$page_size;
-					} else {
-						$roffset = 0;
-					}
-					
-					// filter by id
-					if (util::param($name) == $name.'_item') {
-						$filters['id'] = util::param('item');
-					}
-
-					// uri filters
-					if (util::param($name) == $name.'_items') {
-						$uri_segments = config::get('uri_segments');
-						$start_key = array_search($name.'_items', $uri_segments);
-						foreach ($uri_segments as $key => $value) {
-							if ($key > $start_key) {
-								if (($key - $start_key)%2 == 0) {
-									$filters[$uri_segments[$key-1]] = $value;
-								}
-							}
-						}
-					}
-					unset($filters[$name.'_page']); // removing the uri filter
-
-					$data = R::findLast($this->data_name);
-
-					if (empty($data)) {
-						$item = R::dispense($this->data_name);
-						foreach ($expected_properties as $property=>$content) {
-							$item->$property = trim($content);
-						}
-						$item->updated_at = R::isoDateTime();
-						$item->enabled = true;
-						$id = R::store($item);
-						$data = R::load($this->data_name, $id);
-					} else {
-
-						// param filters
-						if (!empty($arguments)) {
-								$filters = $this->make_filters($arguments[0], $expected_properties, $filters);
-						}
-						
-						// we check for new fields just like for pages
-						$fields = R::inspect($this->data_name);
-						//if (count($expected_properties) > count($fields) - 3) {
-							$latest = R::findOne($this->data_name, '1 ORDER BY id DESC');
-							foreach ($expected_properties as $key => $value) {
-								if (!array_key_exists($key, $fields)) {
-									$latest->$key = trim($value);
-								}
-							}
-							R::store($latest);
-						//}
-
-
-						$sql = '1 = 1';
-						foreach ($filters as $key => $value) {
-							$sql .= ' AND '.$key." = :".$key;
-							$rb_filters[':'.$key] = $value;
-						}	
-						$filters["rlength"] = $page_size;
-						$filters["roffset"] = $roffset;
-						$sql .= ' LIMIT :roffset, :rlength';
-						$data = R::find($this->data_name, $sql, $filters);
-					}
-
-
-
-					$data = R::exportAll( $data );
-
-					// building auto detail links
-					foreach ($data as $key => $item) {
-						$base = config::get("link_uri");
-						$detail_link = $base.substr($this->data_name, 0, -4).'/'.$name.'_item/'.$item['id'];
-						$data[$key]['raster_detail_link'] = $detail_link;
-						if (count($filter_link_params) > 0) {
-							foreach ($filter_link_params as $at_key => $filters) {
-								$filter_link = config::get('link_uri').$name.'/'.$name.'_items/';
-								foreach ($filters as $field) {
-									$filter_link .= $field.'/'.$item[$field].'/';
-								}
-								$data[$key]['raster_filter@'.$at_key] = $filter_link;
-							}
-						}
-					}
-
-					return $data;
-
+					return $this->collection($name, $arguments);
 				default:
 					return false;
 			}
+		} catch (Exception $e) {
+			log::warning('CMS: '.$e->getMessage());
+			return false;
+		}
+	}
+
+	// a page field; false keeps the markup that is in the template
+	protected function page_field($name) {
+		if (cms::reserved($name, 'field')) return false;
+		$this->page_variables[] = $name;
+		$page = cms_store::latest($this->page_name);
+		if (!$page) return false;
+		$fields = cms_store::columns($this->page_name);
+		if (!array_key_exists($name, $fields)) {
+			if (database::$frozen) return false;
+			$page->$name = trim(template::get('current_block'));
+			R::store($page);
+		}
+		$value = $page->$name;
+		return ($value === null || (string)$value === '') ? false : $value;
+	}
+
+	protected function collection($name, $arguments) {
+		if (cms::reserved($name, 'collection')) return false;
+		$filter_link_params = array();
+		$this->page_data[] = $name;
+		$this->data_name = cms::collection_type($name);
+		$filters = array();
+		$expected_properties = array();
+
+		extract(template::get('current_params'));
+		foreach ($datastarts[1] as $key=>$value) {
+			if(strpos($value, 'if.') !== false) continue;
+			if(strpos($value, 'raster_filter') !== false) {
+				$params = explode("raster_filter@", $value);
+				$filter_link_params[$params[1]] = explode('@', $params[1]);
+				continue;
+			}
+			list($property, $content) = $this->detect_data($key, $value);
+			if ($property == "raster_detail_link") {
+				continue;
+			}
+			$expected_properties[$property] = $content;
+		}
+
+		// pagination
+		$page_size = (int)config::get($name."_page_size");
+		if ($page_size < 1) {
+			$page_size = (int)config::get("raster_page_size");
+			if ($page_size < 1) {
+				$page_size = 10;
+			}
+		}
+
+		$page = (int)util::param($name.'_page', 0);
+		$roffset = $page > 1 ? ($page-1)*$page_size : 0;
+
+		// filter by id: /news/news_item/3
+		if (util::param($name) == $name.'_item') {
+			$filters['id'] = (int)util::param($name.'_item');
+		}
+
+		// uri filters: /news/news_items/tag/php
+		if (util::param($name) == $name.'_items') {
+			$uri_segments = config::get('uri_segments');
+			$start_key = array_search($name.'_items', $uri_segments);
+			foreach ($uri_segments as $key => $value) {
+				if ($key > $start_key && ($key - $start_key)%2 == 0) {
+					$filters[$uri_segments[$key-1]] = $value;
+				}
+			}
+		}
+		unset($filters[$name.'_page']);
+
+		// param filters: render.cms.news('featured=1')
+		if (!empty($arguments) && is_string($arguments[0])) {
+			$filters = $this->make_filters($arguments[0], $expected_properties, $filters);
+		}
+
+		$exists = cms_store::table_exists($this->data_name);
+		if (!$exists || R::count($this->data_name) == 0) {
+			if (database::$frozen) return false;
+			// the first item is the placeholder content from the template
+			$item = R::dispense($this->data_name);
+			foreach ($expected_properties as $property=>$content) {
+				$item->$property = trim($content);
+			}
+			$item->updated_at = R::isoDateTime();
+			$item->enabled = '1';
+			R::store($item);
+		} elseif (!database::$frozen) {
+			// new fields in the template become new columns
+			$fields = cms_store::columns($this->data_name);
+			$latest = cms_store::latest($this->data_name);
+			$changed = false;
+			foreach ($expected_properties as $key => $value) {
+				if (!array_key_exists($key, $fields)) {
+					$latest->$key = trim($value);
+					$changed = true;
+				}
+			}
+			if ($changed) R::store($latest);
+		}
+
+		// only real columns can be filtered on
+		$fields = cms_store::columns($this->data_name);
+		$sql = ' 1 = 1 ';
+		$bindings = array();
+		foreach ($filters as $key => $value) {
+			if (!array_key_exists($key, $fields) || !preg_match('/^[a-z0-9_]+$/', $key)) {
+				if ($key === 'id') return false;
+				continue;
+			}
+			$sql .= ' AND '.$key.' = :'.$key.' ';
+			$bindings[':'.$key] = $value;
+		}
+		$sql .= ' ORDER BY id ASC LIMIT '.(int)$page_size.' OFFSET '.(int)$roffset;
+		$data = R::exportAll(R::find($this->data_name, $sql, $bindings));
+		if (empty($data) && isset($filters['id']) && !headers_sent()) {
+			// a detail page for an item that does not exist
+			http_response_code(404);
+		}
+
+		// building auto detail links
+		foreach ($data as $key => $item) {
+			$base = config::get("link_uri");
+			$data[$key]['raster_detail_link'] = $base.$name.'/'.$name.'_item/'.$item['id'];
+			foreach ($filter_link_params as $at_key => $filter_fields) {
+				$filter_link = $base.$name.'/'.$name.'_items/';
+				foreach ($filter_fields as $field) {
+					$filter_link .= $field.'/'.rawurlencode(isset($item[$field]) ? $item[$field] : '').'/';
+				}
+				$data[$key]['raster_filter@'.$at_key] = $filter_link;
+			}
+		}
+
+		return $data;
 	}
 
 	// parses the filters and adds new fields if any
-	function make_filters($filters, &$expected_properties, &$data_filter) {
-		$params = array();
-		$fields = R::inspect($this->data_name);
-		$latest = R::findOne($this->data_name, '1 ORDER BY id DESC');
-
-		foreach (explode('&', $filters) as $k=>$chunk) {
-	    $params[$k] = explode("=", $chunk);
-	    $data_filter[$params[$k][0]] = $params[$k][1];
-		}
-
-		foreach ($data_filter as $key=>$value) {
-			$expected_properties[$key] = $value;
+	protected function make_filters($filters, &$expected_properties, &$data_filter) {
+		foreach (explode('&', $filters) as $chunk) {
+			$pair = explode("=", $chunk, 2);
+			if ($pair[0] === '') continue;
+			$data_filter[$pair[0]] = isset($pair[1]) ? $pair[1] : '';
+			$expected_properties[$pair[0]] = $data_filter[$pair[0]];
 		}
 		return $data_filter;
 	}
 
-	function create_cms_data() {
-		$settings = R::findOne('rasterdata', '1 ORDER BY id DESC');
-		if (empty($settings)) {
-			$settings = R::dispense('rasterdata');
-			$settings->key_name = 'default_page_parameter';
-			$settings->key_value = 'page';
-			R::store($settings);
-
-			$settings = R::dispense('rasterdata');
-			$settings->key_name = 'default_URL_key';
-			$settings->key_value = 'id';
-			R::store($settings);
-		}
-		$users = R::findOne('usersdata', '1 ORDER BY id DESC');
-		if (empty($users)) {
-			$users = R::dispense('usersdata');
-			$users->username = 'admin';
-			$users->password = md5('admin');
-			R::store($users);
-		}
-	}
-
-	function get_page_variable($page, $variable) {
+	protected function get_page_variable($page, $variable) {
 		$db = database::instance('cms');
-		$data = R::findOne($page, '1 ORDER BY id DESC');
+		$data = cms_store::latest(cms::safe_type($page));
 		return array(
-			"type" => $data->getMeta('type'),
-			"value" => $data->$variable
+			"type" => $data ? $data->getMeta('type') : '',
+			"value" => $data ? $data->$variable : ''
 		);
 	}
 
+	// types posted by the editor must be tables the CMS owns
+	static function safe_type($type) {
+		$type = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', (string)$type));
+		return preg_match('/(page|data)$/', $type) ? $type : 'invalidpage';
+	}
+
+	// admin endpoints stop here unless someone is logged in
+	static function require_admin($check_csrf = false) {
+		cms::session();
+		if (!cms::loggedin() || ($check_csrf && !util::csrf_valid(util::post('csrf')))) {
+			http_response_code(403);
+			exit('Forbidden');
+		}
+		database::instance('cms');
+	}
 
 	function edit_data() {
-
-		$db = database::instance('cms');
-		$data_type = util::post('name').'data';
-
-		
-		$data = R::findAll($data_type);
-		$fields = R::inspect($data_type);
-
+		cms::require_admin();
+		$data_type = cms::collection_type(util::post('name'));
+		$data = cms_store::table_exists($data_type) ? R::findAll($data_type) : array();
+		$fields = cms_store::columns($data_type);
+		unset($fields['password']);
+		$csrf = util::csrf_token();
+		$type = $data_type;
 		include BASE.'models/cms/editor/data.php';
-
 		return false;
 	}
 
 	function edit_item() {
-
-		$db = database::instance('cms');
-		$item_type = util::post('name').'data';
-		$item_id = util::post('did');
-
-		
+		cms::require_admin();
+		$item_type = cms::collection_type(util::post('name'));
+		$item_id = (int)util::post('did');
 		$data = R::load($item_type, $item_id);
-		$fields = R::inspect($item_type);
-
+		$fields = cms_store::columns($item_type);
+		$csrf = util::csrf_token();
 		include BASE.'models/cms/editor/item.php';
-
 		return false;
 	}
 
 	function add_item() {
-
-		$db = database::instance('cms');
-		$item_type = util::post('name').'data';
-
-		
+		cms::require_admin();
+		$item_type = cms::collection_type(util::post('name'));
 		$data = R::dispense($item_type);
-		$fields = R::inspect($item_type);
-
+		$fields = cms_store::columns($item_type);
+		$csrf = util::csrf_token();
 		include BASE.'models/cms/editor/add.php';
-
 		return false;
 	}
 
+	function remove_item() {
+		cms::require_admin(true);
+		$item_type = cms::collection_type(util::post('name'));
+		return array('removed' => cms_store::delete_item($item_type, (int)util::post('did')));
+	}
+
 	function edit_variable() {
+		cms::require_admin();
 		extract($this->get_page_variable(util::post('page'), util::post('name')));
+		$csrf = util::csrf_token();
 		include BASE.'models/cms/editor/page.php';
-		return false;	
+		return false;
 	}
 
 	function style() {
@@ -324,30 +399,32 @@ class cms
 		}
 		header("Content-Type: text/css");
 		header("X-Content-Type-Options: nosniff");
-		echo file_get_contents(BASE.'/views/cms_admin/style.css');
+		echo file_get_contents(BASE.'views/cms_admin/style.css');
 		return false;
 	}
 
 	public function css() {
 		$file = util::param('raster_file', 'raster_cms');
+		if (!in_array($file, array('raster_cms', 'croppic'))) return false;
 		header("Content-Type: text/css");
 		header("X-Content-Type-Options: nosniff");
-		echo file_get_contents(BASE.'/models/cms/css/'.$file.'.css');
+		echo file_get_contents(BASE.'models/cms/css/'.$file.'.css');
 		return false;
 	}
 
 	public function script() {
 		$file = util::param('raster_file', 'raster_cms');
+		if (!in_array($file, array('raster_cms', 'croppic.min'))) return false;
 		header("content-type: application/javascript");
-		echo file_get_contents(BASE.'/models/cms/js/'.$file.'.js');
+		echo file_get_contents(BASE.'models/cms/js/'.$file.'.js');
 		return false;
 	}
 
 	public function logout() {
 		if (util::param('logout') === 'fromraster') {
+			cms::session();
 			session_destroy();
 			util::redirect();
-			exit;
 		}
 		return false;
 	}
@@ -355,220 +432,189 @@ class cms
 	public function login() {
 
 		$this->logout();
+		cms::session(!util::no_post_data());
 
 		if (cms::loggedin()) {
 			util::redirect();
 		}
 
-		$db = database::instance('cms');
-
-		$this->default_check();
-		
-		$username = util::post('username');
-		$password = md5(util::post('password'));
-
-		$user = R::findOne('usersdata', ' username = ? AND password = ?', array( $username, $password ));
-		if (empty($user)) {
+		if (util::no_post_data()) {
 			return false;
 		}
-		$_SESSION['uid'] = $user->id;
+
+		database::instance('cms');
+		$uid = cms_store::check_login(util::post('username'), util::post('password'));
+		if (!$uid) {
+			$this->login_error = 'Wrong username or password.';
+			return false;
+		}
+		session_regenerate_id(true);
+		$_SESSION['uid'] = $uid;
 		session_write_close();
 		util::redirect();
-		exit;
 	}
 
-	function default_check() {
-		if (R::count('usersdata') == 1) {
-			$user = R::load('usersdata', 1);
+	public $login_error = null;
+
+	// message shown above the login form
+	function login_message() {
+		database::instance('cms');
+		if (!database::configured()) {
+			return '<p class="notice">No database is configured for this environment (application/config/db/).</p>';
 		}
-		if (!empty($user)) {
-			if ($user->password == md5($user->username) && $user->username == 'admin') {
-				$validation = controller::get_object('validation');
-				echo $validation->raise('default_setup_detected');
-				return true;
-			}
+		if (!cms_store::has_users()) {
+			return '<p class="notice">There are no users yet. Create one from the project folder: <code>php bin/raster user admin</code></p>';
 		}
-		return false;
+		if ($this->login_error) {
+			return '<p class="notice">'.util::e($this->login_error).'</p>';
+		}
+		return '';
 	}
 
 	static function loggedin() {
-		return !empty($_SESSION['uid']);
+		return isset($_SESSION) && !empty($_SESSION['uid']);
 	}
 
-	function save_page() {
-		if (!util::post('raster_action', false)) {
+	protected function save_page() {
+		if (util::post('raster_action') !== 'save_page') {
 			return false;
 		}
-		if (util::post('raster_action', false) !== 'save_page') {
+		// edits always go to the page being viewed
+		$type = $this->page_name;
+		$variable = (string)util::post('variable_name');
+		if (!preg_match('/^[a-z0-9_]+$/', $variable) || cms::reserved($variable, 'field') || !array_key_exists($variable, cms_store::columns($type))) {
 			return false;
 		}
-		$page = util::post('page_name');
-		$variable = util::post('variable_name');
-		$value = util::post('raster_page_value');
-		$db = database::instance('cms');
-		$data = R::findOne($page, '1 ORDER BY id DESC');
-		$new_data = R::dup($data);
-		$new_data->$variable = $value;
-		R::store($new_data);
+		cms_store::update_page($type, $this->slug, array($variable => util::post('raster_page_value')), array($variable));
 	}
 
-	function save_data() {
-		if (!util::post('raster_action', false)) {
+	protected function save_data() {
+		if (util::post('raster_action') !== 'save_data') {
 			return false;
 		}
-		if (util::post('raster_action', false) !== 'save_data') {
+		$data_type = cms::collection_type(util::post('data_name'));
+		$this->store_posted_item($data_type, (int)util::post('data_id'));
+	}
+
+	protected function add_data() {
+		if (util::post('raster_action') !== 'add_data') {
 			return false;
 		}
-		$db = database::instance('cms');
+		$data_type = cms::collection_type(util::post('data_name'));
+		$this->store_posted_item($data_type, 0);
+	}
 
-		$data_type = util::post('data_name').'data';
-		$did = util::post('data_id');
-		$item = R::load($data_type, $did);
-
-		$fields = R::inspect($data_type);
+	protected function store_posted_item($data_type, $id) {
+		$fields = cms_store::columns($data_type);
+		$values = array();
 		foreach ($fields as $key => $value) {
-			if ($key == 'id') {
-				continue;
-			}
-			$item->$key = util::post($key);
+			if (in_array($key, cms_store::$system_fields) || $key === 'password') continue;
+			if (array_key_exists($key, $_POST)) $values[$key] = util::post($key);
 		}
-		R::store($item);
+		cms_store::save_item($data_type, $id, $values, array_keys($values));
 	}
 
-	function add_data() {
-		if (!util::post('raster_action', false)) {
-			return false;
-		}
-		if (util::post('raster_action', false) !== 'add_data') {
-			return false;
-		}
-		$db = database::instance('cms');
-
-		$data_type = util::post('data_name').'data';
-		$item = R::dispense($data_type);
-
-		$fields = R::inspect($data_type);
-		foreach ($fields as $key => $value) {
-			if ($key == 'id') {
-				continue;
-			}
-			$item->$key = util::post($key);
-		}
-		R::store($item);
-	}
-
+	// the editing toolbar, added to every page for logged in editors
 	public function buttons() {
 
 		if (!cms::loggedin()) {
-			return null;
+			return '';
 		}
 
+		$link = config::get('link_uri');
 		return '
-				<link rel="stylesheet" href="'.config::get('link_uri').'api/cms/css/raster_file/croppic">
-				<link rel="stylesheet" href="'.config::get('link_uri').'api/cms/css">
-				<script language="javascript">
+				<link rel="stylesheet" href="'.$link.'api/cms/css/raster_file/croppic">
+				<link rel="stylesheet" href="'.$link.'api/cms/css">
+				<script>
 					var Raster_Admin = {};
-					Raster_Admin.page_data = '.json_encode($this->page_data).';
-					Raster_Admin.page_variables = '.json_encode($this->page_variables).';
-					Raster_Admin.page_name = '.json_encode($this->page_name).';
+					Raster_Admin.page_data = '.json_encode(array_values(array_unique($this->page_data)), JSON_HEX_TAG).';
+					Raster_Admin.page_variables = '.json_encode(array_values(array_unique($this->page_variables)), JSON_HEX_TAG).';
+					Raster_Admin.page_name = '.json_encode($this->page_name, JSON_HEX_TAG).';
+					Raster_Admin.csrf = '.json_encode(util::csrf_token()).';
 				</script>
-				<script language="javascript" src="'.config::get('link_uri').'api/cms/script/raster_file/croppic.min"></script>
-				<script language="javascript" src="'.config::get('link_uri').'api/cms/script"></script>
+				<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+				<script src="'.$link.'api/cms/script/raster_file/croppic.min"></script>
+				<script src="'.$link.'api/cms/script"></script>
 		';
 	}
 
-	public function upload_media() {
-		$imagePath = BASE.'../'.config::get('raster_media_folder').'/';
-		$allowedExts = array("gif", "jpeg", "jpg", "png", "GIF", "JPEG", "JPG", "PNG");
-		$temp = explode(".", $_FILES["img"]["name"]);
-		$extension = end($temp);
-
-		if ( in_array($extension, $allowedExts)) {
-		  if ($_FILES["img"]["error"] > 0) {
-				 $response = array(
-					"status" => 'error',
-					"message" => 'ERROR Return Code: '. $_FILES["img"]["error"],
-				);
-				echo "Return Code: " . $_FILES["img"]["error"] . "<br>";
-			} else {	
-			  $filename = $_FILES["img"]["tmp_name"];
-			  list($width, $height) = getimagesize( $filename );
-
-			  move_uploaded_file($filename,  $imagePath . $_FILES["img"]["name"]);
-
-			  $response = array(
-					"status" => 'success',
-					"url" => config::get('base_uri').config::get('raster_media_folder').'/'.$_FILES["img"]["name"],
-					"width" => $width,
-					"height" => $height
-			  );
-			}
+	// bound to before_output: adds the toolbar before </body>
+	public function inject_toolbar() {
+		if (!cms::loggedin() || !$this->page_name) return false;
+		$template = template::instance();
+		$buttons = $this->buttons();
+		if (stripos($template->output, '</body>') !== false) {
+			$template->output = preg_replace('#</body>#i', $buttons."\n</body>", $template->output, 1);
 		} else {
-		   $response = array(
-				"status" => 'error',
-				"message" => 'something went wrong',
-			);
+			$template->output .= $buttons;
 		}
-		  
-		return $response;
+		return true;
+	}
+
+	protected static function media_dir() {
+		$dir = dirname(BASE).'/'.trim(config::get('raster_media_folder', 'media'), '/').'/';
+		if (!is_dir($dir)) @mkdir($dir, 0775, true);
+		return $dir;
+	}
+
+	public function upload_media() {
+		cms::require_admin(true);
+		$allowed = array('gif' => IMAGETYPE_GIF, 'jpeg' => IMAGETYPE_JPEG, 'jpg' => IMAGETYPE_JPEG, 'png' => IMAGETYPE_PNG);
+		if (empty($_FILES['img']) || $_FILES['img']['error'] !== UPLOAD_ERR_OK) {
+			return array('status' => 'error', 'message' => 'Upload failed');
+		}
+		$extension = strtolower(pathinfo($_FILES['img']['name'], PATHINFO_EXTENSION));
+		$info = @getimagesize($_FILES['img']['tmp_name']);
+		if (!isset($allowed[$extension]) || !$info || $info[2] !== $allowed[$extension]) {
+			return array('status' => 'error', 'message' => 'Only gif, jpeg and png images are allowed');
+		}
+		$filename = bin2hex(random_bytes(8)).'.'.$extension;
+		move_uploaded_file($_FILES['img']['tmp_name'], cms::media_dir().$filename);
+		return array(
+			"status" => 'success',
+			"url" => config::get('base_uri').trim(config::get('raster_media_folder', 'media'), '/').'/'.$filename,
+			"width" => $info[0],
+			"height" => $info[1]
+		);
 	}
 
 	public function crop_media() {
+		cms::require_admin(true);
 
-		$imagePath = BASE.'../'.config::get('raster_media_folder').'/';
-		$imgUrl = 		util::post('imgUrl');
-		$imgInitW = 	util::post('imgInitW');
-		$imgInitH = 	util::post('imgInitH');
-		$imgW = 			util::post('imgW');
-		$imgH = 			util::post('imgH');
-		$imgY1 = 			util::post('imgY1');
-		$imgX1 = 			util::post('imgX1');
-		$cropW = 			util::post('cropW');
-		$cropH = 			util::post('cropH');
+		// only images already in the media folder can be cropped
+		$media_url = config::get('base_uri').trim(config::get('raster_media_folder', 'media'), '/').'/';
+		$imgUrl = (string)util::post('imgUrl');
+		if (strpos($imgUrl, $media_url) !== 0) return array('status' => 'error', 'message' => 'Unknown image');
+		$source = realpath(cms::media_dir().basename(substr($imgUrl, strlen($media_url))));
+		if (!$source || strpos($source, realpath(cms::media_dir())) !== 0) return array('status' => 'error', 'message' => 'Unknown image');
 
-		$jpeg_quality = 100;
+		$n = function ($key) { return max(0, (int)round((float)util::post($key))); };
+		$imgInitW = $n('imgInitW'); $imgInitH = $n('imgInitH');
+		$imgW = max(1, $n('imgW')); $imgH = max(1, $n('imgH'));
+		$imgY1 = $n('imgY1'); $imgX1 = $n('imgX1');
+		$cropW = max(1, $n('cropW')); $cropH = max(1, $n('cropH'));
 
-		$filename = "croppedImg_".time().md5($imgUrl);
-		$output_filename = $imagePath."/".$filename;
-
-		$what = getimagesize($imgUrl);
+		$what = getimagesize($source);
 		switch(strtolower($what['mime']))
 		{
-			case 'image/png':
-				$img_r = imagecreatefrompng($imgUrl);
-				$source_image = imagecreatefrompng($imgUrl);
-				$type = '.png';
-				break;
-			case 'image/jpeg':
-				$img_r = imagecreatefromjpeg($imgUrl);
-				$source_image = imagecreatefromjpeg($imgUrl);
-				$type = '.jpeg';
-				break;
-			case 'image/gif':
-				$img_r = imagecreatefromgif($imgUrl);
-				$source_image = imagecreatefromgif($imgUrl);
-				$type = '.gif';
-				break;
-			default: die('image type not supported');
+			case 'image/png': $source_image = imagecreatefrompng($source); break;
+			case 'image/jpeg': $source_image = imagecreatefromjpeg($source); break;
+			case 'image/gif': $source_image = imagecreatefromgif($source); break;
+			default: return array('status' => 'error', 'message' => 'image type not supported');
 		}
 
 		$resizedImage = imagecreatetruecolor($imgW, $imgH);
-		imagecopyresampled($resizedImage, $source_image, 0, 0, 0, 0, $imgW, 
-		$imgH, $imgInitW, $imgInitH);	
-
-
+		imagecopyresampled($resizedImage, $source_image, 0, 0, 0, 0, $imgW, $imgH, $imgInitW ?: $what[0], $imgInitH ?: $what[1]);
 		$dest_image = imagecreatetruecolor($cropW, $cropH);
-		imagecopyresampled($dest_image, $resizedImage, 0, 0, $imgX1, $imgY1, $cropW, 
-		$cropH, $cropW, $cropH);	
+		imagecopyresampled($dest_image, $resizedImage, 0, 0, $imgX1, $imgY1, $cropW, $cropH, $cropW, $cropH);
 
+		$filename = "cropped_".bin2hex(random_bytes(8)).'.jpeg';
+		imagejpeg($dest_image, cms::media_dir().$filename, 90);
 
-		imagejpeg($dest_image, $output_filename.$type, $jpeg_quality);
-
-		$response = array(
-		"status" => 'success',
-		"url" => config::get('base_uri').config::get('raster_media_folder').'/'.$filename.$type 
+		return array(
+			"status" => 'success',
+			"url" => $media_url.$filename
 		);
-		return $response;
 	}
 
 	private function detect_data($key, $value) {
@@ -585,19 +631,20 @@ class cms
 		$rpos1 = strpos($rendered_tpl, $start);
 		if($rpos1 === false)
 		{
+			$start = "<!-- print.".$value." /-->";
 			$end = $start;
 			$rpos1 = strpos($rendered_tpl, $start);
-			$rpos2 = $rpos1 + strlen($start);
 		}
-		else
-			$rpos2 = strpos($rendered_tpl, $end) - $rpos1 + strlen($end);
-		
-		if (strpos($value, '@') !== false) {
-			$dataattr = str_replace('@', '', $parts[0]);
-			preg_match("% ".$dataattr."(.*?)=(.*?)('|\")(.*?)('|\")%", $rendered_tpl, $attribute_value);	
-			$content = $attribute_value[4];
+
+		if (strpos($value, '@') !== false || strpos($value, '+') !== false) {
+			$dataattr = str_replace(array('@', '+'), '', $parts[0]);
+			preg_match("% ".preg_quote($dataattr, '%')."(.*?)=(.*?)('|\")(.*?)('|\")%", $rendered_tpl, $attribute_value);
+			$content = isset($attribute_value[4]) ? $attribute_value[4] : '';
+		} elseif ($rpos1 === false || $start === $end) {
+			$content = '';
 		} else {
-			$content = substr($rendered_tpl, $rpos1 + strlen($start), $rpos2 - 2*strlen($end)+1);
+			$endpos = strpos($rendered_tpl, $end, $rpos1);
+			$content = $endpos === false ? '' : substr($rendered_tpl, $rpos1 + strlen($start), $endpos - $rpos1 - strlen($start));
 		}
 		$property = $parts[count($parts) -1];
 		return array($property, $content);

@@ -30,12 +30,29 @@ class boot {
 		event::dispatch('launch');
 	}
 	
+	// ##CLI initialization
+	// Same as up() but stops before dispatching ```launch```. The raster
+	// command line tool (bin/raster) and the tests use this to get a fully
+	// configured framework (config, database, models) without a request.
+	static function cli($uri = '/')
+	{
+		// RASTER_URL tells the command line where the site lives, so links
+		// it prints (and the MCP base_url) are right
+		$url = parse_url(getenv('RASTER_URL') ?: 'http://localhost:8000/');
+		$_SERVER['HTTP_HOST'] = $url['host'].(isset($url['port']) ? ':'.$url['port'] : '');
+		if (isset($url['scheme']) && $url['scheme'] === 'https') $_SERVER['HTTPS'] = 'on';
+		$_SERVER['SCRIPT_NAME'] = rtrim(isset($url['path']) ? $url['path'] : '', '/').'/index.php';
+		$_SERVER['REQUEST_URI'] = $uri;
+		boot::file_system_setup();
+		boot::load_core_files();
+		boot::load_core_config();
+		config::initialize();
+	}
+
 	static function file_system_setup() {
-		$current_directory = explode(DIRECTORY_SEPARATOR, __FILE__);
-		unset($current_directory[count($current_directory)-1]);
-		$current_directory = implode('/', $current_directory);
-		
-		define('APPBASE', $current_directory.'/../'.self::$appname.'/');
+		if (defined('BASE')) return;
+		$current_directory = __DIR__;
+		define('APPBASE', realpath($current_directory.'/../'.self::$appname).'/');
 		define('BASE', $current_directory.'/');
 	}
 	
@@ -74,8 +91,8 @@ class boot {
 	}
 	
 	static function get_core_files() {
-		$files = scandir(BASE); 
-		$array = array(); 
+		$files = scandir(BASE);
+		$core_files = array();
 		foreach($files as $file) {
 		    if(!is_dir(BASE.$file.'/') && strpos($file,'.php') !== false) {
 				$core_files[] = $file;
@@ -85,8 +102,8 @@ class boot {
 	}
 	
 	static function get_core_config() {
-		$files = scandir(BASE.'config/'); 
-		$array = array(); 
+		$files = scandir(BASE.'config/');
+		$core_config_files = array();
 		foreach($files as $file) {
 		    if(!is_dir(BASE.$file.'/') && strpos($file,'.php') !== false) {
 				$core_config_files[] = $file;

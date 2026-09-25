@@ -1,7 +1,3 @@
-if (!window.jQuery) {
-    document.write('<script src="//cdnjs.cloudflare.com/ajax/libs/jquery/2.1.1/jquery.min.js"><\/script>');
-}
-
 (function(){
 
 	Raster_Admin.system = [
@@ -86,7 +82,8 @@ if (!window.jQuery) {
 		$('#raster_editor .body').html('<span>Calculating the meaning of life.</span>');
 		var info = {
 			"page":Raster_Admin.page_name,
-			"name":rel
+			"name":rel,
+			"csrf":Raster_Admin.csrf
 		};
 		$.post(BASE + 'api/cms/edit_' + type, info, function(data){
 			$('#raster_editor .body').html(data);
@@ -113,9 +110,11 @@ if (!window.jQuery) {
 		Raster_Admin.media = {}; 
 		var croppicHeaderOptions = {
 			uploadUrl:BASE+'api/cms/upload_media',
+			uploadData:{
+				"csrf":Raster_Admin.csrf
+			},
 			cropData:{
-				"dummyData":1,
-				"dummyData2":"asdas"
+				"csrf":Raster_Admin.csrf
 			},
 			// customUploadButtonId:'',
 			cropUrl:BASE+'api/cms/crop_media',
@@ -144,6 +143,19 @@ if (!window.jQuery) {
 		$.post(BASE + 'api/cms/add_item', info, function(data){
 			$('#raster_editor .body').html(data);
 		})
+	}
+
+	function do_remove(e) {
+		e.preventDefault();
+		if (!window.confirm('Remove this item?')) return;
+		var row = $(this).closest('tr');
+		$.post(BASE + 'api/cms/remove_item', {
+			"did": $(this).data('rel'),
+			"name": $(this).data('name'),
+			"csrf": Raster_Admin.csrf
+		}, function(){
+			row.remove();
+		});
 	}
 
 	function setup_modals() {
@@ -175,6 +187,7 @@ if (!window.jQuery) {
 		$(document).on('click', '.raction', do_action);
 		$(document).on('click', '.data_editor', do_edit);
 		$(document).on('click', '.data_adder', do_add);
+		$(document).on('click', '.data_remover', do_remove);
 		$(document).on('click', '.media_object', media_control);
 	}
 
@@ -183,10 +196,10 @@ if (!window.jQuery) {
 	    return string.charAt(0).toUpperCase() + string.slice(1);
 	}
 
-	window.onload = function() {
+	window.addEventListener('load', function() {
 	    $('body').append(build_buttons());
 	    setup_modals();
 	    hook_events();
-	};
+	});
 }());
 

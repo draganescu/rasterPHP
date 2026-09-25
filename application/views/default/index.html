@@ -1,84 +1,44 @@
 <!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <meta http-equiv="X-UA-Compatible" content="chrome=1">
-    <title>Raster Framework User Guide</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
-    <!--[if lt IE 9]>
-    <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
-    <![endif]-->
-    <script src="https://google-code-prettify.googlecode.com/svn/loader/run_prettify.js?lang=css&lang=ml"></script>
-	
-    <link rel="stylesheet" href="style.css">
+<html lang="en">
+<head>
+  <!-- dry._layout.head /-->
+  <title><!-- print.cms.title -->Raster — HTML in, website out<!-- /print.cms.title --></title>
+</head>
+<body>
+  <!-- dry._layout.header /-->
 
-  </head>
-  <body id='rootElement'>
-    <div class="wrapper">
-    	<header>
-	    	<h1>Raster</h1>
-	    	<h4>Table Of Contents</h4>
-    	</header>
-    	<section>
-				
+  <main>
+    <section class="hero">
+      <h1><!-- print.cms.headline -->Write HTML. Get a CMS.<!-- /print.cms.headline --></h1>
+      <div class="lede"><!-- print.cms.intro --><p>Raster turns plain HTML pages into an editable website. Mark the parts that change with comments and the content model builds itself.</p><!-- /print.cms.intro --></div>
+    </section>
 
-			<h1 id="Installation">The basic concept</h1>
-    		<hr>
-			
-			<pre>
-				<code>
-					
-				</code>
-			</pre>
+    <section class="features">
+      <!-- render.cms.features -->
+      <article class="feature">
+        <h2><!-- print.title -->HTML is the source of truth<!-- /print.title --></h2>
+        <div><!-- print.body --><p>Views are plain HTML that renders in a browser as is. Annotations are comments.</p><!-- /print.body --></div>
+      </article>
+      <!-- remove -->
+      <article class="feature">
+        <h2>Placeholder</h2>
+        <div><p>Everything inside a remove block is mock-up content and never reaches visitors.</p></div>
+      </article>
+      <!-- /remove -->
+      <!-- /render.cms.features -->
+    </section>
 
-    		<h1 id="Installation">Installation</h1>
-    		<hr>
-    		<p>
-    			In order to setup Shade you only need to download it from github and add it to a folder in the root of your web server.
-    		</p>
-				
-    		<h1 id="Routing">Configuration</h1>
-    		<hr>
+    <section class="latest">
+      <h2>Latest news</h2>
+      <ul class="news-list">
+        <!-- render.cms.news -->
+        <li><!-- print.@href.raster_detail_link --><a href="news/news_item/1"><!-- print.headline -->Raster runs on PHP 8<!-- /print.headline --></a><!-- /print.@href.raster_detail_link --></li>
+        <!-- /render.cms.news -->
+      </ul>
+      <p><a href="news.html">All news</a></p>
+    </section>
+  </main>
 
-    		<h1 id="Routing">Routing</h1>
-    		<hr>
-
-    		<h1 id="Routing">Events</h1>
-    		<hr>
-
-    		<h1 id="Routing">Database</h1>
-    		<hr>
-				
-			<h1 id="Routing">Themes</h1>
-    		<hr>
-
-    		<h1 id="Routing">Util</h1>
-    		<hr>
-
-    	</section>
-    </div>
-    <script src="javascripts/scale.fix.js"></script>
-    <script src="//ajax.googleapis.com/ajax/libs/jquery/1.10.2/jquery.min.js"></script>
-    <script >
-		  
-			var newLine, el, title, link;
-			var ToC = '';
-			$("section h1").each(function() {
-
-			  el = $(this);
-			  title = el.text();
-			  link = "#" + el.attr("id");
-
-			  newLine = "<a href='" + link + "'>" + title + "</a> <br/>";
-
-			  ToC += newLine;
-              $('base').attr('href', '');
-
-			});
-
-			
-
-			$("header h4").after(ToC);
-		</script>
-  </body>
+  <!-- dry._layout.footer /-->
+</body>
 </html>

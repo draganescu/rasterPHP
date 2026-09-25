@@ -32,6 +32,78 @@ class template {
   public $render_results = array();
   public $current_block = '';
   public $pad_uri = "";
+  public $output = '';
+  public $base_tag = '';
+  public $current_params = array();
+  // the view file being rendered, used in error messages
+  public $view_file = '';
+
+  // Parses a method reference as written in a template tag:
+  //   latest            -> array('latest', array())
+  //   latest(3, 'news') -> array('latest', array(3, 'news'))
+  // Only literals are allowed as arguments: numbers, quoted strings, true,
+  // false and null. Returns false when the reference is malformed.
+  static function parse_call($reference) {
+  	$reference = trim($reference);
+  	if (!preg_match('/^([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:\((.*)\))?$/s', $reference, $m)) {
+  		return false;
+  	}
+  	$arguments = array();
+  	if (isset($m[2]) && trim($m[2]) !== '') {
+  		$tokens = token_get_all('<?php '.$m[2].';');
+  		array_shift($tokens);
+  		array_pop($tokens);
+  		$expect_value = true;
+  		$negative = false;
+  		foreach ($tokens as $token) {
+  			if (is_array($token) && $token[0] === T_WHITESPACE) continue;
+  			if ($expect_value) {
+  				if ($token === '-') {
+  					if ($negative) return false;
+  					$negative = true;
+  					continue;
+  				}
+  				if (!is_array($token)) return false;
+  				switch ($token[0]) {
+  					case T_CONSTANT_ENCAPSED_STRING:
+  						$quote = $token[1][0];
+  						$inner = substr($token[1], 1, -1);
+  						$arguments[] = $quote === "'" ? str_replace(array("\\'", '\\\\'), array("'", '\\'), $inner) : stripcslashes($inner);
+  						break;
+  					case T_LNUMBER:
+  						$arguments[] = $negative ? -(int)$token[1] : (int)$token[1];
+  						break;
+  					case T_DNUMBER:
+  						$arguments[] = $negative ? -(float)$token[1] : (float)$token[1];
+  						break;
+  					case T_STRING:
+  						$word = strtolower($token[1]);
+  						if ($word === 'true') $arguments[] = true;
+  						elseif ($word === 'false') $arguments[] = false;
+  						elseif ($word === 'null') $arguments[] = null;
+  						else return false;
+  						break;
+  					default:
+  						return false;
+  				}
+  				if ($negative && !in_array($token[0], array(T_LNUMBER, T_DNUMBER))) return false;
+  				$negative = false;
+  				$expect_value = false;
+  			} else {
+  				if ($token !== ',') return false;
+  				$expect_value = true;
+  			}
+  		}
+  		if ($expect_value) return false;
+  	}
+  	return array($m[1], $arguments);
+  }
+
+  // Raised when a template can't be rendered, for example when a block is
+  // never closed. Run `php bin/raster lint` to see every problem at once.
+  function fail($message) {
+  	throw new RuntimeException($message.($this->view_file ? ' in '.$this->view_file : '').'. Run `php bin/raster lint` for details.');
+  }
     
   // set data to be replaced in all templates
 	function replace($what, $with, $where = ".*")
@@ -60,10 +132,11 @@ class template {
 		
 		$template->base_tag = $template->base_uri.$template->views_path.'/'.$template->theme.'/';
 		
+		$script = "<script>var BASE = ".json_encode((string)$template->link_uri, JSON_HEX_TAG | JSON_HEX_APOS | JSON_UNESCAPED_SLASHES)."</script>";
 		if(stripos($template->output,'<base') === false)
-				$base = "<base href='".$template->base_tag."' />\n<script type='text/javascript'>var BASE = '".$template->link_uri."'</script>";
+				$base = "<base href='".htmlspecialchars($template->base_tag, ENT_QUOTES)."' />\n".$script;
 		else
-			$base = "<script type='text/javascript'>var BASE = '".$template->link_uri."'</script>";
+			$base = $script;
 		
 		$template->output = str_replace('<head>', "<head>\n".$base, $template->output);
 		
@@ -88,6 +161,7 @@ class template {
 
   public function set_current_block($model, $method, $action) {
   	self::$model = $model;
+  	$this->current_params = array('pos1' => false, 'pos2' => 0, 'render_template' => '', 'datastarts' => array(array(), array(), array()));
   	if ($action == 'print') {
   		$this->current_action = 'print';
   		$isalt = false;
@@ -105,15 +179,17 @@ class template {
 			}
 			else
 			{
-				$pos2 = strpos($this->output, $end) - $pos1 + strlen($end);
+				$endpos = strpos($this->output, $end, $pos1);
+				if ($endpos === false) $this->fail("Unclosed $start (expected $end)");
+				$pos2 = $endpos - $pos1 + strlen($end);
 			}
 			
 			if($pos1 === false) return false;
 
 			if(!$isalt)
 			{
-				$this->current_block = substr($this->output, $pos1+strlen($start), $pos2 - 2*strlen($end));
-				$render_template = substr($this->output, $pos1+strlen($start), $pos2 - 2*strlen($end) + 1);
+				$render_template = substr($this->output, $pos1+strlen($start), $pos2 - strlen($start) - strlen($end));
+				$this->current_block = $render_template;
 			}
 			else
 			{
@@ -128,11 +204,13 @@ class template {
 			$start = "<!-- render.$model.$method -->";
 			$end = "<!-- /render.$model.$method -->";
 			$pos1 = strpos($this->output, $start);
-			$pos2 = strpos($this->output, $end) - $pos1 + strlen($end);
+			if ($pos1 === false) return false;
+			$endpos = strpos($this->output, $end, $pos1);
+			if ($endpos === false) $this->fail("Unclosed $start (expected $end)");
+			$pos2 = $endpos - $pos1 + strlen($end);
 			
-			$this->current_block = substr($this->output, $pos1+strlen($start), $pos2 - 2*strlen($end));
-
-			$render_template = substr($this->output, $pos1+strlen($start), $pos2 - 2*strlen($end)+1);
+			$render_template = substr($this->output, $pos1+strlen($start), $pos2 - strlen($start) - strlen($end));
+			$this->current_block = $render_template;
 			$res = preg_match_all('/<!-- print\.([@\+,a-z,A-Z,_,-,\.,0-9]*) (\/?)-->/', $render_template, $datastarts);
 			$this->current_params['render_template'] = $render_template;
 			$this->current_params['pos1'] = $pos1;
@@ -147,7 +225,10 @@ class template {
 			$start = $value;
 			$end = str_replace("<!-- ", "<!-- /", $value);
 			$rpos1 = strpos($this->output, $start);
-			$rpos2 = strpos($this->output, $end) - $rpos1 + strlen($end);
+			if ($rpos1 === false) continue;
+			$endpos = strpos($this->output, $end, $rpos1);
+			if ($endpos === false) $this->fail("Unclosed <!-- remove --> (expected <!-- /remove -->)");
+			$rpos2 = $endpos - $rpos1 + strlen($end);
 			$this->output = substr_replace($this->output, "", $rpos1, $rpos2);
 		}
   }
@@ -156,10 +237,11 @@ class template {
   public function _print($data, $model, $method) {
     	
   		extract($this->current_params);
+  		if ($pos1 === false) return false;
 
 			if($model == 'session')
 			{
-				if(array_key_exists($method, $_SESSION))
+				if(isset($_SESSION) && array_key_exists($method, $_SESSION))
 					$this->output = substr_replace($this->output, $_SESSION[$method], $pos1, $pos2);
 				else
 					$this->output = substr_replace($this->output, "", $pos1, $pos2);
@@ -183,10 +265,12 @@ class template {
 				return 'if';
 			}
 
-			if($data === false)
+			if($data === false || $data === null)
 				$this->output = substr_replace($this->output, $render_template, $pos1, $pos2);
+			elseif(is_scalar($data))
+				$this->output = substr_replace($this->output, (string)$data, $pos1, $pos2);
 			else
-				$this->output = substr_replace($this->output, $data, $pos1, $pos2);
+				$this->fail("print.$model.$method returned ".gettype($data)."; print needs a string (use render for lists)");
 
 			unset($object);
     }
@@ -212,7 +296,7 @@ class template {
 
 		$res = preg_match_all('/<!-- print\.([@\+,a-z,A-Z,_,-,\.]*) (\/?)-->/', $html, $datastarts);
 
-		$datastarts = super_unique($datastarts);
+		$datastarts = util::unique_matches($datastarts);
 		$return = '';
 		foreach($data as $item)
 		{
@@ -232,9 +316,10 @@ class template {
 				else
 					$end = str_replace("<!-- ", "<!-- /", $value);
 				$pos1 = strpos($loop, $start);
-				$pos2 = strpos($loop, $end) - $pos1 + strlen($end);
+				if ($pos1 === false) continue;
+				$pos2 = strpos($loop, $end, $pos1) - $pos1 + strlen($end);
 
-				$this->dispatch('loop');
+				event::dispatch('loop');
 				
 				$current_item = substr($loop, $pos1 + strlen($start), $pos2 - 2*strlen($end) + 1);
 				$content = $item[$datastarts[1][$key]];
@@ -342,6 +427,7 @@ class template {
 		{
 			$html = $bit;
 			foreach ($item as $key => $value) {
+				$is_append = false;
 
 				// simple replacement
 				$start = "<!-- print.$key -->";
@@ -391,6 +477,7 @@ class template {
     
     extract($this->current_params);
     $rendered_data = "";
+    if ($pos1 === false) return false;
 
 		if($data_arr === false)
 		{
@@ -459,9 +546,9 @@ class template {
 		            else
 		                $datakey = $datastarts[1][$key];
 		            
-		            $current_item = substr($rendered_tpl, $rpos1 + strlen($start), $rpos2 - 2*strlen($end)+1);
+		            $current_item = ($start === $end) ? '' : substr($rendered_tpl, $rpos1 + strlen($start), $rpos2 - 2*strlen($end)+1);
 
-		            if(is_array($data[$datakey]))
+		            if(array_key_exists($datakey, $data) && is_array($data[$datakey]))
 		            {
 		            	$loop = $this->_loop($render_template, $data[$datakey], $datastarts[0][$key]);
 		            	$rendered_tpl = substr_replace($rendered_tpl, $loop, $rpos1, $rpos2);
@@ -494,6 +581,7 @@ class template {
 		              {
 		                if($is_attr)
 		                {
+		                	if (is_string($data[$datakey])) $data[$datakey] = htmlspecialchars($data[$datakey], ENT_QUOTES, 'UTF-8', false);
 			                if($data[$datakey] === false)
 								$attrchange = preg_replace("% ".$dataattr."(.*?)=(.*?)('|\")(.*?)('|\")%", ' ', $current_item);			                	
 			                else {
@@ -508,8 +596,8 @@ class template {
 		                }
 		                else
 		                {
-		                	$rendered_tpl = substr_replace($rendered_tpl, $data[$datakey], $rpos1, $rpos2);
-		                	$occurences = substr_count($render_tpl, $datastarts[0][$key]);
+		                	$rendered_tpl = substr_replace($rendered_tpl, (string)$data[$datakey], $rpos1, $rpos2);
+		                	$occurences = substr_count($rendered_tpl, $datastarts[0][$key]);
 							if($occurences > 0)
 							{
 								for ($i=0; $i < $occurences; $i++) { 
@@ -518,13 +606,17 @@ class template {
 									$end = str_replace("<!-- ", "<!-- /", $value);
 									$rpos1 = strpos($rendered_tpl, $start);
 									$rpos2 = strpos($rendered_tpl, $end) - $rpos1 + strlen($end);
-									$rendered_tpl = substr_replace($rendered_tpl, $data[$datakey], $rpos1, $rpos2);
+									$rendered_tpl = substr_replace($rendered_tpl, (string)$data[$datakey], $rpos1, $rpos2);
 								}
 							}
 		              	}
 		              }
 		            }
 			}
+			// keys the row doesn't have keep their mock-up content, without the tags
+			$rendered_tpl = preg_replace_callback('/<!-- \/?print\.([@+][a-zA-Z0-9_\-:]+\.)?([A-Za-z0-9_\-]+) \/?-->/', function ($m) {
+				return $m[2] === '' ? $m[0] : '';
+			}, $rendered_tpl);
 			$rendered_data .= "\n".$rendered_tpl;
 		}
 
@@ -538,7 +630,7 @@ class template {
     
     
     function view_path($view) {
-    	return $this->views_path.DIRECTORY_SEPARATOR.$this->theme.DIRECTORY_SEPARATOR.$view.$this->view_ext;
+    	return APPBASE.config::get('views_path').DIRECTORY_SEPARATOR.$this->theme.DIRECTORY_SEPARATOR.$view.$this->view_ext;
     }
     
     function dry_template(){

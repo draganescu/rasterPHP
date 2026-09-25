@@ -7,7 +7,7 @@ class util {
 	// get the value from a key/value set passed in the url
 	static function param($name, $v = false)
 	{
-		$uri_segments=config::get('uri_segments');
+		$uri_segments=(array)config::get('uri_segments');
 		$value=false;
 		if(in_array($name, $uri_segments))
 			if(array_key_exists(array_search($name, $uri_segments) + 1, $uri_segments))
@@ -17,11 +17,44 @@ class util {
 	}
 	
 	// redirect to a location within the app
-	static function redirect($location)
+	static function redirect($location = '')
 	{
-		$base = config::get('base_uri');
-		header("Location: ".$base.$location);
+		$base = config::get('link_uri');
+		header("Location: ".$base.ltrim($location, '/'));
 		exit;
+	}
+
+	// removes duplicate matches from a preg_match_all result, keeping the
+	// groups aligned (used by the template loops)
+	static function unique_matches($matches)
+	{
+		if (empty($matches) || empty($matches[0])) return $matches;
+		$keep = array_keys(array_unique($matches[0]));
+		foreach ($matches as $group => $values) {
+			$matches[$group] = array_values(array_intersect_key($values, array_flip($keep)));
+		}
+		return $matches;
+	}
+
+	// escapes a value for HTML output
+	static function e($value)
+	{
+		return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
+	}
+
+	// a per session token that forms changing data must send back
+	static function csrf_token()
+	{
+		if (session_status() !== PHP_SESSION_ACTIVE) return '';
+		if (empty($_SESSION['raster_csrf'])) {
+			$_SESSION['raster_csrf'] = bin2hex(random_bytes(16));
+		}
+		return $_SESSION['raster_csrf'];
+	}
+
+	static function csrf_valid($token)
+	{
+		return is_string($token) && $token !== '' && hash_equals(util::csrf_token(), $token);
 	}
 
 	/* these are used for forms management and to be able to hook xss filters */
@@ -77,4 +110,10 @@ class util {
 		else
 			return true;
 	}
+}
+
+// a path relative to the project folder, for messages
+function raster_path($path) {
+	$root = dirname(BASE).'/';
+	return strpos($path, $root) === 0 ? substr($path, strlen($root)) : $path;
 }

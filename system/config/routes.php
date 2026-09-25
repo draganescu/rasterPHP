@@ -1,3 +1,8 @@
 <?php
-// this is a default route so that you can access the help system instantly
-controller::route( 'help' )->to( 'raster_guide' )->from( 'raster' );
+// System routes. Application routes live in application/config/the_routes.php
+// and use the same syntax:
+//
+//     controller::route('blog/post')->to('post');          // view: post.html
+//     controller::route('login')->to('login')->from('cms_admin'); // another theme
+//
+// Route patterns are regular expressions matched from the start of the path.

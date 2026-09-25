@@ -8,6 +8,8 @@ class event {
     protected $events = array();
     protected $current_event = '';
     protected $event_data = array();
+    public $current_model = null;
+    public $current_method = null;
 
     public static function instance()
     {
@@ -40,9 +42,9 @@ class event {
 	
 	function from($model, $method) {
 		$unbind = null;
-		$binds = $this->events[$this->current_event];
+		$binds = isset($this->events[$this->current_event]) ? $this->events[$this->current_event] : array();
 		foreach (( array )$binds as $key => $bind) {
-			if( $model == $bind[ 0 ] && $model == $bind[ 1 ] ) {
+			if( $model == $bind[ 0 ] && $method == $bind[ 1 ] ) {
 				$unbind = $key;
 			}
 		}
@@ -54,10 +56,10 @@ class event {
 	
 	function core() {
 		if(strpos($this->current_event, 'core_') !== false) return false;
-		$subscribers = $this->events[$this->current_event];
+		$subscribers = isset($this->events[$this->current_event]) ? $this->events[$this->current_event] : array();
 		unset($this->events[$this->current_event]);
 		$this->current_event = 'core_'.$this->current_event;
-		$core_subscribers = $this->events[$this->current_event];
+		$core_subscribers = isset($this->events[$this->current_event]) ? $this->events[$this->current_event] : array();
 		if(empty($core_subscribers)) {
 			$core_subscribers = array();
 		}
@@ -90,6 +92,7 @@ class event {
 			
 			if($model == NULL) {
 				function_exists($method) ? $event->data($method($event)) : $event->data(NULL);
+				continue;
 			}
 			
 			if(strpos($the_event, 'core_') !== false) {
@@ -99,7 +102,10 @@ class event {
 				$object = controller::get_object($model);
 			}
 			
-			if(!is_callable(array($object, $method))) $event->data(false);
+			if(!is_object($object) || !is_callable(array($object, $method))) {
+				$event->data(false);
+				continue;
+			}
 			
 			$event->data($object->$method());
 		}
@@ -112,9 +118,12 @@ class event {
 		return true;
 	}
 	
-	static function result($event, $model, $method) {
+	static function result($name, $model, $method) {
 		$event = event::instance();
-		return $event->event_data[$event][$model.$method];
+		foreach (array($name, 'core_'.$name) as $key) {
+			if (isset($event->event_data[$key][$model.$method])) return $event->event_data[$key][$model.$method];
+		}
+		return null;
 	}
 	
 }
