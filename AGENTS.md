@@ -547,5 +547,8 @@ php tests/mutate.php              # slow: would the demo suite notice a regressi
 A new feature gets an ID in `demo/README.md`, a use in the demo and a test.
 A change that sites must follow gets an upgrade step, and anything it
 replaces an entry in `system/tools/deprecations.php` (kept working until the
-version it names). Bump `system/VERSION` and add to `CHANGELOG.md` when
-releasing, and tag the release `v<version>`.
+version it names). To release, bump `system/VERSION` and add a
+`## <version>` section to `CHANGELOG.md`, then merge to `master`: the
+workflow in `.github/workflows/release.yml` runs the tests, tags
+`v<version>` and publishes the release with those notes. Pull requests run
+the same tests.

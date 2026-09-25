@@ -1,0 +1,89 @@
+# Tests every push and pull request. On master, when system/VERSION names a
+# version that has no tag yet, it also tags that commit v<version> and
+# publishes a GitHub release with that version's section of CHANGELOG.md.
+#
+# To release: bump system/VERSION, add a "## <version>" section to
+# CHANGELOG.md, merge to master. Merging is the approval.
+name: Test and release
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.1', '8.4']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: pdo_sqlite, sqlite3, mbstring, openssl, gd, zlib, phar
+          ini-values: phar.readonly=0
+          coverage: none
+      - name: Framework
+        run: php tests/run.php
+      - name: Updates
+        run: php tests/update.php
+      - name: Demo café (every feature)
+        run: php tests/demo.php
+      - name: Lint
+        run: |
+          php bin/raster lint
+          RASTER_APP=demo php bin/raster lint --all-themes
+
+  release:
+    needs: test
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Version
+        id: version
+        run: |
+          version="$(tr -d '[:space:]' < system/VERSION)"
+          if ! echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "system/VERSION is '$version', not a release version; nothing to publish"
+            exit 0
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/v$version" > /dev/null; then
+            echo "v$version is already released"
+            exit 0
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Release notes
+        if: steps.version.outputs.version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          awk -v v="$VERSION" '
+            $0 == "## " v { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "CHANGELOG.md has no '## $VERSION' section; add one before releasing"
+            exit 1
+          fi
+      - name: Tag and publish
+        if: steps.version.outputs.version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh release create "v$VERSION" \
+            --target "$GITHUB_SHA" \
+            --title "Raster $VERSION" \
+            --notes-file notes.md \
+            --latest
