@@ -203,6 +203,11 @@ class raster_inspector {
 		if (strpos($ref, 'raster_filter@') === 0) {
 			return array('key' => $ref, 'attribute' => null, 'append' => false, 'builtin' => true);
 		}
+		// a link to the other items sharing field values:
+		// print.@href.raster_filter@author (or @author@year for several fields)
+		if (preg_match('/^([@+])([a-zA-Z0-9_\-:]+)\.(raster_filter(@[a-z0-9_]+)+)$/', $ref, $m)) {
+			return array('key' => $m[3], 'attribute' => $m[2], 'append' => $m[1] === '+', 'builtin' => true);
+		}
 		if (preg_match('/^([@+])([a-zA-Z0-9_\-:]+)\.([A-Za-z0-9_\-]+)$/', $ref, $m)) {
 			return array('key' => $m[3], 'attribute' => $m[2], 'append' => $m[1] === '+', 'builtin' => in_array($m[3], self::$builtin_keys));
 		}

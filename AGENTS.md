@@ -84,6 +84,12 @@ Blocks must nest properly: close the inner block before the outer one.
 - `print.@attr.key` wraps a tag and sets its `attr` to the value (escaped).
 - `print.+attr.key` wraps a tag and appends the value to `attr`.
 - `raster_detail_link` is provided for CMS collections: the item's URL.
+- `print.@href.raster_filter@author` links to the other items of the
+  collection with the same `author` (`/news/news_items/author/<value>/`).
+  `raster_filter@author@year` matches on several fields.
+- A row value that is itself a list of rows renders its `print.key` block once
+  per nested row. Models can use this for one-to-many data, for example a post
+  with its comments.
 - If the method returns an empty array, the block renders nothing. If it
   returns `false`, the mock-up content stays.
 
@@ -171,6 +177,10 @@ renders `cms.news` shows the same items.
   - `/news/news_items/tag/php` renders `news.html` filtered by `tag = php`.
   - `render.cms.news('featured=1')` filters in the template and adds the
     `featured` field. When the field is new, the newest item gets that value.
+- Relationships are by value: items that share a field value (an `author`,
+  a `tag`) are linked with `raster_filter@field` and listed at
+  `/<name>/<name>_items/<field>/<value>`. For real references between
+  collections, write a model (RedBeanPHP has own and shared lists).
 - Page edits are versioned: each save stores a new revision.
 - Values can contain HTML and are printed as is. An empty value shows the
   template's default content, so to hide something, remove it from the view.
