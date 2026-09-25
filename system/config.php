@@ -12,23 +12,22 @@ class config {
     
     // these are mainly defaults and we define them here 
     // so that we can set them later on to a new value
-    public $rewrite = false;
     protected $config = array();
+    protected $current_assignment = '';
     static $extension = '.php';
     
     // given a parameter
     // $varname string
     static function set($varname) {
     	$config = config::instance();
-    	$config->$varname = '';
-    	$config->$current_assignment = $varname;
+    	$config->current_assignment = $varname;
     	return $config;
     }
     
     // it sets a config value
     // returns $this
     public function to($value) {
-    	$varname = $this->$current_assignment; 
+    	$varname = $this->current_assignment;
     	$this->$varname = $value;
     	return $this;
     }
@@ -36,9 +35,9 @@ class config {
     // builds the config files array
     static function get_application_config() {
 		$files = scandir(APPBASE.'config/');
-		$array = array(); 
+		$app_config_files = array();
 		foreach($files as $file) {
-		    if(!is_dir(BASE.$file.'/') && strpos($file,'.php') !== false) {
+		    if(is_file(APPBASE.'config/'.$file) && substr($file, -4) === '.php') {
 				$app_config_files[] = $file;
 			}
 		}		
@@ -76,18 +75,28 @@ class config {
     	$request_uri = config::request_uri();
     	// but if this magic fails you can manually set the host
     	// config::set('host')->to('example.com');
-    	if($config->host == '') $config->host = $_SERVER["HTTP_HOST"];
+    	// the Host header comes from the client: only a plain host[:port] is accepted
+    	if($config->host == '') {
+    		$host = isset($_SERVER["HTTP_HOST"]) ? strtolower($_SERVER["HTTP_HOST"]) : 'localhost';
+    		$config->host = preg_match('/^(\[[0-9a-f:]+\]|[a-z0-9.\-]+)(:\d{1,5})?$/', $host) ? $host : 'localhost';
+    	}
     	
     	// an attempt to find the name of the index file
-    	preg_match("|([a-z,A-Z,_,\.]*)\.php|", $_SERVER["SCRIPT_NAME"], $matches);
-    	$config->index_file = $matches[0];
+    	$script_name = isset($_SERVER["SCRIPT_NAME"]) ? $_SERVER["SCRIPT_NAME"] : '/index.php';
+    	// the built in php server reports the requested path as SCRIPT_NAME when
+    	// index.php is used as a router script, so we trust SCRIPT_FILENAME there
+    	if (PHP_SAPI === 'cli-server') {
+    		$script_name = '/'.basename($_SERVER['SCRIPT_FILENAME']);
+    	}
+    	preg_match("|([a-zA-Z0-9_\.\-]*)\.php|", $script_name, $matches);
+    	$config->index_file = isset($matches[0]) ? $matches[0] : 'index.php';
     	
     	// an attempt to see if the app runs at the root of the domain or in a subfolder
-		$folder_path = str_replace($config->index_file, '', $_SERVER["SCRIPT_NAME"]);
+		$folder_path = str_replace($config->index_file, '', $script_name);
 		$config->folder_path = $folder_path;
 		
-	    if($folder_path != '/') {
-	  		$request_uri = str_replace($folder_path, '', $request_uri);
+	    if($folder_path != '/' && strpos($request_uri, $folder_path) === 0) {
+	  		$request_uri = '/'.substr($request_uri, strlen($folder_path));
 		}
 		
 		// protocol determination
@@ -111,9 +120,13 @@ class config {
 		}
 		
 		// this is used to retrieve url params passed as key value pairs
-		$path_info = str_replace($config->index_file.'/', '', $request_uri);
-		$config->uri_segments = explode("/",$path_info);
-		array_shift($config->uri_segments);
+		$path_info = str_replace('/'.$config->index_file, '', $request_uri);
+		if ($path_info === '') $path_info = '/';
+		$request_uri = $path_info;
+		$uri_segments = explode("/", rtrim($path_info, '/'));
+		array_shift($uri_segments);
+		if (count($uri_segments) == 0) $uri_segments = array('');
+		$config->uri_segments = $uri_segments;
 		
 		// forgot what this is but i think its important
 		// ah, probably to config::get('uri_string') so you know where in the app you're at
@@ -129,18 +142,34 @@ class config {
 	// and when it finds a match it sets the environment accortdingly
 	// The environment is very important for database connections for example
 	private function set_environment(  ) {
-		$this->environment = 'development';
+		$this->environment = getenv('RASTER_ENV') ? getenv('RASTER_ENV') : 'development';
+		// without a servers file everything is development; with one, hosts
+		// that are not listed are production
 		if( !file_exists(APPBASE.'config/servers.php') ) {
 			return $this;
 		}
-		require_once APPBASE.'config/servers.php';
+		$servers = array();
+		require APPBASE.'config/servers.php';
 		
 		$this->servers = $servers;
+		$this->environment = 'production';
 
+		// RASTER_ENV always wins, which is handy for the CLI and for containers
+		if (getenv('RASTER_ENV')) {
+			$this->environment = getenv('RASTER_ENV');
+			return $this;
+		}
+		// Patterns are matched against the whole host name (port excluded).
+		// The Host header is chosen by the client, so loopback names
+		// (localhost, 127.0.0.1) only count for requests from this machine.
+		// On servers, set RASTER_ENV=production rather than relying on this.
+		$host = preg_replace('/:\d+$/', '', (string)$this->host);
+		$remote = isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : '127.0.0.1';
+		$from_this_machine = PHP_SAPI === 'cli' || in_array($remote, array('127.0.0.1', '::1'));
 		foreach ((array)$servers as $key => $environment) {
-			if(preg_match("|".$key."|", $this->base_uri)) {
-				$this->environment = $environment;
-			}
+			if(!preg_match("|^(".$key.")$|i", $host)) continue;
+			if(preg_match('/^(localhost|127\.0\.0\.1|\[?::1\]?)$/i', $host) && !$from_this_machine) continue;
+			$this->environment = $environment;
 		}
 		return $this;
 	}
@@ -162,15 +191,24 @@ class config {
 				$uri = $_SERVER['SCRIPT_NAME'];
 			}
 		}
-		$uri = '/' . ltrim($uri, '/');
+		// the query string is not part of the route
+		$uri = strtok($uri, '?');
+		$uri = '/' . ltrim(rawurldecode($uri), '/');
 		
 		return $uri;
 	}
 	
 	// config::get('whatever')
-	static function get($varname) {
+	static function get($varname, $default = null) {
 		$config = config::instance();
-		return $config->$varname;
+		$value = $config->$varname;
+		return ($value === null) ? $default : $value;
+	}
+
+	// config::has('whatever') tells apart "not set" from "set to a falsy value"
+	static function has($varname) {
+		$config = config::instance();
+		return array_key_exists($varname, $config->config);
 	}
 	
 	// generic setter as PHP lets us do

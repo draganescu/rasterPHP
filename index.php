@@ -5,6 +5,22 @@
 // entry point, which is the index.php file. It can be renamed and it serves
 // as the entry point for one application.
 
+// ### Development server
+// `php -S localhost:8000 index.php` runs the site with no web server.
+// Static files (theme css, images, media) are served as they are, while code,
+// configuration and data are never exposed (the same rules as .htaccess).
+if (PHP_SAPI === 'cli-server') {
+	$path = preg_replace('#/+#', '/', rawurldecode((string)parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH)));
+	$blocked = '#(^|/)\.|^/(system|bin|tests)(/|$)|^/application/(config|models|data)(/|$)|^/application/views/.*\.html$|\.(php|sqlite|sql|md)$|-(journal|wal|shm)$#i';
+	if (preg_match($blocked, $path) && $path !== '/index.php') {
+		http_response_code(403);
+		exit('Forbidden');
+	}
+	if ($path !== '/' && is_file(__DIR__.$path) && strpos(realpath(__DIR__.$path), __DIR__.'/') === 0) {
+		return false;
+	}
+}
+
 // ### Bootstrap
 // The first thing we load is the boot class
 // which handles auto magic and also wires up the framework

@@ -31,16 +31,15 @@ class log {
     }
 
     public function output() {
-        if ($log->enabled) {
+        if ($this->enabled && PHP_SAPI !== 'cli') {
             echo $this->javascript_console();
         }
     }
 
     function javascript_console() {
-        $code = "<script language='javascript'>\n";
+        $code = "<script>\n";
         foreach ($this->entries as $entry) {
-            $message = str_replace("\n", " ", $entry->message);
-            $code .= "\tconsole.log('".$entry->type.':'.$message."');\n";
+            $code .= "\tconsole.log(".json_encode($entry->type.': '.$entry->message, JSON_HEX_TAG).");\n";
         }
         $code .= "</script>\n";
         return $code;

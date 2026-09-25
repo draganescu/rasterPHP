@@ -1,0 +1,205 @@
+#!/usr/bin/env php
+<?php
+// Raster command line
+//
+//   php bin/raster lint [--json] [--theme=name] [--all-themes]
+//   php bin/raster schema [--json] [--check] [--apply] [--rename=table.old:new] [--drop=table.column]
+//   php bin/raster user <username> [--password=secret]
+//   php bin/raster mcp
+//   php bin/raster serve [--port=8000]
+//   php bin/raster render <url>
+
+if (PHP_SAPI !== 'cli') exit;
+
+$root = dirname(__DIR__);
+require_once $root.'/system/boot.php';
+boot::$appname = getenv('RASTER_APP') ?: 'application';
+
+$args = array_slice($argv, 1);
+$command = array_shift($args) ?: 'help';
+$options = array();
+$positional = array();
+foreach ($args as $arg) {
+	if (preg_match('/^--([a-z\-]+)(?:=(.*))?$/', $arg, $m)) {
+		$key = $m[1];
+		$value = isset($m[2]) ? $m[2] : true;
+		if (isset($options[$key])) $options[$key] = array_merge((array)$options[$key], array($value));
+		else $options[$key] = $value;
+	} else {
+		$positional[] = $arg;
+	}
+}
+
+// `render` boots with the requested URL; everything else needs no request
+if ($command !== 'render') {
+	boot::cli();
+	require_once BASE.'tools/inspector.php';
+	require_once BASE.'tools/schema.php';
+}
+
+$color = function_exists('posix_isatty') && posix_isatty(STDOUT) && !getenv('NO_COLOR');
+$paint = function ($text, $code) use ($color) { return $color ? "\033[{$code}m$text\033[0m" : $text; };
+$json = function ($data) { echo json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)."\n"; };
+
+switch ($command) {
+
+	case 'lint':
+		$inspector = new raster_inspector(null, isset($options['theme']) && is_string($options['theme']) ? $options['theme'] : null);
+		$themes = null;
+		if (isset($options['all-themes'])) {
+			$themes = array_values(array_filter(scandir($inspector->views_dir), function ($d) use ($inspector) {
+				return $d[0] !== '.' && is_dir($inspector->views_dir.'/'.$d);
+			}));
+		}
+		$problems = $inspector->lint($themes ?: array($inspector->theme));
+		$errors = count(array_filter($problems, function ($p) { return $p['severity'] === 'error'; }));
+		if (isset($options['json'])) {
+			$json(array('errors' => $errors, 'warnings' => count($problems) - $errors, 'problems' => $problems));
+		} else {
+			foreach ($problems as $p) {
+				$label = $p['severity'] === 'error' ? $paint('error', '31') : $paint('warning', '33');
+				echo "{$p['file']}:{$p['line']}:{$p['column']}: $label: {$p['message']}\n";
+			}
+			$views = count($inspector->views());
+			echo $problems ? "\n" : '';
+			echo ($errors ? $paint("$errors error(s)", '31') : $paint('No errors', '32')).', '.(count($problems) - $errors)." warning(s) in theme '{$inspector->theme}' ($views views)\n";
+		}
+		exit($errors ? 1 : 0);
+
+	case 'schema':
+		$schema = new raster_schema();
+		try {
+			$output = array();
+			foreach ((array)($options['rename'] ?? array()) as $rename) {
+				if (!preg_match('/^([a-z0-9]+)\.([a-z0-9_]+):([a-z0-9_]+)$/', (string)$rename, $m)) {
+					fwrite(STDERR, "--rename takes table.old:new, e.g. --rename=newsdata.title:headline\n");
+					exit(2);
+				}
+				$output[] = $schema->rename($m[1], $m[2], $m[3]);
+			}
+			foreach ((array)($options['drop'] ?? array()) as $drop) {
+				if (!preg_match('/^([a-z0-9]+)(?:\.([a-z0-9_]+))?$/', (string)$drop, $m)) {
+					fwrite(STDERR, "--drop takes table.column or table, e.g. --drop=newsdata.subtitle\n");
+					exit(2);
+				}
+				$output[] = $schema->drop($m[1], isset($m[2]) ? $m[2] : null, isset($options['force']));
+			}
+			if (isset($options['apply'])) {
+				$output = array_merge($output, $schema->apply());
+			}
+			$status = $schema->status();
+		} catch (Exception $e) {
+			fwrite(STDERR, $paint('error', '31').': '.$e->getMessage()."\n");
+			exit(1);
+		}
+
+		if (isset($options['json'])) {
+			$json(array('changes' => $output) + $status);
+		} else {
+			foreach ($output as $line) echo $paint('✓', '32')." $line\n";
+			if ($output) echo "\n";
+			echo "Environment: {$status['environment']}".($status['frozen'] ? ' (frozen)' : ' (fluid: new fields are created on the next request)')."\n\n";
+			foreach ($status['tables'] as $table) {
+				$title = $table['kind'] === 'page'
+					? "page {$table['url']}  ({$table['view']})"
+					: "collection {$table['name']}  (used in ".implode(', ', $table['views']).")";
+				$state = $table['exists'] ? "{$table['rows']} row(s)" : $paint('not in database', '33');
+				echo $paint($title, '1')."  table {$table['table']}, $state\n";
+				foreach ($table['fields'] as $name => $field) {
+					$default = preg_replace('/\s+/', ' ', strip_tags($field['default']));
+					if (mb_strlen($default) > 50) $default = mb_substr($default, 0, 47).'...';
+					$mark = $field['in_database'] ? $paint('✓', '32') : $paint('+', '33');
+					echo "  $mark $name".($default !== '' ? $paint("  \"$default\"", '2') : '')."\n";
+				}
+				foreach ($table['orphans'] as $orphan) {
+					echo '  '.$paint('-', '31')." $orphan ".$paint('(in database, not in any template)', '2')."\n";
+				}
+				foreach ($table['rename_candidates'] as $rename) {
+					echo '    '.$paint("renamed? php bin/raster schema --rename={$table['table']}.{$rename['from']}:{$rename['to']}", '36')."\n";
+				}
+			}
+			foreach ($status['unused_tables'] as $table) {
+				echo $paint("table $table", '1')."  ".$paint("not used by any template (php bin/raster schema --drop=$table)", '2')."\n";
+			}
+			echo "\n";
+			if ($status['drift']) {
+				echo $paint('The database and the templates differ.', '33');
+				echo $status['frozen'] ? " Run `php bin/raster schema --apply` to add missing tables and columns.\n" : "\n";
+			} else {
+				echo $paint('The database matches the templates.', '32')."\n";
+			}
+		}
+		exit(isset($options['check']) && $status['drift'] ? 1 : 0);
+
+	case 'user':
+		$username = isset($positional[0]) ? $positional[0] : null;
+		if (!$username) {
+			fwrite(STDERR, "Usage: php bin/raster user <username> [--password=secret]\n");
+			exit(2);
+		}
+		require_once BASE.'models/cms/cms.php';
+		cms_store::connect();
+		$password = isset($options['password']) && is_string($options['password']) ? $options['password'] : bin2hex(random_bytes(9));
+		$was_frozen = database::$frozen;
+		R::freeze(false);
+		cms_store::create_user($username, $password);
+		R::freeze($was_frozen);
+		echo "User '$username' saved.".(isset($options['password']) ? '' : " Password: $password")."\n";
+		echo "Log in at ".rtrim(config::get('link_uri'), '/')."/login\n";
+		exit(0);
+
+	case 'mcp':
+		controller::load_model('mcp');
+		controller::get_object('mcp')->stdio();
+		exit(0);
+
+	case 'serve':
+		$port = isset($options['port']) ? (int)$options['port'] : 8000;
+		$host = isset($options['host']) ? $options['host'] : 'localhost';
+		echo "Raster is running at http://$host:$port (Ctrl+C to stop)\n";
+		passthru(escapeshellarg(PHP_BINARY).' -S '.escapeshellarg("$host:$port").' -t '.escapeshellarg($root).' '.escapeshellarg($root.'/index.php'), $status);
+		exit($status);
+
+	case 'render':
+		// renders a URL without a web server, handy for tests and agents
+		$uri = isset($positional[0]) ? $positional[0] : '/';
+		$url = parse_url(getenv('RASTER_URL') ?: 'http://localhost:8000/');
+		$_SERVER['HTTP_HOST'] = $url['host'].(isset($url['port']) ? ':'.$url['port'] : '');
+		if (isset($url['scheme']) && $url['scheme'] === 'https') $_SERVER['HTTPS'] = 'on';
+		$prefix = rtrim(isset($url['path']) ? $url['path'] : '', '/');
+		$_SERVER['SCRIPT_NAME'] = $prefix.'/index.php';
+		$_SERVER['REQUEST_URI'] = $prefix.'/'.ltrim($uri, '/');
+		$_SERVER['REQUEST_METHOD'] = 'GET';
+		chdir($root);
+		// exit status 1 for 4xx/5xx responses (missing page, template errors)
+		register_shutdown_function(function () {
+			$status = http_response_code();
+			if ($status && $status >= 400) {
+				fwrite(STDERR, "HTTP $status\n");
+				exit(1);
+			}
+		});
+		boot::up();
+		exit(0);
+
+	default:
+		echo <<<HELP
+Raster command line
+
+  php bin/raster serve [--port=8000]     run the site with PHP's built in server
+  php bin/raster lint [--json]           check every view for annotation errors
+  php bin/raster schema [--json]         compare the templates' content model with the database
+        --apply                          create missing tables and columns (needed when frozen)
+        --check                          exit with 1 when they differ (for CI)
+        --rename=table.old:new           rename a column after renaming an annotation
+        --drop=table.column              delete a column no template uses
+        --drop=table                     delete a table no template uses
+  php bin/raster user <name> [--password=...]   create a CMS user or reset a password
+  php bin/raster mcp                     MCP server over stdio for local agents
+  php bin/raster render <url>            print the HTML of a URL
+
+Set RASTER_ENV=production to run against the production database.
+
+HELP;
+		exit($command === 'help' ? 0 : 2);
+}

@@ -28,11 +28,26 @@ class database {
         return $database;
     }
 
+    // true when a connection was selected for the current environment
+    protected static $connected = false;
+    // the name of the selected connection (the environment)
+    public static $connection = null;
+    // whether the selected connection is frozen (no automatic schema changes)
+    public static $frozen = false;
+
     // by default we load the Red Bean library and connect to the db when 
     // a new instance of the database singleton is called
     protected function __construct() {
-        require BASE.'libraries/rb.php';
+        require_once BASE.'libraries/rb.php';
         database::setup(  );
+    }
+
+    // true when there is a database connection for this environment
+    public static function configured() {
+        if (!isset(self::$instances[__CLASS__]) && !isset(self::$instances['the_'.__CLASS__])) {
+            database::instance();
+        }
+        return self::$connected;
     }
 
     // Raster offers a simple way to get rid of SQL text syntax in you PHP files
@@ -55,6 +70,7 @@ class database {
             return $this->query(file_get_contents($sqlfile), $arguments);
         } else {
             if(file_exists(APPBASE.'models/sql.php')) {
+                $querries = array();
                 include APPBASE.'models/sql.php';
                 if(array_key_exists($name, $querries)) {
                     return $this->query($querries[$name], $arguments);
@@ -69,28 +85,27 @@ class database {
         return $this;
     }
 
-    // This is just a helper function that runs a query trough
-    // R::getAll( $query ) and has parameter the classic escaping built in
-    public function query(  ) {
-        $args = func_get_args();
-
-        if (count($args) < 2)
-        {
-            $args = $args[0];
+    // Runs a query and returns all rows. Parameters are bound, never pasted:
+    //   $db->query('SELECT * FROM book WHERE author = ?', array('Tolkien'));
+    //   $db->query('SELECT * FROM book WHERE author = :a', array(':a' => 'Tolkien'));
+    // Older SQL files that use sprintf placeholders (%s, %d) still work; their
+    // values are quoted by the database driver first.
+    public function query( $query, $params = array() ) {
+        $params = (array)$params;
+        if (count($params) === 1 && isset($params[0]) && is_array($params[0])) {
+            $params = $params[0];
         }
-        else
-        {
-            $query = array_shift($args);
-            if($this->escape === true)
-                $args = array_map('mysql_escape_string', $args[0]);
-            else
-                $args = $args[0];
-            array_unshift($args, $query);
+        if (preg_match('/%[sd]/', $query) && !preg_match('/\?|:[a-z_]/i', $query)) {
+            $pdo = R::getDatabaseAdapter()->getDatabase()->getPDO();
+            $quoted = array();
+            foreach ($params as $value) {
+                $quoted[] = is_int($value) || is_float($value) ? $value : $pdo->quote((string)$value);
+            }
+            $query = vsprintf(str_replace("'%s'", '%s', $query), $quoted);
+            $params = array();
         }
-        
-        $query = call_user_func_array('sprintf', $args);
         log::info('Query: '. $query);
-        return R::getAll( $query );
+        return R::getAll( $query, $params );
     }
 
     // each connection config in APPBASE.'config/db/' is parsed and if 
@@ -101,13 +116,26 @@ class database {
 
     	if( count( $db_config_files ) == 0 ) return false;
 
+    	$frozen_connections = array(  );
     	foreach ($db_config_files as $file) {
-    		require_once APPBASE.'config/db/'.$file;
+    		// each file is read in isolation so settings don't leak between files
+    		$settings = (function ($__file) {
+    			$active = false; $dsn = null; $user = null; $password = null; $frozen = false;
+    			require $__file;
+    			return compact('active', 'dsn', 'user', 'password', 'frozen');
+    		})(APPBASE.'config/db/'.$file);
     		$key = basename($file, ".php");
-            if( $active )
-        		R::addDatabase($key,$dsn,$user,$password,$frozen);
-            if( $active )
-                $active_connections[  ] = $key;
+    		if( !$settings['active'] || !$settings['dsn'] ) continue;
+    		// make sure the folder of an sqlite database exists
+    		if (strpos($settings['dsn'], 'sqlite:') === 0) {
+    			$path = substr($settings['dsn'], 7);
+    			if ($path !== ':memory:' && !is_dir(dirname($path))) @mkdir(dirname($path), 0775, true);
+    		}
+    		if (!R::hasDatabase($key)) {
+    			R::addDatabase($key, $settings['dsn'], $settings['user'], $settings['password'], (bool)$settings['frozen']);
+    		}
+    		$active_connections[  ] = $key;
+    		$frozen_connections[ $key ] = (bool)$settings['frozen'];
     	}
 
         // Raster supports seamless deployement on multiple
@@ -120,15 +148,20 @@ class database {
         // depending on what the current environment is we use R to make
         // a new connection to the DB
 		R::selectDatabase($env);
+		R::freeze($frozen_connections[$env]);
+		self::$connected = true;
+		self::$connection = $env;
+		self::$frozen = $frozen_connections[$env];
     	return true;
     }
 
     // the database config loader looks up all the files in APPBASE.'config/db/'
     static function get_db_config() {
     	$db_config_files = array(  );
+    	if (!is_dir(APPBASE.'config/db/')) return $db_config_files;
 		$files = scandir(APPBASE.'config/db/'); 
 		foreach($files as $file) {
-		    if(!is_dir(BASE.$file.'/') && strpos($file,'.php') !== false) {
+		    if(is_file(APPBASE.'config/db/'.$file) && substr($file, -4) === '.php') {
             	$db_config_files[] = $file;
 			}
 		}		

@@ -1,6 +1,26 @@
 Raster PHP
 ======
 
+Raster is a PHP framework for content sites. You write HTML and mark the parts that change with HTML comments. The CMS derives its content model from that markup: no schema files, no admin configuration.
+
+Compared with Laravel or Symfony, Raster is much smaller: under 4,000 lines of framework (ORM aside), a single controller, and no build step. Pages are fast. What it generates is easy to follow: one view file per URL, one table per page. Every page is editable as soon as it exists. Routing is file-based, like Next.js: `/about` is `about.html`.
+
+```sh
+php bin/raster serve          # http://localhost:8000 (PHP 8.1+, SQLite, nothing to install)
+php bin/raster user admin     # an editor account; log in at /login
+php bin/raster lint           # check every view for annotation errors
+php bin/raster schema         # the content model the templates define, compared with the database
+php bin/raster mcp            # let an agent edit the content (MCP over stdio; /mcp over HTTP)
+```
+
+**Working on a Raster site with an AI agent?** [AGENTS.md](AGENTS.md) is the complete specification: annotations, the CMS rules, the tools and the MCP endpoint.
+
+What changed in this version: PHP 8 support, SQLite by default, RedBeanPHP 5.7, a linter with line-level errors, schema drift detection with frozen production databases, an MCP server, password hashing, CSRF protection for the editor, and a test suite (`php tests/run.php`).
+
+---
+
+The original introduction follows.
+
 Raster PHP is the php implementation of the raster specification that implements the RTO design pattern ([more details](https://draganescu.github.io/rto/specs/2014/06/29/rto.html)).
 
 # Hi i'm Raster!
