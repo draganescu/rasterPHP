@@ -40,7 +40,8 @@ class raster_inspector {
 		if (!is_dir($dir)) return $views;
 		$iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS));
 		foreach ($iterator as $file) {
-			if (substr($file->getFilename(), -strlen($this->ext)) !== $this->ext) continue;
+			// html views, plus feeds and data views (news.rss, sitemap.xml, api.json)
+			if (substr($file->getFilename(), -strlen($this->ext)) !== $this->ext && !preg_match('/\.(rss|atom|xml|json|txt)$/', $file->getFilename())) continue;
 			$views[] = ltrim(substr($file->getPathname(), strlen($dir)), '/');
 		}
 		sort($views);
@@ -203,6 +204,11 @@ class raster_inspector {
 		if (strpos($ref, 'raster_filter@') === 0) {
 			return array('key' => $ref, 'attribute' => null, 'append' => false, 'builtin' => true);
 		}
+		// a link to the other items sharing field values:
+		// print.@href.raster_filter@author (or @author@year for several fields)
+		if (preg_match('/^([@+])([a-zA-Z0-9_\-:]+)\.(raster_filter(@[a-z0-9_]+)+)$/', $ref, $m)) {
+			return array('key' => $m[3], 'attribute' => $m[2], 'append' => $m[1] === '+', 'builtin' => true);
+		}
 		if (preg_match('/^([@+])([a-zA-Z0-9_\-:]+)\.([A-Za-z0-9_\-]+)$/', $ref, $m)) {
 			return array('key' => $m[3], 'attribute' => $m[2], 'append' => $m[1] === '+', 'builtin' => in_array($m[3], self::$builtin_keys));
 		}
@@ -258,9 +264,35 @@ class raster_inspector {
 					}
 				}
 			}
+			// an override (the_feed extends feed) has its parent's methods too
+			if (strpos(basename(dirname($file)), 'the_') === 0) {
+				$parent = BASE.$models_path.'/'.$model.'/'.$model.'.php';
+				if (file_exists($parent)) {
+					$base_info = $this->parent_info($parent);
+					$info['methods'] = array_values(array_unique(array_merge($info['methods'], $base_info['methods'])));
+					$info['magic'] = $info['magic'] || $base_info['magic'];
+				}
+			}
 			break;
 		}
 		return $cache[$model] = $info;
+	}
+
+	// methods of a system model file, for overrides
+	protected function parent_info($file) {
+		$info = array('methods' => array(), 'magic' => false);
+		$tokens = token_get_all(file_get_contents($file));
+		foreach ($tokens as $i => $t) {
+			if (!is_array($t) || $t[0] !== T_FUNCTION) continue;
+			for ($j = $i + 1; $j < count($tokens); $j++) {
+				if (is_array($tokens[$j]) && $tokens[$j][0] === T_STRING) {
+					if ($tokens[$j][1] === '__call') $info['magic'] = true; else $info['methods'][] = $tokens[$j][1];
+					break;
+				}
+				if ($tokens[$j] === '(') break;
+			}
+		}
+		return $info;
 	}
 
 	// ##Lint
@@ -276,6 +308,7 @@ class raster_inspector {
 		$html = file_get_contents($path);
 		list($blocks, $problems) = self::blocks($html);
 		$this->lint_blocks($blocks, $problems, null, $theme);
+		$this->lint_forms($html, $problems, $theme);
 		usort($problems, function ($a, $b) { return $a['line'] <=> $b['line'] ?: $a['column'] <=> $b['column']; });
 		foreach ($problems as &$problem) {
 			$problem['file'] = self::short($path);
@@ -287,6 +320,8 @@ class raster_inspector {
 	protected function lint_blocks($blocks, &$problems, $render, $theme) {
 		foreach ($blocks as $block) {
 			$keyword = $block['keyword'];
+			// mock-up content is removed before anything runs
+			if ($keyword === 'remove') continue;
 			if ($keyword === 'print' && $render !== null) {
 				$this->lint_data_key($block, $problems, $render);
 			} elseif ($keyword === 'print' || $keyword === 'render') {
@@ -319,7 +354,7 @@ class raster_inspector {
 		if (in_array($ref['model'], self::$builtin_models)) return;
 		$info = $this->model_info($ref['model']);
 		if ($info === false) {
-			$problems[] = self::problem('error', $block, "Model '{$ref['model']}' not found; create application/models/{$ref['model']}/{$ref['model']}.php with class {$ref['model']}");
+			$problems[] = self::problem('error', $block, "Model '{$ref['model']}' not found; create ".boot::$appname."/models/{$ref['model']}/{$ref['model']}.php with class {$ref['model']}");
 			return;
 		}
 		if (!$info['class']) {
@@ -335,7 +370,7 @@ class raster_inspector {
 			// CMS helpers used by templates are written self-closing; a helper name
 			// wrapping default content is a field that would never be stored
 			$reserved = (in_array($method, $info['methods']) && (!in_array($method, $template_methods) || ($block['keyword'] === 'print' && $block['type'] !== 'self')))
-				|| ($block['keyword'] === 'print' && in_array($method, array('slug', 'id', 'updated_at', 'enabled')))
+				|| ($block['keyword'] === 'print' && in_array($method, array('slug', 'id', 'updated_at', 'enabled', 'published_at')))
 				|| ($block['keyword'] === 'render' && in_array($method, array('users', 'raster')));
 			if ($reserved) {
 				$problems[] = self::problem('error', $block, "'$method' is reserved by the CMS and can't be used as a ".($block['keyword'] === 'print' ? 'field' : 'collection')." name; pick another name");
@@ -350,7 +385,7 @@ class raster_inspector {
 				$problems[] = self::problem('warning', $block, "{$block['raw']} has no default content; use <!-- print.cms.$method -->default<!-- /print.cms.$method --> so the field starts with a value");
 			}
 		}
-		if ($block['keyword'] === 'render' && $block['type'] === 'open' && trim(strip_tags($block['inner'])) === '' && strpos($block['inner'], '<!--') === false && strpos($block['inner'], '<') === false) {
+		if ($block['keyword'] === 'render' && $block['type'] === 'open' && trim($block['inner']) !== '' && trim(strip_tags($block['inner'])) === '' && strpos($block['inner'], '<!--') === false && strpos($block['inner'], '<') === false) {
 			$problems[] = self::problem('warning', $block, "{$block['raw']} is empty; render repeats its inner HTML once per item");
 		}
 	}
@@ -359,8 +394,9 @@ class raster_inspector {
 		$key = self::data_key($block['ref']);
 		if ($key['builtin']) return;
 		if (strpos($key['key'], '.') !== false) {
-			if (strpos($block['ref'], 'if.') === 0) return;
-			$problems[] = self::problem('warning', $block, "{$block['raw']} is inside <!-- {$render['name']} --> (line {$render['line']}), so it is read as the item key '{$key['key']}', not as a model call");
+			// model.method inside a render block runs after the block renders,
+			// once for every copy
+			if ($key['attribute'] === null) $this->lint_model_call($block, $problems);
 			return;
 		}
 		if ($key['attribute'] !== null) {
@@ -392,6 +428,144 @@ class raster_inspector {
 		}
 	}
 
+	static function position($html, $offset) {
+		$before = substr($html, 0, $offset);
+		$nl = strrpos($before, "\n");
+		return array('line' => substr_count($before, "\n") + 1, 'column' => $nl === false ? $offset + 1 : $offset - $nl);
+	}
+
+	static function problem_at($severity, $html, $offset, $message) {
+		return array('severity' => $severity, 'message' => $message) + self::position($html, $offset);
+	}
+
+	// every raise('x') and done('x') in the models, so alerts can be checked
+	function raised_names() {
+		static $names = null;
+		if ($names !== null) return $names;
+		$names = array();
+		foreach (array(BASE.'models', APPBASE.config::get('models_path', 'models')) as $dir) {
+			if (!is_dir($dir)) continue;
+			foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS)) as $file) {
+				if (substr($file, -4) !== '.php') continue;
+				preg_match_all('/(?:raise|done)\(\s*[\'"]([a-z0-9_]+)[\'"]/', file_get_contents($file), $m);
+				$names = array_merge($names, $m[1]);
+			}
+		}
+		return $names = array_unique($names);
+	}
+
+	// ##Forms
+	// Post forms, validation regions and alerts follow conventions the
+	// engine relies on; these checks catch the mistakes that fail silently.
+	protected function lint_forms($html, &$problems, $theme) {
+		// render blocks
+		preg_match_all('/<!-- (\/?)render\.([a-z0-9_\-]+\.[^ ]*(?:\([^)]*\))?) -->/', $html, $tags, PREG_OFFSET_CAPTURE | PREG_SET_ORDER);
+		$blocks = array(); $stack = array();
+		foreach ($tags as $tag) {
+			if ($tag[1][0] === '') { $stack[] = array('ref' => $tag[2][0], 'start' => $tag[0][1]); continue; }
+			for ($i = count($stack) - 1; $i >= 0; $i--) {
+				if ($stack[$i]['ref'] === $tag[2][0]) {
+					$blocks[] = array('ref' => $tag[2][0], 'start' => $stack[$i]['start'], 'end' => $tag[0][1]);
+					array_splice($stack, $i, 1);
+					break;
+				}
+			}
+		}
+		// post forms and their owners
+		$forms = array();
+		preg_match_all('/<form\b[^>]*>/i', $html, $opens, PREG_OFFSET_CAPTURE);
+		foreach ($opens[0] as $open) {
+			if (!preg_match('/\bmethod\s*=\s*["\']?post/i', $open[0])) continue;
+			$close = stripos($html, '</form>', $open[1]);
+			$end = $close === false ? strlen($html) : $close;
+			$owner = ''; $best = -1;
+			foreach ($blocks as $block) {
+				if (strpos($block['ref'], 'validation.') === 0) continue;
+				if ($block['start'] < $open[1] && $block['end'] > $open[1] && $block['start'] > $best) { $owner = $block['ref']; $best = $block['start']; }
+			}
+			if ($owner === '') {
+				$problems[] = self::problem_at('warning', $html, $open[1], 'This post form is not inside a render block, so no model handles it. Wrap it: <!-- render.model.method --><form method="post">...</form><!-- /render.model.method -->');
+			}
+			$forms[] = array('owner' => $owner, 'at' => $open[1], 'end' => $end, 'fields' => template::instance()->constraints(substr($html, $open[1], $end - $open[1])));
+		}
+		// validation regions
+		$validation = $this->model_info('validation');
+		$methods = $validation ? $validation['methods'] : array();
+		preg_match_all('/<!-- (print|render)\.validation\.([a-z0-9_]+)(\(([^)]*)\))? \/?-->/', $html, $vtags, PREG_OFFSET_CAPTURE | PREG_SET_ORDER);
+		foreach ($vtags as $vtag) {
+			$method = $vtag[2][0];
+			$at = $vtag[0][1];
+			if (in_array($method, array('alert', 'raise', 'finalize', 'get', 'submitted', 'valid', 'errors'))) continue;
+			$call = template::parse_call($method.(isset($vtag[3]) ? $vtag[3][0] : ''));
+			if (!in_array($method, $methods)) {
+				$rule_file = APPBASE.config::get('models_path', 'models').'/validation/rules/'.$method.'.php';
+				if (!file_exists($rule_file)) {
+					$problems[] = self::problem_at('error', $html, $at, "Unknown validation rule '$method'. Built in: field, matches, cant_be, accepted; or create ".self::short($rule_file));
+					continue;
+				}
+			}
+			$form = null;
+			foreach ($forms as $f) {
+				if ($at > $f['at'] && $at < $f['end']) $form = $f;
+			}
+			if (!$form || $form['owner'] === '') {
+				$problems[] = self::problem_at('warning', $html, $at, "validation.$method only shows inside a post form that sits in a render block");
+				continue;
+			}
+			$fields = $call ? array_filter($call[1], 'is_string') : array();
+			$checked = $method === 'cant_be' ? array_slice($fields, 0, 1) : ($method === 'field' || $method === 'accepted' || $method === 'not_empty' || $method === 'email_format' ? array_slice($fields, 0, 1) : $fields);
+			foreach ($checked as $field) {
+				if (!isset($form['fields'][$field])) {
+					$problems[] = self::problem_at('error', $html, $at, "validation.$method checks '$field' but the form has no input named $field");
+				}
+			}
+			if ($method === 'field' && $fields && isset($form['fields'][reset($fields)])) {
+				$rules = $form['fields'][reset($fields)];
+				unset($rules['type']);
+				if (!$rules && !in_array($form['fields'][reset($fields)]['type'], array('email', 'url', 'number', 'range', 'date'))) {
+					$problems[] = self::problem_at('warning', $html, $at, "validation.field('".reset($fields)."') never shows: the input has no constraint (required, type, minlength, maxlength, min, max, pattern)");
+				}
+			}
+		}
+		// alerts need something that raises them
+		preg_match_all("/<!-- print\.validation\.alert\('([a-z0-9_]+)'\) -->/", $html, $alerts, PREG_OFFSET_CAPTURE | PREG_SET_ORDER);
+		$raised = $this->raised_names();
+		foreach ($alerts as $alert) {
+			if (!in_array($alert[1][0], $raised)) {
+				$problems[] = self::problem_at('warning', $html, $alert[0][1], "No model raises '{$alert[1][0]}': call validation::get()->raise('{$alert[1][0]}') or util::done('{$alert[1][0]}') for this alert to show");
+			}
+		}
+		// models that send emails need their email views
+		$emails = array('render.authentication.forgot' => '_email/password_reset', 'render.newsletter.signup' => '_email/newsletter_confirm');
+		foreach ($emails as $tag => $view) {
+			$at = strpos($html, '<!-- '.$tag.' -->');
+			if ($at === false) continue;
+			if (!file_exists($this->theme_dir($theme).'/'.$view.$this->ext)) {
+				$problems[] = self::problem_at('error', $html, $at, "$tag sends an email written in ".self::short($this->theme_dir($theme).'/'.$view.$this->ext).", which does not exist");
+			}
+		}
+	}
+
+	// the routes in config/the_routes.php: pattern, view, theme, line
+	function routes() {
+		$file = APPBASE.'config/the_routes.php';
+		$routes = array();
+		if (!file_exists($file)) return $routes;
+		$code = '';
+		foreach (token_get_all(file_get_contents($file)) as $token) {
+			if (is_array($token) && in_array($token[0], array(T_COMMENT, T_DOC_COMMENT))) {
+				$code .= str_repeat("\n", substr_count($token[1], "\n"));
+			} else {
+				$code .= is_array($token) ? $token[1] : $token;
+			}
+		}
+		foreach (explode("\n", $code) as $n => $line) {
+			if (!preg_match('/route\(\s*([\'"])(.*?)\1\s*\)\s*->\s*to\(\s*([\'"])(.*?)\3\s*\)(?:\s*->\s*from\(\s*([\'"])(.*?)\5\s*\))?/', $line, $m)) continue;
+			$routes[] = array('pattern' => $m[2], 'view' => $m[4], 'theme' => isset($m[6]) && $m[6] !== '' ? $m[6] : $this->theme, 'line' => $n + 1, 'code' => $line);
+		}
+		return $routes;
+	}
+
 	// Checks routes in application/config/the_routes.php point at views
 	function lint_routes() {
 		$problems = array();
@@ -409,7 +583,7 @@ class raster_inspector {
 		$lines = explode("\n", $code);
 		foreach ($lines as $n => $line) {
 			if (!preg_match('/route\(\s*([\'"])(.*?)\1\s*\)\s*->\s*to\(\s*([\'"])(.*?)\3\s*\)(?:\s*->\s*from\(\s*([\'"])(.*?)\5\s*\))?/', $line, $m)) continue;
-			$theme = isset($m[6]) && $m[6] !== '' ? $m[6] : $this->theme;
+			$theme = isset($m[6]) && $m[6] !== '' ? $m[6] : config::get('theme', $this->theme);
 			$view = $m[4];
 			$app_file = $this->theme_dir($theme).'/'.$view.$this->ext;
 			$system_file = BASE.'views/'.$theme.'/'.$view.$this->ext;
@@ -425,6 +599,98 @@ class raster_inspector {
 		return $problems;
 	}
 
+	// ##Events
+	// Where the app listens: bindings in config/the_events.php and
+	// listens() in its models. array(event, model, method, file, line)
+	function listeners() {
+		$found = array();
+		$file = APPBASE.'config/the_events.php';
+		if (file_exists($file)) {
+			foreach (explode("\n", $this->without_comments(file_get_contents($file))) as $n => $line) {
+				if (!preg_match_all('/event::bind\(\s*([\'"])(.+?)\1\s*\)\s*->\s*to\(\s*([\'"])(.+?)\3\s*,\s*([\'"])(.+?)\5\s*\)/', $line, $matches, PREG_SET_ORDER)) continue;
+				foreach ($matches as $m) $found[] = array('event' => $m[2], 'model' => $m[4], 'method' => $m[6], 'file' => self::short($file), 'line' => $n + 1);
+			}
+		}
+		foreach (glob(APPBASE.config::get('models_path', 'models').'/*', GLOB_ONLYDIR) ?: array() as $dir) {
+			$folder = basename($dir);
+			$model_file = "$dir/$folder.php";
+			if (!is_file($model_file)) continue;
+			$source = file_get_contents($model_file);
+			$at = strpos($source, 'function listens(');
+			if ($at === false) continue;
+			if (!class_exists($folder)) require_once $model_file;
+			if (!method_exists($folder, 'listens')) continue;
+			$line = substr_count(substr($source, 0, $at), "\n") + 1;
+			$model = strpos($folder, 'the_') === 0 ? substr($folder, 4) : $folder;
+			foreach ((array)call_user_func(array($folder, 'listens')) as $event => $methods) {
+				foreach ((array)$methods as $method) $found[] = array('event' => $event, 'model' => $model, 'method' => $method, 'file' => self::short($model_file), 'line' => $line);
+			}
+		}
+		return $found;
+	}
+
+	// events something dispatches by name: the framework's and the app's
+	function dispatched_events() {
+		$names = array('launch', 'finding_route', 'route_set', 'route_found', 'route_not_found', 'before_drying', 'after_drying', 'before_render', 'after_render', 'before_print', 'after_print', 'loop', 'before_output', 'done', 'land', 'read_get_data', 'read_post_data', 'read_cookie_data');
+		foreach (array(BASE, APPBASE) as $root) {
+			$iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS));
+			foreach ($iterator as $file) {
+				if (substr($file->getFilename(), -4) !== '.php' || strpos($file->getPathname(), '/libraries/') !== false || strpos($file->getPathname(), '/data/') !== false) continue;
+				if (preg_match_all('/event::dispatch\(\s*([\'"])([a-z0-9_.]+)\1/', file_get_contents($file->getPathname()), $m)) {
+					$names = array_merge($names, $m[2]);
+				}
+			}
+		}
+		$names = array_values(array_unique($names));
+		sort($names);
+		return $names;
+	}
+
+	// is something going to send this event?
+	function event_exists($event, $known) {
+		if (in_array($event, $known, true)) return true;
+		if (preg_match('/^loading_model_([a-z0-9_]+)$/', $event, $m)) return (bool)$this->model_info($m[1]);
+		if (strpos($event, 'dried_') === 0) return true;
+		if (preg_match('/^execut(?:ing|ed)_([a-z0-9_]+)$/', $event, $m)) {
+			// executed_news_latest: some split into an existing model and method
+			$parts = explode('_', $m[1]);
+			for ($i = 1; $i < count($parts); $i++) {
+				$info = $this->model_info(implode('_', array_slice($parts, 0, $i)));
+				if ($info && ($info['magic'] || in_array(implode('_', array_slice($parts, $i)), $info['methods']))) return true;
+			}
+		}
+		return false;
+	}
+
+	function lint_events() {
+		$problems = array();
+		$known = $this->dispatched_events();
+		foreach ($this->listeners() as $l) {
+			$at = array('file' => $l['file'], 'line' => $l['line'], 'column' => 1);
+			$info = $this->model_info($l['model']);
+			if (!$info) {
+				$problems[] = $at + array('severity' => 'error', 'message' => "'{$l['event']}' is bound to model '{$l['model']}', which does not exist");
+				continue;
+			}
+			if (!$info['magic'] && !in_array($l['method'], $info['methods'])) {
+				$problems[] = $at + array('severity' => 'error', 'message' => "'{$l['event']}' is bound to {$l['model']}.{$l['method']}, which is not a public method of {$l['model']}");
+			}
+			if (!$this->event_exists($l['event'], $known)) {
+				$problems[] = $at + array('severity' => 'warning', 'message' => "Nothing sends '{$l['event']}', so {$l['model']}.{$l['method']} never runs. Events sent: ".implode(', ', array_filter($known, function ($e) { return strpos($e, '.') !== false; })).', and the request events in AGENTS.md');
+			}
+		}
+		return $problems;
+	}
+
+	protected function without_comments($code) {
+		$out = '';
+		foreach (token_get_all($code) as $token) {
+			if (is_array($token) && in_array($token[0], array(T_COMMENT, T_DOC_COMMENT))) $out .= str_repeat("\n", substr_count($token[1], "\n"));
+			else $out .= is_array($token) ? $token[1] : $token;
+		}
+		return $out;
+	}
+
 	function lint($themes = null) {
 		$problems = array();
 		$themes = $themes ?: array($this->theme);
@@ -433,7 +699,7 @@ class raster_inspector {
 				$problems = array_merge($problems, $this->lint_file($view, $theme));
 			}
 		}
-		return array_merge($problems, $this->lint_routes());
+		return array_merge($problems, $this->lint_routes(), $this->lint_events());
 	}
 
 	static function short($path) {
@@ -483,14 +749,22 @@ class raster_inspector {
 		$theme = $theme ?: $this->theme;
 		$pages = array();
 		$collections = array();
+		$site = array();
 		$cms = $this->model_info('cms');
 		$reserved = $cms ? $cms['methods'] : array();
 		foreach ($this->views($theme) as $view) {
-			if (strpos(basename($view), '_') === 0) continue; // partials
+			if (preg_match('#(^|/)_#', $view)) continue; // partials and _email/
+			if (substr($view, -strlen($this->ext)) !== $this->ext) continue; // feeds
 			$html = $this->expand(file_get_contents($this->theme_dir($theme).'/'.$view), $theme);
 			list($blocks) = self::blocks($html);
 			$fields = array();
 			$this->collect_content($blocks, $fields, $collections, $view, $reserved);
+			// site_* fields are shared by all pages
+			foreach ($fields as $name => $field) {
+				if (strpos($name, 'site_') !== 0) continue;
+				if (!isset($site[$name])) $site[$name] = $field;
+				unset($fields[$name]);
+			}
 			if (empty($fields) && !$this->uses_collections($blocks)) continue;
 			$slug = $this->slug_for_view($view);
 			$pages[] = array(
@@ -501,8 +775,41 @@ class raster_inspector {
 				'fields' => $fields,
 			);
 		}
+		// literal routes (controller::route('specials')->to('menu')) are pages too:
+		// each URL keeps its own page fields
+		foreach ($this->routes() as $route) {
+			if (!preg_match('#^[a-z0-9_\-/]+$#', $route['pattern']) || $route['theme'] !== $theme) continue;
+			foreach ($pages as $page) {
+				if ($page['view'] !== $route['view'].$this->ext || !$page['fields']) continue;
+				$slug = '/'.trim($route['pattern'], '/');
+				$pages[] = array('view' => $page['view'], 'url' => $slug, 'slug' => $slug, 'type' => cms::page_type($slug), 'fields' => $page['fields']);
+				break;
+			}
+		}
 		ksort($collections);
+		if ($site) {
+			array_unshift($pages, array('view' => '*', 'url' => 'site', 'slug' => 'site', 'type' => 'sitepage', 'fields' => $site));
+		}
 		return array('pages' => $pages, 'collections' => $collections);
+	}
+
+	// the mock-up item of a collection, taken from its own view (news.html,
+	// else news_item.html): the first item stored comes from there, whichever
+	// page asks for the collection first
+	function collection_defaults($name, $theme = null) {
+		foreach (array($name, $name.'_item') as $view) {
+			$file = $this->theme_dir($theme).'/'.$view.$this->ext;
+			if (!is_file($file)) continue;
+			list($blocks) = self::blocks($this->expand(file_get_contents($file), $theme));
+			$fields = array();
+			$collections = array();
+			$this->collect_content($blocks, $fields, $collections, $view.$this->ext, array());
+			if (!isset($collections[$name])) continue;
+			$defaults = array();
+			foreach ($collections[$name]['fields'] as $key => $field) $defaults[$key] = $field['default'];
+			return $defaults;
+		}
+		return array();
 	}
 
 	protected function uses_collections($blocks) {
@@ -564,7 +871,7 @@ class raster_inspector {
 		if (!empty($arguments) && is_string($arguments[0])) {
 			foreach (explode('&', $arguments[0]) as $pair) {
 				$parts = explode('=', $pair, 2);
-				if ($parts[0] !== '' && !isset($collection['fields'][$parts[0]])) {
+				if ($parts[0] !== '' && !in_array($parts[0], array('order', 'limit')) && !isset($collection['fields'][$parts[0]])) {
 					$collection['fields'][$parts[0]] = array('default' => isset($parts[1]) ? $parts[1] : '');
 				}
 			}

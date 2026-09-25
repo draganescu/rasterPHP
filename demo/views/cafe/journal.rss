@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Raster Café journal</title>
+    <link><!-- print.feed.site_url /--></link>
+    <description>News from the café</description>
+    <generator><!-- print.feed.generator -->Raster<!-- /print.feed.generator --></generator>
+    <!-- render.feed.items('journal') -->
+    <item>
+      <title><!-- print.title -->Title<!-- /print.title --></title>
+      <link><!-- print.url /--></link>
+      <guid><!-- print.url /--></guid>
+      <pubDate><!-- print.date_rfc822 /--></pubDate>
+      <description><!-- print.summary -->Summary<!-- /print.summary --></description>
+    </item>
+    <!-- /render.feed.items('journal') -->
+  </channel>
+</rss>

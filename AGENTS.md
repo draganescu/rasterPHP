@@ -1,9 +1,14 @@
 # Raster: a guide for agents
 
-Raster is a PHP framework for content sites. Views are plain HTML. The dynamic
-parts are marked with HTML comments, and the CMS builds its content model from
-those comments. This file is the whole specification. When the code and this
-file disagree, the code is wrong.
+Raster is the PHP implementation of RTO (Request, Template, Object). A request
+picks a template, and the template pulls its data from objects (models). Views
+are plain HTML, and the dynamic parts are HTML comments. The template owns all
+the text; models only decide what shows. The CMS, forms, accounts and the
+newsletter all follow this rule.
+
+This file is the whole specification. When the code and this file disagree,
+the code is wrong. The pattern itself is described at
+https://draganescu.github.io/rto/specs/2014/06/29/rto.html
 
 ## Your loop
 
@@ -11,12 +16,17 @@ file disagree, the code is wrong.
 php bin/raster serve              # http://localhost:8000, no setup, SQLite
 php bin/raster lint               # after every template edit; exit 1 on errors
 php bin/raster schema             # what the CMS will store, compared with the database
-php bin/raster render /about      # print a page's HTML without a server
-php tests/run.php                 # framework test suite
+php bin/raster render /about      # print a page without a server (exit 1 on 4xx/5xx)
+php bin/raster doctor             # is this site healthy, up to date, ready for production?
 ```
 
+The demo café in the Raster repository
+(https://github.com/draganescu/rasterPHP/tree/master/demo) is a complete site
+that uses every feature. When you're unsure how something is written, look
+there first.
+
 In development, a view with template errors, or with errors in the partials it
-includes with `dry`, returns HTTP 500 with the list of problems (header
+includes, returns HTTP 500 listing the problems (header
 `X-Raster-Template-Errors`) instead of a half-rendered page.
 
 ## Layout
@@ -25,50 +35,68 @@ includes with `dry`, returns HTTP 500 with the list of problems (header
 index.php                     entry point, also the router for `php -S`
 bin/raster                    command line
 application/
-  config/the_app.php          settings (theme, mcp_token, page sizes)
-  config/the_routes.php       extra routes (usually not needed)
+  config/the_app.php          settings
+  config/the_routes.php       extra routes (rarely needed)
   config/servers.php          host → environment
-  config/db/<environment>.php database connection per environment
+  config/db/<environment>.php database per environment
   models/<name>/<name>.php    your models: class <name>
-  views/<theme>/*.html        views, css, images
-  data/                       SQLite database (not served, not committed)
-system/                       the framework; don't edit for a site
+  views/<theme>/              views (.html, .rss, .xml, .json), css, images
+  i18n/<lang>/<file>.php      translations
+  data/                       SQLite, page cache, logged mail (never served)
+system/                       the framework and its bundled models (don't edit)
 media/                        uploads from the CMS
 ```
 
-## URLs to views
+## Requests to views
 
-- `/` renders `index.html`.
-- `/about` renders `about.html`. `/docs/setup` renders `docs/setup.html`.
-- A view whose name starts with `_` (like `_layout.html`) is a partial and is
-  never served as a page.
-- Unknown URLs return 404. `/index` is the same page as `/`.
-- View files are templates, not public files: `/application/views/…/*.html`
-  returns 403. CSS, images and other assets in the theme folder are served.
-- In views, link to other pages by file name: `href="about.html"`. Raster
-  rewrites it to `/about`, and the file still works when opened as a static
-  mock-up. `index.html` becomes `/`. Assets (`style.css`, `img/x.png`) are
-  relative to the theme folder.
-- To make a URL render a differently named view, use `application/config/the_routes.php`:
+- `/` renders `index.html`. `/about` renders `about.html`, and
+  `/docs/setup` renders `docs/setup.html`. `/index` is the same page as `/`.
+- **Formats:** `/news.rss` renders `news.rss`, and `/sitemap.xml` renders
+  `sitemap.xml` (also `.json`, `.txt`, `.atom`). Printed values are escaped
+  for the format: XML-escaped in feeds, JSON-escaped in JSON views. HTML views
+  print values as they are.
+- Files and folders starting with `_` are never pages: `_layout.html` for
+  partials, `_email/` for emails.
+- Unknown URLs return 404. View files themselves (`.html`, `.rss`, `.xml`,
+  `.json`, `.txt` under `application/views/`) are never served raw (403); other
+  theme assets are. Links like `href="news.rss"` are rewritten to `/news.rss`.
+- In `.json` views, the rows of a render block are separated by commas, so a
+  block inside `[ … ]` makes a JSON list.
+- Link to pages by file name, `href="about.html"`. Raster rewrites that to
+  `/about`, and `index.html` becomes `/`, so the file still works as a static
+  mock-up. Asset paths are relative to the theme folder.
+- Routes, for URLs that should render a differently named view
+  (`application/config/the_routes.php`):
   `controller::route('blog/post')->to('post');`. Patterns are regular
-  expressions matched from the start of the path.
+  expressions matched from the start of the path. A literal route is a page
+  of its own, with its own page fields. `/blog/post/id/7` makes
+  `util::param('id')` return `7`.
+- **Several sites in one install:** each app folder has its own config,
+  models and views. `RASTER_APP=<folder>` picks one; the default is
+  `application`.
 
 ## Annotations
 
 An annotation is an HTML comment in one of these exact forms: one space after
-`<!--` and one space before `-->` (or ` /-->` for self-closing). Anything else
-is ignored at runtime, and `lint` reports it.
+`<!--` and one space before `-->`, or before `/-->` when self-closing.
+Anything else is ignored at runtime, and `lint` reports it.
 
 | Form | Meaning |
 |---|---|
-| `<!-- print.model.method -->default<!-- /print.model.method -->` | Replace the block with the string the method returns. If it returns `false` or `null`, the default stays. |
+| `<!-- print.model.method -->default<!-- /print.model.method -->` | Replaced by the string the method returns. `false` or `null` keeps the default. |
 | `<!-- print.model.method /-->` | Same, with no default. |
-| `<!-- render.model.method --> … <!-- /render.model.method -->` | Repeat the block once for each row the method returns. Inside, `print.key` refers to a key of the row. |
-| `<!-- remove --> … <!-- /remove -->` | Mock-up content. Always removed. Can't be nested. |
-| `<!-- res.name --> … <!-- /res.name -->` | Marks a reusable fragment in a view. |
-| `<!-- dry.view.name /-->` | Inserts the fragment `res.name` from `view.html`. |
+| `<!-- render.model.method --> … <!-- /render.model.method -->` | Repeated once per row the method returns. Inside, `print.key` is a key of the row. |
+| `<!-- remove --> … <!-- /remove -->` | Mock-up content. Removed before anything runs. Can't be nested. |
+| `<!-- res.name --> … <!-- /res.name -->` | A reusable fragment. |
+| `<!-- dry.view.name /-->` | Inserts fragment `res.name` from `view.html` (e.g. `dry._layout.header`). |
+| `<!-- print.if.flag --> … <!-- /print.if.flag -->` | Shown only when the template flag is true (`template::set('flag')->to(true)`). |
+| `<!-- print.self.name /-->` | A value set on the template, for example in emails. |
+| `<!-- print.session.key /-->` | `$_SESSION['key']`. |
 
-Blocks must nest properly: close the inner block before the outer one.
+Blocks must nest properly. **Evaluation order:** render blocks run from the
+last in the file to the first, so blocks nested inside a render block run
+before it. That's how a form's model already knows the validation results of
+the regions inside the form. Print blocks run after all render blocks.
 
 ### Inside render blocks
 
@@ -82,33 +110,25 @@ Blocks must nest properly: close the inner block before the outer one.
 
 - `print.key` is replaced by the row's value.
 - `print.@attr.key` wraps a tag and sets its `attr` to the value (escaped).
-- `print.+attr.key` wraps a tag and appends the value to `attr`.
-- `raster_detail_link` is provided for CMS collections: the item's URL.
-- If the method returns an empty array, the block renders nothing. If it
-  returns `false`, the mock-up content stays.
+  `print.+attr.key` appends the value to the attribute instead. The attribute
+  must already exist on the tag.
+- A value that is itself a list of rows repeats its `print.key` block once for
+  each nested row, for example a post with its comments.
+- An empty array renders nothing. `false` keeps the mock-up content.
 
 ### Method arguments
 
-Literals only: `render.news.latest(3, 'sports', true)`. Numbers, quoted
-strings, `true`, `false` and `null` are allowed. Expressions are rejected, and
-arguments are never passed to `eval`.
-
-### Built-in models
-
-- `print.session.key`: the value of `$_SESSION['key']`.
-- `print.cms.*` and `render.cms.*`: the CMS (below).
+Literals only: `render.news.latest(3, 'sports', true, -1)`. Numbers, quoted
+strings, `true`, `false` and `null` are allowed. Nothing is ever passed to
+`eval`.
 
 ## Models
 
-`application/models/products/products.php`:
-
 ```php
-<?php
+<?php // application/models/products/products.php
 class products {
     function featured() {            // render.products.featured
-        return array(
-            array('name' => 'Chair', 'url' => '/chair'),
-        );
+        return array(array('name' => 'Chair', 'url' => '/chair'));
     }
     function count() {               // print.products.count
         return '12';
@@ -116,121 +136,416 @@ class products {
 }
 ```
 
-Methods return strings (for `print`) or lists of associative arrays (for
-`render`). Output is not escaped, so escape user input with `util::e($value)`.
+Models return strings for `print` and lists of rows for `render`. HTML views
+print values unescaped, so use `util::e($value)` on user input. Models load on
+first use, so they can call each other directly (`mail::send_view(...)`,
+`validation::get()`). A helper class named `<model>_<name>` lives in
+`models/<model>/<name>.php` and loads the same way.
 
-Every public method of an application model is also reachable as JSON at
-`/api/<model>/<method>/<arg1>/<arg2>`. Of the system models, only `cms` is
-reachable (config `api_system_models`). Put anything that changes data behind
-a permission check.
+A model that writes its own tables declares them, so production gets them
+from `raster schema --apply`:
 
-Database access uses RedBeanPHP (`R::find`, `R::dispense`, `R::store`, …) or
-`database::instance()->query('SELECT … WHERE a = ?', array($a))`. Parameters
-are always bound.
+```php
+static function schema() {
+    return array('reservation' => array('name' => '', 'guests' => 0, 'created_at' => ''));
+}
+```
+
+SQL can live in files: `models/<model>/sql/<name>.sql` runs as
+`database::instance('<model>')-><name>($arg, …)`, with `?` placeholders bound
+to the arguments.
+
+Text can be replaced in the pages under a path:
+`template::instance()->replace('{{x}}', 'y', 'lab');`.
+
+## Events: models talking to each other
+
+A template shows what the page displays and nothing else. When one model's
+work should set off another's (a booking subscribes the guest to the
+newsletter, a new account gets a welcome email), the first model sends an
+event and the second listens. No model in the view does the wiring.
+
+```php
+// the model that knows something happened
+event::dispatch('reservation.booked', array('email' => $email, 'newsletter' => true));
+
+// a model that cares declares it next to its code
+class cafe {
+    static function listens() {
+        return array('reservation.booked' => 'subscribe_guest');   // or a list of methods
+    }
+    function subscribe_guest($booking) {
+        if ($booking['newsletter']) newsletter::subscribe($booking['email']);
+    }
+}
+```
+
+- Or bind in `config/the_events.php`:
+  `event::bind('reservation.booked')->to('cafe', 'subscribe_guest');`, and
+  `event::unbind(…)->from(…)`.
+- Listeners get the payload array and run in order: `the_events.php`, then
+  `listens()`, then the framework's own. A listener returning `false` makes
+  `event::dispatch()` return `false`; the sender decides what that means.
+- Name your events `<model>.<what happened>`, in the past tense.
+- `lint` reports bindings to models or methods that don't exist, and events
+  nothing sends. MCP `site_overview` lists who listens to what.
+
+Events the bundled models send, from forms, `/api`, MCP and the command line
+alike:
+
+| Event | Payload |
+|---|---|
+| `authentication.registered`, `logged_in`, `logged_out`, `password_changed`, `account_saved` | `id`, `email`, `name`, `role` |
+| `authentication.login_failed` | `login` |
+| `newsletter.subscribed` | `email`, `name`, `status` (`pending` or `confirmed`), `source` |
+| `newsletter.confirmed`, `newsletter.unsubscribed` | `email`, `name` |
+| `cms.item_saved` | `collection`, `created` (true for new items), `item` |
+| `cms.item_deleted` | `collection`, `item` |
+| `cms.page_saved` | `type`, `slug`, `changed` (field names), `fields` |
+| `content_changed` | none (sent by `util::content_changed()`) |
+| `mail.sent` / `mail.failed` | `to`, `subject` / and `error` |
+
+The request sends `launch`, `finding_route`, `route_set`, `route_found`,
+`route_not_found`, `before_drying`, `dried_<view>`, `after_drying`,
+`before_render`, `after_render`, `before_print`, `after_print`, `loop`,
+`before_output`, `done` and `land`. `loading_model_<name>` can stop a model
+from loading by returning false. Around every model call a template makes,
+`executing_<model>_<method>` gets `arguments` and `executed_<model>_<method>`
+gets `arguments` and `result` (the model's own name even when a `the_`
+override answers, the method's name without arguments). These say "the
+template called it", not "it happened": `executed_authentication_register`
+runs on every view of the sign-up page, so listen to
+`authentication.registered` instead.
+
+Every public method of an application model is also JSON at
+`/api/<model>/<method>/<arg>/…`. Of the system models, only `cms` is
+reachable. Posts there pass the same site check as forms, but they are not
+form submissions: `validation::get()->submitted()` is false, so form models
+do nothing over `/api`. Keep anything else that changes data behind a check.
+
+The database is RedBeanPHP (`R::find`, `R::dispense`, `R::store`), or
+`database::instance()->query('… WHERE a = ?', array($a))` with bound
+parameters.
+
+## Forms
+
+A form posts to its own page. The render block around it is the model that
+handles it:
+
+```html
+<!-- print.validation.alert('sent') --><p>Thanks, we got your message.</p><!-- /print.validation.alert('sent') -->
+<!-- render.contact.send -->
+<form method="post">
+  <input type="email" name="email" required>
+  <!-- render.validation.field('email') --><p class="error">Enter your email.</p><!-- /render.validation.field('email') -->
+  <textarea name="message" required maxlength="2000"></textarea>
+  <!-- render.validation.field('message') --><p class="error">Write a message (up to 2000 characters).</p><!-- /render.validation.field('message') -->
+  <button>Send</button>
+</form>
+<!-- /render.contact.send -->
+```
+
+```php
+class contact {
+    function send() {
+        $v = validation::get();
+        if (!$v->submitted()) return false;                       // show the form as designed
+        if (!$v->valid()) return template::instance()->form_state(); // again, with the values
+        mail::send_view('_email/contact', 'me@example.com', array('message' => util::post('message')));
+        util::done('sent');                                       // redirect; the alert shows
+    }
+}
+```
+
+- **Rules live in the HTML.** `required`, `type` (email, url, number, date),
+  `minlength`, `maxlength`, `min`, `max` and `pattern` are enforced on the
+  server too.
+- **`validation.field('name')`** shows its block when that field breaks a rule.
+  Other regions: `matches('password', 'password_again')`, `cant_be('name',
+  'admin')`, `accepted('terms')`. For your own rules, add
+  `application/models/validation/rules/<rule>.php` with a function
+  `validate_<rule>($value, ...)` that returns true or false.
+- **`print.validation.alert('name')`** is hidden until a model calls
+  `validation::get()->raise('name')`, or until the page loads with
+  `?done=name` (which `util::done('name')` does). Alerts work anywhere on the
+  page.
+- **`template::instance()->form_state($data)`** fills the form: input values,
+  checked boxes, selected options and textarea text. Passwords are never
+  filled.
+- **Added automatically** to every post form: `raster_form` (its owner), a
+  honeypot field, and the session token for logged in users.
+- **Refused automatically:** posts from other sites, and bots that fill the
+  honeypot. The bots get a fake success.
 
 ## The CMS: the markup is the schema
 
-`print.cms.<field>` and `render.cms.<collection>` are CMS content. You don't
-declare a schema; the annotations are the schema.
+`print.cms.<field>` declares a page field. Its default is the content inside
+the block, and it is stored separately for each page URL. `render.cms.<name>`
+declares a collection, whose fields are the `print` keys inside it. The first
+item of a collection is the mock-up content.
 
 ```html
 <h1><!-- print.cms.headline -->Hello<!-- /print.cms.headline --></h1>
-```
-
-This declares a page field `headline` for this page. Its first value is
-`Hello`, the text inside the block.
-
-```html
-<!-- render.cms.news -->
+<!-- render.cms.news('order=newest&limit=3') -->
 <h2><!-- print.headline -->First post<!-- /print.headline --></h2>
-<div><!-- print.body --><p>Text</p><!-- /print.body --></div>
-<!-- /render.cms.news -->
+<!-- /render.cms.news('order=newest&limit=3') -->
 ```
 
-This declares a collection `news` with fields `headline` and `body`. The
-first item is the mock-up content. Collections are site-wide: every view that
-renders `cms.news` shows the same items.
+- **Names:** lowercase letters, digits and `_`, starting with a letter.
+  Reserved: CMS method names (`style`, `login`, …), `slug`, `id`,
+  `updated_at`, `enabled` and `published_at` for fields; `users` and `raster`
+  for collections. `lint` reports these.
+- **Site-wide fields:** a field whose name starts with `site_`
+  (`print.cms.site_name`) is shared by every page. Put these in `_layout.html`.
+- **Collection URLs** are routed to views that render that collection:
+  - `/news/news_item/<slug or id>` renders `news_item.html` (or `news.html`)
+    with that item. If there's no such item, the response is a 404.
+  - `/news/news_page/2` is page 2. The page size comes from `news_page_size` or
+    `raster_page_size` (10).
+  - `/news/news_items/tag/php` lists the items where `tag` is `php`.
+- **Options:** `render.cms.news('featured=1&order=newest&limit=3')`. `order`
+  is `newest`, `oldest`, `<field>` or `-<field>` (descending). Any other
+  `key=value` is a filter, and adds that field if it's new.
+- **Items** get a `slug` made from their title, headline or name. They also
+  have `enabled` (`0` makes a draft) and `published_at` (a future date
+  schedules the item). Visitors don't see drafts or scheduled items; editors
+  do.
+- **Relationships are by value.** `print.@href.raster_filter@author` links to
+  the items with the same `author`. For real references, write a model.
+- **Page edits are versioned:** every save is a new revision. Values can be
+  HTML. An empty value shows the template default.
+- **Changing fields.** A new annotation adds a column: on the next request in
+  development, or with `php bin/raster schema --apply` in production.
+  `schema` shows orphaned columns and suggests
+  `--rename=table.old:new`, which moves the content across.
+  `--drop=table.column` or `--drop=table` deletes something no template uses;
+  `--force` overrides that check. `--check` exits 1 when the templates and the
+  database differ (for CI).
 
-**Rules**
+## Bundled models
 
-- Field and collection names: lowercase letters, digits and `_`, starting with
-  a letter.
-- Reserved names: fields can't be named after a CMS method (`style`, `login`,
-  `session`, `route`, …) or `slug`, `id`, `updated_at`, `enabled`.
-  Collections can't be called `users` or `raster`. `lint` reports these.
-- Page fields belong to the page's URL (the slug): `/about` and `/` each have
-  their own `title`. A field in a `dry` fragment is stored separately for each
-  page that includes it. For content shared across the whole site, use a
-  collection.
-- Collection URLs are routed automatically, but only to views that contain
-  `render.cms.<name>`:
-  - `/news/news_item/3` renders `news_item.html` (or `news.html`), filtered to
-    item 3. Returns 404 if the item doesn't exist.
-  - `/news/news_page/2` renders page 2 of `news.html`. The page size is set by
-    `news_page_size` or `raster_page_size` (10).
-  - `/news/news_items/tag/php` renders `news.html` filtered by `tag = php`.
-  - `render.cms.news('featured=1')` filters in the template and adds the
-    `featured` field. When the field is new, the newest item gets that value.
-- Page edits are versioned: each save stores a new revision.
-- Values can contain HTML and are printed as is. An empty value shows the
-  template's default content, so to hide something, remove it from the view.
+**authentication**: accounts, with every screen written in your templates.
+- Regions:
+  - `render.authentication.login`: fields `login` (email or username) and
+    `password`; respects `?next=/path`.
+  - `register`: `name`, `email`, `password`.
+  - `forgot`: `email`. Sends `_email/password_reset.html`, with
+    `print.self.reset_url` and `print.self.name`.
+  - `reset`: `password`, opened from that email's link.
+  - `account`: `name`, `email`, `password`, `current_password`.
+  - `logout`: a form with a button.
+  - `me`: rows with `name`, `email`, `role`.
+- Alerts: `login_failed`, `email_taken`, `email_invalid`, `password_short`,
+  `reset_sent`, `reset_invalid`, `registered`, `password_changed`,
+  `account_saved`, `current_password_wrong`.
+- Flags: `if.logged_in`, `if.logged_out`, `if.is_member`, `if.is_editor`,
+  `if.is_admin`.
+- Roles: `admin`, `editor` (edits content), `member`.
+- Settings: `config::set('protected')->to(array('account' => 'member'))`,
+  `registration` (false turns sign-up off), `login_page`, `after_login`,
+  `password_min_length` (8).
+- Five wrong passwords lock an account for 15 minutes.
+- Command line: `php bin/raster user <email|name> [--role=…] [--password=…]`
+  and `php bin/raster users`.
 
-**Changing fields**
+**newsletter**: sign-ups with double opt-in.
+- Regions:
+  - `render.newsletter.signup`: a form with `email`, and optionally `name`.
+    Sends `_email/newsletter_confirm.html` with `print.self.confirm_url`.
+  - `render.newsletter.confirm`: on the page `newsletter-confirm`.
+  - `render.newsletter.unsubscribe`: on the page `newsletter-unsubscribe`, a
+    form with a button. Mail apps' one-click unsubscribe works too.
+  - `print.newsletter.count`.
+  - From code: `newsletter::subscribe($email, $name, $source)` does what the
+    form does (and sends the confirmation) and returns `pending`,
+    `confirmed`, `already` or false.
+- Alerts: `check_email`, `subscribed`, `confirmed`, `confirm_invalid`,
+  `unsubscribed`, `unsubscribe_invalid`.
+- **Sending an issue:** `php bin/raster send /news/news_item/my-post
+  [--to=you@example.com] [--dry-run] [--again]` emails any page to confirmed
+  subscribers. Scripts, forms and `<nav>` are removed, and links become
+  absolute. Put `<a href="<!-- print.newsletter.unsubscribe_url /-->">` in the
+  page so each reader gets their own unsubscribe link. A page is sent once
+  unless you pass `--again`.
 
-- Adding an annotation adds a field. In development it's created on the next
-  request. In production run `php bin/raster schema --apply`.
-- Renaming an annotation leaves the old column orphaned. `raster schema`
-  lists the orphan and, when it can tell, suggests `--rename=table.old:new`.
-  Run that to keep the content. It works even if a request already created
-  the new column: the content is moved into it.
-- `--drop=table.column` or `--drop=table` deletes what no template uses. It
-  refuses anything a template still uses, unless you pass `--force`.
-- `php bin/raster schema --check` exits with 1 when the templates and the
-  database differ. Use it in CI and deploys.
+**mail**: emails are views. `mail::send_view('_email/welcome', $to,
+array('name' => 'Ada'))` uses the view's `<title>` as the subject.
+- Transport, set with `RASTER_MAIL`:
+  - `log://` writes to `application/data/mail/` (the development default);
+    `log:///some/folder` writes to that folder instead.
+  - `mail://` uses PHP's mail() (the production default).
+  - `smtp://user:pass@host:587` requires STARTTLS (add `?insecure=1` to allow
+    plain SMTP; `localhost` is allowed as is), and `smtps://…:465` uses TLS.
+- Sender: `RASTER_MAIL_FROM`.
 
-## Environments
+**feed**:
+- `render.feed.items('news')`: the newest published items, with every field
+  plus `url`, `date_rfc822` and `date_iso`.
+- `render.feed.pages`: every page and item, with `url` and `updated`, for
+  `sitemap.xml`.
+- `print.feed.site_url`.
 
-`application/config/servers.php` maps host names (regular expressions matched
-against the whole name) to environments. Hosts that are not listed are
-**production**. `localhost` and `127.0.0.1` only count for requests from the
-same machine, because the Host header is chosen by the client. **On a server,
-set `RASTER_ENV=production`**. It overrides everything.
-Each environment has `application/config/db/<environment>.php`:
+**pagination**: `render.pagination.links('cms.news')` (add the list's filters
+as a second argument: `links('cms.news', 'featured=1')`) gives one row with
+`prev_url`, `next_url`, `prev_state` and `next_state` (`disabled` at the
+ends), `current` and `total`. `render.pagination.pages('cms.news')` gives one
+row per page with `number`, `url` and `state` (`current`). For your own model,
+use `'model.method'`: `method(true)` returns
+`array('total' => …, 'perpage' => …)`, and the pages are `?page=N`.
 
-- development: SQLite at `application/data/raster.sqlite`, fluid (tables and
-  columns are created on demand).
-- production: frozen. The schema only changes through `raster schema --apply`.
-  If a column is missing, the template's default is shown.
+**i18n**: the template's text is the default language.
+- Translations: `print.i18n.home('welcome')` looks up `application/i18n/<lang>/home.php`,
+  which returns an array of key => text.
+- Settings: `config::set('languages')->to(array('en', 'ro'))` and
+  `domain_language`.
+- The language comes from `?lang=` (remembered in a cookie), the domain, the
+  cookie, then the browser.
+- `print.i18n.language` gives the current language; `render.i18n.languages`
+  gives a switcher with `code`, `url` and `state`.
 
-`RASTER_DB=/path/file.sqlite` points either environment at another SQLite
-file. `RASTER_URL=https://example.com/` tells the command line the site's URL.
-The environment follows from it too, so an unlisted host means production.
-`raster render` exits with 1 when the page returns 4xx or 5xx.
+## Environments and cache
 
-## Editors
+- **Environments.** `servers.php` maps host names (full-name regular
+  expressions) to environments. Hosts that aren't listed are **production**.
+  `localhost` counts only for requests from the same machine. **On servers,
+  set `RASTER_ENV=production`.**
+- **Development** uses SQLite at `application/data/raster.sqlite`, and the
+  schema is fluid.
+- **Production** is frozen: the schema only changes through
+  `schema --apply`, which also creates the tables the bundled models use
+  (accounts, subscribers). Missing columns show the template default.
+- **The site's address:** set `RASTER_URL=https://example.com/` (or
+  `config::set('site_url')`). Links in pages and emails then never depend on
+  the visitor's `Host` header. In production, emails with links (password
+  reset, newsletter confirmation) are not sent without it, and
+  `raster send` needs it.
+- **Database file:** `RASTER_DB=/path.sqlite` points at another database
+  file.
+- **Page cache**, on by default in production (config `page_cache`):
+  - Whole pages are cached for visitors without a session or a query string.
+  - Any content change throws the cache away (`util::content_changed()` in
+    your own models), and so does the moment a scheduled item is published.
+  - Settings: `page_cache_ttl` (3600 seconds) and `page_cache_skip` (path
+    patterns). Responses carry `X-Raster-Cache: hit|miss`.
 
-- `php bin/raster user <name>` creates a CMS user and prints a password.
-- Editors log in at `/login` and get a toolbar on every page.
-- Visitors browsing the site get no cookies. A session starts at login.
+## Editors and agents
 
-## MCP (agents editing content)
+- Editors (roles editor and admin) log in at `/login` and get a toolbar on
+  every page. They also see drafts. Visitors get no cookies until they log in
+  (except `lang`, when they pick a language).
+- **MCP** is available in two ways:
+  - over stdio: `php bin/raster mcp`, already set up in `.mcp.json`;
+  - over HTTP: POST to `/mcp` with `Authorization: Bearer $RASTER_MCP_TOKEN`.
+    It's off until that token is set.
+- **Tools:** `site_overview`, `get_page`, `update_page`, `page_history`,
+  `list_items`, `get_item`, `create_item`, `update_item`, `delete_item`,
+  `lint_templates`, `schema_status`.
+- **Addressing pages:** by URL (`/about`), by view (`about`), or `site` for the
+  `site_*` fields.
+- **Writes** are limited to fields in the templates, plus `slug`, `enabled`
+  and `published_at` on items.
 
-- Local, over stdio: `php bin/raster mcp`. It's already set up in `.mcp.json`.
-- Remote, over HTTP: POST to `/mcp` with `Authorization: Bearer <token>`. The
-  endpoint is off until `RASTER_MCP_TOKEN` (or `config::set('mcp_token')`) is
-  set.
+## Extending
 
-Tools: `site_overview`, `get_page`, `update_page`, `page_history`,
-`list_items`, `get_item`, `create_item`, `update_item`, `delete_item`,
-`lint_templates`, `schema_status`. Pages can be named by URL (`/about`), view
-(`about`) or table. Writes are limited to fields that exist in the templates.
-To add a field, edit a view.
+- **Override a bundled model:** `models/the_<name>/the_<name>.php` with
+  `class the_<name> extends <name>`. Templates keep calling `<name>`; your
+  class is used, and its `listens()` counts for `<name>`. Core files work the same way: `application/the_util.php`
+  is loaded after `system/util.php`. So are config files (`config/the_app.php`, `the_routes.php`,
+  `the_events.php` are loaded after the framework's own).
+- **Named queries:** `models/sql.php` sets
+  `$queries['name'] = "SELECT … WHERE a = '%s'"`; call
+  `database::instance('any')->name($a)`. Values are quoted by the driver.
+  Files in `models/<model>/sql/<name>.sql` use `?` placeholders instead.
+- **Values in scripts and styles:** `"/*- print.model.method /-*/"` is the
+  same as `<!-- print.model.method /-->`, written so the file stays valid
+  JavaScript or CSS.
+- **Render into memory:** a render method whose result has the key
+  `'__' => true` next to its rows is rendered but not printed; read the HTML later from
+  `template::instance()->render_results['model']['method']`.
+- **A route to another theme:** `controller::route('print/menu')->to('menu')->from('print')`.
+- **A 404 page:** `config::set('error_document_404')->to('404')` renders
+  `404.html` with status 404.
+
+## Settings
+
+Set in `config/the_app.php` with `config::set('name')->to(value)`.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `theme` | `default` | the folder in `views/` |
+| `default_view` | `index` | the view for `/` |
+| `views_ext` | `.html` | the extension of HTML views |
+| `rewrite` | true | false puts `index.php/` in every link, for servers without rewrites |
+| `strict_templates` | true in development | template errors stop the page with a list (500) |
+| `error_document_404` | none | a view for 404s |
+| `site_url` | none | the site's address (same as `RASTER_URL`) |
+| `cms_enabled` | true | the CMS and the editor toolbar |
+| `raster_page_size`, `<name>_page_size` | 10 | items per page |
+| `raster_media_folder` | `media` | where uploads go |
+| `feed_limit` | 20 | items in `feed.items` |
+| `sitemap_skip` | login, account, … | views left out of `feed.pages` |
+| `protected` | none | `array('path' => 'role')` |
+| `registration` | true | false turns sign-up off |
+| `login_page`, `after_login`, `reset_page` | `login`, none, `reset` | account pages |
+| `password_min_length` | 8 | |
+| `newsletter_double_opt_in` | true | false subscribes without a confirmation |
+| `newsletter_confirm_page`, `newsletter_unsubscribe_page` | `newsletter-confirm`, `newsletter-unsubscribe` | |
+| `mail`, `mail_from` | see `RASTER_MAIL` | transport and sender |
+| `languages`, `domain_language`, `language_cookie` | none, none, `lang` | |
+| `page_cache`, `page_cache_ttl`, `page_cache_skip` | on in production, 3600, none | |
+| `mcp_token` | none | same as `RASTER_MCP_TOKEN` |
+| `api_system_models` | `cms` | system models reachable at `/api` |
+
+Environment variables: `RASTER_ENV`, `RASTER_URL`, `RASTER_DB`,
+`RASTER_APP` (the application folder, `application` by default),
+`RASTER_MAIL`, `RASTER_MAIL_FROM`, `RASTER_MCP_TOKEN`, `NO_COLOR` (plain
+command-line output). They win over the settings above.
 
 ## Checklist for a change
 
 1. Edit or add views in `application/views/<theme>/`. Start from static HTML
    with real content, then annotate.
-2. `php bin/raster lint` must print no errors.
+2. `php bin/raster lint` must show no errors. Also read the warnings: they
+   point to forms nobody handles, alerts nobody raises, and missing email
+   views.
 3. `php bin/raster schema` shows the content model you meant to create.
-4. `php bin/raster render /the-url`, or open it with `serve`, and check the HTML.
-5. `php tests/run.php` if you touched `system/`.
+4. `php bin/raster render /the-url`, or `serve`, and check the HTML.
+5. Don't edit `system/`, `bin/raster`, `index.php`, `.htaccess` or this
+   file in a site: `raster update` replaces them. Use the ways in
+   Extending instead.
+
+## Keeping Raster up to date
+
+- `php bin/raster update` replaces the framework files with the latest
+  release (or `update 2.1.0`, `update <branch>`, `update <folder>`,
+  `update <file.tar.gz>`; `--dry-run` shows what would change). It refuses
+  when framework files were edited since they were installed
+  (`system/checksums.json` records them); `--force` goes ahead. Replaced
+  files are kept in `application/data/backups/`.
+- It then runs `php bin/raster upgrade` for every app: the steps in
+  `system/upgrades/<version>.php` the app still needs (renamed annotations,
+  moved files). The version an app is at is in `config/raster-version`.
+  Database changes stay with `raster schema --apply`.
+- `php bin/raster doctor` checks PHP, versions, edited framework files,
+  templates, the database, uses of deprecated features
+  (`system/tools/deprecations.php`) and, in production, the site address, mail and
+  tokens. Exit 1 when something must be fixed.
+- `php bin/raster new <folder>` starts a new site from this copy of Raster.
+- `CHANGELOG.md` in the repository lists what changed in each release.
+
+## Working on Raster itself
+
+In the Raster repository, not in sites made with it:
+
+```sh
+php tests/run.php                 # framework test suite
+php tests/demo.php                # the demo café: every feature, end to end
+php tests/update.php              # new, update, upgrade, doctor
+php tests/mutate.php              # slow: would the demo suite notice a regression?
+```
+
+A new feature gets an ID in `demo/README.md`, a use in the demo and a test.
+A change that sites must follow gets an upgrade step, and anything it
+replaces an entry in `system/tools/deprecations.php` (kept working until the
+version it names). Bump `system/VERSION` and add to `CHANGELOG.md` when
+releasing, and tag the release `v<version>`.

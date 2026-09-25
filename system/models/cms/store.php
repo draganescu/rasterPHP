@@ -9,7 +9,75 @@
 class cms_store {
 
 	// columns RedBean or Raster manage, never edited as content
-	static $system_fields = array('id', 'slug', 'updated_at', 'enabled');
+	static $system_fields = array('id', 'slug', 'updated_at', 'enabled', 'published_at');
+
+	// ##Slugs, drafts and order
+
+	static function slugify($text) {
+		$text = html_entity_decode(strip_tags((string)$text), ENT_QUOTES, 'UTF-8');
+		if (function_exists('transliterator_transliterate')) {
+			$text = transliterator_transliterate('Any-Latin; Latin-ASCII', $text);
+		} else {
+			$text = @iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $text) ?: $text;
+		}
+		$text = strtolower(trim(preg_replace('/[^a-zA-Z0-9]+/', '-', $text), '-'));
+		return substr($text, 0, 80) ?: 'item';
+	}
+
+	// the text a slug is made from: title, headline or name, else the first field
+	static function slug_source($values) {
+		foreach (array('title', 'headline', 'name') as $field) {
+			if (!empty($values[$field])) return $values[$field];
+		}
+		foreach ($values as $field => $value) {
+			if (!in_array($field, self::$system_fields) && is_string($value) && trim(strip_tags($value)) !== '') return $value;
+		}
+		return 'item';
+	}
+
+	static function unique_slug($type, $text, $id) {
+		$base = self::slugify($text);
+		$slug = $base;
+		for ($i = 2; self::table_exists($type) && array_key_exists('slug', self::columns($type)) && R::count($type, ' slug = ? AND id != ? ', array($slug, (int)$id)) > 0; $i++) {
+			$slug = $base.'-'.$i;
+		}
+		return $slug;
+	}
+
+	// SQL that hides drafts (enabled = 0) and posts published in the future
+	static function published_sql($columns, $include_drafts = false) {
+		$sql = ' 1 = 1 ';
+		$bindings = array();
+		if ($include_drafts) return array($sql, $bindings);
+		if (array_key_exists('enabled', $columns)) $sql .= " AND (enabled IS NULL OR enabled != '0') ";
+		if (array_key_exists('published_at', $columns)) {
+			$sql .= " AND (published_at IS NULL OR published_at = '' OR published_at <= :raster_now) ";
+			$bindings[':raster_now'] = date('Y-m-d H:i:s');
+		}
+		return array($sql, $bindings);
+	}
+
+	static function count_published($type, $filters = array()) {
+		$columns = self::columns($type);
+		list($sql, $bindings) = self::published_sql($columns);
+		foreach ($filters as $key => $value) {
+			if (!array_key_exists($key, $columns) || !preg_match('/^[a-z0-9_]+$/', $key)) continue;
+			$sql .= ' AND '.$key.' = :f_'.$key.' ';
+			$bindings[':f_'.$key] = $value;
+		}
+		return (int)R::count($type, $sql, $bindings);
+	}
+
+	// order=newest|oldest|<field>|-<field> (minus means descending)
+	static function order_sql($order, $columns) {
+		$order = trim((string)$order);
+		if ($order === 'newest') return array_key_exists('published_at', $columns) ? "CASE WHEN published_at IS NULL OR published_at = '' THEN updated_at ELSE published_at END DESC, id DESC" : 'id DESC';
+		if ($order === 'oldest' || $order === '') return 'id ASC';
+		$desc = $order[0] === '-';
+		$field = ltrim($order, '-');
+		if (!preg_match('/^[a-z0-9_]+$/', $field) || !array_key_exists($field, $columns)) return 'id ASC';
+		return $field.($desc ? ' DESC' : ' ASC').', id ASC';
+	}
 
 	static function connect() {
 		database::instance('cms');
@@ -81,7 +149,10 @@ class cms_store {
 		}
 		$page->updated_at = R::isoDateTime();
 		R::store($page);
-		return self::page_values($type);
+		util::content_changed();
+		$saved = self::page_values($type);
+		event::dispatch('cms.page_saved', array('type' => $type, 'slug' => (string)$page->slug, 'changed' => array_keys($values), 'fields' => $saved));
+		return $saved;
 	}
 
 	static function page_history($type, $limit = 20) {
@@ -120,6 +191,13 @@ class cms_store {
 	}
 
 	static function save_item($type, $id, $values, $allowed) {
+		// slug, enabled (0 = draft) and published_at can always be set
+		$allowed = array_merge($allowed, array('slug', 'enabled', 'published_at'));
+		if (isset($values['slug'])) $values['slug'] = self::unique_slug($type, $values['slug'] ?: 'item', (int)$id);
+		if (isset($values['published_at']) && $values['published_at'] !== '' && strtotime($values['published_at']) === false) {
+			throw new InvalidArgumentException("published_at must be a date like 2026-10-01 09:00");
+		}
+		if (isset($values['published_at']) && $values['published_at'] !== '') $values['published_at'] = date('Y-m-d H:i:s', strtotime($values['published_at']));
 		foreach ($values as $field => $value) {
 			if (!in_array($field, $allowed, true)) {
 				throw new InvalidArgumentException("Unknown field '$field'. Fields come from the templates; known fields: ".implode(', ', $allowed));
@@ -135,47 +213,49 @@ class cms_store {
 		foreach ($values as $field => $value) {
 			$bean->$field = self::clean_value($value);
 		}
+		if (!empty($bean->published_at) && strtotime($bean->published_at) > time()) {
+			raster_cache::schedule(strtotime($bean->published_at));
+		}
+		if (empty($bean->slug)) {
+			$bean->slug = self::unique_slug($type, self::slug_source($bean->export()), (int)$bean->id);
+		}
+		if ($bean->published_at === null) $bean->published_at = '';
 		$bean->updated_at = R::isoDateTime();
 		R::store($bean);
-		return self::export_item($bean);
+		util::content_changed();
+		$item = self::export_item($bean);
+		event::dispatch('cms.item_saved', array('collection' => self::collection_of($type), 'created' => !$id, 'item' => $item));
+		return $item;
 	}
 
 	static function delete_item($type, $id) {
 		$bean = self::table_exists($type) ? R::findOne($type, ' id = ? ', array((int)$id)) : null;
 		if (!$bean) return false;
+		$item = self::export_item($bean);
 		R::trash($bean);
+		util::content_changed();
+		event::dispatch('cms.item_deleted', array('collection' => self::collection_of($type), 'item' => $item));
 		return true;
 	}
 
-	// ##Users
+	// newsdata -> news
+	static function collection_of($type) {
+		return preg_replace('/data$/', '', $type);
+	}
+
+	// ##Users (kept for older code; see the authentication model)
 
 	static function create_user($username, $password) {
-		$user = R::findOne('usersdata', ' username = ? ', array($username));
-		if (!$user) {
-			$user = R::dispense('usersdata');
-			$user->username = $username;
-		}
-		$user->password = password_hash($password, PASSWORD_DEFAULT);
-		R::store($user);
-		return (int)$user->id;
+		return authentication::save_user($username, $password, 'admin');
 	}
 
 	static function check_login($username, $password) {
-		if (!self::table_exists('usersdata')) return false;
-		$user = R::findOne('usersdata', ' username = ? ', array((string)$username));
-		if (!$user || !is_string($password) || $password === '') return false;
-		$hash = (string)$user->password;
-		if (preg_match('/^[a-f0-9]{32}$/', $hash)) {
-			// accounts from older Raster versions used md5; upgrade on login
-			if (!hash_equals($hash, md5($password))) return false;
-			$user->password = password_hash($password, PASSWORD_DEFAULT);
-			R::store($user);
-			return (int)$user->id;
-		}
-		return password_verify($password, $hash) ? (int)$user->id : false;
+		authentication::connect();
+		return authentication::check_login($username, $password);
 	}
 
 	static function has_users() {
-		return self::table_exists('usersdata') && R::count('usersdata') > 0;
+		authentication::connect();
+		return authentication::has_users();
 	}
 }

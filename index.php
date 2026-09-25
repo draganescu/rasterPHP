@@ -11,7 +11,11 @@
 // configuration and data are never exposed (the same rules as .htaccess).
 if (PHP_SAPI === 'cli-server') {
 	$path = preg_replace('#/+#', '/', rawurldecode((string)parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH)));
-	$blocked = '#(^|/)\.|^/(system|bin|tests)(/|$)|^/application/(config|models|data)(/|$)|^/application/views/.*\.html$|\.(php|sqlite|sql|md)$|-(journal|wal|shm)$#i';
+	// every app folder (application/, demo/, ...) keeps its code and data private
+	$apps = array();
+	foreach (glob(__DIR__.'/*/config', GLOB_ONLYDIR) as $dir) $apps[] = preg_quote(basename(dirname($dir)), '#');
+	$apps = implode('|', $apps ?: array('application'));
+	$blocked = '#(^|/)\.|^/(system|bin|tests)(/|$)|^/('.$apps.')/(config|models|data|i18n)(/|$)|^/('.$apps.')/views/.*\.(html|rss|atom|xml|json|txt)$|\.(php|sqlite|sql|md)$|-(journal|wal|shm)$#i';
 	if (preg_match($blocked, $path) && $path !== '/index.php') {
 		http_response_code(403);
 		exit('Forbidden');
@@ -36,7 +40,9 @@ require_once 'system/boot.php';
 // ```
 //
 // and then in .htaccess direct all requests to blog.php. 
-boot::$appname = 'application';
+// RASTER_APP picks another app folder, e.g. RASTER_APP=demo for the demo café
+$app = getenv('RASTER_APP');
+boot::$appname = ($app && preg_match('/^[a-z0-9_]+$/', $app) && is_dir(__DIR__.'/'.$app.'/config')) ? $app : 'application';
 
 // ### We're away!
 // The static boot::up() method is all it takes to have

@@ -45,7 +45,17 @@ class raster_schema {
 
 		$drift = !empty($unused);
 		foreach ($tables as $table) {
-			if (!$table['exists'] || $table['missing'] || $table['orphans']) $drift = true;
+			if ((!$table['exists'] && $table['fields']) || $table['missing'] || $table['orphans']) $drift = true;
+		}
+
+		// tables the bundled models use (accounts, subscribers). A fluid
+		// database creates them when needed; a frozen one needs --apply.
+		$system = array();
+		foreach ($this->system_tables() as $name => $fields) {
+			$columns = cms_store::table_exists($name) ? cms_store::columns($name) : array();
+			$missing = array_values(array_diff(array_keys($fields), array_keys($columns)));
+			$system[] = array('table' => $name, 'exists' => (bool)$columns, 'missing' => $missing);
+			if ($missing && database::$frozen) $drift = true;
 		}
 
 		return array(
@@ -53,8 +63,24 @@ class raster_schema {
 			'frozen' => database::$frozen,
 			'drift' => $drift,
 			'tables' => $tables,
+			'system_tables' => $system,
 			'unused_tables' => $unused,
+			'site_url' => (bool)config::get('trusted_url'),
 		);
+	}
+
+	function system_tables() {
+		$tables = array();
+		// bundled models, then the app's own models that declare schema()
+		$models = array('authentication', 'newsletter');
+		foreach (glob(APPBASE.config::get('models_path', 'models').'/*/*.php') ?: array() as $file) {
+			$name = basename($file, '.php');
+			if ($name === basename(dirname($file)) && strpos(file_get_contents($file), 'function schema(') !== false) $models[] = $name;
+		}
+		foreach (array_unique($models) as $model) {
+			if (class_exists($model) && method_exists($model, 'schema')) $tables += $model::schema();
+		}
+		return $tables;
 	}
 
 	protected function compare($kind, $type, $fields, $meta) {
@@ -128,12 +154,28 @@ class raster_schema {
 		R::freeze(false);
 		try {
 			foreach ($status['tables'] as $table) {
+				if ($table['kind'] === 'collection' && $table['exists']) {
+					$columns = cms_store::columns($table['table']);
+					foreach (array('slug', 'published_at') as $system) {
+						if (!array_key_exists($system, $columns)) {
+							$latest = cms_store::latest($table['table']);
+							$latest->$system = '';
+							R::store($latest);
+							$changes[] = "added {$table['table']}.$system";
+						}
+					}
+				}
 				if ($table['exists'] && !$table['missing']) continue;
+				if (!$table['exists'] && !$table['fields']) continue; // a page with collections only
 				$bean = $table['exists'] ? cms_store::latest($table['table']) : null;
 				if (!$bean) {
 					$bean = R::dispense($table['table']);
 					if ($table['kind'] === 'page') $bean->slug = $table['slug'];
-					if ($table['kind'] === 'collection') $bean->enabled = '1';
+					if ($table['kind'] === 'collection') {
+						$bean->enabled = '1';
+						$bean->published_at = '';
+						$bean->slug = cms_store::slugify(cms_store::slug_source(array_map(function ($f) { return $f['default']; }, $table['fields'])));
+					}
 					$changes[] = "created table {$table['table']}";
 				}
 				foreach ($table['fields'] as $name => $field) {
@@ -143,6 +185,16 @@ class raster_schema {
 				}
 				$bean->updated_at = R::isoDateTime();
 				R::store($bean);
+			}
+			// bundled model tables: a row with every column, then removed
+			foreach ($status['system_tables'] as $table) {
+				if (!$table['missing']) continue;
+				$fields = $this->system_tables()[$table['table']];
+				$bean = R::dispense($table['table']);
+				foreach ($fields as $name => $default) $bean->$name = $default;
+				R::store($bean);
+				R::trash($bean);
+				$changes[] = $table['exists'] ? "added {$table['table']}.".implode(", {$table['table']}.", $table['missing']) : "created table {$table['table']}";
 			}
 		} finally {
 			R::freeze($was_frozen);

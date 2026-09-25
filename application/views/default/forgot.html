@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <!-- dry._layout.head /-->
+  <title>Reset your password</title>
+</head>
+<body>
+  <!-- dry._layout.header /-->
+  <main class="narrow">
+    <h1>Forgot your password?</h1>
+    <!-- print.validation.alert('reset_sent') --><p class="notice">If there is an account with that email, a reset link is on its way.</p><!-- /print.validation.alert('reset_sent') -->
+    <!-- render.authentication.forgot -->
+    <form method="post" class="stack">
+      <label>Email <input type="email" name="email" autocomplete="email" required></label>
+      <!-- render.validation.field('email') --><p class="error">Enter a valid email address.</p><!-- /render.validation.field('email') -->
+      <button>Send me a reset link</button>
+    </form>
+    <!-- /render.authentication.forgot -->
+  </main>
+  <!-- dry._layout.footer /-->
+</body>
+</html>

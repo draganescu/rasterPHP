@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <!-- res.head -->
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="img/logo.svg">
+  <link rel="alternate" type="application/rss+xml" title="Journal" href="journal.rss">
+  <!-- /res.head -->
+</head>
+<body>
+  <!-- res.header -->
+  <header class="site-header">
+    <a class="brand" href="index.html"><img src="img/logo.svg" alt="" width="28" height="28"> <!-- print.cms.site_name -->Raster Café<!-- /print.cms.site_name --></a>
+    <nav class="main-nav">
+      <a href="index.html"><!-- print.i18n.common('home') -->Home<!-- /print.i18n.common('home') --></a>
+      <a href="menu.html"><!-- print.i18n.common('menu') -->Menu<!-- /print.i18n.common('menu') --></a>
+      <a href="events.html"><!-- print.i18n.common('events') -->Events<!-- /print.i18n.common('events') --></a>
+      <a href="journal.html"><!-- print.i18n.common('journal') -->Journal<!-- /print.i18n.common('journal') --></a>
+      <a href="visit.html"><!-- print.i18n.common('visit') -->Visit<!-- /print.i18n.common('visit') --></a>
+      <a href="about.html"><!-- print.i18n.common('about') -->About<!-- /print.i18n.common('about') --></a>
+      <a href="faq.html">FAQ</a>
+    </nav>
+    <div class="account-nav">
+      <!-- print.if.logged_out --><a href="login.html">Log in</a><!-- /print.if.logged_out -->
+      <!-- print.if.logged_in --><a href="members.html">Members</a> · <a href="account.html">Account</a><!-- /print.if.logged_in -->
+      <!-- print.if.is_editor --> · <a href="staff.html">Staff</a><!-- /print.if.is_editor -->
+      <span class="languages">
+        <!-- render.i18n.languages --><!-- print.+class.state --><!-- print.@href.url --><a class="lang" href="#"><!-- print.code -->en<!-- /print.code --></a><!-- /print.@href.url --><!-- /print.+class.state --><!-- /render.i18n.languages -->
+      </span>
+    </div>
+  </header>
+  <!-- /res.header -->
+
+  <!-- res.footer -->
+  <footer class="site-footer">
+    <section class="signup">
+      <h2><!-- print.i18n.common('signup_title') -->Get the news by email<!-- /print.i18n.common('signup_title') --></h2>
+      <!-- print.validation.alert('check_email') --><p class="notice">Almost there: check your inbox to confirm.</p><!-- /print.validation.alert('check_email') -->
+      <!-- render.newsletter.signup -->
+      <form method="post" class="inline-form">
+        <label for="signup-email" class="visually-hidden">Email</label>
+        <input id="signup-email" type="email" name="email" placeholder="you@example.com" required maxlength="200">
+        <button><!-- print.i18n.common('subscribe') -->Subscribe<!-- /print.i18n.common('subscribe') --></button>
+        <!-- render.validation.field('email') --><p class="error">Please enter a valid email address.</p><!-- /render.validation.field('email') -->
+      </form>
+      <!-- /render.newsletter.signup -->
+      <p class="meta"><!-- print.newsletter.count -->0<!-- /print.newsletter.count --> readers get our letters.</p>
+    </section>
+    <p><!-- print.cms.site_tagline -->Coffee, cake and quiet corners since 2014.<!-- /print.cms.site_tagline --></p>
+    <p class="meta"><!-- print.cms.site_address -->Strada Exemplu 1, București<!-- /print.cms.site_address --> · <a href="journal.rss">RSS</a> · <a href="feed.json">JSON feed</a> · <a href="hours.txt">Hours as text</a></p>
+  </footer>
+  <!-- /res.footer -->
+</body>
+</html>

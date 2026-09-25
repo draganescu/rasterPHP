@@ -144,7 +144,7 @@ class mcp
 			);
 		};
 		return array(
-			$tool('site_overview', 'Lists the pages (URL, view, editable fields) and collections (fields, item count) of the site. Start here.', array(), array(), $read_only),
+			$tool('site_overview', 'Lists the pages (URL, view, editable fields) and collections (fields, item count) of the site, and which models listen to which events. Start here.', array(), array(), $read_only),
 			$tool('get_page', 'Current values of the editable fields of a page.', array('page' => $page), array('page'), $read_only),
 			$tool('update_page', 'Changes fields of a page. Stores a new revision; nothing is overwritten.', array('page' => $page, 'fields' => $fields), array('page', 'fields'), $write),
 			$tool('page_history', 'Previous revisions of a page, newest first.', array('page' => $page, 'limit' => array('type' => 'integer', 'default' => 10)), array('page'), $read_only),
@@ -198,8 +198,9 @@ class mcp
 	protected function find_page($reference) {
 		$reference = (string)$reference;
 		foreach ($this->model()['pages'] as $page) {
-			$view = substr($page['view'], 0, -strlen(config::get('views_ext', '.html')));
-			if (in_array($reference, array($page['url'], $page['slug'], $page['type'], $page['view'], $view, '/'.$view), true)) {
+			$view = $page['view'] === '*' ? '*' : substr($page['view'], 0, -strlen(config::get('views_ext', '.html')));
+			$names = $page['view'] === '*' ? array('site', 'sitepage') : array($page['url'], $page['slug'], $page['type'], $page['view'], $view, '/'.$view);
+			if (in_array($reference, $names, true)) {
 				return $page;
 			}
 		}
@@ -237,7 +238,13 @@ class mcp
 				'item_url' => '/'.$collection['name'].'/'.$collection['name'].'_item/{id}',
 			);
 		}
-		return array('base_url' => config::get('base_uri'), 'environment' => config::get('environment'), 'pages' => $pages, 'collections' => $collections);
+		// who listens to what: saving an item or a booking may do more than it says
+		$events = array();
+		foreach (event::bindings() as $event => $listeners) {
+			$listeners = array_values(array_filter($listeners, function ($l) { return !preg_match('/^(controller|log)\./', $l); }));
+			if ($listeners) $events[$event] = $listeners;
+		}
+		return array('base_url' => config::get('base_uri'), 'environment' => config::get('environment'), 'pages' => $pages, 'collections' => $collections, 'events' => $events);
 	}
 
 	protected function tool_get_page($arguments) {

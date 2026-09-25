@@ -26,6 +26,9 @@ class boot {
 		// determines the index file and the rewrite procedure
 		// and figures out if its development or production or whatever
 		config::initialize();
+		boot::autoload_models();
+		// listeners models declare in static function listens()
+		event::discover();
 		// the first event (hook) that our system launches
 		event::dispatch('launch');
 	}
@@ -47,6 +50,33 @@ class boot {
 		boot::load_core_files();
 		boot::load_core_config();
 		config::initialize();
+		boot::autoload_models();
+		event::discover();
+	}
+
+	// Model classes load on first use, so models can call each other
+	// directly: mail::send_view(...), validation::get()
+	static function autoload_models() {
+		spl_autoload_register(function ($class) {
+			if (!preg_match('/^[a-z][a-z0-9_]*$/', $class)) return;
+			$paths = controller::build_model_paths($class);
+			foreach (array('app_path', 'system_path') as $key) {
+				if (file_exists($paths[$key])) {
+					require_once $paths[$key];
+					return;
+				}
+			}
+			// helper classes live next to their model: cms_store in models/cms/store.php
+			if (preg_match('/^([a-z0-9]+)_([a-z0-9_]+)$/', $class, $m)) {
+				foreach (array(APPBASE, BASE) as $root) {
+					$file = $root.config::get('models_path').'/'.$m[1].'/'.$m[2].'.php';
+					if (file_exists($file)) {
+						require_once $file;
+						return;
+					}
+				}
+			}
+		});
 	}
 
 	static function file_system_setup() {

@@ -19,3 +19,18 @@ nav { display: flex; gap: 16px; }
 .news-item { padding: 16px 0; border-bottom: 1px solid var(--line); }
 .meta { color: var(--muted); font-size: .9rem; margin: 0; }
 .site-footer { padding-top: 32px; padding-bottom: 48px; color: var(--muted); font-size: .9rem; }
+.narrow { max-width: 480px; }
+.stack { display: grid; gap: 12px; margin: 16px 0; }
+.stack label { display: grid; gap: 4px; font-weight: 500; }
+input, button, textarea, select { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); }
+button { background: var(--accent); color: #fff; border: 0; cursor: pointer; }
+button.secondary { background: transparent; color: var(--fg); border: 1px solid var(--line); }
+.inline-form { display: flex; gap: 8px; flex-wrap: wrap; }
+.error { color: #c0392b; margin: 0; }
+.notice { background: color-mix(in srgb, var(--accent) 12%, transparent); padding: 8px 12px; border-radius: 8px; }
+.signup { border-top: 1px solid var(--line); padding-top: 24px; margin-bottom: 24px; }
+.signup h2 { font-size: 1rem; margin: 0 0 8px; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.pager { display: flex; gap: 8px; margin: 24px 0; }
+.pager a.current { font-weight: 700; text-decoration: none; }
+.pager a.disabled { pointer-events: none; opacity: .4; }

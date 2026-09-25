@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <!-- dry._layout.head /-->
+  <title>Your account</title>
+</head>
+<body>
+  <!-- dry._layout.header /-->
+  <main class="narrow">
+    <h1>Your account</h1>
+    <!-- print.validation.alert('account_saved') --><p class="notice">Saved.</p><!-- /print.validation.alert('account_saved') -->
+    <!-- print.validation.alert('current_password_wrong') --><p class="error">Your current password is not right.</p><!-- /print.validation.alert('current_password_wrong') -->
+    <!-- print.validation.alert('email_taken') --><p class="error">Another account uses that email.</p><!-- /print.validation.alert('email_taken') -->
+    <!-- print.validation.alert('email_invalid') --><p class="error">That email does not look right.</p><!-- /print.validation.alert('email_invalid') -->
+    <!-- print.validation.alert('password_short') --><p class="error">Use at least 8 characters.</p><!-- /print.validation.alert('password_short') -->
+    <!-- render.authentication.account -->
+    <form method="post" class="stack">
+      <label>Name <input type="text" name="name" maxlength="100"></label>
+      <label>Email <input type="email" name="email" required></label>
+      <label>New password <input type="password" name="password" minlength="8"></label>
+      <label>Current password <input type="password" name="current_password"></label>
+      <button>Save</button>
+    </form>
+    <!-- /render.authentication.account -->
+    <!-- render.authentication.logout -->
+    <form method="post"><button class="secondary">Log out</button></form>
+    <!-- /render.authentication.logout -->
+  </main>
+  <!-- dry._layout.footer /-->
+</body>
+</html>

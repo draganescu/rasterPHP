@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Raster Café journal</title>
+  <id><!-- print.feed.site_url /--></id>
+  <!-- render.feed.items('journal') -->
+  <entry>
+    <title><!-- print.title -->Title<!-- /print.title --></title>
+    <id><!-- print.url /--></id>
+    <link href="<!-- print.url /-->"/>
+    <updated><!-- print.date_iso /--></updated>
+    <summary type="html"><!-- print.summary -->Summary<!-- /print.summary --></summary>
+  </entry>
+  <!-- /render.feed.items('journal') -->
+</feed>

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <!-- dry._layout.head /-->
+  <title>Visit us</title>
+</head>
+<body>
+  <!-- dry._layout.header /-->
+  <main class="two-columns">
+    <section>
+      <h1>Book a table</h1>
+      <p class="error-count"><!-- print.self.error_count -->0<!-- /print.self.error_count --> problems</p>
+      <!-- print.validation.alert('booked') --><p class="notice">Thank you, your table is booked. We sent the details to the staff.</p><!-- /print.validation.alert('booked') -->
+      <!-- render.reservation.book -->
+      <form method="post" class="stack">
+        <label>Name <input type="text" name="name" required minlength="2" maxlength="80" value="Your name"></label>
+        <!-- render.validation.field('name') --><p class="error">Tell us your name (2 to 80 letters).</p><!-- /render.validation.field('name') -->
+        <!-- render.validation.cant_be('name', 'Your name') --><p class="error">Please replace the example name with yours.</p><!-- /render.validation.cant_be('name', 'Your name') -->
+        <label>Email <input type="email" name="email" required></label>
+        <!-- render.validation.field('email') --><p class="error">We need a valid email to confirm.</p><!-- /render.validation.field('email') -->
+        <label>Phone <input type="tel" name="phone" pattern="\+?[0-9 ]{6,15}"></label>
+        <!-- render.validation.field('phone') --><p class="error">Digits and spaces only, like +40 721 000 000.</p><!-- /render.validation.field('phone') -->
+        <label>Date <input type="date" name="date" required min="2026-01-01" max="2030-12-31"></label>
+        <!-- render.validation.field('date') --><p class="error">Pick a date between 2026 and 2030.</p><!-- /render.validation.field('date') -->
+        <!-- render.validation.not_monday('date') --><p class="error">We are closed on Mondays.</p><!-- /render.validation.not_monday('date') -->
+        <label>Guests <input type="number" name="guests" required min="1" max="8" value="2"></label>
+        <!-- render.validation.field('guests') --><p class="error">Tables are for 1 to 8 guests.</p><!-- /render.validation.field('guests') -->
+        <!-- render.validation.field('guests', 'max') --><p class="error">For groups over 8, please call us.</p><!-- /render.validation.field('guests', 'max') -->
+        <label>Seating
+          <select name="seating"><option value="inside">Inside</option><option value="terrace">Terrace</option><option value="window">By the window</option></select>
+        </label>
+        <fieldset><legend>Occasion</legend>
+          <label><input type="radio" name="occasion" value="none" checked> None</label>
+          <label><input type="radio" name="occasion" value="birthday"> Birthday</label>
+        </fieldset>
+        <label><input type="checkbox" name="newsletter" value="yes"> Also send me the newsletter</label>
+        <label>Notes <textarea name="notes" maxlength="300"></textarea></label>
+        <!-- render.validation.field('notes') --><p class="error">Keep notes under 300 characters.</p><!-- /render.validation.field('notes') -->
+        <label><input type="checkbox" name="terms" value="1"> I agree to the house rules</label>
+        <!-- render.validation.accepted('terms') --><p class="error">Please agree to the house rules.</p><!-- /render.validation.accepted('terms') -->
+        <button>Book</button>
+      </form>
+      <!-- /render.reservation.book -->
+    </section>
+    <section>
+      <h2>Write to us</h2>
+      <!-- print.validation.alert('contacted') --><p class="notice">Thanks, we will write back soon.</p><!-- /print.validation.alert('contacted') -->
+      <!-- render.reservation.contact -->
+      <form method="post" class="stack">
+        <label>Email <input type="email" name="email"></label>
+        <!-- render.validation.not_empty('email') --><p class="error">Your email, please.</p><!-- /render.validation.not_empty('email') -->
+        <!-- render.validation.email_format('email') --><p class="error">That email does not look right.</p><!-- /render.validation.email_format('email') -->
+        <label>Website <input type="url" name="website"></label>
+        <!-- render.validation.field('website') --><p class="error">A web address starts with https://</p><!-- /render.validation.field('website') -->
+        <label>Message <textarea name="message" required maxlength="2000"></textarea></label>
+        <!-- render.validation.field('message') --><p class="error">Write a message.</p><!-- /render.validation.field('message') -->
+        <button>Send</button>
+      </form>
+      <!-- /render.reservation.contact -->
+    </section>
+  </main>
+  <!-- dry._layout.footer /-->
+</body>
+</html>

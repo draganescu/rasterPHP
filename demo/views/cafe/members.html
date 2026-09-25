@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <!-- dry._layout.head /-->
+  <title>Members</title>
+</head>
+<body>
+  <!-- dry._layout.header /-->
+  <main class="">
+    <h1>Members</h1>
+    <!-- print.validation.alert('registered') --><p class="notice">Welcome! Your account is ready.</p><!-- /print.validation.alert('registered') -->
+    <!-- print.validation.alert('password_changed') --><p class="notice">Your password was changed.</p><!-- /print.validation.alert('password_changed') -->
+    <!-- render.authentication.me --><p>Hello <strong><!-- print.name -->Ana<!-- /print.name --></strong>, you are a <!-- print.role -->member<!-- /print.role -->.</p><!-- /render.authentication.me -->
+    <p>Your session number is <!-- print.session.uid -->0<!-- /print.session.uid -->.</p>
+    <p>Members get the tenth coffee free. Show this page at the counter.</p>
+    <!-- print.if.is_member --><p class="member-note">Your card is active.</p><!-- /print.if.is_member -->
+    <!-- print.if.is_admin --><p class="admin-note">You run this place.</p><!-- /print.if.is_admin -->
+  </main>
+  <!-- dry._layout.footer /-->
+</body>
+</html>

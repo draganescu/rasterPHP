@@ -8,14 +8,20 @@
   <!-- dry._layout.header /-->
   <main>
     <h1><!-- print.cms.heading -->News<!-- /print.cms.heading --></h1>
-    <!-- render.cms.news -->
+    <!-- render.cms.news('order=newest') -->
     <article class="news-item">
       <h2><!-- print.@href.raster_detail_link --><a href="news/news_item/1"><!-- print.headline -->Raster runs on PHP 8<!-- /print.headline --></a><!-- /print.@href.raster_detail_link --></h2>
       <p class="meta"><!-- print.date -->2026-09-25<!-- /print.date --></p>
       <div><!-- print.summary --><p>The framework was ported to modern PHP, uses SQLite out of the box and ships with a linter.</p><!-- /print.summary --></div>
     </article>
-    <!-- /render.cms.news -->
-    <p class="pager"><a href="news/news_page/2.html">Older news</a></p>
+    <!-- /render.cms.news('order=newest') -->
+    <!-- render.pagination.links('cms.news') -->
+    <nav class="pager">
+      <!-- print.+class.prev_state --><!-- print.@href.prev_url --><a class="page" href="#">&larr; Newer</a><!-- /print.@href.prev_url --><!-- /print.+class.prev_state -->
+      <!-- render.pagination.pages('cms.news') --><!-- print.+class.state --><!-- print.@href.url --><a class="page" href="#"><!-- print.number -->1<!-- /print.number --></a><!-- /print.@href.url --><!-- /print.+class.state --><!-- /render.pagination.pages('cms.news') -->
+      <!-- print.+class.next_state --><!-- print.@href.next_url --><a class="page" href="#">Older &rarr;</a><!-- /print.@href.next_url --><!-- /print.+class.next_state -->
+    </nav>
+    <!-- /render.pagination.links('cms.news') -->
   </main>
   <!-- dry._layout.footer /-->
 </body>

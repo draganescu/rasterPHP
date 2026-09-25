@@ -1,21 +1,37 @@
 Raster PHP
 ======
 
-Raster is a PHP framework for content sites. You write HTML and mark the parts that change with HTML comments. The CMS derives its content model from that markup: no schema files, no admin configuration.
+Raster is a PHP framework for web artefacts made by people and agents: sites, landing pages, blogs, newsletters and small apps. It implements the [RTO pattern](https://draganescu.github.io/rto/specs/2014/06/29/rto.html): a request picks a template, and the template pulls its data from objects.
 
-Compared with Laravel or Symfony, Raster is much smaller: under 4,000 lines of framework (ORM aside), a single controller, and no build step. Pages are fast. What it generates is easy to follow: one view file per URL, one table per page. Every page is editable as soon as it exists. Routing is file-based, like Next.js: `/about` is `about.html`.
+You write HTML and mark the parts that change with HTML comments. The template owns every word on the page, including error messages and emails; models only decide what shows. The CMS derives its content model from the markup, so there are no schema files and no admin configuration.
+
+Compared with Laravel or Symfony, Raster is small: a single controller, one view file per URL, no build step. Pages are fast and cached for visitors. What it generates is easy to follow, and every page is editable as soon as it exists.
 
 ```sh
+php bin/raster new mysite     # a new site (or clone this repository and work in application/)
 php bin/raster serve          # http://localhost:8000 (PHP 8.1+, SQLite, nothing to install)
 php bin/raster user admin     # an editor account; log in at /login
-php bin/raster lint           # check every view for annotation errors
+php bin/raster lint           # check every view: annotations, forms, alerts, emails
 php bin/raster schema         # the content model the templates define, compared with the database
+php bin/raster send /news/news_item/hello   # email a page to newsletter subscribers
 php bin/raster mcp            # let an agent edit the content (MCP over stdio; /mcp over HTTP)
+php bin/raster doctor         # checks the site, including production settings
+php bin/raster update         # the latest release of the framework; your app is left alone
 ```
 
-**Working on a Raster site with an AI agent?** [AGENTS.md](AGENTS.md) is the complete specification: annotations, the CMS rules, the tools and the MCP endpoint.
+Included:
+- **CMS:** page fields and collections derived from the markup, with site-wide fields, readable slugs, drafts and scheduled posts.
+- **Forms:** validation rules come from the HTML attributes and messages from the template. Every post is protected against other sites and bots.
+- **Accounts:** login, sign-up, password reset by email, account page, roles, and protected pages.
+- **Newsletter:** double opt-in, one-click unsubscribe, and sending any page as an issue.
+- **Feeds and sitemaps:** views such as `news.rss` and `sitemap.xml`.
+- **Other:** translations, pagination, mail over SMTP, page caching, and an MCP server for agents.
 
-What changed in this version: PHP 8 support, SQLite by default, RedBeanPHP 5.7, a linter with line-level errors, schema drift detection with frozen production databases, an MCP server, password hashing, CSRF protection for the editor, and a test suite (`php tests/run.php`).
+**Working on a Raster site with an AI agent?** [AGENTS.md](AGENTS.md) is the complete specification.
+
+**Updating:** `raster update` replaces only the framework files (`system/`, `bin/raster`, `index.php`, `.htaccess`, `AGENTS.md`), refuses if you edited them, and then runs the upgrade steps each app needs. What changed is in [CHANGELOG.md](CHANGELOG.md).
+
+Tests: `php tests/run.php` for the framework, `php tests/update.php` for updates, and `php tests/demo.php` for [the demo café](demo/README.md), a complete site that uses every feature. Each feature has an ID, and the suite fails if any of them lacks a passing test. `php tests/mutate.php` breaks the framework on purpose, one change at a time from `tests/mutations.json`, and fails if the demo suite doesn't notice.
 
 ---
 

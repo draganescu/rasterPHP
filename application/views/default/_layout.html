@@ -5,23 +5,38 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="stylesheet" href="style.css">
+  <link rel="alternate" type="application/rss+xml" title="News" href="news.rss">
   <!-- /res.head -->
 </head>
 <body>
   <!-- res.header -->
   <header class="site-header">
-    <a class="brand" href="index.html">Raster</a>
+    <a class="brand" href="index.html"><!-- print.cms.site_name -->Raster<!-- /print.cms.site_name --></a>
     <nav>
       <!-- render.site.nav -->
       <!-- print.+class.state --><!-- print.@href.url --><a class="nav-link" href="#"><!-- print.label -->Home<!-- /print.label --></a><!-- /print.@href.url --><!-- /print.+class.state -->
       <!-- /render.site.nav -->
+      <!-- print.if.logged_out --><a class="nav-link" href="login.html">Log in</a><!-- /print.if.logged_out -->
+      <!-- print.if.logged_in --><a class="nav-link" href="account.html">Account</a><!-- /print.if.logged_in -->
     </nav>
   </header>
   <!-- /res.header -->
 
   <!-- res.footer -->
   <footer class="site-footer">
-    <p>&copy; <!-- print.site.year -->2026<!-- /print.site.year --> · Built with Raster · <a href="login.html">Edit this site</a></p>
+    <section class="signup">
+      <h2>Get the news by email</h2>
+      <!-- print.validation.alert('check_email') --><p class="notice">Almost there: check your inbox to confirm.</p><!-- /print.validation.alert('check_email') -->
+      <!-- render.newsletter.signup -->
+      <form method="post" class="inline-form">
+        <label for="signup-email" class="visually-hidden">Email</label>
+        <input id="signup-email" type="email" name="email" placeholder="you@example.com" required maxlength="200">
+        <button>Subscribe</button>
+        <!-- render.validation.field('email') --><p class="error">Please enter a valid email address.</p><!-- /render.validation.field('email') -->
+      </form>
+      <!-- /render.newsletter.signup -->
+    </section>
+    <p><!-- print.cms.site_footer -->&copy; Raster demo · Built with Raster<!-- /print.cms.site_footer --> · <!-- print.site.year -->2026<!-- /print.site.year --> · <a href="news.rss">RSS</a></p>
   </footer>
   <!-- /res.footer -->
 </body>

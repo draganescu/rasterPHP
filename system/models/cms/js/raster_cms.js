@@ -2,19 +2,9 @@
 
 	Raster_Admin.system = [
 		{
-			"name" : 'Logout',
-			"link" : 'login/logout/fromraster',
+			"name" : 'Log out',
+			"link" : 'api/cms/logout',
 			"type" : 'navigable'
-		},
-		{
-			"name" : 'Settings',
-			"data" : 'raster',
-			"type" : 'data'
-		},
-		{
-			"name" : 'Users',
-			"data" : 'users',
-			"type" : 'data'
 		}
 	];
 
@@ -72,9 +62,9 @@
 		var type = $(this).data('type');
 		if (type == 'system') {
 			$('#raster_editor .body').html('<span>Logging you out ...</span>');
-			setTimeout(function(){
-				window.location.href = BASE + rel;
-			}, 1000);
+			$.post(BASE + rel, {"csrf": Raster_Admin.csrf}, function(){
+				window.location.href = BASE;
+			});
 			return true;
 		};
 		var name = $(this).text();

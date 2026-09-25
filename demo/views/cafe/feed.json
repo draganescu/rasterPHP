@@ -1,0 +1,10 @@
+{
+  "version": "https://jsonfeed.org/version/1.1",
+  "title": "Raster Café journal",
+  "home_page_url": "<!-- print.feed.site_url /-->",
+  "items": [
+    <!-- render.feed.items('journal') -->
+    {"id": "<!-- print.url /-->", "url": "<!-- print.url /-->", "title": "<!-- print.title -->Title<!-- /print.title -->", "content_html": "<!-- print.summary -->Summary<!-- /print.summary -->", "date_published": "<!-- print.date_iso /-->"}
+    <!-- /render.feed.items('journal') -->
+  ]
+}

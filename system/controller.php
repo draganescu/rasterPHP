@@ -47,10 +47,10 @@ class controller {
 	// -paranoid- sorry security reasons. This is why you can 
 	// config::set('views_path')->to('hidden_dir_relative_to_'.APPBASE) 
 	// and APPBASE is always relative to system.
-	static function build_view_path($view)
+	static function build_view_path($view, $ext = null)
 	{
 		$view_file = config::get('theme') . DIRECTORY_SEPARATOR .
-						$view . config::get('views_ext');
+						$view . ($ext === null ? config::get('views_ext') : $ext);
 		if (!file_exists(APPBASE . config::get('views_path') . DIRECTORY_SEPARATOR . $view_file)) {
 			return BASE . 'views/' . $view_file;
 		} else {
@@ -79,7 +79,26 @@ class controller {
 	// The respond method is attached to the launch event and its main role
 	// is to look up the current url and find a matching view
 	function respond() {
-		
+
+		// /news.rss renders news.rss, /api.json renders api.json: the extension
+		// picks the format and the view file
+		$segments = config::get('uri_segments');
+		$last = end($segments);
+		$format = 'html';
+		$format_ext = null;
+		if (preg_match('/^(.+)\.(rss|atom|xml|json|txt)$/', (string)$last, $m)) {
+			$format_ext = '.'.$m[2];
+			$format = in_array($m[2], array('rss', 'atom', 'xml')) ? 'xml' : $m[2];
+			$segments[count($segments) - 1] = $m[1];
+		}
+		config::set('format')->to($format);
+
+		// a cached copy of the page, when there is a fresh one
+		raster_cache::serve();
+
+		// posted forms must come from this site (/api included; /mcp has its own token)
+		if ($_SERVER['REQUEST_METHOD'] === 'POST' && $segments[0] !== 'mcp') controller::guard_post();
+
 		// this event allows work to be done before the route is found
 		event::dispatch('finding_route');
 
@@ -96,13 +115,14 @@ class controller {
 		// so a request to index.php/products will load views/products.html
 		// while a request to index.php/products/car will load views/products/car.html
 		// this is by deafault but can be overridden with routes
-		$default_view = implode('/', config::get('uri_segments'));
-		$default_file = controller::build_view_path($default_view);
+		$default_view = implode('/', $segments);
+		$default_file = controller::build_view_path($default_view, $format_ext);
 		
 		// set the route to the default; views can't be requested with
-		// relative paths and partials (files starting with _) are never pages
+		// relative paths, and partials (files or folders starting with _,
+		// like _layout.html or _email/) are never pages
 		$is_safe = $default_view !== '' && strpos($default_view, '..') === false
-			&& strpos(basename($default_view), '_') !== 0;
+			&& !preg_match('#(^|/)_#', $default_view);
 		if($is_safe && file_exists($default_file)) {
 			$route = $default_file;
 		}
@@ -163,6 +183,67 @@ class controller {
 		return $this;
 	}
 
+	// Rejects posts that come from another site (the browser tells us with
+	// the Origin, Sec-Fetch-Site or Referer headers), posts from bots that
+	// filled the honeypot, and posts from logged in users without the token.
+	static function guard_post() {
+		$host = strtolower((string)config::get('host'));
+		$origin = isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : null;
+		$site = isset($_SERVER['HTTP_SEC_FETCH_SITE']) ? $_SERVER['HTTP_SEC_FETCH_SITE'] : null;
+		$referer = isset($_SERVER['HTTP_REFERER']) ? $_SERVER['HTTP_REFERER'] : null;
+		$host_of = function ($url) {
+			$parts = parse_url($url);
+			return isset($parts['host']) ? strtolower($parts['host'].(isset($parts['port']) ? ':'.$parts['port'] : '')) : '';
+		};
+		$foreign = false;
+		if ($origin !== null && $origin !== 'null') $foreign = $host_of($origin) !== $host;
+		elseif ($site !== null) $foreign = !in_array($site, array('same-origin', 'none'));
+		elseif ($referer !== null) $foreign = $host_of($referer) !== $host;
+		if ($foreign) {
+			http_response_code(403);
+			exit('Forbidden: this form was sent from another site.');
+		}
+		if (isset($_POST['raster_hp']) && $_POST['raster_hp'] !== '') {
+			// pretend it worked so the bot moves on
+			header('Location: '.config::get('link_uri').ltrim((string)config::get('uri_string'), '/'), true, 303);
+			exit;
+		}
+		util::session();
+		if (!empty($_SESSION['uid']) && !util::csrf_valid(isset($_POST['csrf']) ? $_POST['csrf'] : null)) {
+			http_response_code(403);
+			exit('This form has expired. Go back, reload the page and send it again.');
+		}
+	}
+
+	// Renders a view into a string without touching the page being built,
+	// used for emails. $vars are available as print.self.name.
+	static function render_view($view, $vars = array(), $format = 'html') {
+		$path = file_exists($view) ? $view : controller::build_view_path($view);
+		if (!file_exists($path)) throw new RuntimeException("View not found: $view");
+		$previous = template::swap(null);
+		try {
+			$template = template::instance();
+			$template->view_file = raster_path($path);
+			$template->views_path = boot::$appname.DIRECTORY_SEPARATOR.config::get('views_path');
+			$template->theme = config::get('theme');
+			$template->view_ext = config::get('views_ext');
+			$template->base_uri = config::get('base_uri');
+			$template->link_uri = config::get('link_uri');
+			$template->format = $format;
+			$template->is_email = true;
+			foreach ($vars as $name => $value) $template->vars[$name] = $value;
+			controller::instance()->render($template, file_get_contents($path));
+			$output = template::instance()->output;
+			// relative images and links become absolute, relative to the theme
+			$base = config::get('base_uri').trim(boot::$appname.'/'.config::get('views_path'), '/').'/'.config::get('theme').'/';
+			return preg_replace_callback('/\b(src|href)=(["\'])(?!https?:|mailto:|tel:|#|\/\/|data:)([^"\']*)\2/i', function ($m) use ($base) {
+				return $m[1].'='.$m[2].$base.ltrim($m[3], './').$m[2];
+			}, $output);
+		} finally {
+			template::swap($previous);
+		}
+	}
+
 	public static function error($error, $document = false) {
 		if ($error == '404' && !headers_sent()) {
 			http_response_code(404);
@@ -183,8 +264,8 @@ class controller {
 
 		
 		if (!is_object($object)) return false;
-		$model = get_class( $object );
-		event::dispatch('executing_'.$model."_".$method);
+		// the model's own name, also when a the_<model> override answers
+		$model = preg_replace('/^the_/', '', get_class($object));
 
 		// methods can take literal arguments: render.news.latest(3, 'sports')
 		// they are parsed, never eval()-ed
@@ -193,6 +274,10 @@ class controller {
 			throw new RuntimeException("Malformed tag at ".$model.'.'.$method);
 		}
 		list($name, $arguments) = $call;
+		// executing_news_latest, whatever the arguments (and validation.field
+		// inside form 2, which runs as field__f2, is still executing_validation_field)
+		$event_name = $model.'_'.preg_replace('/__f\d+$/', '', $name);
+		event::dispatch('executing_'.$event_name, array('arguments' => $arguments));
 
 		if(!is_callable(array($object, $name))) return false;
 
@@ -203,7 +288,7 @@ class controller {
 
 		$data = call_user_func_array(array($object, $name), $arguments);
 		
-		event::dispatch('executed_'.$model."_".$method);
+		event::dispatch('executed_'.$event_name, array('arguments' => $arguments, 'result' => $data));
 		
 		return $data;
 	}
@@ -222,7 +307,7 @@ class controller {
 			// and the partials it includes with dry
 			preg_match_all('/<!-- dry\.([a-z0-9_\-\/]+)\.[a-z0-9_\-]+ \/?-->/', $data, $dried);
 			foreach (array_unique($dried[1]) as $partial) {
-				$path = template::instance()->view_path($partial);
+				$path = controller::build_view_path($partial);
 				if (strpos($partial, '..') === false && file_exists($path)) $problems = array_merge($problems, $inspector->lint_path($path));
 			}
 			$errors = array_filter($problems, function ($p) { return $p['severity'] === 'error'; });
@@ -231,6 +316,9 @@ class controller {
 		
 		$template = template::instance();
 		$template->view_file = raster_path($this->current_route);
+		$template->format = config::get('format', 'html');
+		$types = array('html' => 'text/html', 'xml' => preg_match('/\.rss$/', $this->current_route) ? 'application/rss+xml' : 'application/xml', 'json' => 'application/json', 'txt' => 'text/plain');
+		if (!headers_sent()) header('Content-Type: '.$types[$template->format].'; charset=utf-8');
 		
 		$template::set('views_path')->to(boot::$appname.DIRECTORY_SEPARATOR.config::get('views_path'));
 		$template::set('theme')->to(config::get('theme'));
@@ -241,7 +329,16 @@ class controller {
 		try {
 			$this->render($template, $data);
 		} catch (RuntimeException $e) {
-			if (!$strict) throw $e;
+			if (!$strict) {
+				// production: log it and show a plain error, never the details
+				error_log('Raster template error: '.$e->getMessage());
+				if (!headers_sent()) {
+					http_response_code(500);
+					header('Content-Type: text/html; charset=utf-8');
+				}
+				echo "<!doctype html><meta charset='utf-8'><title>Error</title><p>This page could not be shown.</p>";
+				exit;
+			}
 			controller::template_error(array(array('file' => $template->view_file, 'line' => 0, 'column' => 0, 'severity' => 'error', 'message' => $e->getMessage())));
 		}
 
@@ -267,7 +364,7 @@ class controller {
 		exit;
 	}
 
-	protected function render($template, $data) {
+	public function render($template, $data) {
 		$template = template::parse($data);
 
 		foreach($template->models as $model) {
@@ -299,6 +396,13 @@ class controller {
 			
 			event::dispatch("before_print");
 			$template->_print($data, $model, $method);
+			// a print inside a repeated render block has one copy per row:
+			// fill them all with the same value
+			for ($copies = 0; $copies < 1000; $copies++) {
+				$template->set_current_block($model, $method, 'print');
+				if ($template->current_params['pos1'] === false) break;
+				$template->_print($data, $model, $method);
+			}
 			event::dispatch("after_print");
 		}
 		
@@ -311,6 +415,10 @@ class controller {
 		$template->output = preg_replace("/(href|action)=(\"|')".preg_quote(config::get('default_view'), '/')."\.html(\"|')/", '$1=$2'.template::get('link_uri').'$3', $template->output);
 		$template->output = preg_replace("/(href|action|src)=(\"|')([a-zA-Z0-9\-\._\?\,\'\/\\\+&amp;%\$#\=~]*)\?".template::get('tpl_uri')."=(.*?)(\"|')/", '$1="'.template::get('link_uri').'$4"', $template->output);
 		$template->output = preg_replace("/(href|action|src)=(\"|')([a-zA-Z0-9\-\._\?\,\'\/\\\+&amp;%\$#\=~]*)\.html/", '$1=$2'.template::get('link_uri').'$3', $template->output);
+		// links to feed and data views: href="news.rss" -> /news.rss
+		$template->output = preg_replace_callback('/(href)=(["\'])([a-zA-Z0-9\-_\/]+\.(rss|atom|xml|json|txt))\2/', function ($m) {
+			return file_exists(controller::build_view_path(substr($m[3], 0, -strlen($m[4]) - 1), '.'.$m[4])) ? $m[1].'='.$m[2].template::get('link_uri').$m[3].$m[2] : $m[0];
+		}, $template->output);
 		$template->output = str_replace(template::get('link_uri')."__", template::get('link_uri').template::get('pad_uri'), $template->output);
 		return $template;
 	} 
@@ -383,6 +491,7 @@ class controller {
 		$template = template::instance();
 		// last chance to change the page, e.g. the CMS adds its toolbar here
 		event::dispatch('before_output');
+		raster_cache::store($template->output);
 		echo $template->output;
 		event::dispatch('land');
 	}
