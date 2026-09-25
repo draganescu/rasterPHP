@@ -8,6 +8,11 @@
 //   php bin/raster mcp
 //   php bin/raster serve [--port=8000]
 //   php bin/raster render <url>
+//   php bin/raster new <folder>
+//   php bin/raster update [latest|<version>|<branch>|<folder>|<file.tar.gz>] [--dry-run] [--force]
+//   php bin/raster upgrade [--dry-run]
+//   php bin/raster doctor [--json]
+//   php bin/raster version
 
 if (PHP_SAPI !== 'cli') exit;
 
@@ -28,6 +33,95 @@ foreach ($args as $arg) {
 	} else {
 		$positional[] = $arg;
 	}
+}
+
+// creating and updating projects happens before any app boots
+if (in_array($command, array('new', 'update', 'version'))) {
+	require_once $root.'/system/tools/project.php';
+	$color = function_exists('posix_isatty') && posix_isatty(STDOUT) && !getenv('NO_COLOR');
+	$paint = function ($text, $code) use ($color) { return $color ? "\033[{$code}m$text\033[0m" : $text; };
+	try {
+		exit(raster_project_command($command, $root, $positional, $options, $paint));
+	} catch (Exception $e) {
+		fwrite(STDERR, $paint('error', '31').': '.$e->getMessage()."\n");
+		exit(1);
+	}
+}
+
+function raster_project_command($command, $root, $positional, $options, $paint) {
+	switch ($command) {
+	case 'version':
+		echo 'Raster '.raster_project::version($root)."\n";
+		foreach (raster_project::apps($root) as $app) {
+			echo "  $app/ is at ".raster_project::app_version("$root/$app")."\n";
+		}
+		return 0;
+
+	case 'new':
+		if (empty($positional[0])) {
+			fwrite(STDERR, "Usage: php bin/raster new <folder>\n");
+			return 2;
+		}
+		$target = rtrim($positional[0], '/');
+		raster_project::create($root, $target);
+		echo "Created a Raster ".raster_project::version($root)." site in $target\n\n";
+		echo "  cd ".escapeshellarg($target)."\n  php bin/raster serve\n\nAGENTS.md explains the rest.\n";
+		return 0;
+
+	case 'update':
+		$source = isset($positional[0]) ? $positional[0] : 'latest';
+		$work = sys_get_temp_dir().'/raster-update-'.getmypid();
+		mkdir($work, 0775, true);
+		register_shutdown_function(function () use ($work) { exec('rm -rf '.escapeshellarg($work)); });
+		echo "Getting Raster ($source)…\n";
+		$release = raster_project::fetch($source, $work);
+		$old = raster_project::version($root);
+		$new = raster_project::version($release);
+		if (version_compare($new, $old, '<') && !isset($options['force'])) {
+			fwrite(STDERR, "That is Raster $new, older than this project's $old. Pass --force to go back anyway.\n");
+			return 1;
+		}
+		$edits = raster_project::edits($root);
+		if (raster_project::has_edits($edits)) {
+			echo $paint('These framework files were edited since they were installed:', '33')."\n";
+			foreach (array('changed', 'missing', 'added') as $kind) foreach ($edits[$kind] as $path) echo "  $kind  $path\n";
+			echo "An update replaces them. Move the changes into your app (a the_<model> override,\nconfig/the_*.php or the_<file>.php; see AGENTS.md, Extending).\n";
+			if (!isset($options['force'])) {
+				echo "Nothing was changed. Pass --force to update anyway (the old files are kept in a backup).\n";
+				return 1;
+			}
+		} elseif ($edits === null) {
+			echo "There is no record of the framework files as installed, so edits can't be detected; the old files are kept in a backup.\n";
+		}
+		$plan = raster_project::plan($root, $release);
+		$total = count($plan['add']) + count($plan['change']) + count($plan['remove']);
+		echo "Raster $old → $new: ".count($plan['change'])." changed, ".count($plan['add'])." new, ".count($plan['remove'])." removed file(s)\n";
+		if (isset($options['dry-run'])) {
+			foreach (array('change' => '~', 'add' => '+', 'remove' => '-') as $kind => $mark) foreach ($plan[$kind] as $path) echo "  $mark $path\n";
+			foreach (raster_project::upgrade_files($release, $old, $new) as $version => $file) echo "  upgrade steps for $version will run\n";
+			return 0;
+		}
+		$apps = raster_project::apps($root);
+		$backup_app = in_array(getenv('RASTER_APP') ?: 'application', $apps) ? (getenv('RASTER_APP') ?: 'application') : (isset($apps[0]) ? $apps[0] : null);
+		if ($total === 0) {
+			raster_project::record($root);
+			echo "Already up to date.\n";
+		} else {
+			if ($backup_app === null) throw new RuntimeException('No app folder to keep the backup in');
+			$backup = raster_project::update($root, $release, $backup_app);
+			echo $paint("Updated to Raster $new.", '32').($backup ? " The replaced files are in ".substr($backup, strlen($root) + 1)."/" : '')."\n";
+		}
+		// the new code upgrades each app
+		$failed = 0;
+		foreach ($apps as $app) {
+			$env = array_merge(getenv(), array('RASTER_APP' => $app));
+			$process = proc_open(array(PHP_BINARY, $root.'/bin/raster', 'upgrade'), array(1 => STDOUT, 2 => STDERR), $pipes, $root, $env);
+			if (proc_close($process) !== 0) $failed++;
+		}
+		echo "\nNext: php bin/raster doctor, and your tests. CHANGELOG.md lists what changed.\n";
+		return $failed ? 1 : 0;
+	}
+	return 2;
 }
 
 // `render` boots with the requested URL; everything else needs no request
@@ -235,6 +329,38 @@ switch ($command) {
 		echo "Sent \"$subject\" to $ok subscriber(s)".($failed ? ", $failed failed" : '')." via ".mail::transport()."\n";
 		exit($failed ? 1 : 0);
 
+	case 'upgrade':
+		require_once BASE.'tools/project.php';
+		$app = boot::$appname;
+		$pending = raster_project::pending($root, $app);
+		$to = raster_project::version($root);
+		if (isset($options['dry-run'])) {
+			if (!$pending) echo "$app/ needs no upgrade steps\n";
+			foreach ($pending as $step) echo "  {$step['version']} {$step['id']}: {$step['description']}\n";
+			exit(0);
+		}
+		$done = raster_project::upgrade($root, $app);
+		foreach ($done as $step) echo "  ✓ {$step['version']} {$step['id']}: {$step['description']}".($step['result'] !== '' ? " ({$step['result']})" : '')."\n";
+		echo "$app/ is at Raster $to".($done ? '' : ', nothing to change')."\n";
+		exit(0);
+
+	case 'doctor':
+		require_once BASE.'tools/project.php';
+		$checks = raster_project::doctor($root, boot::$appname, config::get('environment'));
+		$fails = count(array_filter($checks, function ($c) { return $c['status'] === 'fail'; }));
+		if (isset($options['json'])) {
+			$json(array('environment' => config::get('environment'), 'failures' => $fails, 'checks' => $checks));
+			exit($fails ? 1 : 0);
+		}
+		echo "Checking ".boot::$appname."/ in ".config::get('environment')."\n\n";
+		foreach ($checks as $c) {
+			$mark = array('ok' => $paint('✓', '32'), 'warn' => $paint('!', '33'), 'fail' => $paint('✗', '31'));
+			echo $mark[$c['status']].' '.$c['title']."\n";
+			if ($c['detail'] !== '' && $c['status'] !== 'ok') echo '    '.str_replace("\n", "\n    ", $c['detail'])."\n";
+		}
+		echo "\n".($fails ? $paint("$fails problem(s) to fix", '31') : $paint('Ready', '32'))."\n";
+		exit($fails ? 1 : 0);
+
 	case 'mcp':
 		controller::load_model('mcp');
 		controller::get_object('mcp')->stdio();
@@ -288,6 +414,14 @@ Raster command line
                                          email a page to newsletter subscribers
   php bin/raster mcp                     MCP server over stdio for local agents
   php bin/raster render <url>            print the HTML of a URL
+  php bin/raster doctor [--json]         check the project: PHP, versions, edited framework
+                                         files, templates, database, deprecations, production
+  php bin/raster new <folder>            start a new site from this copy of Raster
+  php bin/raster update [latest|2.1.0|<branch>|<folder>|<file.tar.gz>] [--dry-run] [--force]
+                                         replace the framework files with another release,
+                                         then upgrade every app
+  php bin/raster upgrade [--dry-run]     run the upgrade steps this app still needs
+  php bin/raster version                 the framework's version and each app's
 
 Set RASTER_ENV=production to run against the production database.
 

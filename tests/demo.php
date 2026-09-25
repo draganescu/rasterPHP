@@ -1029,10 +1029,10 @@ test('E26', 'the built-in editor login page, toolbar assets and logout', functio
 		list($status, $body) = http('GET', "$base/login");
 		same(200, $status);
 		has($body, '<title>Raster CMS Login</title>');
-		list($status, , $headers) = http('POST', "$base/login", array('raster_form' => 'cms.login', 'login' => 'staff@cafe.test', 'password' => 'staff password'));
+		list($status, , $headers) = http('POST', "$base/login", array('raster_form' => 'authentication.login', 'login' => 'staff@cafe.test', 'password' => 'staff password'));
 		same(303, $status);
 		check(cookie_from($headers) !== '', 'logged in');
-		has(http('POST', "$base/login", array('raster_form' => 'cms.login', 'login' => 'staff@cafe.test', 'password' => 'wrong password'))[1], 'Wrong username or password.');
+		has(http('POST', "$base/login", array('raster_form' => 'authentication.login', 'login' => 'staff@cafe.test', 'password' => 'wrong password'))[1], 'Wrong username or password.');
 	} finally {
 		rename("$views/login.html.off", "$views/login.html");
 	}

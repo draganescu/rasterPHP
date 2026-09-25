@@ -70,10 +70,12 @@ class database {
             return $this->query(file_get_contents($sqlfile), $arguments);
         } else {
             if(file_exists(APPBASE.'models/sql.php')) {
-                $querries = array();
+                $queries = array();
+                $querries = array(); // the old spelling, still read
                 include APPBASE.'models/sql.php';
-                if(array_key_exists($name, $querries)) {
-                    return $this->query($querries[$name], $arguments);
+                $queries = array_merge($querries, $queries);
+                if(array_key_exists($name, $queries)) {
+                    return $this->query($queries[$name], $arguments);
                 } else {
                     return false;
                 }

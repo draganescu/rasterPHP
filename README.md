@@ -8,12 +8,15 @@ You write HTML and mark the parts that change with HTML comments. The template o
 Compared with Laravel or Symfony, Raster is small: a single controller, one view file per URL, no build step. Pages are fast and cached for visitors. What it generates is easy to follow, and every page is editable as soon as it exists.
 
 ```sh
+php bin/raster new mysite     # a new site (or clone this repository and work in application/)
 php bin/raster serve          # http://localhost:8000 (PHP 8.1+, SQLite, nothing to install)
 php bin/raster user admin     # an editor account; log in at /login
 php bin/raster lint           # check every view: annotations, forms, alerts, emails
 php bin/raster schema         # the content model the templates define, compared with the database
 php bin/raster send /news/news_item/hello   # email a page to newsletter subscribers
 php bin/raster mcp            # let an agent edit the content (MCP over stdio; /mcp over HTTP)
+php bin/raster doctor         # checks the site, including production settings
+php bin/raster update         # the latest release of the framework; your app is left alone
 ```
 
 Included:
@@ -26,7 +29,9 @@ Included:
 
 **Working on a Raster site with an AI agent?** [AGENTS.md](AGENTS.md) is the complete specification.
 
-Tests: `php tests/run.php` for the framework, and `php tests/demo.php` for [the demo café](demo/README.md), a complete site that uses every feature. Each feature has an ID, and the suite fails if any of them lacks a passing test. `php tests/mutate.php` breaks the framework on purpose, one change at a time from `tests/mutations.json`, and fails if the demo suite doesn't notice.
+**Updating:** `raster update` replaces only the framework files (`system/`, `bin/raster`, `index.php`, `.htaccess`, `AGENTS.md`), refuses if you edited them, and then runs the upgrade steps each app needs. What changed is in [CHANGELOG.md](CHANGELOG.md).
+
+Tests: `php tests/run.php` for the framework, `php tests/update.php` for updates, and `php tests/demo.php` for [the demo café](demo/README.md), a complete site that uses every feature. Each feature has an ID, and the suite fails if any of them lacks a passing test. `php tests/mutate.php` breaks the framework on purpose, one change at a time from `tests/mutations.json`, and fails if the demo suite doesn't notice.
 
 ---
 

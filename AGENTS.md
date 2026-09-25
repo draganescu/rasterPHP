@@ -17,13 +17,13 @@ php bin/raster serve              # http://localhost:8000, no setup, SQLite
 php bin/raster lint               # after every template edit; exit 1 on errors
 php bin/raster schema             # what the CMS will store, compared with the database
 php bin/raster render /about      # print a page without a server (exit 1 on 4xx/5xx)
-php tests/run.php                 # framework test suite
-php tests/demo.php                # the demo café: every feature, end to end
+php bin/raster doctor             # is this site healthy, up to date, ready for production?
 ```
 
-`demo/` is a complete example site that uses every feature (see
-`demo/README.md`). Run it with `RASTER_APP=demo php bin/raster serve`. When
-you're unsure how something is written, look there first.
+The demo café in the Raster repository
+(https://github.com/draganescu/rasterPHP/tree/master/demo) is a complete site
+that uses every feature. When you're unsure how something is written, look
+there first.
 
 In development, a view with template errors, or with errors in the partials it
 includes, returns HTTP 500 listing the problems (header
@@ -43,8 +43,7 @@ application/
   views/<theme>/              views (.html, .rss, .xml, .json), css, images
   i18n/<lang>/<file>.php      translations
   data/                       SQLite, page cache, logged mail (never served)
-demo/                         the demo café, laid out the same way
-system/                       the framework and its bundled models
+system/                       the framework and its bundled models (don't edit)
 media/                        uploads from the CMS
 ```
 
@@ -401,7 +400,7 @@ use `'model.method'`: `method(true)` returns
   `after_drying`, `before_render`, `after_render`, `before_print`,
   `after_print`, `loop`, `before_output`, `done`, `land`.
 - **Named queries:** `models/sql.php` sets
-  `$querries['name'] = "SELECT … WHERE a = '%s'"`; call
+  `$queries['name'] = "SELECT … WHERE a = '%s'"`; call
   `database::instance('any')->name($a)`. Values are quoted by the driver.
   Files in `models/<model>/sql/<name>.sql` use `?` placeholders instead.
 - **Values in scripts and styles:** `"/*- print.model.method /-*/"` is the
@@ -458,7 +457,42 @@ command-line output). They win over the settings above.
    views.
 3. `php bin/raster schema` shows the content model you meant to create.
 4. `php bin/raster render /the-url`, or `serve`, and check the HTML.
-5. If you touched `system/`: `php tests/run.php` and `php tests/demo.php`.
-   A new feature gets an ID in `demo/README.md`, a use in the demo and a
-   test; `php tests/mutate.php` (slow) checks the tests would catch a
-   regression.
+5. Don't edit `system/`, `bin/raster`, `index.php`, `.htaccess` or this
+   file in a site: `raster update` replaces them. Use the ways in
+   Extending instead.
+
+## Keeping Raster up to date
+
+- `php bin/raster update` replaces the framework files with the latest
+  release (or `update 2.1.0`, `update <branch>`, `update <folder>`,
+  `update <file.tar.gz>`; `--dry-run` shows what would change). It refuses
+  when framework files were edited since they were installed
+  (`system/checksums.json` records them); `--force` goes ahead. Replaced
+  files are kept in `application/data/backups/`.
+- It then runs `php bin/raster upgrade` for every app: the steps in
+  `system/upgrades/<version>.php` the app still needs (renamed annotations,
+  moved files). The version an app is at is in `config/raster-version`.
+  Database changes stay with `raster schema --apply`.
+- `php bin/raster doctor` checks PHP, versions, edited framework files,
+  templates, the database, uses of deprecated features
+  (`system/deprecations.php`) and, in production, the site address, mail and
+  tokens. Exit 1 when something must be fixed.
+- `php bin/raster new <folder>` starts a new site from this copy of Raster.
+- `CHANGELOG.md` in the repository lists what changed in each release.
+
+## Working on Raster itself
+
+In the Raster repository, not in sites made with it:
+
+```sh
+php tests/run.php                 # framework test suite
+php tests/demo.php                # the demo café: every feature, end to end
+php tests/update.php              # new, update, upgrade, doctor
+php tests/mutate.php              # slow: would the demo suite notice a regression?
+```
+
+A new feature gets an ID in `demo/README.md`, a use in the demo and a test.
+A change that sites must follow gets an upgrade step, and anything it
+replaces an entry in `system/deprecations.php` (kept working until the
+version it names). Bump `system/VERSION` and add to `CHANGELOG.md` when
+releasing, and tag the release `v<version>`.
