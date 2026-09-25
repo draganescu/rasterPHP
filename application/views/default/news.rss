@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>News</title>
+    <link><!-- print.feed.site_url /--></link>
+    <description>News from the Raster demo site</description>
+    <!-- render.feed.items('news') -->
+    <item>
+      <title><!-- print.headline -->Headline<!-- /print.headline --></title>
+      <link><!-- print.url /--></link>
+      <guid><!-- print.url /--></guid>
+      <pubDate><!-- print.date_rfc822 /--></pubDate>
+      <description><!-- print.summary -->Summary<!-- /print.summary --></description>
+    </item>
+    <!-- /render.feed.items('news') -->
+  </channel>
+</rss>

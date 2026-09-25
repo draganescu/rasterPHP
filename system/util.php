@@ -42,6 +42,37 @@ class util {
 		return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
 	}
 
+	// Starts the session only for people who already have one (editors,
+	// members) or when $force is true (logging in). Visitors get no cookie.
+	static function session($force = false)
+	{
+		if (PHP_SAPI === 'cli' || session_status() !== PHP_SESSION_NONE) return;
+		if ($force || isset($_COOKIE[session_name()])) {
+			session_start(array('cookie_httponly' => true, 'cookie_samesite' => 'Lax', 'use_strict_mode' => true));
+		}
+	}
+
+	// Ends a successful form post: redirects to the same page with
+	// ?done=<name>, so reloading doesn't send the form again. Blocks written
+	// as <!-- print.validation.alert('name') --> show after the redirect.
+	static function done($name = 'done', $location = null)
+	{
+		$name = preg_replace('/[^a-z0-9_]/', '', strtolower($name));
+		if ($location === null) {
+			$location = config::get('base_uri').ltrim(strtok((string)config::get('uri_string'), '?'), '/');
+		}
+		$location .= (strpos($location, '?') === false ? '?' : '&').'done='.$name;
+		if (PHP_SAPI === 'cli') return $location;
+		header('Location: '.$location, true, 303);
+		exit;
+	}
+
+	// call after changing content so cached pages are rebuilt
+	static function content_changed()
+	{
+		raster_cache::bump();
+	}
+
 	// a per session token that forms changing data must send back
 	static function csrf_token()
 	{
@@ -116,4 +147,79 @@ class util {
 function raster_path($path) {
 	$root = dirname(BASE).'/';
 	return strpos($path, $root) === 0 ? substr($path, strlen($root)) : $path;
+}
+
+// #Page cache
+// Whole pages are cached for visitors (no session, no query string) and
+// thrown away when content changes. On by default in production; set
+// config page_cache to true or false to decide yourself.
+class raster_cache {
+
+	static $cacheable = null;
+
+	static function dir() {
+		return APPBASE.'data/cache/';
+	}
+
+	static function enabled() {
+		return (bool)config::get('page_cache', config::get('environment') === 'production');
+	}
+
+	static function key() {
+		// multilingual sites cache one copy per language
+		$language = config::get('languages') ? i18n::detect() : '';
+		return sha1(config::get('host').'|'.config::get('uri_string').'|'.$language);
+	}
+
+	static function cacheable() {
+		if (self::$cacheable !== null) return self::$cacheable;
+		$uri = (string)config::get('uri_string');
+		$ok = self::enabled()
+			&& isset($_SERVER['REQUEST_METHOD']) && in_array($_SERVER['REQUEST_METHOD'], array('GET', 'HEAD'))
+			&& empty($_SERVER['QUERY_STRING'])
+			&& !isset($_COOKIE[session_name()])
+			&& !preg_match('#^/(api|mcp|login)(/|$)#', $uri);
+		foreach ((array)config::get('page_cache_skip', array()) as $pattern) {
+			if (preg_match('%^/?'.$pattern.'%', $uri)) $ok = false;
+		}
+		return self::$cacheable = $ok;
+	}
+
+	static function version() {
+		$file = self::dir().'version';
+		return is_file($file) ? (int)file_get_contents($file) : 0;
+	}
+
+	static function bump() {
+		if (!is_dir(self::dir())) @mkdir(self::dir(), 0775, true);
+		@file_put_contents(self::dir().'version', (string)(self::version() + 1), LOCK_EX);
+	}
+
+	static function serve() {
+		if (!self::cacheable()) return;
+		$file = self::dir().self::key();
+		if (!is_file($file)) return;
+		$handle = fopen($file, 'r');
+		$meta = json_decode((string)fgets($handle), true);
+		$ttl = (int)config::get('page_cache_ttl', 3600);
+		if (!$meta || $meta['v'] !== self::version() || time() - $meta['t'] > $ttl) { fclose($handle); return; }
+		header('Content-Type: '.$meta['type']);
+		header('X-Raster-Cache: hit');
+		fpassthru($handle);
+		fclose($handle);
+		exit;
+	}
+
+	static function store($output) {
+		if (!self::cacheable() || http_response_code() !== 200 || session_status() === PHP_SESSION_ACTIVE) return;
+		$type = 'text/html; charset=utf-8';
+		foreach (headers_list() as $header) {
+			if (stripos($header, 'Set-Cookie:') === 0) return;
+			if (stripos($header, 'Content-Type:') === 0) $type = trim(substr($header, 13));
+		}
+		if (!is_dir(self::dir())) @mkdir(self::dir(), 0775, true);
+		$meta = json_encode(array('v' => self::version(), 't' => time(), 'type' => $type));
+		@file_put_contents(self::dir().self::key(), $meta."\n".$output, LOCK_EX);
+		if (!headers_sent()) header('X-Raster-Cache: miss');
+	}
 }

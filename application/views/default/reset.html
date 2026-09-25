@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <!-- dry._layout.head /-->
+  <title>Choose a new password</title>
+</head>
+<body>
+  <!-- dry._layout.header /-->
+  <main class="narrow">
+    <h1>Choose a new password</h1>
+    <!-- print.validation.alert('reset_invalid') --><p class="error">This link has expired or was already used. <a href="forgot.html">Get a new one</a>.</p><!-- /print.validation.alert('reset_invalid') -->
+    <!-- print.validation.alert('password_short') --><p class="error">Use at least 8 characters.</p><!-- /print.validation.alert('password_short') -->
+    <!-- render.authentication.reset -->
+    <form method="post" class="stack">
+      <label>New password <input type="password" name="password" autocomplete="new-password" required minlength="8"></label>
+      <label>Again <input type="password" name="password_again" autocomplete="new-password" required></label>
+      <!-- render.validation.matches('password', 'password_again') --><p class="error">The passwords are different.</p><!-- /render.validation.matches('password', 'password_again') -->
+      <button>Save password</button>
+    </form>
+    <!-- /render.authentication.reset -->
+  </main>
+  <!-- dry._layout.footer /-->
+</body>
+</html>

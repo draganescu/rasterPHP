@@ -9,7 +9,9 @@ if (PHP_SAPI !== 'cli') exit;
 
 $root = dirname(__DIR__);
 $db = sys_get_temp_dir().'/raster-test-'.getmypid().'.sqlite';
+$maildir = sys_get_temp_dir().'/raster-mail-'.getmypid();
 putenv("RASTER_DB=$db");
+putenv("RASTER_MAIL=log://$maildir");
 putenv('RASTER_ENV=development');
 
 require_once $root.'/system/boot.php';
@@ -134,17 +136,20 @@ test('content model from the demo theme', function () {
 	same(array('title', 'headline', 'intro'), $pages['/']);
 	same(array('title', 'heading', 'body'), $pages['/about']);
 	same(array('headline', 'date', 'summary', 'body'), array_keys($model['collections']['news']['fields']));
-	same('Write HTML. Get a CMS.', $model['pages'][1]['fields']['headline']['default']);
+	foreach ($model['pages'] as $page) if ($page['url'] === '/') same('Write HTML. Get a CMS.', $page['fields']['headline']['default']);
+	same(array('site_name', 'site_footer'), $pages['site']);
 });
 
 // ## Integration tests
 
 $port = 8765 + getmypid() % 100;
 $base = "http://127.0.0.1:$port";
-$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_MCP_TOKEN' => 'test-token', 'PATH' => getenv('PATH')));
-register_shutdown_function(function () use ($server, $db) {
+$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_MCP_TOKEN' => 'test-token', 'RASTER_MAIL' => "log://$maildir", 'PATH' => getenv('PATH')));
+register_shutdown_function(function () use ($server, $db, $maildir) {
 	proc_terminate($server);
 	@unlink($db);
+	array_map('unlink', glob("$maildir/*") ?: array());
+	@rmdir($maildir);
 });
 for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
 
@@ -176,7 +181,7 @@ test('template defaults become content', function () use ($base) {
 	list(, $body) = http('GET', "$base/");
 	check(strpos($body, '<h1>Write HTML. Get a CMS.</h1>') !== false);
 	check(strpos($body, 'Placeholder') === false, 'remove block leaked');
-	check(strpos($body, 'href="'.$base.'/news/news_item/1"') !== false, 'detail link');
+	check(strpos($body, 'href="'.$base.'/news/news_item/raster-runs-on-php-8"') !== false, 'detail link');
 	check(strpos($body, 'href="'.$base.'/news"') !== false, '.html links rewritten');
 });
 test('missing pages and items are 404', function () use ($base) {
@@ -229,8 +234,8 @@ test('anonymous users cannot edit', function () use ($base) {
 test('editor login and csrf', function () use ($base) {
 	cms_store::connect();
 	cms_store::create_user('editor', 'correct horse');
-	list($status, , $headers) = http('POST', "$base/login", 'username=editor&password=correct+horse', array('Content-Type: application/x-www-form-urlencoded'));
-	same(302, $status);
+	list($status, , $headers) = http('POST', "$base/login", 'login=editor&password=correct+horse', array('Content-Type: application/x-www-form-urlencoded'));
+	same(303, $status);
 	$cookie = preg_replace('/^Set-Cookie:\s*([^;]+).*$/i', '$1', current(preg_grep('/^Set-Cookie/i', $headers)));
 	$page = http('GET', "$base/about", null, array("Cookie: $cookie"))[1];
 	check(preg_match('/Raster_Admin.csrf = "([a-f0-9]+)"/', $page, $m), 'toolbar missing');
@@ -238,9 +243,9 @@ test('editor login and csrf', function () use ($base) {
 	same(403, http('POST', "$base/about", 'raster_action=save_page&page_name=aboutpage&variable_name=heading&raster_page_value=Nope', $form)[0]);
 	$body = http('POST', "$base/about", 'raster_action=save_page&csrf='.$m[1].'&page_name=aboutpage&variable_name=heading&raster_page_value=Edited', $form)[1];
 	check(strpos($body, '<h1>Edited</h1>') !== false, 'edit not saved');
-	list($status, $body) = http('POST', "$base/login", 'username=editor&password=wrong', array('Content-Type: application/x-www-form-urlencoded'));
+	list($status, $body) = http('POST', "$base/login", 'login=editor&password=wrong', array('Content-Type: application/x-www-form-urlencoded'));
 	same(200, $status, 'wrong password must not log in');
-	check(strpos($body, 'Wrong username or password') !== false);
+	check(strpos($body, 'Wrong email or password') !== false);
 });
 test('mcp requires a token', function () use ($base) {
 	same(401, http('POST', "$base/mcp", '{}')[0]);
@@ -310,6 +315,152 @@ test('mcp over stdio', function () use ($root, $db) {
 	proc_close($process);
 	same(7, $response['id']);
 	same('/about', $response['result']['structuredContent']['url']);
+});
+
+
+// ## Forms, accounts, newsletter, feeds
+
+function form_post($url, $fields, $headers = array()) {
+	return http('POST', $url, http_build_query($fields), array_merge(array('Content-Type: application/x-www-form-urlencoded'), $headers));
+}
+function last_mail() {
+	global $maildir;
+	$files = glob("$maildir/*.eml");
+	sort($files);
+	if (!$files) return null;
+	$raw = file_get_contents(end($files));
+	$text = '';
+	if (preg_match('/Content-Type: text\/plain; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n(.*?)\r\n--/s', $raw, $m)) $text = base64_decode($m[1]);
+	return array('raw' => $raw, 'text' => $text);
+}
+function location($headers) {
+	foreach ($headers as $h) if (stripos($h, 'Location:') === 0) return trim(substr($h, 9));
+	return null;
+}
+
+test('lint: form conventions', function () {
+	check(has_problem(lint_html('<form method="post"><input name="a"></form>'), 'not inside a render block'));
+	check(has_problem(lint_html("<!-- render.site.nav --><form method=\"post\"><input name=\"a\" required><!-- render.validation.field('b') -->x<!-- /render.validation.field('b') --></form><!-- /render.site.nav -->"), "no input named b"));
+	check(has_problem(lint_html("<!-- print.validation.alert('nobody_raises_this') -->x<!-- /print.validation.alert('nobody_raises_this') -->"), 'No model raises'));
+});
+test('posts from other sites and bots are refused', function () use ($base) {
+	same(403, form_post("$base/about", array('email' => 'a@b.co'), array('Origin: https://evil.example'))[0]);
+	same(403, form_post("$base/about", array('email' => 'a@b.co'), array('Sec-Fetch-Site: cross-site'))[0]);
+	same(303, form_post("$base/about", array('raster_hp' => 'spam', 'email' => 'a@b.co'))[0]);
+	list(, $body) = http('GET', "$base/about");
+	check(strpos($body, 'name="raster_form" value="newsletter.signup"') !== false, 'form owner not injected');
+});
+test('validation regions and redisplay', function () use ($base) {
+	list($status, $body) = form_post("$base/register", array('raster_form' => 'authentication.register', 'email' => 'not-an-email', 'password' => 'short', 'password_again' => 'other'));
+	same(200, $status);
+	check(strpos($body, 'Enter a valid email address.') !== false, 'field error');
+	check(strpos($body, 'Use at least 8 characters.') !== false, 'minlength error');
+	check(strpos($body, 'The passwords are different.') !== false, 'matches error');
+	check(strpos($body, 'value="not-an-email"') !== false, 'value kept');
+	check(strpos($body, 'value="short"') === false, 'password refilled');
+	check(strpos($body, 'Please enter a valid email address.') === false, 'other form validated');
+});
+test('accounts: register, protected pages, reset by email', function () use ($base) {
+	list($status, , $headers) = http('GET', "$base/account");
+	same(303, $status);
+	check(strpos(location($headers), '/login?next=%2Faccount') !== false, 'login redirect');
+	list($status, , $headers) = form_post("$base/register", array('raster_form' => 'authentication.register', 'name' => 'Ada', 'email' => 'ada@example.com', 'password' => 'correct horse 1', 'password_again' => 'correct horse 1'));
+	same(303, $status);
+	check(strpos(location($headers), '/account?done=registered') !== false, 'after_login');
+	$cookie = preg_replace('/^Set-Cookie:\s*([^;]+).*$/i', '$1', current(preg_grep('/^Set-Cookie/i', $headers)));
+	list(, $body) = http('GET', "$base/account?done=registered", null, array("Cookie: $cookie"));
+	check(strpos($body, 'Welcome! Your account is ready.') !== false, 'registered alert');
+	check(strpos($body, 'value="ada@example.com"') !== false, 'account form filled');
+	check(strpos(http('GET', "$base/", null, array("Cookie: $cookie"))[1], '>Account</a>') !== false, 'if.logged_in');
+	same(true, strpos(form_post("$base/register", array('raster_form' => 'authentication.register', 'email' => 'ada@example.com', 'password' => 'another pass 1', 'password_again' => 'another pass 1'))[1], 'already an account') !== false);
+
+	same(303, form_post("$base/forgot", array('raster_form' => 'authentication.forgot', 'email' => 'ada@example.com'))[0]);
+	$mail = last_mail();
+	check($mail && preg_match('/token=([a-f0-9]{48})/', $mail['text'], $t), 'reset email');
+	check(strpos($mail['raw'], 'Subject: =?UTF-8?B?'.base64_encode('Reset your password').'?=') !== false, 'subject from <title>');
+	same(303, form_post("$base/reset?token={$t[1]}", array('raster_form' => 'authentication.reset', 'token' => $t[1], 'password' => 'brand new pass', 'password_again' => 'brand new pass'))[0]);
+	check(strpos(http('GET', "$base/reset?token={$t[1]}")[1], 'expired or was already used') !== false, 'token single use');
+	same(303, form_post("$base/login", array('raster_form' => 'authentication.login', 'login' => 'ada@example.com', 'password' => 'brand new pass'))[0]);
+	list($status, , $headers) = form_post("$base/login?next=//evil.example", array('raster_form' => 'authentication.login', 'login' => 'ada@example.com', 'password' => 'brand new pass'));
+	check(strpos(location($headers), 'evil.example') === false, 'open redirect');
+	// members don't get the editor toolbar
+	check(strpos(http('GET', "$base/about", null, array("Cookie: $cookie"))[1], 'Raster_Admin') === false, 'member got toolbar');
+});
+test('newsletter: double opt-in, send, one-click unsubscribe', function () use ($base, $root, $db, $maildir) {
+	list($status, , $headers) = form_post("$base/about", array('raster_form' => 'newsletter.signup', 'email' => 'reader@example.com'));
+	same(303, $status);
+	check(strpos(location($headers), 'done=check_email') !== false);
+	$mail = last_mail();
+	check($mail && preg_match('/token=([a-f0-9]{40})/', $mail['text'], $t), 'confirmation email');
+	check(strpos(http('GET', "$base/newsletter-confirm?token={$t[1]}")[1], 'You are subscribed') !== false, 'confirm');
+	$env = 'RASTER_DB='.escapeshellarg($db).' RASTER_MAIL='.escapeshellarg("log://$maildir").' RASTER_URL='.escapeshellarg("$base/");
+	$out = shell_exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' send /about --dry-run 2>&1');
+	check(strpos($out, 'to 1 subscriber') !== false, "dry run: $out");
+	$out = shell_exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' send /about 2>&1');
+	check(strpos($out, 'Sent "About" to 1 subscriber') !== false, "send: $out");
+	$mail = last_mail();
+	check(preg_match('/List-Unsubscribe: <([^>]+)>/', $mail['raw'], $u), 'List-Unsubscribe');
+	check(strpos($mail['raw'], 'List-Unsubscribe-Post: List-Unsubscribe=One-Click') !== false);
+	$html = base64_decode(preg_replace('/.*Content-Type: text\/html; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n(.*?)\r\n--.*/s', '$1', $mail['raw']));
+	check(strpos($html, '<form') === false && strpos($html, '<script') === false && strpos($html, '<base') === false, 'issue cleaned up');
+	$again = shell_exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' send /about 2>&1');
+	check(strpos($again, 'already sent') !== false, 'double send guard');
+	check(strpos(http('POST', $u[1], 'List-Unsubscribe=One-Click', array('Content-Type: application/x-www-form-urlencoded'))[1], 'You are unsubscribed') !== false, 'one-click');
+});
+test('collections: slugs, drafts, scheduling, order', function () use ($base) {
+	$item = mcp_call('create_item', array('collection' => 'news', 'fields' => array('headline' => 'Ünïcode & Friends', 'summary' => '<p>x</p>')))['structuredContent'];
+	same('unicode-friends', $item['slug']);
+	same(200, http('GET', "$base/news/news_item/unicode-friends")[0]);
+	mcp_call('create_item', array('collection' => 'news', 'fields' => array('headline' => 'Secret draft', 'enabled' => '0')));
+	mcp_call('create_item', array('collection' => 'news', 'fields' => array('headline' => 'From the future', 'published_at' => '2099-01-01 10:00')));
+	list(, $body) = http('GET', "$base/news");
+	check(strpos($body, 'Secret draft') === false && strpos($body, 'From the future') === false, 'hidden items shown');
+	same(404, http('GET', "$base/news/news_item/secret-draft")[0]);
+	check(strpos($body, 'Ünïcode') < strpos($body, 'Raster runs on PHP 8'), 'order=newest');
+});
+test('feeds are well-formed and escaped', function () use ($base) {
+	list($status, $body, $headers) = http('GET', "$base/news.rss");
+	same(200, $status);
+	check((bool)preg_grep('/^Content-Type: application\/rss\+xml/i', $headers), 'rss content type');
+	$doc = new DOMDocument();
+	check(@$doc->loadXML($body), 'rss is not well-formed XML');
+	check(strpos($body, 'Ünïcode &amp; Friends') !== false, 'rss escaping');
+	check(strpos($body, 'From the future') === false, 'future item in feed');
+	list(, $body) = http('GET', "$base/sitemap.xml");
+	check(@$doc->loadXML($body) && strpos($body, "<loc>$base/news/news_item/unicode-friends</loc>") !== false, 'sitemap');
+	check(strpos($body, '/login') === false, 'sitemap lists login');
+});
+test('site-wide fields', function () use ($base) {
+	mcp_call('update_page', array('page' => 'site', 'fields' => array('site_name' => 'Acme')));
+	check(strpos(http('GET', "$base/")[1], '>Acme</a>') !== false && strpos(http('GET', "$base/news")[1], '>Acme</a>') !== false, 'site_name everywhere');
+});
+test('pagination', function () use ($base) {
+	for ($i = 1; $i <= 11; $i++) mcp_call('create_item', array('collection' => 'news', 'fields' => array('headline' => "Filler $i")));
+	list(, $body) = http('GET', "$base/news");
+	check(preg_match_all('/<a class="page ?\w*" href="[^"]*news_page\/2"/', $body) >= 1, 'page 2 link');
+	list($status, $body) = http('GET', "$base/news/news_page/2");
+	same(200, $status);
+	check(strpos($body, 'class="page current"') !== false, 'current page');
+});
+test('i18n picks languages', function () {
+	same(array('ro-RO', 'ro', 'en'), i18n::parse_header('ro-RO,ro;q=0.9,en;q=0.8'));
+});
+test('page cache in production', function () use ($root, $db) {
+	$env = 'RASTER_ENV=production RASTER_DB='.escapeshellarg($db);
+	shell_exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' schema --apply');
+	$port = 8865 + getmypid() % 100;
+	$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_ENV' => 'production', 'PATH' => getenv('PATH')));
+	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
+	try {
+		$cache = function () use ($port) { return current(preg_grep('/^X-Raster-Cache/i', http('GET', "http://127.0.0.1:$port/about")[2])); };
+		same('X-Raster-Cache: miss', $cache());
+		same('X-Raster-Cache: hit', $cache());
+		util::content_changed();
+		same('X-Raster-Cache: miss', $cache());
+	} finally {
+		proc_terminate($server);
+		foreach (glob(APPBASE.'data/cache/*') ?: array() as $f) unlink($f);
+	}
 });
 
 echo "\n\n$passed passed, ".count($failed)." failed\n";

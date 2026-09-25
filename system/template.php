@@ -37,6 +37,47 @@ class template {
   public $current_params = array();
   // the view file being rendered, used in error messages
   public $view_file = '';
+  // html, xml, json or txt: decides how printed values are escaped
+  public $format = 'html';
+  // values set with template::set('name')->to(...) for print.self and print.if
+  public $vars = array();
+  // post forms found in the view: owner (model.method of the render block
+  // around the form) => field constraints read from the HTML
+  public $forms = array();
+  // for validation tags: tag reference => owners of the forms they sit in
+  public $tag_owners = array();
+  // form number => owner; validation tags inside form N are renamed
+  // method__fN so identical tags in two forms stay apart
+  public $form_owners = array();
+  // the model.method of the block being processed
+  public $current_call = '';
+  // emails get absolute links and no <base> or scripts
+  public $is_email = false;
+
+  public function __set($name, $value) { $this->vars[$name] = $value; }
+  public function __get($name) { return isset($this->vars[$name]) ? $this->vars[$name] : null; }
+  public function __isset($name) { return isset($this->vars[$name]); }
+
+  // Replaces the template singleton, used to render a second view (an email)
+  // in the middle of a request. Returns the previous instance.
+  static function swap($instance = null) {
+  	$cls = class_exists('the_template') ? 'the_template' : 'template';
+  	$previous = isset(self::$instances[$cls]) ? self::$instances[$cls] : null;
+  	if ($instance === null) unset(self::$instances[$cls]);
+  	else self::$instances[$cls] = $instance;
+  	return $previous;
+  }
+
+  // Escapes a printed value for the view's format. HTML views print values
+  // as they are (CMS content is HTML); feeds and JSON views are escaped.
+  function escape($value) {
+  	$value = (string)$value;
+  	switch ($this->format) {
+  		case 'xml': return htmlspecialchars($value, ENT_XML1 | ENT_QUOTES, 'UTF-8');
+  		case 'json': return substr(json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), 1, -1);
+  		default: return $value;
+  	}
+  }
 
   // Parses a method reference as written in a template tag:
   //   latest            -> array('latest', array())
@@ -138,8 +179,14 @@ class template {
 		else
 			$base = $script;
 		
-		$template->output = str_replace('<head>', "<head>\n".$base, $template->output);
+		if ($template->format === 'html' && !$template->is_email) {
+			$template->output = str_replace('<head>', "<head>\n".$base, $template->output);
+		}
 		
+		// mock-up content goes first, so models inside it are never called
+		$template->remove();
+		$template->index_forms();
+
 		$res = preg_match_all('/<!-- ((print|render)\.(([a-z,_,-,0-9]*)\.(.*?))) (\/?)-->/', $template->output, $methodstarts);
 		$template->models = array_unique($methodstarts[4]);
 
@@ -153,14 +200,13 @@ class template {
 		$template->models_methods_render = array_reverse($template->models_methods_render);
 		$template->models_methods_print = array_reverse($template->models_methods_print);
 		
-		$template->remove();
-		
 		return $template;
 		
   }
 
   public function set_current_block($model, $method, $action) {
   	self::$model = $model;
+  	$this->current_call = $model.'.'.$method;
   	$this->current_params = array('pos1' => false, 'pos2' => 0, 'render_template' => '', 'datastarts' => array(array(), array(), array()));
   	if ($action == 'print') {
   		$this->current_action = 'print';
@@ -219,6 +265,112 @@ class template {
   	}
   }
     
+  // ##Forms
+  // Every post form gets three hidden fields:
+  // - raster_form: the render block that owns the form (model.method), so
+  //   models and validation know which form was sent
+  // - raster_hp: a honeypot; bots fill it, people never see it
+  // - csrf: the session token, when there is a session
+  // Field constraints (required, type, minlength, maxlength, min, max,
+  // pattern) are read from the inputs so validation can enforce them.
+  function index_forms() {
+  	$this->forms = array();
+  	$this->tag_owners = array();
+  	$html = $this->output;
+  	if (stripos($html, '<form') === false) return;
+
+  	// render blocks with their ranges
+  	preg_match_all('/<!-- (\/?)render\.([a-z0-9_\-]+\.[^ ]*(?:\([^)]*\))?) -->/', $html, $tags, PREG_OFFSET_CAPTURE | PREG_SET_ORDER);
+  	$blocks = array(); $stack = array();
+  	foreach ($tags as $tag) {
+  		if ($tag[1][0] === '') { $stack[] = array('ref' => $tag[2][0], 'start' => $tag[0][1]); continue; }
+  		for ($i = count($stack) - 1; $i >= 0; $i--) {
+  			if ($stack[$i]['ref'] === $tag[2][0]) {
+  				$blocks[] = array('ref' => $tag[2][0], 'start' => $stack[$i]['start'], 'end' => $tag[0][1]);
+  				array_splice($stack, $i, 1);
+  				break;
+  			}
+  		}
+  	}
+
+  	preg_match_all('/<form\b[^>]*>/i', $html, $opens, PREG_OFFSET_CAPTURE);
+  	$forms = array();
+  	foreach ($opens[0] as $open) {
+  		if (!preg_match('/\bmethod\s*=\s*["\']?post/i', $open[0])) continue;
+  		$close = stripos($html, '</form>', $open[1]);
+  		$end = $close === false ? strlen($html) : $close;
+  		// the innermost render block around the form, validation blocks excluded
+  		$owner = ''; $best = -1;
+  		foreach ($blocks as $block) {
+  			if (strpos($block['ref'], 'validation.') === 0) continue;
+  			if ($block['start'] < $open[1] && $block['end'] > $open[1] && $block['start'] > $best) {
+  				$owner = $block['ref']; $best = $block['start'];
+  			}
+  		}
+  		$forms[] = array('owner' => $owner, 'tag' => $open[0], 'at' => $open[1], 'end' => $end);
+  		if ($owner !== '') {
+  			$this->forms[$owner] = array_merge(isset($this->forms[$owner]) ? $this->forms[$owner] : array(), $this->constraints(substr($html, $open[1], $end - $open[1])));
+  		}
+  	}
+
+  	// validation tags belong to the form they sit in
+  	preg_match_all('/<!-- (?:print|render)\.validation\.([^ ]+(?:\([^)]*\))?) \/?-->/', $html, $vtags, PREG_OFFSET_CAPTURE | PREG_SET_ORDER);
+  	foreach ($vtags as $vtag) {
+  		foreach ($forms as $form) {
+  			if ($vtag[0][1] > $form['at'] && $vtag[0][1] < $form['end'] && $form['owner'] !== '') {
+  				$this->tag_owners['validation.'.$vtag[1][0]][] = $form['owner'];
+  			}
+  		}
+  	}
+
+  	// add the hidden fields, from the last form to the first
+  	$token = util::csrf_token();
+  	$this->form_owners = array();
+  	foreach ($forms as $n => $form) $this->form_owners[$n] = $form['owner'];
+  	foreach (array_reverse($forms, true) as $n => $form) {
+  		if ($form['owner'] !== '') {
+  			// tie the validation tags inside this form to it
+  			$region = substr($html, $form['at'], $form['end'] - $form['at']);
+  			$region = preg_replace('/<!-- (\/?)(render|print)\.validation\.(?!alert\b)([a-z0-9_]+)(\(| \/?-->| -->)/', '<!-- $1$2.validation.$3__f'.$n.'$4', $region);
+  			$html = substr($html, 0, $form['at']).$region.substr($html, $form['end']);
+  		}
+  		$hidden = "\n<input type=\"hidden\" name=\"raster_form\" value=\"".htmlspecialchars($form['owner'], ENT_QUOTES)."\">"
+  			."\n<input type=\"text\" name=\"raster_hp\" value=\"\" tabindex=\"-1\" autocomplete=\"off\" aria-hidden=\"true\" style=\"position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden\">";
+  		if ($token !== '') $hidden .= "\n<input type=\"hidden\" name=\"csrf\" value=\"".$token."\">";
+  		$at = $form['at'] + strlen($form['tag']);
+  		$html = substr($html, 0, $at).$hidden.substr($html, $at);
+  	}
+  	$this->output = $html;
+  }
+
+  // field constraints from the inputs of a form
+  function constraints($form_html) {
+  	$fields = array();
+  	preg_match_all('/<(input|select|textarea)\b([^>]*)>/i', $form_html, $inputs, PREG_SET_ORDER);
+  	foreach ($inputs as $input) {
+  		$attributes = array();
+  		preg_match_all('/([a-zA-Z\-]+)(?:\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+)))?/', $input[2], $pairs, PREG_SET_ORDER);
+  		foreach ($pairs as $pair) {
+  			if (isset($pair[4]) && $pair[4] !== '') $value = $pair[4];
+  			elseif (isset($pair[3]) && $pair[3] !== '') $value = $pair[3];
+  			elseif (isset($pair[2])) $value = $pair[2];
+  			else $value = true; // a boolean attribute like required
+  			$attributes[strtolower($pair[1])] = is_bool($value) ? true : html_entity_decode($value, ENT_QUOTES);
+  		}
+  		if (empty($attributes['name'])) continue;
+  		$name = preg_replace('/\[\]$/', '', $attributes['name']);
+  		if (in_array($name, array('raster_form', 'raster_hp', 'csrf'))) continue;
+  		$type = strtolower($input[1]) === 'input' ? strtolower(isset($attributes['type']) ? $attributes['type'] : 'text') : strtolower($input[1]);
+  		if (in_array($type, array('submit', 'button', 'reset', 'image'))) continue;
+  		$rule = isset($fields[$name]) ? $fields[$name] : array('type' => $type);
+  		foreach (array('required', 'minlength', 'maxlength', 'min', 'max', 'pattern') as $constraint) {
+  			if (array_key_exists($constraint, $attributes)) $rule[$constraint] = $attributes[$constraint];
+  		}
+  		$fields[$name] = $rule;
+  	}
+  	return $fields;
+  }
+
   function remove() {
     	$res = preg_match_all('/<!-- remove -->/', $this->output, $removesStarts);
 		foreach ($removesStarts[0] as $key => $value) {
@@ -250,7 +402,7 @@ class template {
 
 			if($model == 'self')
 			{
-				$this->output = substr_replace($this->output, $this->$method, $pos1, $pos2);
+				$this->output = substr_replace($this->output, $this->escape((string)$this->$method), $pos1, $pos2);
 				return 'self';
 			}
 
@@ -268,7 +420,7 @@ class template {
 			if($data === false || $data === null)
 				$this->output = substr_replace($this->output, $render_template, $pos1, $pos2);
 			elseif(is_scalar($data))
-				$this->output = substr_replace($this->output, (string)$data, $pos1, $pos2);
+				$this->output = substr_replace($this->output, $this->escape($data), $pos1, $pos2);
 			else
 				$this->fail("print.$model.$method returned ".gettype($data)."; print needs a string (use render for lists)");
 
@@ -322,7 +474,7 @@ class template {
 				event::dispatch('loop');
 				
 				$current_item = substr($loop, $pos1 + strlen($start), $pos2 - 2*strlen($end) + 1);
-				$content = $item[$datastarts[1][$key]];
+				$content = is_scalar($item[$datastarts[1][$key]]) ? $this->escape($item[$datastarts[1][$key]]) : '';
 
 				$res = substr_replace($loop, $content, $pos1, $pos2);				
 				$occurences = substr_count($res, $value);
@@ -344,80 +496,83 @@ class template {
 		return $return;
 	}
 	
+	// Fills the form in the current block with $data (or the posted values):
+	// value for inputs, checked for checkboxes and radios, selected for
+	// options, the text of textareas. Passwords are never filled in.
+	// Keys without a field become hidden inputs (only for $data you pass).
 	public function form_state($data = null)
 	{
-		$this->current_block = preg_replace('/(<input(.*?)(text|hidden)(.*?))value="(.*?)"/',
-											"$1",
-											$this->current_block);
-		
-		if($data == null) $data = $_POST;
-		$hidden = '';
-		foreach($data as $key => $value)
-		{
-			if(is_array($value))
-			{	
-				foreach($value as $v)
-				{
-					$evalue = str_replace("/","\/",$v);
-					$value = $v;
-					
-					$this->current_block = 	
-					preg_replace('/<input(.*?)type="checkbox"(.*?)name="'.$key.'\[\]"(.*?)value="'.$evalue.'"/',
-						'$0 checked="true"',
-						$this->current_block, -1, $checkboxes);
+		$explicit = $data !== null;
+		if (!$explicit) $data = $_POST;
+		$data = (array)$data;
+		foreach (array('raster_form', 'raster_hp', 'csrf') as $internal) unset($data[$internal]);
+		$used = array();
+		$attr = function ($tag, $name) {
+			return preg_match('/\s'.$name.'\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))/i', $tag, $m) ? html_entity_decode($m[1] !== '' ? $m[1] : (isset($m[2]) && $m[2] !== '' ? $m[2] : (isset($m[3]) ? $m[3] : '')), ENT_QUOTES) : null;
+		};
+		$without = function ($tag, $name) {
+			return preg_replace('/\s'.$name.'(\s*=\s*(?:"[^"]*"|\'[^\']*\'|[^\s>]+))?(?=[\s>\/])/i', '', $tag);
+		};
+		$lookup = function ($name) use ($data, &$used) {
+			$key = preg_replace('/\[\]$/', '', (string)$name);
+			if (!array_key_exists($key, $data)) return array(false, null);
+			$used[$key] = true;
+			return array(true, $data[$key]);
+		};
+		$e = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
 
-					$this->current_block =
-					preg_replace("/<select(.*?)name=\"".$key."\[\]\"(.*?)<option(.*?)value=\"".$evalue."\"/",
-						"$0 selected=\"true\"",
-						$this->current_block, -1, $selects);
-				}
- 			} else {
-				$evalue = str_replace("/","\/",preg_quote($value));
-				$this->current_block = preg_replace('/<input(.*?)type="text"(.*?)name="'.$key.'"/',
-					'$0 value="'.$value.'"',
-					$this->current_block, -1, $textfields);
-
-				if($textfields == 0)
-					$this->current_block = 
-					preg_replace('/<input(.*?)type="radio"(.*?)name="'.$key.'\[\]"(.*?)value="'.$evalue.'"/',
-					'$0 checked="true"',
-					$this->current_block, -1, $radios);
-
-				if($textfields == 0 && $radios == 0)
-					$this->current_block = 
-					preg_replace('/<input(.*?)type="checkbox"(.*?)name="'.$key.'"(.*?)value="'.$evalue.'"/',
-					'$0 checked="true"',
-					$this->current_block, -1, $checkboxes);
-				
-				if($textfields == 0 && $radios == 0 && $checkboxes == 0)
-					$this->current_block = preg_replace("/<textarea(.*?)name=\"".$key."\"(.*?)>/ims",
-						"$0".$value,
-						$this->current_block, -1, $textareas);
-				
-				if($textfields == 0 && $radios == 0 && $checkboxes == 0 && $textareas == 0)
-					$this->current_block =
-					preg_replace("/<select(.*?)name=\"".$key."\"(.*?)<option(.*?)value=\"".$evalue."\"/ims",
-						"$0 selected=\"true\"",
-						$this->current_block, -1, $selects);
-				
-				if($textfields == 0 && $radios == 0 && $checkboxes == 0 && $textareas == 0 && $selects == 0)
-					$this->current_block = preg_replace('/<input(.*?)type="hidden"(.*?)name="'.$key.'"/',
-						'$0 value="'.$value.'"',
-						$this->current_block, -1, $hiddens);
-				
-				$this->current_block = preg_replace('/class="spa_'.$key.'">(.*?)<\//',
-						'class="spa_'.$key.'">'.$value.'</',
-						$this->current_block);
+		$block = preg_replace_callback('/<input\b[^>]*>/i', function ($m) use ($attr, $without, $lookup, $e) {
+			$tag = $m[0];
+			$name = $attr($tag, 'name');
+			if ($name === null || in_array($name, array('raster_form', 'raster_hp', 'csrf'))) return $tag;
+			$type = strtolower((string)$attr($tag, 'type') ?: 'text');
+			if (in_array($type, array('password', 'submit', 'button', 'reset', 'image', 'file'))) return $tag;
+			list($found, $value) = $lookup($name);
+			if (!$found) return $tag;
+			if ($type === 'checkbox' || $type === 'radio') {
+				$tag = $without($tag, 'checked');
+				$own = (string)$attr($tag, 'value');
+				$on = is_array($value) ? in_array($own, array_map('strval', $value), true) : ((string)$value === ($own === '' ? 'on' : $own));
+				return $on ? preg_replace('/\s*\/?>$/', ' checked$0', $tag) : $tag;
 			}
-			$totals = array_sum(compact('textfields', 'textareas', 'selects', 'radios', 'checkboxes', 'hiddens'));
-			if($totals == 0)
-				$hidden .= '<input type="hidden" name="'.$key.'" value="'.$value.'" />' . "\n";
+			if (is_array($value)) return $tag;
+			$tag = $without($tag, 'value');
+			return preg_replace('/\s*\/?>$/', ' value="'.$e($value).'"$0', $tag);
+		}, $this->current_block);
 
+		$block = preg_replace_callback('/(<textarea\b[^>]*>)(.*?)(<\/textarea>)/is', function ($m) use ($attr, $lookup, $e) {
+			list($found, $value) = $lookup($attr($m[1], 'name'));
+			return $found && !is_array($value) ? $m[1].$e($value).$m[3] : $m[0];
+		}, $block);
+
+		$block = preg_replace_callback('/(<select\b[^>]*>)(.*?)(<\/select>)/is', function ($m) use ($attr, $without, $lookup) {
+			list($found, $value) = $lookup($attr($m[1], 'name'));
+			if (!$found) return $m[0];
+			$values = array_map('strval', (array)$value);
+			$options = preg_replace_callback('/<option\b[^>]*>/i', function ($o) use ($attr, $without, $values) {
+				$tag = $without($o[0], 'selected');
+				return in_array((string)$attr($tag, 'value'), $values, true) ? preg_replace('/>$/', ' selected>', $tag) : $tag;
+			}, $m[2]);
+			return $m[1].$options.$m[3];
+		}, $block);
+
+		foreach ($data as $key => $value) {
+			if (is_scalar($value)) {
+				$block = preg_replace('/class="spa_'.preg_quote($key, '/').'">(.*?)<\//', 'class="spa_'.$key.'">'.$e($value).'</', $block);
+			}
 		}
-		if($hidden != '')
-			$this->current_block = preg_replace("/<form(.*?)>/ims", "\n $0 ". $hidden."\n", $this->current_block);
 
-		return $this->current_block;
+		if ($explicit) {
+			$hidden = '';
+			foreach ($data as $key => $value) {
+				if (isset($used[$key]) || !is_scalar($value)) continue;
+				$hidden .= '<input type="hidden" name="'.$e($key).'" value="'.$e($value).'">'."\n";
+			}
+			if ($hidden !== '') $block = preg_replace('/<form\b[^>]*>/i', "$0\n".$hidden, $block, 1);
+		}
+
+		$this->current_block = $block;
+		return $block;
 	}
 	
 	function get_parsed_items($data, $bit)
@@ -515,12 +670,8 @@ class template {
 					$end = str_replace("<!-- ", "<!-- /", $value);
 
 				$rpos1 = strpos($rendered_tpl, $start);
-				if($rpos1 === false)
-				{
-					$end = $start;
-					$rpos1 = strpos($rendered_tpl, $start);
-					$rpos2 = $rpos1 + strlen($start);
-				}
+				// already replaced (the same tag appears more than once)
+				if($rpos1 === false) continue;
 				else
 					$rpos2 = strpos($rendered_tpl, $end) - $rpos1 + strlen($end);
 
@@ -596,17 +747,25 @@ class template {
 		                }
 		                else
 		                {
-		                	$rendered_tpl = substr_replace($rendered_tpl, (string)$data[$datakey], $rpos1, $rpos2);
+		                	$rendered_tpl = substr_replace($rendered_tpl, $this->escape($data[$datakey]), $rpos1, $rpos2);
 		                	$occurences = substr_count($rendered_tpl, $datastarts[0][$key]);
 							if($occurences > 0)
 							{
 								for ($i=0; $i < $occurences; $i++) { 
 									$value = $datastarts[0][$key];
 									$start = $value;
-									$end = str_replace("<!-- ", "<!-- /", $value);
 									$rpos1 = strpos($rendered_tpl, $start);
-									$rpos2 = strpos($rendered_tpl, $end) - $rpos1 + strlen($end);
-									$rendered_tpl = substr_replace($rendered_tpl, (string)$data[$datakey], $rpos1, $rpos2);
+									if ($rpos1 === false) break;
+									if (substr($value, -5) === ' /-->') {
+										// self-closing: <!-- print.url /--> may appear several times
+										$rpos2 = strlen($value);
+									} else {
+										$end = str_replace("<!-- ", "<!-- /", $value);
+										$endpos = strpos($rendered_tpl, $end, $rpos1);
+										if ($endpos === false) break;
+										$rpos2 = $endpos - $rpos1 + strlen($end);
+									}
+									$rendered_tpl = substr_replace($rendered_tpl, $this->escape($data[$datakey]), $rpos1, $rpos2);
 								}
 							}
 		              	}

@@ -103,7 +103,7 @@ switch ($command) {
 				$title = $table['kind'] === 'page'
 					? "page {$table['url']}  ({$table['view']})"
 					: "collection {$table['name']}  (used in ".implode(', ', $table['views']).")";
-				$state = $table['exists'] ? "{$table['rows']} row(s)" : $paint('not in database', '33');
+				$state = $table['exists'] ? "{$table['rows']} row(s)" : ($table['fields'] ? $paint('not in database', '33') : 'no page fields');
 				echo $paint($title, '1')."  table {$table['table']}, $state\n";
 				foreach ($table['fields'] as $name => $field) {
 					$default = preg_replace('/\s+/', ' ', strip_tags($field['default']));
@@ -132,21 +132,94 @@ switch ($command) {
 		exit(isset($options['check']) && $status['drift'] ? 1 : 0);
 
 	case 'user':
-		$username = isset($positional[0]) ? $positional[0] : null;
-		if (!$username) {
-			fwrite(STDERR, "Usage: php bin/raster user <username> [--password=secret]\n");
+		$login = isset($positional[0]) ? $positional[0] : null;
+		if (!$login) {
+			fwrite(STDERR, "Usage: php bin/raster user <email or username> [--password=secret] [--role=admin|editor|member] [--name=\"Ada Lovelace\"]\n");
 			exit(2);
 		}
-		require_once BASE.'models/cms/cms.php';
-		cms_store::connect();
+		$role = isset($options['role']) && is_string($options['role']) ? $options['role'] : 'admin';
 		$password = isset($options['password']) && is_string($options['password']) ? $options['password'] : bin2hex(random_bytes(9));
 		$was_frozen = database::$frozen;
-		R::freeze(false);
-		cms_store::create_user($username, $password);
-		R::freeze($was_frozen);
-		echo "User '$username' saved.".(isset($options['password']) ? '' : " Password: $password")."\n";
+		try {
+			authentication::connect();
+			R::freeze(false);
+			authentication::save_user($login, $password, $role, isset($options['name']) && is_string($options['name']) ? $options['name'] : null);
+		} catch (Exception $e) {
+			fwrite(STDERR, $paint('error', '31').': '.$e->getMessage()."\n");
+			exit(1);
+		} finally {
+			R::freeze($was_frozen);
+		}
+		echo "User '$login' saved as $role.".(isset($options['password']) ? '' : " Password: $password")."\n";
 		echo "Log in at ".rtrim(config::get('link_uri'), '/')."/login\n";
 		exit(0);
+
+	case 'users':
+		authentication::connect();
+		$users = authentication::table_ready() ? R::findAll('user', ' ORDER BY id ') : array();
+		foreach ($users as $user) {
+			printf("%-4d %-8s %-30s %s\n", $user->id, $user->role, $user->email ?: $user->username, $user->last_login ? 'last login '.$user->last_login : 'never logged in');
+		}
+		if (!$users) echo "No users. Create one with: php bin/raster user admin\n";
+		exit(0);
+
+	case 'send':
+		// sends a page of the site as a newsletter issue
+		$url = isset($positional[0]) ? $positional[0] : null;
+		if (!$url) {
+			fwrite(STDERR, "Usage: php bin/raster send <url> [--to=email] [--subject=...] [--dry-run] [--again]\n");
+			exit(2);
+		}
+		$env = getenv();
+		$env['RASTER_SENDING'] = '1';
+		$process = proc_open(array(PHP_BINARY, __FILE__, 'render', $url), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, $env);
+		$html = stream_get_contents($pipes[1]);
+		$errors = stream_get_contents($pipes[2]);
+		if (proc_close($process) !== 0) {
+			fwrite(STDERR, $paint('error', '31').": $url did not render: ".trim($errors)."\n");
+			exit(1);
+		}
+		$html = newsletter::prepare_issue($html);
+		$subject = isset($options['subject']) && is_string($options['subject']) ? $options['subject'] : newsletter::subject_of($html);
+		if ($subject === '') {
+			fwrite(STDERR, "The page has no <title>; pass --subject=\"...\"\n");
+			exit(2);
+		}
+		if (strpos($html, newsletter::MARKER) === false) {
+			fwrite(STDERR, $paint('warning', '33').": the page has no unsubscribe link (<!-- print.newsletter.unsubscribe_url /-->); readers can only use their mail app's unsubscribe button\n");
+		}
+		if (isset($options['to'])) {
+			$ok = newsletter::deliver($html, $subject, (string)$options['to'], '');
+			echo $ok ? "Sent \"$subject\" to {$options['to']} (".mail::transport().")\n" : $paint('error', '31').': '.mail::$last_error."\n";
+			exit($ok ? 0 : 1);
+		}
+		newsletter::connect();
+		$sent_before = in_array('newsletterissue', R::inspect()) ? R::findOne('newsletterissue', ' url = ? ', array($url)) : null;
+		if ($sent_before && !isset($options['again'])) {
+			fwrite(STDERR, "$url was already sent on {$sent_before->sent_at} to {$sent_before->recipients} subscribers. Use --again to send it again.\n");
+			exit(1);
+		}
+		$subscribers = newsletter::subscribers();
+		if (isset($options['dry-run'])) {
+			echo "Would send \"$subject\" to ".count($subscribers)." subscriber(s) via ".mail::transport()."\n";
+			exit(0);
+		}
+		$ok = 0; $failed = 0;
+		foreach ($subscribers as $subscriber) {
+			if (newsletter::deliver($html, $subject, $subscriber->email, $subscriber->token)) $ok++;
+			else { $failed++; fwrite(STDERR, "  {$subscriber->email}: ".mail::$last_error."\n"); }
+		}
+		$was_frozen = database::$frozen;
+		R::freeze(false);
+		$issue = R::dispense('newsletterissue');
+		$issue->url = $url;
+		$issue->subject = $subject;
+		$issue->recipients = $ok;
+		$issue->sent_at = R::isoDateTime();
+		R::store($issue);
+		R::freeze($was_frozen);
+		echo "Sent \"$subject\" to $ok subscriber(s)".($failed ? ", $failed failed" : '')." via ".mail::transport()."\n";
+		exit($failed ? 1 : 0);
 
 	case 'mcp':
 		controller::load_model('mcp');
@@ -194,7 +267,11 @@ Raster command line
         --rename=table.old:new           rename a column after renaming an annotation
         --drop=table.column              delete a column no template uses
         --drop=table                     delete a table no template uses
-  php bin/raster user <name> [--password=...]   create a CMS user or reset a password
+  php bin/raster user <email|name> [--password=...] [--role=admin|editor|member]
+                                         create a user or reset a password
+  php bin/raster users                   list users
+  php bin/raster send <url> [--to=email] [--dry-run] [--again]
+                                         email a page to newsletter subscribers
   php bin/raster mcp                     MCP server over stdio for local agents
   php bin/raster render <url>            print the HTML of a URL
 

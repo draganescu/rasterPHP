@@ -14,3 +14,8 @@
 
 // Items per page for CMS collections (or <name>_page_size for one collection)
 // config::set('raster_page_size')->to(10);
+
+// Pages that need an account, and the role they need (member, editor, admin)
+config::set('protected')->to(array('account' => 'member'));
+// After logging in or signing up, go to the account page
+config::set('after_login')->to('account');

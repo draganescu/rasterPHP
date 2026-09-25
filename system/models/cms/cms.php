@@ -71,10 +71,7 @@ class cms
 
 	// Visitors don't get a session cookie; editors get one when they log in.
 	static function session($force = false) {
-		if (PHP_SAPI === 'cli' || session_status() !== PHP_SESSION_NONE) return;
-		if ($force || isset($_COOKIE[session_name()])) {
-			session_start(array('cookie_httponly' => true, 'cookie_samesite' => 'Lax'));
-		}
+		util::session($force);
 	}
 
 	// custom cms routes for admin panels and collection URLs
@@ -125,6 +122,13 @@ class cms
 			return;
 		}
 
+		// feeds and data views (news.rss) have no page fields of their own
+		if (config::get('format', 'html') !== 'html') {
+			$this->page_name = 'feedpage';
+			$this->slug = $slug;
+			return;
+		}
+
 		$page_name = cms::page_type($slug);
 		$this->page_name = $page_name;
 		$this->slug = $slug;
@@ -141,15 +145,8 @@ class cms
 				$this->add_data();
 			}
 
-			// creates the page the first time it is rendered
-			$page = cms_store::latest($page_name);
-			if (empty($page) && !database::$frozen) {
-				$page = R::dispense($page_name);
-				$page->slug = $slug;
-				$page->updated_at = R::isoDateTime();
-				R::store($page);
-			}
-			$this->page = $page;
+			// the page's row is created by its first print.cms field
+			$this->page = cms_store::latest($page_name);
 		} catch (Exception $e) {
 			// a frozen schema without this page: templates show their defaults
 			log::warning('CMS: '.$e->getMessage());
@@ -178,12 +175,24 @@ class cms
 	}
 
 	// a page field; false keeps the markup that is in the template
+	// fields named site_* are shared by every page (stored in sitepage)
+	static function field_type($name, $page_type) {
+		return strpos($name, 'site_') === 0 ? 'sitepage' : $page_type;
+	}
+
 	protected function page_field($name) {
 		if (cms::reserved($name, 'field')) return false;
 		$this->page_variables[] = $name;
-		$page = cms_store::latest($this->page_name);
+		$type = cms::field_type($name, $this->page_name);
+		$page = cms_store::latest($type);
+		if (!$page && !database::$frozen) {
+			$page = R::dispense($type);
+			$page->slug = $type === 'sitepage' ? 'site' : $this->slug;
+			$page->updated_at = R::isoDateTime();
+			R::store($page);
+		}
 		if (!$page) return false;
-		$fields = cms_store::columns($this->page_name);
+		$fields = cms_store::columns($type);
 		if (!array_key_exists($name, $fields)) {
 			if (database::$frozen) return false;
 			$page->$name = trim(template::get('current_block'));
@@ -228,9 +237,11 @@ class cms
 		$page = (int)util::param($name.'_page', 0);
 		$roffset = $page > 1 ? ($page-1)*$page_size : 0;
 
-		// filter by id: /news/news_item/3
+		// one item: /news/news_item/3 or /news/news_item/raster-runs-on-php-8
 		if (util::param($name) == $name.'_item') {
-			$filters['id'] = (int)util::param($name.'_item');
+			$wanted = (string)util::param($name.'_item');
+			if (ctype_digit($wanted)) $filters['id'] = (int)$wanted;
+			else $filters['slug'] = $wanted;
 		}
 
 		// uri filters: /news/news_items/tag/php
@@ -245,9 +256,14 @@ class cms
 		}
 		unset($filters[$name.'_page']);
 
-		// param filters: render.cms.news('featured=1')
+		// param filters: render.cms.news('featured=1&order=newest&limit=3')
+		$options = array();
 		if (!empty($arguments) && is_string($arguments[0])) {
-			$filters = $this->make_filters($arguments[0], $expected_properties, $filters);
+			$filters = $this->make_filters($arguments[0], $expected_properties, $filters, $options);
+		}
+		if (isset($options['limit']) && (int)$options['limit'] > 0) {
+			$page_size = (int)$options['limit'];
+			$roffset = $page > 1 ? ($page-1)*$page_size : 0;
 		}
 
 		$exists = cms_store::table_exists($this->data_name);
@@ -260,12 +276,20 @@ class cms
 			}
 			$item->updated_at = R::isoDateTime();
 			$item->enabled = '1';
+			$item->published_at = '';
+			$item->slug = cms_store::unique_slug($this->data_name, cms_store::slug_source($expected_properties), 0);
 			R::store($item);
 		} elseif (!database::$frozen) {
 			// new fields in the template become new columns
 			$fields = cms_store::columns($this->data_name);
 			$latest = cms_store::latest($this->data_name);
 			$changed = false;
+			foreach (array('slug', 'published_at') as $system) {
+				if (!array_key_exists($system, $fields)) {
+					$latest->$system = '';
+					$changed = true;
+				}
+			}
 			foreach ($expected_properties as $key => $value) {
 				if (!array_key_exists($key, $fields)) {
 					$latest->$key = trim($value);
@@ -277,19 +301,30 @@ class cms
 
 		// only real columns can be filtered on
 		$fields = cms_store::columns($this->data_name);
-		$sql = ' 1 = 1 ';
-		$bindings = array();
+		// drafts (enabled = 0) and future posts are hidden, except for editors
+		list($sql, $bindings) = cms_store::published_sql($fields, cms::loggedin());
 		foreach ($filters as $key => $value) {
 			if (!array_key_exists($key, $fields) || !preg_match('/^[a-z0-9_]+$/', $key)) {
-				if ($key === 'id') return false;
+				if ($key === 'id' || $key === 'slug') return array();
 				continue;
 			}
 			$sql .= ' AND '.$key.' = :'.$key.' ';
 			$bindings[':'.$key] = $value;
 		}
-		$sql .= ' ORDER BY id ASC LIMIT '.(int)$page_size.' OFFSET '.(int)$roffset;
+		$sql .= ' ORDER BY '.cms_store::order_sql(isset($options['order']) ? $options['order'] : '', $fields).' LIMIT '.(int)$page_size.' OFFSET '.(int)$roffset;
 		$data = R::exportAll(R::find($this->data_name, $sql, $bindings));
-		if (empty($data) && isset($filters['id']) && !headers_sent()) {
+
+		// items made before slugs existed get one (development only)
+		if (!database::$frozen && array_key_exists('slug', $fields)) {
+			foreach ($data as $key => $item) {
+				if (!empty($item['slug'])) continue;
+				$bean = R::load($this->data_name, $item['id']);
+				$bean->slug = cms_store::unique_slug($this->data_name, cms_store::slug_source($item), $item['id']);
+				R::store($bean);
+				$data[$key]['slug'] = $bean->slug;
+			}
+		}
+		if (empty($data) && (isset($filters['id']) || isset($filters['slug'])) && !headers_sent()) {
 			// a detail page for an item that does not exist
 			http_response_code(404);
 		}
@@ -297,7 +332,7 @@ class cms
 		// building auto detail links
 		foreach ($data as $key => $item) {
 			$base = config::get("link_uri");
-			$data[$key]['raster_detail_link'] = $base.$name.'/'.$name.'_item/'.$item['id'];
+			$data[$key]['raster_detail_link'] = $base.$name.'/'.$name.'_item/'.(!empty($item['slug']) ? rawurlencode($item['slug']) : $item['id']);
 			foreach ($filter_link_params as $at_key => $filter_fields) {
 				$filter_link = $base.$name.'/'.$name.'_items/';
 				foreach ($filter_fields as $field) {
@@ -311,10 +346,15 @@ class cms
 	}
 
 	// parses the filters and adds new fields if any
-	protected function make_filters($filters, &$expected_properties, &$data_filter) {
+	protected function make_filters($filters, &$expected_properties, &$data_filter, &$options = array()) {
 		foreach (explode('&', $filters) as $chunk) {
 			$pair = explode("=", $chunk, 2);
 			if ($pair[0] === '') continue;
+			// order and limit shape the list, they are not fields
+			if (in_array($pair[0], array('order', 'limit'))) {
+				$options[$pair[0]] = isset($pair[1]) ? $pair[1] : '';
+				continue;
+			}
 			$data_filter[$pair[0]] = isset($pair[1]) ? $pair[1] : '';
 			$expected_properties[$pair[0]] = $data_filter[$pair[0]];
 		}
@@ -323,7 +363,7 @@ class cms
 
 	protected function get_page_variable($page, $variable) {
 		$db = database::instance('cms');
-		$data = cms_store::latest(cms::safe_type($page));
+		$data = cms_store::latest(cms::field_type((string)$variable, cms::safe_type($page)));
 		return array(
 			"type" => $data ? $data->getMeta('type') : '',
 			"value" => $data ? $data->$variable : ''
@@ -420,41 +460,23 @@ class cms
 		return false;
 	}
 
+	// /login/logout/fromraster, the toolbar's logout link
 	public function logout() {
 		if (util::param('logout') === 'fromraster') {
-			cms::session();
-			session_destroy();
+			authentication::log_out();
 			util::redirect();
 		}
 		return false;
 	}
 
+	// the editor login page (system/views/cms_admin/login.html) uses
+	// render.authentication.login; this stays for older templates
 	public function login() {
-
 		$this->logout();
-		cms::session(!util::no_post_data());
-
-		if (cms::loggedin()) {
-			util::redirect();
-		}
-
-		if (util::no_post_data()) {
-			return false;
-		}
-
-		database::instance('cms');
-		$uid = cms_store::check_login(util::post('username'), util::post('password'));
-		if (!$uid) {
-			$this->login_error = 'Wrong username or password.';
-			return false;
-		}
-		session_regenerate_id(true);
-		$_SESSION['uid'] = $uid;
-		session_write_close();
-		util::redirect();
+		if (cms::loggedin()) util::redirect();
+		$auth = new authentication();
+		return $auth->login();
 	}
-
-	public $login_error = null;
 
 	// message shown above the login form
 	function login_message() {
@@ -462,25 +484,24 @@ class cms
 		if (!database::configured()) {
 			return '<p class="notice">No database is configured for this environment (application/config/db/).</p>';
 		}
-		if (!cms_store::has_users()) {
+		authentication::connect();
+		if (!authentication::has_users()) {
 			return '<p class="notice">There are no users yet. Create one from the project folder: <code>php bin/raster user admin</code></p>';
-		}
-		if ($this->login_error) {
-			return '<p class="notice">'.util::e($this->login_error).'</p>';
 		}
 		return '';
 	}
 
+	// editors and admins get the toolbar and see drafts
 	static function loggedin() {
-		return isset($_SESSION) && !empty($_SESSION['uid']);
+		return authentication::can('editor');
 	}
 
 	protected function save_page() {
 		if (util::post('raster_action') !== 'save_page') {
 			return false;
 		}
-		// edits always go to the page being viewed
-		$type = $this->page_name;
+		// edits always go to the page being viewed (or the site, for site_*)
+		$type = cms::field_type((string)util::post('variable_name'), $this->page_name);
 		$variable = (string)util::post('variable_name');
 		if (!preg_match('/^[a-z0-9_]+$/', $variable) || cms::reserved($variable, 'field') || !array_key_exists($variable, cms_store::columns($type))) {
 			return false;

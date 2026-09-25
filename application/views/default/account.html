@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <!-- dry._layout.head /-->
+  <title>Your account</title>
+</head>
+<body>
+  <!-- dry._layout.header /-->
+  <main class="narrow">
+    <h1>Your account</h1>
+    <!-- print.validation.alert('account_saved') --><p class="notice">Saved.</p><!-- /print.validation.alert('account_saved') -->
+    <!-- print.validation.alert('registered') --><p class="notice">Welcome! Your account is ready.</p><!-- /print.validation.alert('registered') -->
+    <!-- print.validation.alert('current_password_wrong') --><p class="error">Your current password is not right.</p><!-- /print.validation.alert('current_password_wrong') -->
+    <!-- print.validation.alert('email_taken') --><p class="error">Another account uses that email.</p><!-- /print.validation.alert('email_taken') -->
+    <!-- render.authentication.me --><p>Logged in as <strong><!-- print.name -->Ada<!-- /print.name --></strong> (<!-- print.role -->member<!-- /print.role -->).</p><!-- /render.authentication.me -->
+    <!-- render.authentication.account -->
+    <form method="post" class="stack">
+      <label>Name <input type="text" name="name" maxlength="100"></label>
+      <label>Email <input type="email" name="email" required></label>
+      <label>New password <input type="password" name="password" minlength="8" autocomplete="new-password"></label>
+      <label>Current password (needed to change email or password) <input type="password" name="current_password" autocomplete="current-password"></label>
+      <button>Save</button>
+    </form>
+    <!-- /render.authentication.account -->
+    <!-- render.authentication.logout -->
+    <form method="post"><button class="secondary">Log out</button></form>
+    <!-- /render.authentication.logout -->
+  </main>
+  <!-- dry._layout.footer /-->
+</body>
+</html>

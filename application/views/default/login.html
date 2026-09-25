@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <!-- dry._layout.head /-->
+  <title>Log in</title>
+</head>
+<body>
+  <!-- dry._layout.header /-->
+  <main class="narrow">
+    <h1>Log in</h1>
+    <!-- print.validation.alert('login_failed') --><p class="error">Wrong email or password.</p><!-- /print.validation.alert('login_failed') -->
+    <!-- print.cms.login_message /-->
+    <!-- render.authentication.login -->
+    <form method="post" class="stack">
+      <label>Email or username <input type="text" name="login" autocomplete="username" required></label>
+      <!-- render.validation.field('login') --><p class="error">Enter your email or username.</p><!-- /render.validation.field('login') -->
+      <label>Password <input type="password" name="password" autocomplete="current-password" required></label>
+      <button>Log in</button>
+    </form>
+    <!-- /render.authentication.login -->
+    <p><a href="forgot.html">Forgot your password?</a> · <a href="register.html">Create an account</a></p>
+  </main>
+  <!-- dry._layout.footer /-->
+</body>
+</html>

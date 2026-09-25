@@ -2,19 +2,9 @@
 
 	Raster_Admin.system = [
 		{
-			"name" : 'Logout',
+			"name" : 'Log out',
 			"link" : 'login/logout/fromraster',
 			"type" : 'navigable'
-		},
-		{
-			"name" : 'Settings',
-			"data" : 'raster',
-			"type" : 'data'
-		},
-		{
-			"name" : 'Users',
-			"data" : 'users',
-			"type" : 'data'
 		}
 	];
 

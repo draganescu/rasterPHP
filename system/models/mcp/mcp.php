@@ -198,8 +198,9 @@ class mcp
 	protected function find_page($reference) {
 		$reference = (string)$reference;
 		foreach ($this->model()['pages'] as $page) {
-			$view = substr($page['view'], 0, -strlen(config::get('views_ext', '.html')));
-			if (in_array($reference, array($page['url'], $page['slug'], $page['type'], $page['view'], $view, '/'.$view), true)) {
+			$view = $page['view'] === '*' ? '*' : substr($page['view'], 0, -strlen(config::get('views_ext', '.html')));
+			$names = $page['view'] === '*' ? array('site', 'sitepage') : array($page['url'], $page['slug'], $page['type'], $page['view'], $view, '/'.$view);
+			if (in_array($reference, $names, true)) {
 				return $page;
 			}
 		}

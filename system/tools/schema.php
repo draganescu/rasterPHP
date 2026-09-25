@@ -45,7 +45,7 @@ class raster_schema {
 
 		$drift = !empty($unused);
 		foreach ($tables as $table) {
-			if (!$table['exists'] || $table['missing'] || $table['orphans']) $drift = true;
+			if ((!$table['exists'] && $table['fields']) || $table['missing'] || $table['orphans']) $drift = true;
 		}
 
 		return array(
@@ -128,12 +128,28 @@ class raster_schema {
 		R::freeze(false);
 		try {
 			foreach ($status['tables'] as $table) {
+				if ($table['kind'] === 'collection' && $table['exists']) {
+					$columns = cms_store::columns($table['table']);
+					foreach (array('slug', 'published_at') as $system) {
+						if (!array_key_exists($system, $columns)) {
+							$latest = cms_store::latest($table['table']);
+							$latest->$system = '';
+							R::store($latest);
+							$changes[] = "added {$table['table']}.$system";
+						}
+					}
+				}
 				if ($table['exists'] && !$table['missing']) continue;
+				if (!$table['exists'] && !$table['fields']) continue; // a page with collections only
 				$bean = $table['exists'] ? cms_store::latest($table['table']) : null;
 				if (!$bean) {
 					$bean = R::dispense($table['table']);
 					if ($table['kind'] === 'page') $bean->slug = $table['slug'];
-					if ($table['kind'] === 'collection') $bean->enabled = '1';
+					if ($table['kind'] === 'collection') {
+						$bean->enabled = '1';
+						$bean->published_at = '';
+						$bean->slug = cms_store::slugify(cms_store::slug_source(array_map(function ($f) { return $f['default']; }, $table['fields'])));
+					}
 					$changes[] = "created table {$table['table']}";
 				}
 				foreach ($table['fields'] as $name => $field) {

@@ -26,6 +26,7 @@ class boot {
 		// determines the index file and the rewrite procedure
 		// and figures out if its development or production or whatever
 		config::initialize();
+		boot::autoload_models();
 		// the first event (hook) that our system launches
 		event::dispatch('launch');
 	}
@@ -47,6 +48,22 @@ class boot {
 		boot::load_core_files();
 		boot::load_core_config();
 		config::initialize();
+		boot::autoload_models();
+	}
+
+	// Model classes load on first use, so models can call each other
+	// directly: mail::send_view(...), validation::get()
+	static function autoload_models() {
+		spl_autoload_register(function ($class) {
+			if (!preg_match('/^[a-z][a-z0-9_]*$/', $class)) return;
+			$paths = controller::build_model_paths($class);
+			foreach (array('app_path', 'system_path') as $key) {
+				if (file_exists($paths[$key])) {
+					require_once $paths[$key];
+					return;
+				}
+			}
+		});
 	}
 
 	static function file_system_setup() {
