@@ -326,7 +326,7 @@ class raster_inspector {
 		if (in_array($ref['model'], self::$builtin_models)) return;
 		$info = $this->model_info($ref['model']);
 		if ($info === false) {
-			$problems[] = self::problem('error', $block, "Model '{$ref['model']}' not found; create application/models/{$ref['model']}/{$ref['model']}.php with class {$ref['model']}");
+			$problems[] = self::problem('error', $block, "Model '{$ref['model']}' not found; create ".boot::$appname."/models/{$ref['model']}/{$ref['model']}.php with class {$ref['model']}");
 			return;
 		}
 		if (!$info['class']) {
