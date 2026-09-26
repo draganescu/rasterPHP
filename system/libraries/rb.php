@@ -18632,8 +18632,13 @@ if ( !function_exists( 'DBPrefix' ) ) {
 
 if (defined('Pdo\Mysql::ATTR_INIT_COMMAND')) {
 	define('RB_PDO_MYSQL_ATTR_INIT_COMMAND', Pdo\Mysql::ATTR_INIT_COMMAND);
-} else {
+} elseif (defined('PDO::MYSQL_ATTR_INIT_COMMAND')) {
 	define('RB_PDO_MYSQL_ATTR_INIT_COMMAND', \PDO::MYSQL_ATTR_INIT_COMMAND);
+} else {
+	// No MySQL driver in this PHP. The constant is only ever passed to a MySQL
+	// connection, which can't be made, but the library still has to load: an
+	// SQLite-only site must not need pdo_mysql. 1002 is PDO's own value.
+	define('RB_PDO_MYSQL_ATTR_INIT_COMMAND', 1002);
 }
 
 

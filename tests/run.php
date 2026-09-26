@@ -19,6 +19,7 @@ boot::$appname = 'application';
 boot::cli();
 require_once BASE.'tools/inspector.php';
 require_once BASE.'tools/schema.php';
+require_once BASE.'tools/project.php';
 require_once BASE.'models/cms/cms.php';
 
 $passed = 0; $failed = array(); $current = '';
@@ -522,6 +523,114 @@ test('frozen database: accounts and newsletter after schema --apply', function (
 	} finally {
 		@unlink($db);
 	}
+});
+
+// ## What is never served: one list, three servers
+
+test('private_paths: the rules, and the apps they name', function () use ($root) {
+	require_once BASE.'private_paths.php';
+	$apps = private_paths::apps($root);
+	check(in_array('application', $apps), 'application is an app folder');
+	check(!in_array('system', $apps) && !in_array('media', $apps), 'system/ and media/ are not, though system/ has a config/');
+	foreach (array('/system/boot.php', '/bin/raster', '/tests/run.php', '/.git/HEAD', '/composer.phar',
+		'/application/config/the_app.php', '/application/models/x.php', '/application/data/raster.sqlite',
+		'/application/data/raster.sqlite-wal', '/application/i18n/ro/common.php',
+		'/application/views/default/index.html', '/application/views/default/news.rss', '/README.md') as $path) {
+		check(private_paths::blocked($path), "$path must be private");
+	}
+	foreach (array('/index.php', '/', '/about', '/application/views/default/style.css', '/media/x.jpg') as $path) {
+		check(!private_paths::blocked($path), "$path must be served");
+	}
+	// no rule names an app folder, so a site's folders can be called anything
+	check(private_paths::blocked('/anything/config/x.txt'), 'config/ under any folder is private');
+	check(private_paths::blocked('/anything/views/page.html'), 'and so is a raw view');
+});
+test('private_paths: every server config carries every rule', function () use ($root) {
+	require_once BASE.'private_paths.php';
+	foreach (private_paths::servers() as $server) {
+		$config = private_paths::config($server, array('host' => 'x.example', 'root' => '/srv/x'));
+		check(strlen($config) > 100, "$server config is empty");
+		foreach (private_paths::rules() as $rule) {
+			check(strpos($config, $rule['why']) !== false, "$server does not mention rule '{$rule['id']}'");
+		}
+		check(strpos($config, 'phar') !== false, "$server does not refuse .phar");
+	}
+	// the .htaccess in the repository is what the generator prints
+	same(trim(private_paths::config('apache')), trim(file_get_contents("$root/.htaccess")));
+	same(array(), raster_project::htaccess_gaps($root));
+	$missing = 0;
+	try { private_paths::config('iis'); } catch (InvalidArgumentException $e) { $missing = 1; }
+	same(1, $missing, 'an unknown server is an error');
+});
+
+// ## Closing tags may be short
+
+test('template::closes is the one rule', function () {
+	check(template::closes('render', 'cms.menu', 'render', ''), 'no name closes any render block');
+	check(template::closes('render', "cms.menu('order=name')", 'render', 'cms.menu'), 'the name without its arguments');
+	check(template::closes('render', 'cms.menu', 'render', 'cms.menu'), 'the full name');
+	check(template::closes('remove', '', 'remove', ''), 'remove has no name at all');
+	check(!template::closes('render', 'cms.menu', 'print', ''), 'a print tag does not close a render block');
+	check(!template::closes('render', 'cms.menu', 'render', 'cms.events'), 'another name does not');
+	check(!template::closes('render', 'cms.menuitems', 'render', 'cms.menu'), 'and it is not a plain prefix');
+});
+test('expand_closings writes short closing tags out in full', function () {
+	$cases = array(
+		'<!-- render.a.b -->x<!-- /render -->' => '<!-- render.a.b -->x<!-- /render.a.b -->',
+		"<!-- render.a.b('c=d') -->x<!-- /render.a.b -->" => "<!-- render.a.b('c=d') -->x<!-- /render.a.b('c=d') -->",
+		"<!-- render.a.b(1, 'two') -->x<!-- /render -->" => "<!-- render.a.b(1, 'two') -->x<!-- /render.a.b(1, 'two') -->",
+		'<!-- print.@src.cms.photo --><img src="a.jpg"><!-- /print -->' => '<!-- print.@src.cms.photo --><img src="a.jpg"><!-- /print.@src.cms.photo -->',
+		'<!-- res.head -->x<!-- /res -->' => '<!-- res.head -->x<!-- /res.head -->',
+		'<!-- render.a.b --><!-- print.x -->y<!-- /print --><!-- /render -->' => '<!-- render.a.b --><!-- print.x -->y<!-- /print.x --><!-- /render.a.b -->',
+		// left alone: already full, nothing to close, not a directive
+		'<!-- render.a.b -->x<!-- /render.a.b -->' => '<!-- render.a.b -->x<!-- /render.a.b -->',
+		'<!-- /render -->' => '<!-- /render -->',
+		'<!-- print.a.b /--><!-- /print -->' => '<!-- print.a.b /--><!-- /print -->',
+		'<!-- a note about /render -->' => '<!-- a note about /render -->',
+	);
+	foreach ($cases as $before => $after) {
+		same($after, template::expand_closings($before), $before);
+		same($after, template::expand_closings($after), 'and running twice changes nothing');
+	}
+});
+test('lint accepts short closing tags, and the engine renders them', function () {
+	same(array(), lint_html('<!-- render.cms.news --><!-- print.headline -->x<!-- /print --><!-- /render -->'));
+	$problems = lint_html('<!-- render.cms.news -->x');
+	check(count($problems) === 1 && strpos($problems[0]['message'], 'never closed') !== false, 'an unclosed block is still an error');
+	$problems = lint_html('<!-- /render -->');
+	check(count($problems) === 1 && strpos($problems[0]['message'], 'never opened') !== false, 'and so is a stray closing tag');
+});
+
+// ## Deprecations a site keeps on purpose
+
+test('allow_deprecated counts a use apart instead of warning', function () use ($root) {
+	$views = "$root/application/views/default";
+	$file = "$views/zz_deprecated.html";
+	file_put_contents($file, '<!-- render.validation.not_empty(\'email\') -->x<!-- /render.validation.not_empty(\'email\') -->');
+	try {
+		$found = raster_project::deprecations($root, 'application');
+		$mine = array_values(array_filter($found, function ($d) { return strpos($d['file'], 'zz_deprecated') !== false; }));
+		same(1, count($mine), 'the use is found');
+		same(false, $mine[0]['allowed'], 'and is not allowed by default');
+		config::set('allow_deprecated')->to(array('legacy-validation-regions' => '#zz_deprecated#'));
+		$found = raster_project::deprecations($root, 'application');
+		$mine = array_values(array_filter($found, function ($d) { return strpos($d['file'], 'zz_deprecated') !== false; }));
+		same(true, $mine[0]['allowed'], 'a pattern over the path allows it');
+		config::set('allow_deprecated')->to(array('legacy-validation-regions' => '#nothing-like-this#'));
+		$found = raster_project::deprecations($root, 'application');
+		$mine = array_values(array_filter($found, function ($d) { return strpos($d['file'], 'zz_deprecated') !== false; }));
+		same(false, $mine[0]['allowed'], 'a pattern that does not match does not');
+	} finally {
+		config::set('allow_deprecated')->to(array());
+		unlink($file);
+	}
+});
+
+// ## RedBean loads without a MySQL driver
+
+test('the ORM does not need pdo_mysql for an SQLite site', function () {
+	check(defined('RB_PDO_MYSQL_ATTR_INIT_COMMAND'), 'rb.php defines it whatever drivers PHP has');
+	check(in_array('sqlite', PDO::getAvailableDrivers()), 'and SQLite is enough to get here');
 });
 
 echo "\n\n$passed passed, ".count($failed)." failed\n";

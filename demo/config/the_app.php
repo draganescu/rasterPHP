@@ -36,6 +36,12 @@ config::set('page_cache_skip')->to(array('lab'));
 config::set('mail_from')->to('Raster Café <hello@cafe.test>');
 config::set('cafe_staff_email')->to('staff@cafe.test');
 
+// the booking and reset forms keep the older validation regions on purpose, so
+// the suite still covers them (D14). doctor counts them apart instead of warning.
+config::set('allow_deprecated')->to(array(
+	'legacy-validation-regions' => '#^views/cafe/(visit|password/new)\.html$#',
+));
+
 // text replaced in pages under /lab only (template::replace)
 template::instance()->replace('{{cafe}}', 'Raster Café', 'lab');
 

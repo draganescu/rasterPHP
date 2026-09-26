@@ -191,6 +191,76 @@ class template {
 		$this->replace[$where][] = array($what,$with);
 	}
     
+  // ##Closing tags
+  //
+  // The engine matches annotations as exact strings, so a block's closing tag
+  // has to carry the whole name. Writing it twice is work for nothing, and one
+  // character of difference breaks the block, so a closing tag may leave out
+  // the reference, or just its arguments:
+  //
+  //   <!-- render.cms.menu('order=name') --> … <!-- /render -->
+  //   <!-- render.cms.menu('order=name') --> … <!-- /render.cms.menu -->
+  //
+  // Both close the innermost block still open with that keyword. Everything
+  // after this runs on the full form, which expand_closings writes back in.
+
+  // the keywords that open a block, from system/tools/annotations.php
+  static $block_keywords = null;
+  static function block_keywords() {
+    if (self::$block_keywords === null) {
+      $grammar = include BASE.'tools/annotations.php';
+      self::$block_keywords = array();
+      foreach ($grammar['keywords'] as $keyword => $rules) {
+        if (!empty($rules['block'])) self::$block_keywords[] = $keyword;
+      }
+    }
+    return self::$block_keywords;
+  }
+
+  // Does this closing tag close that opening? The one rule, used here and by
+  // the inspector, so lint accepts exactly what the engine renders.
+  static function closes($open_keyword, $open_ref, $close_keyword, $close_ref) {
+    if ($open_keyword !== $close_keyword) return false;
+    if ($close_ref === '' || $open_ref === $close_ref) return true;
+    // the name without its arguments
+    return strpos($open_ref, $close_ref.'(') === 0;
+  }
+
+  // Writes short closing tags back to the full form.
+  static function expand_closings($html) {
+    if (strpos($html, '<!-- /') === false) return $html;
+    $keywords = self::block_keywords();
+    if (!preg_match_all('#<!-- (/?)([a-z]+)(?:\.([^\s(]+?(?:\([^)]*\))?))? (/?)-->#', $html, $matches, PREG_OFFSET_CAPTURE | PREG_SET_ORDER)) return $html;
+    $open = array();
+    $edits = array();
+    foreach ($matches as $m) {
+      $keyword = $m[2][0];
+      if (!in_array($keyword, $keywords)) continue;
+      $ref = (isset($m[3]) && $m[3][1] !== -1) ? $m[3][0] : '';
+      if ($m[1][0] === '/') {
+        for ($i = count($open) - 1; $i >= 0; $i--) {
+          if (self::closes($open[$i]['keyword'], $open[$i]['ref'], $keyword, $ref)) break;
+        }
+        // a closing tag with nothing to close is left alone; lint reports it
+        if ($i < 0) continue;
+        $opened = $open[$i];
+        array_splice($open, $i);
+        if ($ref !== $opened['ref']) {
+          $edits[] = array($m[0][1], strlen($m[0][0]), '<!-- /'.$keyword.($opened['ref'] !== '' ? '.'.$opened['ref'] : '').' -->');
+        }
+        continue;
+      }
+      // self-closing tags open nothing
+      if ($m[4][0] === '/') continue;
+      $open[] = array('keyword' => $keyword, 'ref' => $ref);
+    }
+    // from the end, so the offsets still hold
+    foreach (array_reverse($edits) as $edit) {
+      $html = substr_replace($html, $edit[2], $edit[0], $edit[1]);
+    }
+    return $html;
+  }
+
   static function parse($data) {
     	
     	$template = template::instance();
@@ -205,9 +275,12 @@ class template {
 			}
 		}
 		
-		$template->output = $template->template_data;
+		// short closing tags become the full form before anything reads them
+		$template->output = self::expand_closings($template->template_data);
 		$template->dry_template();
 		$template->output = str_replace(array('/*-', '-*/'), array('<!--', '-->'), $template->output);
+		// again, for the ones written as /*- … /-*/ inside scripts and styles
+		$template->output = self::expand_closings($template->output);
 		
 		
 		$template->base_tag = $template->base_uri.$template->views_path.'/'.$template->theme.'/';
@@ -968,8 +1041,9 @@ class template {
 				event::dispatch('dried_'.$file);
 				$data = "";
 			} else {
+				// the partial's own closing tags may be short too
 				if(!array_key_exists($file,$loaded_files))
-					$loaded_files[$file] = file_get_contents($path);
+					$loaded_files[$file] = self::expand_closings(file_get_contents($path));
 
 				$data = $loaded_files[$file];
 			}
