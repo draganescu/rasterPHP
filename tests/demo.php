@@ -305,6 +305,10 @@ test(array('C45', 'C46', 'C47'), 'short closing tags', function () use (&$lab, $
 	has(between($lab, 'ordering'), '<li>', 'a closing tag without the arguments');
 	// a res fragment of a partial, closed short, still dries in
 	has($section, "This fragment's own closing tag is the short form.");
+	// and one the page defines itself: its tags are taken out, not left behind
+	has($section, 'A fragment this page defines itself, closed short.');
+	lacks($lab, '<!-- /res', 'no closing tag is left in the page');
+	lacks($lab, '<!-- /render', 'and none of the render ones either');
 	// the rule itself, and that lint accepts exactly what the engine renders
 	same('<!-- render.a.b(1, 2) -->x<!-- /render.a.b(1, 2) -->', template::expand_closings('<!-- render.a.b(1, 2) -->x<!-- /render -->'));
 	same('<!-- render.a.b --><!-- render.c.d -->x<!-- /render.c.d --><!-- /render.a.b -->', template::expand_closings('<!-- render.a.b --><!-- render.c.d -->x<!-- /render --><!-- /render -->'));
@@ -723,7 +727,12 @@ test(array('E18', 'E19', 'E28'), 'the editor saves pages and items, keeps revisi
 	list($status, $error) = $save('editor_save_field', array('type' => 'aboutpage', 'slug' => '/about', 'field' => 'made_up', 'value' => 'x'));
 	same(400, $status);
 	has($error['error'], "Unknown field 'made_up'");
-	same(400, $save('editor_save_field', array('type' => 'userpage', 'field' => 'password', 'value' => 'x'))[0], 'only CMS page tables');
+	same(400, $save('editor_save_field', array('type' => 'userpage', 'field' => 'password', 'value' => 'x'))[0], 'a page table that does not exist');
+	// a table that does exist but is not a page: the name must end in "page"
+	list($status, $error) = $save('editor_save_field', array('type' => 'user', 'field' => 'role', 'value' => 'admin'));
+	same(400, $status, 'only CMS page tables');
+	has($error['error'], 'Unknown page');
+	same(400, $save('editor_save_field', array('type' => 'subscriber', 'field' => 'email', 'value' => 'x@y.zz'))[0]);
 	list(, $history) = $save('editor_history', array('type' => 'aboutpage'));
 	check(count($history['revisions']) >= 2, 'revisions');
 	same('Edited in the page', $history['revisions'][0]['fields']['heading']);
