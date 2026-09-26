@@ -1003,6 +1003,39 @@ test(array('N1', 'N2', 'N3', 'E22'), 'help, lint and render', function () use ($
 	has($out, '<h1>About us</h1>');
 	same(1, raster(array('render', '/nope'))[0]);
 });
+test('N5', 'raster export: the site as static files', function () use ($tmp) {
+	$out = "$tmp/static";
+	list($code, $output) = raster(array('export', $out, '--url=https://cafe.example/'));
+	same(0, $code, $output);
+	has($output, 'linked to https://cafe.example/');
+	has($output, 'Left out (they need an account): /members, /staff');
+	has($output, 'The reservation.book form (/visit) needs the PHP site');
+	has($output, 'Pages link to what the export leaves out: /login');
+	foreach (array('index.html', 'about/index.html', 'menu/index.html', 'menu/menu_page/2/index.html', 'menu/menu_item/americano/index.html', 'menu/menu_items/category/cakes/index.html', 'journal.rss', 'feed.json', 'sitemap.xml', 'hours.txt', '404.html', 'demo/views/cafe/style.css', 'demo/views/cafe/img/menu/flat-white.jpg', 'print/menu/index.html', 'ro/index.html', 'ro/menu/index.html', '.raster-export.json') as $file) {
+		check(is_file("$out/$file"), "missing $file");
+	}
+	foreach (array('login/index.html', 'members/index.html', 'register/index.html', 'account/index.html', 'ro/journal.rss') as $file) check(!file_exists("$out/$file"), "should not export $file");
+	$home = file_get_contents("$out/index.html");
+	has($home, "<base href='https://cafe.example/demo/views/cafe/' />");
+	has($home, 'href="https://cafe.example/menu"');
+	has($home, '<a class="lang" href="https://cafe.example/ro/">ro</a>', 'the language switcher');
+	lacks($home, 'raster-editor', 'no editor');
+	has(file_get_contents("$out/404.html"), '<h1>We looked everywhere</h1>');
+	$ro = file_get_contents("$out/ro/menu/index.html");
+	has($ro, '>Meniu</a>');
+	has($ro, 'href="https://cafe.example/ro/about"', 'links stay in the language');
+	has($ro, 'href="https://cafe.example/journal.rss"', 'feeds are shared');
+	has($ro, '<a class="lang" href="https://cafe.example/menu">en</a>');
+	lacks(file_get_contents("$out/events/index.html"), 'Secret tasting', 'no drafts');
+	has(file_get_contents("$out/journal.rss"), '<link>https://cafe.example/journal/journal_item/');
+	$left = trim(shell_exec('grep -rl "127.0.0.1" '.escapeshellarg($out).' 2>/dev/null'));
+	same('', $left, 'no local addresses left');
+	same(1, raster(array('export', $out))[0], 'a folder with files needs --clean');
+	list($code, $output) = raster(array('export', $out, '--clean', '--skip=/lab'));
+	same(0, $code, $output);
+	check(!file_exists("$out/lab/index.html"), '--skip');
+	has(file_get_contents("$out/index.html"), 'href="/menu"', 'root-relative links without --url');
+});
 test('N4', 'serve', function () use ($root) {
 	$port = free_port();
 	$process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'serve', "--port=$port", '--host=127.0.0.1'), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, getenv());

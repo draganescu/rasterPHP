@@ -454,6 +454,25 @@ use `'model.method'`: `method(true)` returns
   - Settings: `page_cache_ttl` (3600 seconds) and `page_cache_skip` (path
     patterns). Responses carry `X-Raster-Cache: hit|miss`.
 
+## Static export
+
+`php bin/raster export <folder> [--url=https://example.com/]` writes the site
+as plain files for any static host (GitHub Pages, Netlify, a bucket). It
+visits every page as a visitor would and follows the links, so items, pages
+of lists and filter pages come along; drafts and the editor don't.
+
+- `/about` becomes `about/index.html`, feeds keep their names, a missing
+  page becomes `404.html`, and theme files and `media/` are copied.
+- Links point at `--url` (the site's address, `RASTER_URL`, or root-relative
+  links when neither is set).
+- Every language after the first goes in `/<lang>/`, and the language
+  switcher links there.
+- Left out: pages that need an account, login, sign-up, password and
+  newsletter pages, `/api`, and paths in `config::set('export_skip')` or
+  `--skip=/path`. The command lists forms, links to left-out pages and
+  query strings, since a static host can't answer them.
+- `--clean` replaces an earlier export in the same folder.
+
 ## Editors and agents
 
 - Editors (roles editor and admin) log in at `/login`. They also see drafts.

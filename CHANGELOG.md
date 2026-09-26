@@ -5,6 +5,12 @@ file changes for you; `php bin/raster doctor` shows what is left.
 
 ## Unreleased
 
+- `raster export <folder>` writes the site as static files: every page,
+  item, list page and feed, the 404 page, theme files and uploads, and each
+  language in its own folder. It reports what needs PHP (forms, accounts).
+- Uploaded pictures are stored with root-relative addresses (`/media/…`),
+  so they survive a new domain or a static export.
+
 - A new in-page editor replaces the old toolbar and its modal forms: the
   page is the editor, it takes the site's colours and fonts, saves as you
   go with undo, handles items (details, duplicate, hide, schedule, delete,
