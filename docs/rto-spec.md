@@ -1,8 +1,9 @@
 ---
 layout: post
 title:  "RTO: Request, Template, Object"
-date:   2014-06-29 10:18:00
+date:   2026-09-26 12:00:00
 categories: rto specs
+permalink: /rto/specs/2014/06/29/rto.html
 excerpt: A design pattern for web artefacts made by people and agents. A request picks a template, and the template pulls its data from objects.
 # Published as _posts/2014-06-29-rto.markdown in draganescu/draganescu.github.com
 # (without the heading below): https://draganescu.github.io/rto/specs/2014/06/29/rto.html
