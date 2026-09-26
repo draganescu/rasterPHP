@@ -164,7 +164,7 @@
  {
   "name": "newsletter-name-not-stored",
   "file": "system/models/newsletter/newsletter.php",
-  "search": "$subscriber->name = trim((string)util::post('name'));",
+  "search": "$subscriber->name = trim((string)$name);",
   "replace": ""
  },
  {
@@ -302,8 +302,8 @@
  {
   "name": "C42-events-not-linted",
   "file": "system/tools/inspector.php",
-  "search": "$this->lint_routes(), $this->lint_events());",
-  "replace": "$this->lint_routes());"
+  "search": "$this->lint_routes(), $this->lint_events(), $this->lint_queries());",
+  "replace": "$this->lint_routes(), $this->lint_queries());"
  },
  {
   "name": "C39-overview-without-events",
@@ -352,5 +352,53 @@
   "file": "system/template.php",
   "search": "\t\t\t$template->models_methods_print[] = array($attrstarts[2][$k], $attrstarts[3][$k], $attrstarts[1][$k]);",
   "replace": ""
+ },
+ {
+  "name": "C45-short-closings-not-expanded",
+  "file": "system/template.php",
+  "search": "$template->output = self::expand_closings($template->template_data);",
+  "replace": "$template->output = $template->template_data;"
+ },
+ {
+  "name": "C46-close-must-carry-the-arguments",
+  "file": "system/template.php",
+  "search": "    return strpos($open_ref, $close_ref.'(') === 0;",
+  "replace": "    return false;"
+ },
+ {
+  "name": "C47-partial-short-close-not-expanded",
+  "file": "system/template.php",
+  "search": "$loaded_files[$file] = self::expand_closings(file_get_contents($path));",
+  "replace": "$loaded_files[$file] = file_get_contents($path);"
+ },
+ {
+  "name": "A16-phar-is-not-private",
+  "file": "system/private_paths.php",
+  "search": "static $private_extensions = array('php', 'phar', 'sqlite', 'sql', 'md', 'lock', 'ini', 'bak');",
+  "replace": "static $private_extensions = array('php', 'sqlite', 'sql', 'md', 'lock', 'ini', 'bak');"
+ },
+ {
+  "name": "A16-nothing-is-blocked",
+  "file": "system/private_paths.php",
+  "search": "\t\treturn (bool)preg_match(self::pattern(), $path);",
+  "replace": "\t\treturn false;"
+ },
+ {
+  "name": "N6-lint-fix-does-not-write",
+  "file": "system/tools/inspector.php",
+  "search": "\t\tif ($applied) file_put_contents($path, $html);",
+  "replace": ""
+ },
+ {
+  "name": "N8-htaccess-gaps-never-found",
+  "file": "system/tools/project.php",
+  "search": "\t\t\t\tif (strpos($have, trim($line)) === false) { $missing[] = $rule['id']; break; }",
+  "replace": ""
+ },
+ {
+  "name": "N8-allow_deprecated-ignored",
+  "file": "system/tools/project.php",
+  "search": "'allowed' => self::deprecation_allowed($allowed, $id, $relative),",
+  "replace": "'allowed' => false,"
  }
 ]

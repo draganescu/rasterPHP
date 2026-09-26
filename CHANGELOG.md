@@ -5,6 +5,37 @@ file changes for you; `php bin/raster doctor` shows what is left.
 
 ## Unreleased
 
+- **One list of what is never served.** The rules were kept twice, in
+  `.htaccess` and in the router in `index.php`, and they had already drifted:
+  neither refused `.phar`, so a `composer.phar` in a site folder was
+  downloadable. They now live once, in `system/private_paths.php`, which the
+  router reads and which `php bin/raster deploy --config=apache|nginx|caddy`
+  turns into the configuration for the server in front (the shipped
+  `.htaccess` is that output). `.phar`, `.lock`, `.ini` and `.bak` join the
+  private extensions. `doctor` checks that the `.htaccess` on disk still
+  carries every rule, and `doctor --edge` asks the live site for one real file
+  per rule and fails if any of them is served.
+- **Closing tags may be short.** A closing tag can leave out the reference, or
+  just its arguments: `<!-- /render -->` and `<!-- /render.cms.menu -->` both
+  close `<!-- render.cms.menu('order=name') -->`. It closes the innermost
+  block still open with that keyword. The full form still works, and one rule
+  (`template::closes`) is used by both the engine and `lint`, so lint accepts
+  exactly what renders.
+- **`lint --fix`** repairs the mechanical problems — spacing the engine can't
+  read (`<!--print.cms.x-->`) and misspelled keywords (`prnit.`) — and reports
+  everything that needs a decision instead of guessing.
+- **The annotation grammar is data:** `system/tools/annotations.php`, printed
+  by `php bin/raster annotations [--json]`. `lint` checks against that same
+  file, so what an agent is told and what is enforced cannot drift apart.
+- Config `allow_deprecated` marks uses of deprecated features a site keeps on
+  purpose (`array('<id>' => true or path pattern(s))`); `doctor` counts them
+  apart instead of warning. The demo café uses it for the older validation
+  regions its suite still covers.
+- The ORM no longer needs `pdo_mysql` to be loaded on an SQLite-only site:
+  `rb.php` read `PDO::MYSQL_ATTR_INIT_COMMAND` as it loaded, which is a fatal
+  error when PHP has no MySQL driver.
+- `raster_project::apps()` and the router agreed that any top level folder
+  with a `config/` inside is an app folder, which made `system/` one.
 - A new in-page editor replaces the old toolbar and its modal forms: the
   page is the editor, it takes the site's colours and fonts, saves as you
   go with undo, handles items (details, duplicate, hide, schedule, delete,

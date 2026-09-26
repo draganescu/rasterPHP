@@ -192,6 +192,25 @@ test(array('A10', 'A11'), 'assets are served, code and raw views are not', funct
 		same(403, http('GET', $base.$path)[0], $path);
 	}
 });
+test('A16', 'the private extensions, composer.phar included, are never served', function () use ($base, $root) {
+	// the rules are in system/private_paths.php; index.php, .htaccess and the
+	// configs `raster deploy` prints all come from there
+	same(403, http('GET', "$base/composer.phar")[0], 'a phar in the site folder');
+	foreach (array('/x.lock', '/x.ini', '/x.bak', '/demo/views/cafe/style.css.bak') as $path) {
+		same(403, http('GET', $base.$path)[0], $path);
+	}
+	same(200, http('GET', "$base/index.php")[0], 'the entry point is the exception');
+	// and the same check without a web server
+	require_once "$root/system/private_paths.php";
+	$apps = private_paths::apps($root);
+	check(in_array('demo', $apps), 'demo is an app folder');
+	check(!in_array('system', $apps), 'system is not');
+	foreach (array('/composer.phar', '/system/boot.php', '/demo/data/x.sqlite-wal', '/.git/HEAD') as $path) {
+		check(private_paths::blocked($path), "$path is private");
+	}
+	check(!private_paths::blocked('/index.php'), 'index.php is not');
+	check(!private_paths::blocked('/demo/views/cafe/style.css'), 'theme assets are not');
+});
 test('A12', 'query strings do not change the route', function () use ($base) {
 	has(http('GET', "$base/about?utm=x")[1], '<h1>About us</h1>');
 });
@@ -274,6 +293,30 @@ test(array('C11', 'C12', 'C13'), 'attributes, nested rows, repeated tags', funct
 	has(between($lab, 'nested'), '<ul><li>Carrot cake</li></ul>');
 	has(between($lab, 'repeated'), 'https://example.com/a and again https://example.com/a');
 	has(between($lab, 'repeated'), 'https://example.com/b and again https://example.com/b');
+});
+test(array('C45', 'C46', 'C47'), 'short closing tags', function () use (&$lab, $views, $root) {
+	$section = between($lab, 'short-closings');
+	// <!-- /render --> and <!-- /print --> close the innermost open block
+	has($section, '<li>', 'the render block ran');
+	has($section, 'closed short', 'print closed without its name');
+	has($section, '<a href="https://example.com/first">first</a>', 'nested attribute and key blocks');
+	has($section, '<a href="https://example.com/second">second</a>');
+	// <!-- /render.cms.menu --> closes render.cms.menu('order=-price&limit=2')
+	has(between($lab, 'ordering'), '<li>', 'a closing tag without the arguments');
+	// a res fragment of a partial, closed short, still dries in
+	has($section, "This fragment's own closing tag is the short form.");
+	// the rule itself, and that lint accepts exactly what the engine renders
+	same('<!-- render.a.b(1, 2) -->x<!-- /render.a.b(1, 2) -->', template::expand_closings('<!-- render.a.b(1, 2) -->x<!-- /render -->'));
+	same('<!-- render.a.b --><!-- render.c.d -->x<!-- /render.c.d --><!-- /render.a.b -->', template::expand_closings('<!-- render.a.b --><!-- render.c.d -->x<!-- /render --><!-- /render -->'));
+	same('<!-- print.cms.x /--><!-- /render -->', template::expand_closings('<!-- print.cms.x /--><!-- /render -->'), 'a self-closing tag opens nothing, so the stray close is left alone');
+	with_file("$views/zz-short.html", '<!-- render.cms.journal --><!-- print.title -->t<!-- /print --><!-- /render -->', function () {
+		same(0, raster(array('lint'))[0], 'lint accepts short closing tags');
+	});
+	with_file("$views/zz-short.html", '<!-- render.cms.journal --><!-- /print -->', function () {
+		list($code, $out) = raster(array('lint'));
+		same(1, $code);
+		has($out, 'never closed');
+	});
 });
 test(array('C14', 'C15', 'C16', 'C17'), 'arguments, escaping, replace, memory', function () use ($base, &$lab) {
 	has(between($lab, 'args'), '[3,"soup",true,-1,null]');
@@ -1002,6 +1045,75 @@ test(array('N1', 'N2', 'N3', 'E22'), 'help, lint and render', function () use ($
 	same(0, $code);
 	has($out, '<h1>About us</h1>');
 	same(1, raster(array('render', '/nope'))[0]);
+});
+test('N5', 'annotations: the grammar as data', function () {
+	list($code, $out) = raster(array('annotations', '--json'));
+	same(0, $code, $out);
+	$grammar = json_decode($out, true);
+	same(2, $grammar['version']);
+	same('<!-- /{keyword} -->', $grammar['spelling']['short_close']);
+	check($grammar['keywords']['render']['repeats'], 'render repeats its content');
+	check(!$grammar['keywords']['render']['self_closing'], 'render cannot self-close');
+	check($grammar['keywords']['print']['self_closing'], 'print can');
+	check(!$grammar['keywords']['remove']['name'], 'remove takes no name');
+	// the same list the inspector lints with
+	same(array_keys($grammar['keywords']), raster_inspector::keywords());
+	same($grammar['references']['builtin_models'], raster_inspector::builtin_models());
+	has(raster(array('annotations'))[1], 'may self-close');
+});
+test('N6', 'lint --fix repairs what is mechanical', function () use ($views) {
+	// spacing the engine cannot read, and a misspelled keyword
+	$broken = "<!--print.cms.heading-->T<!-- /print.cms.heading -->\n<!-- prnit.cms.intro -->I<!-- /print.cms.intro -->\n<!--  render.cms.journal  --><!-- print.title -->x<!-- /print --><!-- /render -->\n";
+	with_file("$views/zz-fix.html", $broken, function () use ($views) {
+		same(1, raster(array('lint'))[0], 'errors before');
+		list($code, $out) = raster(array('lint', '--fix'));
+		same(0, $code, $out);
+		has($out, '3 fixed');
+		has($out, '<!--print.cms.heading--> -> <!-- print.cms.heading -->');
+		$fixed = file_get_contents("$views/zz-fix.html");
+		has($fixed, '<!-- print.cms.heading -->');
+		has($fixed, '<!-- print.cms.intro -->');
+		has($fixed, '<!-- render.cms.journal -->');
+		lacks($fixed, 'prnit');
+		same(0, raster(array('lint'))[0], 'and nothing is left');
+	});
+	// what needs a decision is reported, not guessed at
+	with_file("$views/zz-fix.html", '<!-- render.cms.journal -->', function () {
+		list($code, $out) = raster(array('lint', '--fix'));
+		same(1, $code);
+		has($out, 'never closed');
+		lacks($out, 'fixed');
+	});
+});
+test('N7', 'deploy prints the server configuration', function () use ($root) {
+	list($code, $apache) = raster(array('deploy', '--config=apache'));
+	same(0, $code, $apache);
+	same(trim(file_get_contents("$root/.htaccess")), trim($apache), 'the .htaccess in the repository is this file');
+	foreach (array('nginx', 'caddy') as $server) {
+		list($code, $out) = raster(array('deploy', "--config=$server", '--host=cafe.example.com', '--root=/srv/cafe'));
+		same(0, $code, $out);
+		has($out, 'cafe.example.com');
+		has($out, '/srv/cafe');
+		has($out, 'phar', 'the private extensions are in there');
+		lacks($out, '/demo/', 'no rule names an app folder, so adding an app needs no change');
+	}
+	same(2, raster(array('deploy'))[0], 'no --config is a usage error');
+	same(1, raster(array('deploy', '--config=iis'))[0]);
+});
+test('N8', 'doctor: the rules on disk, intentional deprecations, and the live site', function () use ($root, $base) {
+	list($code, $out) = raster(array('doctor'));
+	has($out, '.htaccess has every rule');
+	// the demo keeps the older validation regions on purpose (D14)
+	has($out, 'kept on purpose');
+	lacks($out, 'use(s) of deprecated features'."\n    regions", 'so they are not a warning');
+	// a .htaccess from an older Raster is missing the newer rules
+	with_file("$root/.htaccess", "RewriteEngine on\nRewriteRule (^|/)\\. - [F,L]\n", function () {
+		has(raster(array('doctor'))[1], 'is missing');
+	});
+	// --edge asks the running site for the files it must refuse
+	list($code, $out) = raster(array('doctor', '--edge'), array('RASTER_URL' => $base));
+	has($out, 'refused (403)');
+	lacks($out, 'is served');
 });
 test('N4', 'serve', function () use ($root) {
 	$port = free_port();

@@ -11,7 +11,9 @@
 //   php bin/raster new <folder>
 //   php bin/raster update [latest|<version>|<branch>|<folder>|<file.tar.gz>] [--dry-run] [--force]
 //   php bin/raster upgrade [--dry-run]
-//   php bin/raster doctor [--json]
+//   php bin/raster doctor [--json] [--edge]
+//   php bin/raster deploy --config=apache|nginx|caddy [--host=…] [--root=…] [--socket=…]
+//   php bin/raster annotations [--json]
 //   php bin/raster version
 
 if (PHP_SAPI !== 'cli') exit;
@@ -36,7 +38,7 @@ foreach ($args as $arg) {
 }
 
 // creating and updating projects happens before any app boots
-if (in_array($command, array('new', 'update', 'version'))) {
+if (in_array($command, array('new', 'update', 'version', 'deploy'))) {
 	require_once $root.'/system/tools/project.php';
 	$color = function_exists('posix_isatty') && posix_isatty(STDOUT) && !getenv('NO_COLOR');
 	$paint = function ($text, $code) use ($color) { return $color ? "\033[{$code}m$text\033[0m" : $text; };
@@ -55,6 +57,22 @@ function raster_project_command($command, $root, $positional, $options, $paint) 
 		foreach (raster_project::apps($root) as $app) {
 			echo "  $app/ is at ".raster_project::app_version("$root/$app")."\n";
 		}
+		return 0;
+
+	case 'deploy':
+		// the configuration for the server in front, built from the same rules
+		// index.php and .htaccess use (system/private_paths.php)
+		require_once $root.'/system/private_paths.php';
+		$server = isset($options['config']) && is_string($options['config']) ? $options['config'] : null;
+		if (!$server) {
+			fwrite(STDERR, "Usage: php bin/raster deploy --config=".implode('|', private_paths::servers())." [--host=example.com] [--root=/var/www/site] [--socket=unix//run/php/php8.2-fpm.sock]\n");
+			return 2;
+		}
+		echo private_paths::config($server, array(
+			'host' => isset($options['host']) && is_string($options['host']) ? $options['host'] : 'example.com',
+			'root' => isset($options['root']) && is_string($options['root']) ? $options['root'] : $root,
+			'socket' => isset($options['socket']) && is_string($options['socket']) ? $options['socket'] : 'unix//run/php/php-fpm.sock',
+		));
 		return 0;
 
 	case 'new':
@@ -145,11 +163,19 @@ switch ($command) {
 				return $d[0] !== '.' && is_dir($inspector->views_dir.'/'.$d);
 			}));
 		}
+		// --fix repairs what is mechanical (a directive the engine can't read
+		// because of its spacing, a misspelled keyword) and then reports what
+		// is left, which needs a decision
+		$fixed = isset($options['fix']) ? $inspector->fix($themes ?: array($inspector->theme)) : array();
 		$problems = $inspector->lint($themes ?: array($inspector->theme));
 		$errors = count(array_filter($problems, function ($p) { return $p['severity'] === 'error'; }));
 		if (isset($options['json'])) {
-			$json(array('errors' => $errors, 'warnings' => count($problems) - $errors, 'problems' => $problems));
+			$json(array('errors' => $errors, 'warnings' => count($problems) - $errors, 'fixed' => $fixed, 'problems' => $problems));
 		} else {
+			foreach ($fixed as $f) {
+				echo "{$f['file']}:{$f['line']}: ".$paint('fixed', '32').": {$f['was']} -> {$f['now']}\n";
+			}
+			if ($fixed) echo "\n";
 			foreach ($problems as $p) {
 				$label = $p['severity'] === 'error' ? $paint('error', '31') : $paint('warning', '33');
 				echo "{$p['file']}:{$p['line']}:{$p['column']}: $label: {$p['message']}\n";
@@ -158,9 +184,35 @@ switch ($command) {
 			$views = 0;
 			foreach ($names as $name) $views += count($inspector->views($name));
 			echo $problems ? "\n" : '';
-			echo ($errors ? $paint("$errors error(s)", '31') : $paint('No errors', '32')).', '.(count($problems) - $errors)." warning(s) in ".(count($names) > 1 ? 'themes ' : 'theme ')."'".implode("', '", $names)."' ($views views)\n";
+			echo ($fixed ? count($fixed).' fixed, ' : '').($errors ? $paint("$errors error(s)", '31') : $paint('No errors', '32')).', '.(count($problems) - $errors)." warning(s) in ".(count($names) > 1 ? 'themes ' : 'theme ')."'".implode("', '", $names)."' ($views views)\n";
 		}
 		exit($errors ? 1 : 0);
+
+	case 'annotations':
+		// the annotation grammar as data, for agents and editors
+		$grammar = raster_inspector::grammar();
+		if (isset($options['json'])) {
+			$json($grammar);
+			exit(0);
+		}
+		echo "Raster annotations (grammar version {$grammar['version']}; --json for the whole thing)\n\n";
+		foreach ($grammar['spelling'] as $key => $value) {
+			if (in_array($key, array('note', 'in_scripts'))) continue;
+			echo '  '.str_pad($key, 14).$value."\n";
+		}
+		echo "\n  ".$grammar['spelling']['note']."\n  ".$grammar['spelling']['in_scripts']."\n\n";
+		foreach ($grammar['keywords'] as $keyword => $rules) {
+			$shape = array();
+			if (!$rules['name']) $shape[] = 'no name';
+			if ($rules['self_closing']) $shape[] = 'may self-close';
+			if ($rules['repeats']) $shape[] = 'repeats its content';
+			echo '  '.$paint($keyword, '1').($shape ? ' ('.implode(', ', $shape).')' : '')."\n";
+			echo '      '.$rules['what']."\n";
+			foreach ($rules['examples'] as $example) echo '      '.$example."\n";
+		}
+		echo "\n";
+		foreach ($grammar['structure'] as $rule) echo '  '.$rule."\n";
+		exit(0);
 
 	case 'schema':
 		$schema = new raster_schema();
@@ -347,6 +399,14 @@ switch ($command) {
 	case 'doctor':
 		require_once BASE.'tools/project.php';
 		$checks = raster_project::doctor($root, boot::$appname, config::get('environment'));
+		if (isset($options['edge'])) {
+			$url = config::get('trusted_url') ? config::get('link_uri') : null;
+			if (!$url) {
+				$checks[] = array('status' => 'warn', 'title' => 'No site address to ask', 'detail' => 'Set RASTER_URL (or config site_url) so --edge knows where the site is');
+			} else {
+				$checks = array_merge($checks, raster_project::edge($url, $root, raster_project::apps($root)));
+			}
+		}
 		$fails = count(array_filter($checks, function ($c) { return $c['status'] === 'fail'; }));
 		if (isset($options['json'])) {
 			$json(array('environment' => config::get('environment'), 'failures' => $fails, 'checks' => $checks));
@@ -401,6 +461,8 @@ Raster command line
 
   php bin/raster serve [--port=8000]     run the site with PHP's built in server
   php bin/raster lint [--json]           check every view for annotation errors
+        --fix                            repair what is mechanical (spacing, misspelled keywords)
+  php bin/raster annotations [--json]    the annotation grammar, as data
   php bin/raster schema [--json]         compare the templates' content model with the database
         --apply                          create missing tables and columns (needed when frozen)
         --check                          exit with 1 when they differ (for CI)
@@ -415,7 +477,12 @@ Raster command line
   php bin/raster mcp                     MCP server over stdio for local agents
   php bin/raster render <url>            print the HTML of a URL
   php bin/raster doctor [--json]         check the project: PHP, versions, edited framework
-                                         files, templates, database, deprecations, production
+                                         files, templates, database, what is private,
+                                         deprecations, production
+        --edge                           also ask the live site for files it must refuse
+  php bin/raster deploy --config=apache|nginx|caddy [--host=...] [--root=...] [--socket=...]
+                                         the server configuration, from the rules in
+                                         system/private_paths.php
   php bin/raster new <folder>            start a new site from this copy of Raster
   php bin/raster update [latest|2.1.0|<branch>|<folder>|<file.tar.gz>] [--dry-run] [--force]
                                          replace the framework files with another release,

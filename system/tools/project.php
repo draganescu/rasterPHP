@@ -42,14 +42,8 @@ class raster_project
 
 	// app folders: top-level folders with a config/ inside
 	static function apps($root) {
-		$apps = array();
-		foreach (glob($root.'/*/config', GLOB_ONLYDIR) ?: array() as $dir) {
-			$name = basename(dirname($dir));
-			if (in_array($name, array('system', 'bin', 'tests', 'media'))) continue;
-			$apps[] = $name;
-		}
-		sort($apps);
-		return $apps;
+		require_once dirname(__DIR__).'/private_paths.php';
+		return private_paths::apps($root);
 	}
 
 	// ##Framework files
@@ -270,9 +264,21 @@ class raster_project
 	// ##Deprecations
 
 	// uses of things that still work but will go away, found in the app's
-	// views, models and config: array(file, line, id, message)
+	// views, models and config: array(file, line, id, message, allowed).
+	//
+	// A site can say a use is on purpose, and `doctor` then counts it apart
+	// instead of warning about it — the demo café keeps the older validation
+	// regions so the test suite still covers them:
+	//
+	//   config::set('allow_deprecated')->to(array(
+	//       'legacy-validation-regions' => '#^views/(visit|password/new)\.html$#',
+	//   ));
+	//
+	// The value is true for the whole app, or one or more patterns over the
+	// path inside the app folder.
 	static function deprecations($root, $app) {
 		$found = array();
+		$allowed = class_exists('config') ? (array)config::get('allow_deprecated', array()) : array();
 		$rules = include $root.'/system/tools/deprecations.php';
 		$app_dir = $root.'/'.$app;
 		$iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($app_dir, FilesystemIterator::SKIP_DOTS));
@@ -290,12 +296,76 @@ class raster_project
 						'line' => substr_count(substr($source, 0, $match[1]), "\n") + 1,
 						'id' => $id,
 						'message' => $rule['message'].' (deprecated in '.$rule['since'].', removed in '.$rule['removed_in'].')',
+						'allowed' => self::deprecation_allowed($allowed, $id, $relative),
 					);
 				}
 			}
 		}
 		usort($found, function ($a, $b) { return strcmp($a['file'], $b['file']) ?: $a['line'] - $b['line']; });
 		return $found;
+	}
+
+	// whether config allow_deprecated covers this use
+	static protected function deprecation_allowed($allowed, $id, $relative) {
+		if (!isset($allowed[$id])) return false;
+		if ($allowed[$id] === true) return true;
+		foreach ((array)$allowed[$id] as $pattern) {
+			if (is_string($pattern) && @preg_match($pattern, $relative)) return true;
+		}
+		return false;
+	}
+
+	// ##What the server in front refuses
+	//
+	// The rules are in system/private_paths.php. Apache reads them from the
+	// .htaccess generated from that file, so check the copy on disk still
+	// carries every rule: a site from an older Raster is missing the newer
+	// ones. Extra lines of your own are fine.
+	static function htaccess_gaps($root) {
+		require_once dirname(__DIR__).'/private_paths.php';
+		$file = $root.'/.htaccess';
+		if (!is_file($file)) return null;
+		$have = file_get_contents($file);
+		$missing = array();
+		foreach (private_paths::rules() as $rule) {
+			foreach ($rule['apache'] as $line) {
+				if (strpos($have, trim($line)) === false) { $missing[] = $rule['id']; break; }
+			}
+		}
+		return $missing;
+	}
+
+	// Asks the live site for files it must never hand over. One existing file
+	// per rule (private_paths::samples), so a 200 means it was really served.
+	static function edge($url, $root, $apps) {
+		require_once dirname(__DIR__).'/private_paths.php';
+		$checks = array();
+		$base = rtrim($url, '/');
+		$samples = private_paths::samples($root, $apps);
+		if (!$samples) {
+			$checks[] = array('status' => 'warn', 'title' => 'Nothing to ask the server for', 'detail' => 'No file of a private kind was found to test with');
+			return $checks;
+		}
+		foreach ($samples as $id => $path) {
+			$context = stream_context_create(array(
+				'http' => array('method' => 'GET', 'ignore_errors' => true, 'follow_location' => 0, 'timeout' => 10),
+				'ssl' => array('verify_peer' => true, 'verify_peer_name' => true),
+			));
+			$http_response_header = array();
+			$body = @file_get_contents($base.$path, false, $context);
+			$code = 0;
+			if (isset($http_response_header[0]) && preg_match('/\s(\d{3})\s/', $http_response_header[0], $m)) $code = (int)$m[1];
+			if (!$code && $body === false) {
+				$checks[] = array('status' => 'warn', 'title' => "$path: no answer", 'detail' => 'The site could not be reached at '.$base);
+				continue;
+			}
+			if ($code === 200) {
+				$checks[] = array('status' => 'fail', 'title' => "$path is served (rule '$id')", 'detail' => "The server in front does not refuse it. `php bin/raster deploy --config=<server>` prints rules that do.");
+			} else {
+				$checks[] = array('status' => 'ok', 'title' => "$path refused ($code)", 'detail' => '');
+			}
+		}
+		return $checks;
 	}
 
 	// ##Doctor
@@ -342,6 +412,16 @@ class raster_project
 			$add('ok', 'Framework files as installed');
 		}
 
+		// what must never be served
+		$gaps = self::htaccess_gaps($root);
+		if ($gaps === null) {
+			$add('warn', '.htaccess is missing', "On Apache nothing in the site is private.\nphp bin/raster deploy --config=apache > .htaccess");
+		} elseif ($gaps) {
+			$add('warn', '.htaccess is missing '.count($gaps).' rule(s): '.implode(', ', $gaps), "It is older than this Raster, or was edited.\nphp bin/raster deploy --config=apache > .htaccess\nBehind nginx or Caddy, `deploy --config=nginx|caddy` prints the same rules; `doctor --edge` asks the live site.");
+		} else {
+			$add('ok', '.htaccess has every rule');
+		}
+
 		// folders the site writes to
 		foreach (array($app.'/data', 'media') as $folder) {
 			$path = $root.'/'.$folder;
@@ -365,17 +445,20 @@ class raster_project
 			$add('fail', 'No database', $e->getMessage());
 		}
 
-		// deprecations
+		// deprecations, minus the ones config allow_deprecated says are on purpose
 		$deprecated = self::deprecations($root, $app);
-		if ($deprecated) {
+		$flagged = array_values(array_filter($deprecated, function ($d) { return empty($d['allowed']); }));
+		$intended = count($deprecated) - count($flagged);
+		if ($flagged) {
 			$groups = array();
-			foreach ($deprecated as $d) {
+			foreach ($flagged as $d) {
 				$groups[$d['message']][] = "{$d['file']}:{$d['line']}";
 			}
 			$lines = array();
 			foreach ($groups as $message => $places) $lines[] = $message."\n  ".implode("\n  ", $places);
-			$add('warn', count($deprecated).' use(s) of deprecated features', implode("\n", $lines));
+			$add('warn', count($flagged).' use(s) of deprecated features', implode("\n", $lines));
 		}
+		if ($intended) $add('ok', "$intended use(s) of deprecated features kept on purpose", 'config allow_deprecated');
 
 		// production settings
 		if ($environment === 'production') {

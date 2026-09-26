@@ -10,14 +10,49 @@
 // It never executes models, so it is safe to run anywhere.
 class raster_inspector {
 
+	// ##The grammar
+	// system/tools/annotations.php is the one description of what the engine
+	// accepts, and `raster annotations` prints it. Everything below reads from
+	// it, so the lint rules and what agents are told can't drift apart.
+	static $grammar = null;
+
+	static function grammar() {
+		if (self::$grammar === null) self::$grammar = include __DIR__.'/annotations.php';
+		return self::$grammar;
+	}
+
 	// the directives the template engine understands
-	static $keywords = array('print', 'render', 'remove', 'res', 'dry');
+	static function keywords() {
+		return array_keys(self::grammar()['keywords']);
+	}
+
+	// keywords that may end in /--> instead of wrapping content
+	static function self_closing_keywords() {
+		$keywords = array();
+		foreach (self::grammar()['keywords'] as $keyword => $rules) {
+			if (!empty($rules['self_closing'])) $keywords[] = $keyword;
+		}
+		return $keywords;
+	}
+
+	// keywords that take a .reference (remove does not)
+	static function named_keywords() {
+		$keywords = array();
+		foreach (self::grammar()['keywords'] as $keyword => $rules) {
+			if (!empty($rules['name'])) $keywords[] = $keyword;
+		}
+		return $keywords;
+	}
 
 	// models the template engine handles itself
-	static $builtin_models = array('session', 'self', 'if');
+	static function builtin_models() {
+		return self::grammar()['references']['builtin_models'];
+	}
 
 	// print keys inside render blocks that Raster fills in by itself
-	static $builtin_keys = array('raster_detail_link');
+	static function builtin_keys() {
+		return self::grammar()['references']['builtin_keys'];
+	}
 
 	public $theme;
 	public $views_dir;
@@ -73,14 +108,20 @@ class raster_inspector {
 			$trimmed = trim($body);
 			if (!preg_match('/^(\/)?([a-z]+)(?:\.([^\s(]+?(?:\(.*\))?))?\s*(\/)?$/s', $trimmed, $m)) continue;
 			$keyword = $m[2];
-			if (!in_array($keyword, self::$keywords)) {
+			if (!in_array($keyword, self::keywords())) {
 				// a comment like <!-- prnit.cms.title --> is probably a typo
 				if (isset($m[3]) && $m[3] !== '') {
-					foreach (self::$keywords as $known) {
+					foreach (self::keywords() as $known) {
 						if (levenshtein($keyword, $known) <= 2) {
 							$token['type'] = 'typo';
 							$token['keyword'] = $keyword;
 							$token['suggestion'] = $known;
+							// how it would be written with the keyword it meant,
+							// so `lint --fix` repairs the spelling and the spacing at once
+							$token['ref'] = $m[3];
+							$name = $known.'.'.$m[3];
+							$token['canonical'] = $m[1] === '/' ? '<!-- /'.$name.' -->'
+								: ((isset($m[4]) && $m[4] === '/') ? '<!-- '.$name.' /-->' : '<!-- '.$name.' -->');
 							$tokens[] = $token;
 							break;
 						}
@@ -114,19 +155,23 @@ class raster_inspector {
 
 		foreach ($tokens as $token) {
 			if ($token['type'] === 'typo') {
-				$problems[] = self::problem('warning', $token, "Unknown directive '{$token['keyword']}' in {$token['raw']}; did you mean '{$token['suggestion']}'?");
+				$problems[] = self::problem('warning', $token, "Unknown directive '{$token['keyword']}' in {$token['raw']}; did you mean '{$token['suggestion']}'?",
+					self::edit($token, $token['canonical']));
 				continue;
 			}
 			if (!$token['exact']) {
-				$problems[] = self::problem('error', $token, "Directive written as {$token['raw']} is ignored by the template engine; write it exactly as {$token['canonical']}");
+				$problems[] = self::problem('error', $token, "Directive written as {$token['raw']} is ignored by the template engine; write it exactly as {$token['canonical']}",
+					self::edit($token, $token['canonical']));
 				continue;
 			}
-			if ($token['keyword'] !== 'remove' && $token['ref'] === '') {
+			// an opening needs its name; a closing may leave it out (see
+			// template::closes), and remove has no name at all
+			if ($token['type'] !== 'close' && in_array($token['keyword'], self::named_keywords()) && $token['ref'] === '') {
 				$problems[] = self::problem('error', $token, "{$token['raw']} needs a name, e.g. <!-- {$token['keyword']}.model.method -->");
 				continue;
 			}
 			if ($token['type'] === 'self') {
-				if (in_array($token['keyword'], array('render', 'remove', 'res'))) {
+				if (!in_array($token['keyword'], self::self_closing_keywords())) {
 					$problems[] = self::problem('error', $token, "{$token['keyword']} blocks can't be self-closing: use {$token['canonical']} ... <!-- /{$token['name']} -->");
 					continue;
 				}
@@ -155,10 +200,10 @@ class raster_inspector {
 				continue;
 			}
 			$last = end($open);
-			if ($last['name'] !== $token['name']) {
+			if (!self::pairs($last, $token)) {
 				$opened_at = null;
 				foreach (array_reverse($open) as $candidate) {
-					if ($candidate['name'] === $token['name']) { $opened_at = $candidate; break; }
+					if (self::pairs($candidate, $token)) { $opened_at = $candidate; break; }
 				}
 				if ($opened_at === null) {
 					$problems[] = self::problem('error', $token, "{$token['raw']} closes a block that was never opened");
@@ -166,7 +211,7 @@ class raster_inspector {
 				}
 				$problems[] = self::problem('error', $token, "{$token['raw']} closes before <!-- {$last['name']} --> (line {$last['line']}); blocks must nest, close the inner block first");
 				// recover by closing everything up to the matching opening
-				while (!empty($open) && end($open)['name'] !== $token['name']) {
+				while (!empty($open) && !self::pairs(end($open), $token)) {
 					array_pop($open);
 					array_pop($stack);
 				}
@@ -185,8 +230,33 @@ class raster_inspector {
 		return array($root['children'], $problems);
 	}
 
-	static function problem($severity, $token, $message) {
-		return array('severity' => $severity, 'line' => $token['line'], 'column' => $token['column'], 'message' => $message);
+	// Whether a closing token closes an opening one. The rule itself is
+	// template::closes, so lint accepts exactly what the engine renders.
+	static function pairs($open, $close) {
+		return template::closes($open['keyword'], $open['ref'], $close['keyword'], $close['ref']);
+	}
+
+	// A partial, read the way the engine reads it when drying: res fragments
+	// are found by name, so a short closing tag is written out in full first.
+	// Positions in this text are not the file's, so it is only used to look
+	// fragments up, never to report a problem or to fix one.
+	static function fragments_of($file) {
+		return template::expand_closings(file_get_contents($file));
+	}
+
+	static function problem($severity, $token, $message, $fix = null) {
+		$problem = array('severity' => $severity, 'line' => $token['line'], 'column' => $token['column'], 'message' => $message);
+		if ($fix) $problem['fix'] = $fix;
+		return $problem;
+	}
+
+	// ##Fixable problems
+	// A problem carries a `fix` when the repair is mechanical: the same
+	// directive, written the way the engine reads it. `lint --fix` applies
+	// these; everything else needs a decision and is only reported.
+	static function edit($token, $replacement) {
+		if ($replacement === $token['raw']) return null;
+		return array('offset' => $token['offset'], 'length' => strlen($token['raw']), 'replacement' => $replacement, 'was' => $token['raw']);
 	}
 
 	// Splits a print/render reference into model and method. Returns false
@@ -210,9 +280,9 @@ class raster_inspector {
 			return array('key' => $m[3], 'attribute' => $m[2], 'append' => $m[1] === '+', 'builtin' => true);
 		}
 		if (preg_match('/^([@+])([a-zA-Z0-9_\-:]+)\.([A-Za-z0-9_\-]+)$/', $ref, $m)) {
-			return array('key' => $m[3], 'attribute' => $m[2], 'append' => $m[1] === '+', 'builtin' => in_array($m[3], self::$builtin_keys));
+			return array('key' => $m[3], 'attribute' => $m[2], 'append' => $m[1] === '+', 'builtin' => in_array($m[3], self::builtin_keys()));
 		}
-		return array('key' => $ref, 'attribute' => null, 'append' => false, 'builtin' => in_array($ref, self::$builtin_keys));
+		return array('key' => $ref, 'attribute' => null, 'append' => false, 'builtin' => in_array($ref, self::builtin_keys()));
 	}
 
 	// ##Models
@@ -302,6 +372,38 @@ class raster_inspector {
 		return $this->lint_path($this->theme_dir($theme).'/'.$relative, $theme);
 	}
 
+	// Applies every mechanical fix in the views of these themes. Returns one
+	// entry per change: file, line, was, now.
+	function fix($themes = null) {
+		$applied = array();
+		foreach ($themes ?: array($this->theme) as $theme) {
+			foreach ($this->views($theme) as $view) {
+				$applied = array_merge($applied, $this->fix_path($this->theme_dir($theme).'/'.$view, $theme));
+			}
+		}
+		return $applied;
+	}
+
+	function fix_path($path, $theme = null) {
+		$problems = $this->lint_path($path, $theme);
+		$edits = array();
+		foreach ($problems as $problem) {
+			if (isset($problem['fix'])) $edits[] = $problem['fix'] + array('line' => $problem['line']);
+		}
+		if (!$edits) return array();
+		// from the end of the file, so the offsets of the others still hold
+		usort($edits, function ($a, $b) { return $b['offset'] <=> $a['offset']; });
+		$html = file_get_contents($path);
+		$applied = array();
+		foreach ($edits as $edit) {
+			if (substr($html, $edit['offset'], $edit['length']) !== $edit['was']) continue;
+			$html = substr_replace($html, $edit['replacement'], $edit['offset'], $edit['length']);
+			$applied[] = array('file' => self::short($path), 'line' => $edit['line'], 'was' => $edit['was'], 'now' => $edit['replacement']);
+		}
+		if ($applied) file_put_contents($path, $html);
+		return array_reverse($applied);
+	}
+
 	// Lints any view file by its path
 	function lint_path($path, $theme = null) {
 		$theme = $theme ?: $this->theme;
@@ -368,7 +470,7 @@ class raster_inspector {
 			return;
 		}
 		list($method, $arguments) = $call;
-		if (in_array($ref['model'], self::$builtin_models)) return;
+		if (in_array($ref['model'], self::builtin_models())) return;
 		$info = $this->model_info($ref['model']);
 		if ($info === false) {
 			$problems[] = self::problem('error', $block, "Model '{$ref['model']}' not found; create ".boot::$appname."/models/{$ref['model']}/{$ref['model']}.php with class {$ref['model']}");
@@ -439,7 +541,7 @@ class raster_inspector {
 			$problems[] = self::problem('error', $block, "{$block['raw']} reads from ".self::short($file)." which does not exist");
 			return;
 		}
-		$source = file_get_contents($file);
+		$source = self::fragments_of($file);
 		if (strpos($source, "<!-- res.{$m[2]} -->") === false || strpos($source, "<!-- /res.{$m[2]} -->") === false) {
 			$problems[] = self::problem('error', $block, "{$block['raw']}: ".self::short($file)." has no <!-- res.{$m[2]} --> ... <!-- /res.{$m[2]} --> block");
 		}
@@ -766,7 +868,7 @@ class raster_inspector {
 		return preg_replace_callback('/<!-- dry\.([a-z0-9_\-\/]+)\.([a-z0-9_\-]+) (\/?)-->(?:(.*?)<!-- \/dry\.\1\.\2 -->)?/s', function ($m) use ($self, $theme, $depth) {
 			$file = $self->theme_dir($theme).'/'.$m[1].$self->ext;
 			if (!file_exists($file)) return '';
-			$source = file_get_contents($file);
+			$source = self::fragments_of($file);
 			$start = "<!-- res.{$m[2]} -->"; $end = "<!-- /res.{$m[2]} -->";
 			$a = strpos($source, $start); $b = strpos($source, $end);
 			if ($a === false || $b === false) return '';

@@ -15,6 +15,8 @@ https://draganescu.github.io/rto/specs/2014/06/29/rto.html
 ```sh
 php bin/raster serve              # http://localhost:8000, no setup, SQLite
 php bin/raster lint               # after every template edit; exit 1 on errors
+php bin/raster lint --fix         # repair what is mechanical, report the rest
+php bin/raster annotations --json # the annotation grammar as data, to check against
 php bin/raster schema             # what the CMS will store, compared with the database
 php bin/raster render /about      # print a page without a server (exit 1 on 4xx/5xx)
 php bin/raster doctor             # is this site healthy, up to date, ready for production?
@@ -79,7 +81,12 @@ media/                        uploads from the CMS
 
 An annotation is an HTML comment in one of these exact forms: one space after
 `<!--` and one space before `-->`, or before `/-->` when self-closing.
-Anything else is ignored at runtime, and `lint` reports it.
+Anything else is ignored at runtime, and `lint` reports it (`lint --fix`
+repairs the spacing and misspelled keywords, which is all it will guess at).
+
+The grammar is also data: `system/tools/annotations.php`, printed by
+`php bin/raster annotations [--json]`. It is what `lint` checks against, so
+an agent can read it and be sure.
 
 | Form | Meaning |
 |---|---|
@@ -98,6 +105,20 @@ Blocks must nest properly. **Evaluation order:** render blocks run from the
 last in the file to the first, so blocks nested inside a render block run
 before it. That's how a form's model already knows the validation results of
 the regions inside the form. Print blocks run after all render blocks.
+
+**Closing tags may be short.** A closing tag can leave out the reference, or
+just its arguments; it closes the innermost block still open with that keyword:
+
+```html
+<!-- render.cms.menu('order=name&limit=3') -->
+  <li><!-- print.name -->Flat white<!-- /print --></li>
+<!-- /render -->
+```
+
+`<!-- /render -->`, `<!-- /render.cms.menu -->` and
+`<!-- /render.cms.menu('order=name&limit=3') -->` all close that block, so a
+filter can be changed in one place. The full form stays valid and is what the
+engine works with: it writes the short ones out before rendering.
 
 ### Inside render blocks
 
@@ -447,6 +468,22 @@ use `'model.method'`: `method(true)` returns
   `raster send` needs it.
 - **Database file:** `RASTER_DB=/path.sqlite` points at another database
   file.
+- **What the server must never serve.** A Raster site is one folder, and most
+  of it is private: the framework, the app's code and config, the SQLite file,
+  the view files themselves. The rules are in one list,
+  `system/private_paths.php`, and everything comes from it — the router in
+  `index.php` for `php -S`, the `.htaccess` that ships with Raster, and:
+
+  ```sh
+  php bin/raster deploy --config=apache          # the .htaccess itself
+  php bin/raster deploy --config=nginx  --host=site.example --root=/srv/site
+  php bin/raster deploy --config=caddy  --host=site.example --socket=unix//run/php/php-fpm.sock
+  ```
+
+  `raster serve` is PHP's built in server, for development. In production run
+  PHP-FPM behind one of those. `doctor` checks that the `.htaccess` on disk
+  still carries every rule, and `doctor --edge` asks the live site for one real
+  file per rule and fails if any of them comes back.
 - **Page cache**, on by default in production (config `page_cache`):
   - Whole pages are cached for visitors without a session or a query string.
   - Any content change throws the cache away (`util::content_changed()` in
@@ -541,6 +578,7 @@ Set in `config/the_app.php` with `config::set('name')->to(value)`.
 | `page_cache`, `page_cache_ttl`, `page_cache_skip` | on in production, 3600, none | |
 | `mcp_token` | none | same as `RASTER_MCP_TOKEN` |
 | `api_system_models` | `cms` | system models reachable at `/api` |
+| `allow_deprecated` | none | `array('<id>' => true or path pattern(s))`: uses of deprecated features this site keeps on purpose, so `doctor` counts them apart instead of warning |
 
 Environment variables: `RASTER_ENV`, `RASTER_URL`, `RASTER_DB`,
 `RASTER_APP` (the application folder, `application` by default),
@@ -573,9 +611,12 @@ command-line output). They win over the settings above.
   moved files). The version an app is at is in `config/raster-version`.
   Database changes stay with `raster schema --apply`.
 - `php bin/raster doctor` checks PHP, versions, edited framework files,
-  templates, the database, uses of deprecated features
-  (`system/tools/deprecations.php`) and, in production, the site address, mail and
-  tokens. Exit 1 when something must be fixed.
+  templates, the database, whether `.htaccess` still carries every rule in
+  `system/private_paths.php`, uses of deprecated features
+  (`system/tools/deprecations.php`, minus the ones config `allow_deprecated`
+  says are on purpose) and, in production, the site address, mail and
+  tokens. `--edge` also asks the live site for files it must refuse. Exit 1
+  when something must be fixed.
 - `php bin/raster new <folder>` starts a new site from this copy of Raster.
 - `CHANGELOG.md` in the repository lists what changed in each release.
 

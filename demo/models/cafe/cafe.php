@@ -125,6 +125,20 @@ class cafe
 		return '';
 	}
 
+	// printed in a block whose closing tag leaves the name out
+	function short_value() {
+		return 'closed short';
+	}
+
+	// rows for a render block closed the short way, with a nested attribute
+	// block closed the same way
+	function short_rows() {
+		return array(
+			array('label' => 'first', 'link' => 'https://example.com/first'),
+			array('label' => 'second', 'link' => 'https://example.com/second'),
+		);
+	}
+
 	// the same self-closing tag several times in a row
 	function links() {
 		return array(array('url' => 'https://example.com/a'), array('url' => 'https://example.com/b'));

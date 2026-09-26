@@ -17,7 +17,7 @@ php tests/demo.php                        # the whole matrix
 | `/events`, `/journal` | ordering, drafts, scheduled items, author filter links |
 | `/visit` | a booking form using every validation rule, a contact form, the newsletter form: three forms on one page |
 | `/members`, `/staff`, `/account`, `/login`, `/register`, `/forgot`, `/password/new` | accounts, roles and protected pages |
-| `/lab` | the engine's edge cases, one section each |
+| `/lab` | the engine's edge cases, one section each, including short closing tags |
 | `/journal.rss`, `/journal.atom`, `/feed.json`, `/sitemap.xml`, `/hours.txt` | formats |
 | `?lang=ro` | the Romanian translation |
 
@@ -40,6 +40,7 @@ php tests/demo.php                        # the whole matrix
 | A13 | a custom 404 page (`error_document_404`) |
 | A14 | a route to a view in another theme (`->from('print')`) |
 | A15 | `rewrite` off: every link goes through index.php |
+| A16 | the private extensions are 403, `composer.phar` too (system/private_paths.php) |
 | B1 | RSS: content type, well-formed, escaped |
 | B2 | Atom |
 | B3 | JSON views: rows become a list |
@@ -92,6 +93,9 @@ php tests/demo.php                        # the whole matrix
 | C42 | lint checks event bindings: missing models and methods, events nothing sends |
 | C43 | named queries: `:name` placeholders, the calling model's `sql/` by default, a missing name is an error that lint finds |
 | C44 | `print.@attr.model.method` outside render blocks sets an attribute from a model |
+| C45 | a closing tag without the name: `<!-- /render -->` |
+| C46 | a closing tag without the arguments: `<!-- /render.cms.menu -->` |
+| C47 | a short closing tag in a partial's `res` fragment, and lint accepts what the engine renders |
 | D1 | raster_form and honeypot on every post form |
 | D2 | the session token on forms for logged in users |
 | D3 | posts from other sites refused (Origin, Sec-Fetch-Site, Referer, /api too) |
@@ -224,4 +228,8 @@ php tests/demo.php                        # the whole matrix
 | N2 | raster lint and --json, --all-themes |
 | N3 | raster render and its exit codes |
 | N4 | raster serve |
+| N5 | raster annotations, and --json: the grammar as data |
+| N6 | raster lint --fix repairs what is mechanical and leaves the rest |
+| N7 | raster deploy --config=apache\|nginx\|caddy |
+| N8 | raster doctor: .htaccess rules, `allow_deprecated`, and --edge asks the running site |
 | O1 | the sitemap skips private pages and lists items |
