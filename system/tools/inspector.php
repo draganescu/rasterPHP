@@ -335,7 +335,24 @@ class raster_inspector {
 		}
 	}
 
+	// print.@src.cms.photo: the attribute, and the model call without it
+	static function attribute_call($ref) {
+		return preg_match('/^([@+])([a-zA-Z0-9_\-:]+)\.([a-z0-9_\-]+\..+)$/', $ref, $m) ? array('attribute' => $m[2], 'append' => $m[1] === '+', 'ref' => $m[3]) : null;
+	}
+
 	protected function lint_model_call($block, &$problems) {
+		$attribute = $block['keyword'] === 'print' ? self::attribute_call($block['ref']) : null;
+		if ($attribute) {
+			if ($block['type'] === 'self') {
+				$problems[] = self::problem('error', $block, "Attribute directives wrap the tag they change: <!-- {$block['name']} --><img {$attribute['attribute']}=\"...\"><!-- /{$block['name']} -->");
+				return;
+			}
+			if (!preg_match('/\s'.preg_quote($attribute['attribute'], '/').'\s*=/i', $block['inner'])) {
+				$problems[] = self::problem('error', $block, "{$block['raw']} sets the '{$attribute['attribute']}' attribute but the HTML it wraps has no {$attribute['attribute']}=\"...\"");
+			}
+			$block['ref'] = $attribute['ref'];
+			$block['type'] = 'open';
+		}
 		$ref = self::model_reference($block['ref']);
 		if ($ref === false) {
 			$problems[] = self::problem('error', $block, "{$block['raw']} is outside any render block, so it must name a model and a method: <!-- {$block['keyword']}.model.method -->");
@@ -855,12 +872,13 @@ class raster_inspector {
 
 	protected function collect_content($blocks, &$fields, &$collections, $view, $reserved) {
 		foreach ($blocks as $block) {
-			$ref = in_array($block['keyword'], array('print', 'render')) ? self::model_reference($block['ref']) : false;
+			$attribute = $block['keyword'] === 'print' ? self::attribute_call($block['ref']) : null;
+			$ref = in_array($block['keyword'], array('print', 'render')) ? self::model_reference($attribute ? $attribute['ref'] : $block['ref']) : false;
 			if ($ref && $ref['model'] === 'cms') {
 				$call = template::parse_call($ref['method']);
 				if ($call !== false && !in_array($call[0], $reserved)) {
 					if ($block['keyword'] === 'print' && !isset($fields[$call[0]])) {
-						$fields[$call[0]] = array('default' => trim($block['inner']));
+						$fields[$call[0]] = array('default' => $attribute ? template::get_attribute($block['inner'], $attribute['attribute']) : trim($block['inner']));
 					}
 					if ($block['keyword'] === 'render') {
 						$this->collect_collection($block, $call, $collections, $view);

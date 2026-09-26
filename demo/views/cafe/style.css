@@ -40,3 +40,5 @@ input[type=checkbox], input[type=radio] { width: auto; }
 .signup h2 { font-size: 1rem; margin: 0 0 8px; color: var(--fg); }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 .lab section { border-top: 1px dashed var(--line); padding: 8px 0; }
+.photo { display: block; width: calc(100% + 40px); margin: -16px -20px 12px; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 13px 13px 0 0; background: var(--line); }
+.photo.wide { width: 100%; margin: 16px 0; aspect-ratio: 2 / 1; border-radius: 14px; }

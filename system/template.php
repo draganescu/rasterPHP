@@ -53,6 +53,45 @@ class template {
   public $current_call = '';
   // emails get absolute links and no <base> or scripts
   public $is_email = false;
+  // ##Editor marks
+  // For logged in editors the CMS marks what it prints: page fields,
+  // collections, their items and item fields. Each mark is a pair of
+  // comments (<!--raster:s 3--> … <!--raster:e 3-->), or one comment right
+  // before a tag whose attribute holds the value (<!--raster:a 4-->). The
+  // details (which field of which page or item) are in $marks, sent to the
+  // editor script. null when nobody is editing.
+  public $marks = null;
+  // the attribute a print sets: print.@src.cms.photo
+  public $current_attr = null;
+  // a mark the model asked for, for the attribute print being processed
+  public $pending_mark = null;
+
+  function mark($info) {
+    $this->marks[count($this->marks) + 1] = $info;
+    return count($this->marks);
+  }
+
+  // sets (or with $append adds to) an attribute of the first tag in $html
+  static function set_attribute($html, $attribute, $value, $append = false) {
+    $value = htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8', false);
+    if (!preg_match('/<[a-zA-Z][^>]*>/s', $html, $tag, PREG_OFFSET_CAPTURE)) return $html;
+    $open = $tag[0][0];
+    $pattern = '/(\s'.preg_quote($attribute, '/').'\s*=\s*)(["\'])(.*?)\2/is';
+    if (preg_match($pattern, $open)) {
+      $changed = preg_replace_callback($pattern, function ($m) use ($value, $append) {
+        return $m[1].'"'.($append ? trim($m[3].' '.$value) : $value).'"';
+      }, $open, 1);
+    } else {
+      $changed = preg_replace('/\s*(\/?)>$/', ' '.$attribute.'="'.$value.'"$1>', $open, 1);
+    }
+    return substr_replace($html, $changed, $tag[0][1], strlen($open));
+  }
+
+  // the value of an attribute of the first tag in $html, or ''
+  static function get_attribute($html, $attribute) {
+    if (!preg_match('/<[a-zA-Z][^>]*>/s', $html, $tag)) return '';
+    return preg_match('/\s'.preg_quote($attribute, '/').'\s*=\s*(["\'])(.*?)\1/is', $tag[0], $m) ? html_entity_decode($m[2], ENT_QUOTES, 'UTF-8') : '';
+  }
 
   public function __set($name, $value) { $this->vars[$name] = $value; }
   public function __get($name) { return isset($this->vars[$name]) ? $this->vars[$name] : null; }
@@ -196,6 +235,13 @@ class template {
 			if($v == 'print')
 				$template->models_methods_print[] = array($methodstarts[4][$k],$methodstarts[5][$k]);
 		}
+		// a model value in an attribute: <!-- print.@src.cms.photo --><img src="a.jpg"><!-- /print.@src.cms.photo -->
+		preg_match_all('/<!-- print\.([@+][a-zA-Z0-9_\-:]+)\.([a-z0-9_\-]+)\.([^\s]+?) -->/', $template->output, $attrstarts);
+		foreach ($attrstarts[0] as $k => $v) {
+			$template->models[] = $attrstarts[2][$k];
+			$template->models_methods_print[] = array($attrstarts[2][$k], $attrstarts[3][$k], $attrstarts[1][$k]);
+		}
+		$template->models = array_values(array_unique($template->models));
 
 		$template->models_methods_render = array_reverse($template->models_methods_render);
 		$template->models_methods_print = array_reverse($template->models_methods_print);
@@ -204,10 +250,29 @@ class template {
 		
   }
 
-  public function set_current_block($model, $method, $action) {
+  public function set_current_block($model, $method, $action, $attr = null) {
   	self::$model = $model;
   	$this->current_call = $model.'.'.$method;
+  	$this->current_attr = null;
+  	$this->pending_mark = null;
   	$this->current_params = array('pos1' => false, 'pos2' => 0, 'render_template' => '', 'datastarts' => array(array(), array(), array()));
+  	if ($action == 'print' && $attr !== null) {
+  		$this->current_action = 'print';
+  		$this->current_attr = $attr;
+  		$start = "<!-- print.$attr.$model.$method -->";
+  		$end = "<!-- /print.$attr.$model.$method -->";
+  		$pos1 = strpos($this->output, $start);
+  		if ($pos1 === false) return false;
+  		$endpos = strpos($this->output, $end, $pos1);
+  		if ($endpos === false) $this->fail("Unclosed $start (expected $end)");
+  		$inner = substr($this->output, $pos1 + strlen($start), $endpos - $pos1 - strlen($start));
+  		// the model sees the attribute's value as the default
+  		$this->current_block = self::get_attribute($inner, substr($attr, 1));
+  		$this->current_params['render_template'] = $inner;
+  		$this->current_params['pos1'] = $pos1;
+  		$this->current_params['pos2'] = $endpos - $pos1 + strlen($end);
+  		return;
+  	}
   	if ($action == 'print') {
   		$this->current_action = 'print';
   		$isalt = false;
@@ -390,6 +455,17 @@ class template {
     	
   		extract($this->current_params);
   		if ($pos1 === false) return false;
+
+			if ($this->current_attr !== null) {
+				$tag = $render_template;
+				if (!($data === false || $data === null || $data === '')) {
+					if (!is_scalar($data)) $this->fail("print.{$this->current_attr}.$model.$method returned ".gettype($data)."; an attribute needs a string");
+					$tag = self::set_attribute($tag, substr($this->current_attr, 1), $data, $this->current_attr[0] === '+');
+				}
+				if ($this->pending_mark !== null) $tag = '<!--raster:a '.$this->pending_mark.'-->'.$tag;
+				$this->output = substr_replace($this->output, $tag, $pos1, $pos2);
+				return 'attr';
+			}
 
 			if($model == 'session')
 			{
@@ -650,6 +726,13 @@ class template {
 		}
 
 		if(!is_array($data_arr)) return false;
+
+		// editor marks for CMS collections
+		$marking = $this->marks !== null && $model === 'cms' && !array_key_exists('__', $data_arr);
+		if ($marking) {
+			$call = self::parse_call($method);
+			$collection = $call ? $call[0] : $method;
+		}
 		
 		foreach($data_arr as $data)
 		{
@@ -658,6 +741,16 @@ class template {
 
 			if(!is_array($data))
 				continue;
+
+			$item_mark = null;
+			if ($marking && isset($data['id'])) {
+				$item_mark = $this->mark(array(
+					'kind' => 'item', 'collection' => $collection, 'id' => (int)$data['id'],
+					'enabled' => isset($data['enabled']) ? (string)$data['enabled'] : '1',
+					'published_at' => isset($data['published_at']) ? (string)$data['published_at'] : '',
+					'values' => array_filter($data, function ($v, $k) { return is_scalar($v) && strpos($k, 'raster_') !== 0; }, ARRAY_FILTER_USE_BOTH),
+				));
+			}
 
 			$rendered_tpl = $render_template;
 			foreach ($datastarts[0] as $key => $value) {
@@ -736,7 +829,10 @@ class template {
 		                if($is_attr)
 		                {
 		                	if (is_string($data[$datakey])) $data[$datakey] = htmlspecialchars($data[$datakey], ENT_QUOTES, 'UTF-8', false);
-			                if($data[$datakey] === false)
+			                // an empty value keeps the mock-up's attribute (a new image field, say)
+			                if($data[$datakey] === null || $data[$datakey] === '')
+								$attrchange = $current_item;
+			                elseif($data[$datakey] === false)
 								$attrchange = preg_replace("% ".$dataattr."(.*?)=(.*?)('|\")(.*?)('|\")%", ' ', $current_item);			                	
 			                else {
 			                	if($is_append)
@@ -745,12 +841,20 @@ class template {
 				                	$attrchange = preg_replace("% ".$dataattr."(.*?)=(.*?)('|\")(.*?)('|\")%", " ".$dataattr.'="'.str_replace('$', '\$', $data[$datakey]).'"', $current_item);
 			                }
 
+			                if ($item_mark !== null && strpos($datakey, 'raster_') !== 0) {
+			                	$attrchange = '<!--raster:a '.$this->mark(array('kind' => 'item_attr', 'item' => $item_mark, 'field' => $datakey, 'attr' => $dataattr)).'-->'.$attrchange;
+			                }
 			                $rendered_tpl = substr_replace($rendered_tpl, $attrchange, $rpos1, $rpos2);
 
 		                }
 		                else
 		                {
-		                	$rendered_tpl = substr_replace($rendered_tpl, $this->escape($data[$datakey]), $rpos1, $rpos2);
+		                	$printed = $this->escape($data[$datakey]);
+		                	if ($item_mark !== null && is_scalar($data[$datakey]) && strpos($datakey, 'raster_') !== 0) {
+		                		$field_mark = $this->mark(array('kind' => 'item_field', 'item' => $item_mark, 'field' => $datakey));
+		                		$printed = '<!--raster:s '.$field_mark.'-->'.$printed.'<!--raster:e '.$field_mark.'-->';
+		                	}
+		                	$rendered_tpl = substr_replace($rendered_tpl, $printed, $rpos1, $rpos2);
 		                	$occurences = substr_count($rendered_tpl, $datastarts[0][$key]);
 							if($occurences > 0)
 							{
@@ -768,7 +872,7 @@ class template {
 										if ($endpos === false) break;
 										$rpos2 = $endpos - $rpos1 + strlen($end);
 									}
-									$rendered_tpl = substr_replace($rendered_tpl, $this->escape($data[$datakey]), $rpos1, $rpos2);
+									$rendered_tpl = substr_replace($rendered_tpl, $printed, $rpos1, $rpos2);
 								}
 							}
 		              	}
@@ -779,12 +883,27 @@ class template {
 			$rendered_tpl = preg_replace_callback('/<!-- \/?print\.([@+][a-zA-Z0-9_\-:]+\.)?([A-Za-z0-9_\-]+) \/?-->/', function ($m) {
 				return $m[2] === '' ? $m[0] : '';
 			}, $rendered_tpl);
+			if ($item_mark !== null) $rendered_tpl = '<!--raster:s '.$item_mark.'-->'.$rendered_tpl.'<!--raster:e '.$item_mark.'-->';
 			// rows of a text view are lines; rows of a JSON view are list items
 			if ($this->format === 'txt') $rendered_tpl = trim($rendered_tpl, "\r\n");
 			$rendered_data .= ($this->format === 'json' && $rendered_data !== '' ? ',' : '')."\n".$rendered_tpl;
 		}
 
 		$this->render_results[$model][$method][] = $rendered_data;
+
+		if ($marking) {
+			// the whole list, with the template's mock-up item for new ones
+			$filters = array();
+			if ($call && isset($call[1][0]) && is_string($call[1][0])) {
+				foreach (explode('&', $call[1][0]) as $pair) {
+					$pair = explode('=', $pair, 2);
+					if ($pair[0] !== '' && !in_array($pair[0], array('order', 'limit'))) $filters[$pair[0]] = isset($pair[1]) ? $pair[1] : '';
+				}
+			}
+			$mockup = $this->mockup($render_template);
+			$list_mark = $this->mark(array('kind' => 'collection', 'collection' => $collection, 'filters' => $filters, 'fields' => $mockup['fields']));
+			$rendered_data = '<!--raster:s '.$list_mark.'-->'.$rendered_data.'<template data-raster-mockup="'.$list_mark.'">'.$mockup['html'].'</template><!--raster:e '.$list_mark.'-->';
+		}
 
 		if(!array_key_exists("__", $data_arr))
 			$this->output = substr_replace($this->output, $rendered_data, $pos1, $pos2);
@@ -793,6 +912,30 @@ class template {
     }
     
     
+    // A collection's template turned into the editor's model for new items:
+    // fields become <!--raster:m name-->default<!--raster:/m-->, and
+    // attribute fields <!--raster:ma name attr--> before their tag.
+    function mockup($html) {
+      $fields = array();
+      $html = preg_replace_callback('/<!-- print\.([@+])([a-zA-Z0-9_\-:]+)\.([A-Za-z0-9_\-@]+) -->(.*?)<!-- \/print\.\1\2\.\3 -->/s', function ($m) use (&$fields) {
+        if (strpos($m[3], 'raster_') === 0) return $m[4];
+        $fields[$m[3]] = self::get_attribute($m[4], $m[2]);
+        return '<!--raster:ma '.$m[3].' '.$m[2].'-->'.$m[4];
+      }, $html);
+      $html = preg_replace_callback('/<!-- print\.([A-Za-z0-9_\-]+) -->(.*?)<!-- \/print\.\1 -->/s', function ($m) use (&$fields) {
+        if (strpos($m[1], 'raster_') === 0) return $m[2];
+        if (!isset($fields[$m[1]])) $fields[$m[1]] = trim($m[2]);
+        return '<!--raster:m '.$m[1].'-->'.$m[2].'<!--raster:/m-->';
+      }, $html);
+      $html = preg_replace_callback('/<!-- print\.([A-Za-z0-9_\-]+) \/-->/', function ($m) use (&$fields) {
+        if (!isset($fields[$m[1]])) $fields[$m[1]] = '';
+        return '<!--raster:m '.$m[1].'--><!--raster:/m-->';
+      }, $html);
+      // anything else (nested model calls) keeps its mock-up content
+      $html = preg_replace('/<!-- \/?(print|render)\.[^ ]+ \/?-->/', '', $html);
+      return array('html' => $html, 'fields' => $fields);
+    }
+
     function view_path($view) {
     	return APPBASE.config::get('views_path').DIRECTORY_SEPARATOR.$this->theme.DIRECTORY_SEPARATOR.$view.$this->view_ext;
     }

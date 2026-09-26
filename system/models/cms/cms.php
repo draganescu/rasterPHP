@@ -137,18 +137,10 @@ class cms
 		$this->page_name = $page_name;
 		$this->slug = $slug;
 
-		try {
-			// edits sent by the in-page editor
-			if (cms::loggedin() && util::post('raster_action')) {
-				if (!util::csrf_valid(util::post('csrf'))) {
-					http_response_code(403);
-					exit('Invalid or expired form, reload the page and try again.');
-				}
-				$this->save_page();
-				$this->save_data();
-				$this->add_data();
-			}
+		// editors get the page marked for the in-page editor
+		cms_editor::start();
 
+		try {
 			// the page's row is created by its first print.cms field
 			$this->page = cms_store::latest($page_name);
 		} catch (Exception $e) {
@@ -203,7 +195,11 @@ class cms
 			R::store($page);
 		}
 		$value = $page->$name;
-		return ($value === null || (string)$value === '') ? false : $value;
+		$value = ($value === null || (string)$value === '') ? false : $value;
+		if (cms_editor::editing()) {
+			return cms_editor::field($type, $type === 'sitepage' ? 'site' : $this->slug, $name, $value, template::get('current_block'));
+		}
+		return $value;
 	}
 
 	protected function collection($name, $arguments) {
@@ -368,15 +364,6 @@ class cms
 		return $data_filter;
 	}
 
-	protected function get_page_variable($page, $variable) {
-		$db = database::instance('cms');
-		$data = cms_store::latest(cms::field_type((string)$variable, cms::safe_type($page)));
-		return array(
-			"type" => $data ? $data->getMeta('type') : '',
-			"value" => $data ? $data->$variable : ''
-		);
-	}
-
 	// types posted by the editor must be tables the CMS owns
 	static function safe_type($type) {
 		$type = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', (string)$type));
@@ -393,52 +380,14 @@ class cms
 		database::instance('cms');
 	}
 
-	function edit_data() {
-		cms::require_admin();
-		$data_type = cms::collection_type(util::post('name'));
-		$data = cms_store::table_exists($data_type) ? R::findAll($data_type) : array();
-		$fields = cms_store::columns($data_type);
-		unset($fields['password']);
-		$csrf = util::csrf_token();
-		$type = $data_type;
-		include BASE.'models/cms/editor/data.php';
-		return false;
-	}
-
-	function edit_item() {
-		cms::require_admin();
-		$item_type = cms::collection_type(util::post('name'));
-		$item_id = (int)util::post('did');
-		$data = R::load($item_type, $item_id);
-		$fields = cms_store::columns($item_type);
-		$csrf = util::csrf_token();
-		include BASE.'models/cms/editor/item.php';
-		return false;
-	}
-
-	function add_item() {
-		cms::require_admin();
-		$item_type = cms::collection_type(util::post('name'));
-		$data = R::dispense($item_type);
-		$fields = cms_store::columns($item_type);
-		$csrf = util::csrf_token();
-		include BASE.'models/cms/editor/add.php';
-		return false;
-	}
-
-	function remove_item() {
-		cms::require_admin(true);
-		$item_type = cms::collection_type(util::post('name'));
-		return array('removed' => cms_store::delete_item($item_type, (int)util::post('did')));
-	}
-
-	function edit_variable() {
-		cms::require_admin();
-		extract($this->get_page_variable(util::post('page'), util::post('name')));
-		$csrf = util::csrf_token();
-		include BASE.'models/cms/editor/page.php';
-		return false;
-	}
+	// ##The in-page editor (see editor.php): POST /api/cms/editor_… with csrf
+	public function editor_save_field() { return cms_editor::save_field(); }
+	public function editor_save_item() { return cms_editor::save_item(); }
+	public function editor_delete_item() { return cms_editor::delete_item(); }
+	public function editor_history() { return cms_editor::history(); }
+	public function editor_restore() { return cms_editor::restore(); }
+	public function editor_upload() { return cms_editor::upload(); }
+	public function editor_script() { return cms_editor::script(); }
 
 	function style() {
 		if (!util::param('output', false)) {
@@ -450,24 +399,7 @@ class cms
 		return false;
 	}
 
-	public function css() {
-		$file = util::param('raster_file', 'raster_cms');
-		if (!in_array($file, array('raster_cms', 'croppic'))) return false;
-		header("Content-Type: text/css");
-		header("X-Content-Type-Options: nosniff");
-		echo file_get_contents(BASE.'models/cms/css/'.$file.'.css');
-		return false;
-	}
-
-	public function script() {
-		$file = util::param('raster_file', 'raster_cms');
-		if (!in_array($file, array('raster_cms', 'croppic.min'))) return false;
-		header("content-type: application/javascript");
-		echo file_get_contents(BASE.'models/cms/js/'.$file.'.js');
-		return false;
-	}
-
-	// the toolbar's Log out: POST /api/cms/logout with the session token
+	// the editor's Log out: POST /api/cms/logout with the session token
 	public function logout() {
 		if (!isset($_SERVER['REQUEST_METHOD']) || $_SERVER['REQUEST_METHOD'] !== 'POST') return false;
 		cms::require_admin(true);
@@ -501,146 +433,11 @@ class cms
 		return authentication::can('editor');
 	}
 
-	protected function save_page() {
-		if (util::post('raster_action') !== 'save_page') {
-			return false;
-		}
-		// edits always go to the page being viewed (or the site, for site_*)
-		$type = cms::field_type((string)util::post('variable_name'), $this->page_name);
-		$variable = (string)util::post('variable_name');
-		if (!preg_match('/^[a-z0-9_]+$/', $variable) || cms::reserved($variable, 'field') || !array_key_exists($variable, cms_store::columns($type))) {
-			return false;
-		}
-		cms_store::update_page($type, $this->slug, array($variable => util::post('raster_page_value')), array($variable));
-	}
-
-	protected function save_data() {
-		if (util::post('raster_action') !== 'save_data') {
-			return false;
-		}
-		$data_type = cms::collection_type(util::post('data_name'));
-		$this->store_posted_item($data_type, (int)util::post('data_id'));
-	}
-
-	protected function add_data() {
-		if (util::post('raster_action') !== 'add_data') {
-			return false;
-		}
-		$data_type = cms::collection_type(util::post('data_name'));
-		$this->store_posted_item($data_type, 0);
-	}
-
-	protected function store_posted_item($data_type, $id) {
-		$fields = cms_store::columns($data_type);
-		$values = array();
-		foreach ($fields as $key => $value) {
-			if (in_array($key, cms_store::$system_fields) || $key === 'password') continue;
-			if (array_key_exists($key, $_POST)) $values[$key] = util::post($key);
-		}
-		cms_store::save_item($data_type, $id, $values, array_keys($values));
-	}
-
-	// the editing toolbar, added to every page for logged in editors
-	public function buttons() {
-
-		if (!cms::loggedin()) {
-			return '';
-		}
-
-		$link = config::get('link_uri');
-		return '
-				<link rel="stylesheet" href="'.$link.'api/cms/css/raster_file/croppic">
-				<link rel="stylesheet" href="'.$link.'api/cms/css">
-				<script>
-					var Raster_Admin = {};
-					Raster_Admin.page_data = '.json_encode(array_values(array_unique($this->page_data)), JSON_HEX_TAG).';
-					Raster_Admin.page_variables = '.json_encode(array_values(array_unique($this->page_variables)), JSON_HEX_TAG).';
-					Raster_Admin.page_name = '.json_encode($this->page_name, JSON_HEX_TAG).';
-					Raster_Admin.csrf = '.json_encode(util::csrf_token()).';
-				</script>
-				<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
-				<script src="'.$link.'api/cms/script/raster_file/croppic.min"></script>
-				<script src="'.$link.'api/cms/script"></script>
-		';
-	}
-
-	// bound to before_output: adds the toolbar before </body>
+	// bound to before_output: the editor, for editors
 	public function inject_toolbar() {
 		if (!cms::loggedin() || !$this->page_name) return false;
-		$template = template::instance();
-		$buttons = $this->buttons();
-		if (stripos($template->output, '</body>') !== false) {
-			$template->output = preg_replace('#</body>#i', $buttons."\n</body>", $template->output, 1);
-		} else {
-			$template->output .= $buttons;
-		}
+		cms_editor::inject($this->page_name, $this->slug);
 		return true;
-	}
-
-	protected static function media_dir() {
-		$dir = dirname(BASE).'/'.trim(config::get('raster_media_folder', 'media'), '/').'/';
-		if (!is_dir($dir)) @mkdir($dir, 0775, true);
-		return $dir;
-	}
-
-	public function upload_media() {
-		cms::require_admin(true);
-		$allowed = array('gif' => IMAGETYPE_GIF, 'jpeg' => IMAGETYPE_JPEG, 'jpg' => IMAGETYPE_JPEG, 'png' => IMAGETYPE_PNG);
-		if (empty($_FILES['img']) || $_FILES['img']['error'] !== UPLOAD_ERR_OK) {
-			return array('status' => 'error', 'message' => 'Upload failed');
-		}
-		$extension = strtolower(pathinfo($_FILES['img']['name'], PATHINFO_EXTENSION));
-		$info = @getimagesize($_FILES['img']['tmp_name']);
-		if (!isset($allowed[$extension]) || !$info || $info[2] !== $allowed[$extension]) {
-			return array('status' => 'error', 'message' => 'Only gif, jpeg and png images are allowed');
-		}
-		$filename = bin2hex(random_bytes(8)).'.'.$extension;
-		move_uploaded_file($_FILES['img']['tmp_name'], cms::media_dir().$filename);
-		return array(
-			"status" => 'success',
-			"url" => config::get('base_uri').trim(config::get('raster_media_folder', 'media'), '/').'/'.$filename,
-			"width" => $info[0],
-			"height" => $info[1]
-		);
-	}
-
-	public function crop_media() {
-		cms::require_admin(true);
-
-		// only images already in the media folder can be cropped
-		$media_url = config::get('base_uri').trim(config::get('raster_media_folder', 'media'), '/').'/';
-		$imgUrl = (string)util::post('imgUrl');
-		if (strpos($imgUrl, $media_url) !== 0) return array('status' => 'error', 'message' => 'Unknown image');
-		$source = realpath(cms::media_dir().basename(substr($imgUrl, strlen($media_url))));
-		if (!$source || strpos($source, realpath(cms::media_dir())) !== 0) return array('status' => 'error', 'message' => 'Unknown image');
-
-		$n = function ($key) { return max(0, (int)round((float)util::post($key))); };
-		$imgInitW = $n('imgInitW'); $imgInitH = $n('imgInitH');
-		$imgW = max(1, $n('imgW')); $imgH = max(1, $n('imgH'));
-		$imgY1 = $n('imgY1'); $imgX1 = $n('imgX1');
-		$cropW = max(1, $n('cropW')); $cropH = max(1, $n('cropH'));
-
-		$what = getimagesize($source);
-		switch(strtolower($what['mime']))
-		{
-			case 'image/png': $source_image = imagecreatefrompng($source); break;
-			case 'image/jpeg': $source_image = imagecreatefromjpeg($source); break;
-			case 'image/gif': $source_image = imagecreatefromgif($source); break;
-			default: return array('status' => 'error', 'message' => 'image type not supported');
-		}
-
-		$resizedImage = imagecreatetruecolor($imgW, $imgH);
-		imagecopyresampled($resizedImage, $source_image, 0, 0, 0, 0, $imgW, $imgH, $imgInitW ?: $what[0], $imgInitH ?: $what[1]);
-		$dest_image = imagecreatetruecolor($cropW, $cropH);
-		imagecopyresampled($dest_image, $resizedImage, 0, 0, $imgX1, $imgY1, $cropW, $cropH, $cropW, $cropH);
-
-		$filename = "cropped_".bin2hex(random_bytes(8)).'.jpeg';
-		imagejpeg($dest_image, cms::media_dir().$filename, 90);
-
-		return array(
-			"status" => 'success',
-			"url" => $media_url.$filename
-		);
 	}
 
 	private function detect_data($key, $value) {

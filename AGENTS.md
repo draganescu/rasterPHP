@@ -85,6 +85,7 @@ Anything else is ignored at runtime, and `lint` reports it.
 |---|---|
 | `<!-- print.model.method -->default<!-- /print.model.method -->` | Replaced by the string the method returns. `false` or `null` keeps the default. |
 | `<!-- print.model.method /-->` | Same, with no default. |
+| `<!-- print.@src.model.method --><img src="a.jpg"><!-- /print.@src.model.method -->` | Sets the attribute of the tag it wraps (`+` instead of `@` appends). `false`, `null` or an empty string keep the mock-up's value. With `cms`, a page field such as a photo. |
 | `<!-- render.model.method --> … <!-- /render.model.method -->` | Repeated once per row the method returns. Inside, `print.key` is a key of the row. |
 | `<!-- remove --> … <!-- /remove -->` | Mock-up content. Removed before anything runs. Can't be nested. |
 | `<!-- res.name --> … <!-- /res.name -->` | A reusable fragment. |
@@ -114,7 +115,9 @@ the regions inside the form. Print blocks run after all render blocks.
   must already exist on the tag.
 - A value that is itself a list of rows repeats its `print.key` block once for
   each nested row, for example a post with its comments.
-- An empty array renders nothing. `false` keeps the mock-up content.
+- An empty array renders nothing. `false` keeps the mock-up content. For
+  `print.@attr.key`, `null` or an empty string keep the mock-up's attribute
+  (a new image field shows the template's picture), and `false` removes it.
 
 ### Method arguments
 
@@ -453,9 +456,33 @@ use `'model.method'`: `method(true)` returns
 
 ## Editors and agents
 
-- Editors (roles editor and admin) log in at `/login` and get a toolbar on
-  every page. They also see drafts. Visitors get no cookies until they log in
-  (except `lang`, when they pick a language).
+- Editors (roles editor and admin) log in at `/login`. They also see drafts.
+  Visitors get no cookies until they log in (except `lang`, when they pick a
+  language).
+- **The in-page editor.** For editors, the page itself is the editor: every
+  `print.cms` field, collection, item and item field is editable where it
+  shows, in the site's own type (`E` or the Edit button starts, changes save
+  when you leave a field, every change can be undone). Items get a handle to
+  edit details, duplicate, hide, schedule or delete them; each list ends with
+  a card for a new item, made from the template's mock-up. Photos (`print.@src`)
+  are replaced by choosing or dropping a picture, framed in the browser. The
+  Page panel lists fields the page can't show (in `<head>`, in attributes),
+  the lists, and the page's history. Nothing is added for visitors.
+  - How it works: while an editor looks at a page the CMS marks what it
+    prints (`<!--raster:s 3-->…<!--raster:e 3-->`, details in
+    `#raster-editor-config`), and `system/models/cms/editor/editor.js` saves
+    through `POST /api/cms/editor_save_field`, `editor_save_item`,
+    `editor_delete_item`, `editor_history`, `editor_restore` and
+    `editor_upload`, with the session token. They use the same store as MCP,
+    so revisions, field checks and events are the same.
+  - Its colours and fonts come from the page (body text, background, the
+    first button's colour as the accent). To choose them, set
+    `--raster-accent`, `--raster-on-accent`, `--raster-font`,
+    `--raster-heading-font`, `--raster-bg`, `--raster-fg`,
+    `--raster-surface` or `--raster-radius` on `:root`.
+  - Its words are in English; `system/models/cms/editor/lang/<lang>.php`
+    translates them (Romanian is included), and
+    `application/i18n/<lang>/raster_editor.php` overrides any of them.
 - **MCP** is available in two ways:
   - over stdio: `php bin/raster mcp`, already set up in `.mcp.json`;
   - over HTTP: POST to `/mcp` with `Authorization: Bearer $RASTER_MCP_TOKEN`.
@@ -561,6 +588,7 @@ php tests/run.php                 # framework test suite
 php tests/demo.php                # the demo café: every feature, end to end
 php tests/update.php              # new, update, upgrade, doctor
 php tests/mutate.php              # slow: would the demo suite notice a regression?
+node tests/editor-browser.js      # the in-page editor in Chromium (needs Playwright)
 ```
 
 A new feature gets an ID in `demo/README.md`, a use in the demo and a test.

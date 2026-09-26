@@ -96,7 +96,7 @@ function cookie_from($headers) {
 	return implode('; ', $cookies);
 }
 function token_in($html) {
-	return preg_match('/name="csrf" value="([a-f0-9]+)"/', $html, $m) ? $m[1] : (preg_match('/Raster_Admin.csrf = "([a-f0-9]+)"/', $html, $m) ? $m[1] : null);
+	return preg_match('/name="csrf" value="([a-f0-9]+)"/', $html, $m) ? $m[1] : (preg_match('/"csrf":"([a-f0-9]+)"/', $html, $m) ? $m[1] : null);
 }
 function login($base, $login, $password) {
 	list($status, , $headers) = http('POST', "$base/login", array('raster_form' => 'authentication.login', 'login' => $login, 'password' => $password));
@@ -611,55 +611,144 @@ test('G17', 'accounts from older versions', function () use ($root, $db) {
 
 // ## E (editors). The in-page editor
 
-test(array('E17', 'E18', 'E19', 'E20'), 'the editor toolbar and its endpoints', function () use ($base) {
+function editor_config($html) {
+	return preg_match('#<script id="raster-editor-config" type="application/json">(.*?)</script>#s', $html, $m) ? json_decode($m[1], true) : null;
+}
+function mark_of($config, $kind, $test) {
+	foreach ($config['marks'] as $id => $mark) if ($mark['kind'] === $kind && $test($mark)) return array($id, $mark);
+	return array(null, null);
+}
+test(array('E17', 'E20', 'E27'), 'the editor: only for editors, marks where the page shows content', function () use ($base) {
 	$member = login($base, 'maria@example.com', 'reset password');
-	lacks(http('GET', "$base/about", null, array("Cookie: $member"))[1], 'Raster_Admin', 'members get no toolbar');
-	same(403, http('POST', "$base/api/cms/edit_data", array('name' => 'menu'), array("Cookie: $member"))[0]);
-	same(403, http('POST', "$base/api/cms/edit_data", array('name' => 'menu'))[0]);
+	lacks(http('GET', "$base/about", null, array("Cookie: $member"))[1], 'raster-editor-config', 'members get no editor');
+	lacks(http('GET', "$base/about")[1], 'raster:', 'visitors get the plain page');
+	same(403, http('POST', "$base/api/cms/editor_save_field", array('type' => 'aboutpage', 'field' => 'heading', 'value' => 'x'), array("Cookie: $member"))[0]);
+	same(403, http('POST', "$base/api/cms/editor_save_field", array('type' => 'aboutpage', 'field' => 'heading', 'value' => 'x'))[0]);
 	$staff = login($base, 'staff@cafe.test', 'staff password');
 	$page = http('GET', "$base/about", null, array("Cookie: $staff"))[1];
-	has($page, 'Raster_Admin.page_variables');
-	$token = token_in($page);
+	$config = editor_config($page);
+	check($config, 'the editor config');
+	same(array('type' => 'aboutpage', 'slug' => '/about'), $config['page']);
+	same('Sam', $config['user']['name']);
+	has($page, '/api/cms/editor_script?v=');
+	list($id, $heading) = mark_of($config, 'field', function ($m) { return $m['field'] === 'heading'; });
+	same('aboutpage', $heading['type']);
+	has($page, "<h1><!--raster:s $id-->About us<!--raster:e $id--></h1>");
+	list($id, $photo) = mark_of($config, 'field', function ($m) { return $m['field'] === 'photo'; });
+	same('src', $photo['attr']);
+	has($page, "<!--raster:a $id--><img class=\"photo wide\" src=\"img/about.jpg\"");
+	list($id, $body) = mark_of($config, 'field', function ($m) { return $m['field'] === 'body'; });
+	same(true, $body['rich']);
+	// a field in <head> can't be edited in place: the panel offers it
+	list($id, $description) = mark_of($config, 'field', function ($m) { return $m['field'] === 'site_description'; });
+	same(true, $description['hidden']);
+	same('sitepage', $description['type']);
+	has($page, '<meta name="description" content="A small café in București: good coffee, cake and quiet corners.">');
+	// collections: every item and field, and the mock-up for new items
+	$menu = http('GET', "$base/menu", null, array("Cookie: $staff"))[1];
+	$config = editor_config($menu);
+	list($list_id, $list) = mark_of($config, 'collection', function ($m) { return $m['collection'] === 'menu'; });
+	same('img/menu/flat-white.jpg', $list['fields']['photo']);
+	has($menu, '<template data-raster-mockup="'.$list_id.'">');
+	has($menu, '<!--raster:ma photo src--><img class="photo" src="img/menu/flat-white.jpg" alt="">');
+	has($menu, '<!--raster:m name-->Flat white<!--raster:/m-->');
+	list($item_id, $item) = mark_of($config, 'item', function ($m) { return $m['values']['name'] === 'Americano'; });
+	check($item, 'an item mark');
+	list($field_id) = mark_of($config, 'item_field', function ($m) use ($item_id) { return $m['item'] == $item_id && $m['field'] === 'name'; });
+	has($menu, "<!--raster:s $field_id-->Americano<!--raster:e $field_id-->");
+	list($attr_id) = mark_of($config, 'item_attr', function ($m) use ($item_id) { return $m['item'] == $item_id && $m['field'] === 'photo'; });
+	has($menu, "<!--raster:a $attr_id--><img class=\"photo\"");
+	// the script
+	list($status, $js, $headers) = http('GET', "$base/api/cms/editor_script");
+	same(200, $status);
+	has(header_value($headers, 'Content-Type'), 'application/javascript');
+	has($js, 'raster-editor-config');
+});
+test(array('E18', 'E19', 'E28'), 'the editor saves pages and items, keeps revisions and restores them', function () use ($base) {
+	$staff = login($base, 'staff@cafe.test', 'staff password');
 	$h = array("Cookie: $staff");
-	has(http('POST', "$base/api/cms/edit_variable", array('page' => 'aboutpage', 'name' => 'heading', 'csrf' => $token), $h)[1], 'name="raster_action" value="save_page"');
-	has(http('POST', "$base/api/cms/edit_data", array('name' => 'menu', 'csrf' => $token), $h)[1], 'data_editor');
-	has(http('POST', "$base/api/cms/edit_item", array('name' => 'menu', 'did' => 1, 'csrf' => $token), $h)[1], 'name="raster_action" value="save_data"');
-	has(http('POST', "$base/api/cms/add_item", array('name' => 'menu', 'csrf' => $token), $h)[1], 'name="raster_action" value="add_data"');
-	has(http('POST', "$base/about", array('raster_action' => 'save_page', 'variable_name' => 'heading', 'raster_page_value' => 'Edited in the page', 'csrf' => $token), $h)[1], '<h1>Edited in the page</h1>');
-	http('POST', "$base/menu", array('raster_action' => 'add_data', 'data_name' => 'menu', 'name' => 'Zebra cake', 'description' => 'Stripes', 'price' => '12', 'category' => 'cakes', 'csrf' => $token), $h);
-	$item = null;
-	foreach (mcp($base, 'list_items', array('collection' => 'menu', 'limit' => 100))['items'] as $row) if ($row['name'] === 'Zebra cake') $item = $row;
-	check($item, 'add_data');
-	http('POST', "$base/menu", array('raster_action' => 'save_data', 'data_name' => 'menu', 'data_id' => $item['id'], 'name' => 'Zebra torte', 'description' => 'Stripes', 'price' => '13', 'category' => 'cakes', 'csrf' => $token), $h);
-	same('Zebra torte', mcp($base, 'get_item', array('collection' => 'menu', 'id' => $item['id']))['name']);
-	has(http('POST', "$base/api/cms/remove_item", array('name' => 'menu', 'did' => $item['id'], 'csrf' => $token), $h)[1], '"removed":true');
-	same(404, http('GET', "$base/menu/menu_item/{$item['id']}")[0]);
-	mcp($base, 'update_page', array('page' => 'about', 'fields' => array('heading' => 'About us')));
+	$token = token_in(http('GET', "$base/about", null, $h)[1]);
+	same(403, http('POST', "$base/api/cms/editor_save_field", array('type' => 'aboutpage', 'field' => 'heading', 'value' => 'No token'), $h)[0], 'the session token is needed');
+	$save = function ($method, $fields) use ($base, $h, $token) {
+		list($status, $body) = http('POST', "$base/api/cms/$method", array_merge($fields, array('csrf' => $token)), $h);
+		return array($status, json_decode($body, true));
+	};
+	list($status, $saved) = $save('editor_save_field', array('type' => 'aboutpage', 'slug' => '/about', 'field' => 'heading', 'value' => 'Edited in the page'));
+	same(200, $status);
+	same('Edited in the page', $saved['value']);
+	has(http('GET', "$base/about")[1], '<h1>Edited in the page</h1>');
+	list($status, $error) = $save('editor_save_field', array('type' => 'aboutpage', 'slug' => '/about', 'field' => 'made_up', 'value' => 'x'));
+	same(400, $status);
+	has($error['error'], "Unknown field 'made_up'");
+	same(400, $save('editor_save_field', array('type' => 'userpage', 'field' => 'password', 'value' => 'x'))[0], 'only CMS page tables');
+	list(, $history) = $save('editor_history', array('type' => 'aboutpage'));
+	check(count($history['revisions']) >= 2, 'revisions');
+	same('Edited in the page', $history['revisions'][0]['fields']['heading']);
+	check(preg_match('/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d$/', $history['revisions'][0]['updated_at']), 'times with their offset');
+	list($status) = $save('editor_restore', array('type' => 'aboutpage', 'slug' => '/about', 'revision' => $history['revisions'][1]['revision']));
+	same(200, $status);
+	has(http('GET', "$base/about")[1], '<h1>About us</h1>', 'restored');
+	$save('editor_save_field', array('type' => 'aboutpage', 'slug' => '/about', 'field' => 'heading', 'value' => 'About us'));
+	// site-wide fields, including one that only lives in <head>
+	$save('editor_save_field', array('type' => 'sitepage', 'field' => 'site_description', 'value' => 'Coffee & cake'));
+	has(http('GET', "$base/visit")[1], '<meta name="description" content="Coffee & cake">', 'HTML views print values as they are');
+	$save('editor_save_field', array('type' => 'sitepage', 'field' => 'site_description', 'value' => 'A small café in București: good coffee, cake and quiet corners.'));
+	// items: add, change, hide, delete
+	list($status, $item) = $save('editor_save_item', array('collection' => 'menu', 'id' => 0, 'fields' => array('name' => 'Zebra cake', 'description' => 'Stripes', 'price' => '12', 'category' => 'cakes')));
+	same(200, $status);
+	same('zebra-cake', $item['slug']);
+	list(, $item) = $save('editor_save_item', array('collection' => 'menu', 'id' => $item['id'], 'fields' => array('name' => 'Zebra torte', 'price' => '13')));
+	same('Zebra torte', $item['name']);
+	same('Stripes', $item['description'], 'other fields stay');
+	$save('editor_save_item', array('collection' => 'menu', 'id' => $item['id'], 'fields' => array('enabled' => '0')));
+	same(404, http('GET', "$base/menu/menu_item/{$item['id']}")[0], 'hidden from visitors');
+	list(, $error) = $save('editor_save_item', array('collection' => 'menu', 'id' => $item['id'], 'fields' => array('secret' => 'x')));
+	has($error['error'], "Unknown field 'secret'");
+	list($status, $deleted) = $save('editor_delete_item', array('collection' => 'menu', 'id' => $item['id']));
+	same(200, $status);
+	same('Zebra torte', $deleted['item']['name'], 'the item comes back so it can be undone');
+	same(404, $save('editor_delete_item', array('collection' => 'menu', 'id' => $item['id']))[0]);
+	same(400, $save('editor_save_item', array('collection' => 'users', 'id' => 0, 'fields' => array('name' => 'x')))[0]);
 });
 test('E12', 'editors see drafts', function () use ($base) {
 	$staff = login($base, 'staff@cafe.test', 'staff password');
 	has(http('GET', "$base/events", null, array("Cookie: $staff"))[1], 'Secret tasting');
 });
-test('E21', 'media upload and crop', function () use ($base, $root) {
+test(array('E21', 'E29', 'C44'), 'pictures: upload, page and item photos, empty values keep the mock-up', function () use ($base, $root) {
 	$staff = login($base, 'staff@cafe.test', 'staff password');
-	$token = token_in(http('GET', "$base/about", null, array("Cookie: $staff"))[1]);
+	$h = array("Cookie: $staff");
+	$token = token_in(http('GET', "$base/about", null, $h)[1]);
 	$image = imagecreatetruecolor(40, 30);
 	imagefill($image, 0, 0, imagecolorallocate($image, 200, 120, 60));
 	ob_start(); imagepng($image); $png = ob_get_clean();
 	$boundary = 'raster'.bin2hex(random_bytes(4));
-	$body = "--$boundary\r\nContent-Disposition: form-data; name=\"csrf\"\r\n\r\n$token\r\n"
-		."--$boundary\r\nContent-Disposition: form-data; name=\"img\"; filename=\"cake.png\"\r\nContent-Type: image/png\r\n\r\n$png\r\n--$boundary--\r\n";
-	list($status, $response) = http('POST', "$base/api/cms/upload_media", $body, array("Cookie: $staff", "Content-Type: multipart/form-data; boundary=$boundary"));
+	$multipart = function ($name, $bytes) use ($boundary, $token) {
+		return "--$boundary\r\nContent-Disposition: form-data; name=\"csrf\"\r\n\r\n$token\r\n"
+			."--$boundary\r\nContent-Disposition: form-data; name=\"image\"; filename=\"$name\"\r\nContent-Type: image/png\r\n\r\n$bytes\r\n--$boundary--\r\n";
+	};
+	$type = array("Cookie: $staff", "Content-Type: multipart/form-data; boundary=$boundary");
+	list($status, $response) = http('POST', "$base/api/cms/editor_upload", $multipart('cake.png', $png), $type);
+	same(200, $status, $response);
 	$upload = json_decode($response, true);
-	same('success', $upload['status'], $response);
 	same(40, $upload['width']);
-	check(preg_match('#/media/[a-f0-9]{16}\.png$#', $upload['url']), 'random file name');
-	$fake = "--$boundary\r\nContent-Disposition: form-data; name=\"csrf\"\r\n\r\n$token\r\n--$boundary\r\nContent-Disposition: form-data; name=\"img\"; filename=\"shell.png\"\r\nContent-Type: image/png\r\n\r\n<?php echo 1;\r\n--$boundary--\r\n";
-	same('error', json_decode(http('POST', "$base/api/cms/upload_media", $fake, array("Cookie: $staff", "Content-Type: multipart/form-data; boundary=$boundary"))[1], true)['status']);
-	$crop = json_decode(http('POST', "$base/api/cms/crop_media", array('csrf' => $token, 'imgUrl' => $upload['url'], 'imgInitW' => 40, 'imgInitH' => 30, 'imgW' => 40, 'imgH' => 30, 'imgX1' => 5, 'imgY1' => 5, 'cropW' => 20, 'cropH' => 10), array("Cookie: $staff"))[1], true);
-	same('success', $crop['status']);
-	same(array(20, 10), array_slice(getimagesize($root.'/media/'.basename($crop['url'])), 0, 2));
-	same('error', json_decode(http('POST', "$base/api/cms/crop_media", array('csrf' => $token, 'imgUrl' => 'file:///etc/passwd'), array("Cookie: $staff"))[1], true)['status']);
+	check(preg_match('#/media/\d{8}-[a-f0-9]{12}\.png$#', $upload['url']), 'a new file name');
+	check(is_file($root.'/media/'.basename($upload['url'])));
+	list($status, $response) = http('POST', "$base/api/cms/editor_upload", $multipart('shell.png', '<?php echo 1;'), $type);
+	same(400, $status);
+	has($response, 'Only JPEG, PNG, GIF and WebP');
+	// a page field in an attribute: <!-- print.@src.cms.photo -->
+	http('POST', "$base/api/cms/editor_save_field", array('csrf' => $token, 'type' => 'aboutpage', 'slug' => '/about', 'field' => 'photo', 'value' => $upload['url']), $h);
+	has(http('GET', "$base/about")[1], '<img class="photo wide" src="'.$upload['url'].'" alt="The café from across the street">');
+	same($upload['url'], mcp($base, 'get_page', array('page' => '/about'))['fields']['photo'], 'MCP knows the field');
+	http('POST', "$base/api/cms/editor_save_field", array('csrf' => $token, 'type' => 'aboutpage', 'slug' => '/about', 'field' => 'photo', 'value' => ''), $h);
+	has(http('GET', "$base/about")[1], '<img class="photo wide" src="img/about.jpg"', 'empty shows the template\'s picture');
+	// an item photo
+	$item = null;
+	foreach (mcp($base, 'list_items', array('collection' => 'menu', 'limit' => 100))['items'] as $row) if ($row['name'] === 'Americano') $item = $row;
+	http('POST', "$base/api/cms/editor_save_item", array('csrf' => $token, 'collection' => 'menu', 'id' => $item['id'], 'fields' => array('photo' => $upload['url'])), $h);
+	has(http('GET', "$base/menu/menu_item/americano")[1], '<img class="photo wide" src="'.$upload['url'].'"');
+	http('POST', "$base/api/cms/editor_save_item", array('csrf' => $token, 'collection' => 'menu', 'id' => $item['id'], 'fields' => array('photo' => '')), $h);
+	has(http('GET', "$base/menu/menu_item/americano")[1], '<img class="photo wide" src="img/menu/flat-white.jpg"', 'empty keeps the mock-up');
 });
 
 // ## H. Newsletter
@@ -1012,7 +1101,7 @@ test('E25', 'an item page falls back to the collection view', function () use ($
 	has(http('GET', "$base/faq/faq_item/do-you-have-oat-milk")[1], '<p>Always.</p>');
 	same(404, http('GET', "$base/faq/faq_item/nope")[0]);
 });
-test('E26', 'the built-in editor login page, toolbar assets and logout', function () use ($base, $views) {
+test('E26', 'the built-in editor login page and logging out', function () use ($base, $views) {
 	rename("$views/login.html", "$views/login.html.off");
 	try {
 		list($status, $body) = http('GET', "$base/login");
@@ -1029,13 +1118,6 @@ test('E26', 'the built-in editor login page, toolbar assets and logout', functio
 	list(, $css, $headers) = http('GET', "$base/api/cms/style/output/true");
 	has(header_value($headers, 'Content-Type'), 'text/css');
 	check(strlen($css) > 100, 'the login style');
-	list(, $css, $headers) = http('GET', "$base/api/cms/css");
-	has(header_value($headers, 'Content-Type'), 'text/css');
-	has($css, '#raster_tools');
-	list(, $js, $headers) = http('GET', "$base/api/cms/script");
-	has(header_value($headers, 'Content-Type'), 'application/javascript');
-	has($js, 'Raster_Admin.system');
-	check(strlen(trim(http('GET', "$base/api/cms/script/raster_file/boot")[1])) < 10, 'only the bundled files');
 	// the toolbar's Log out posts with the token
 	$staff = login($base, 'staff@cafe.test', 'staff password');
 	$token = token_in(http('GET', "$base/about", null, array("Cookie: $staff"))[1]);
