@@ -388,18 +388,22 @@ class controller {
 		foreach($template->models_methods_print as $action) {
 			$model = $action[0];
 			$method = $action[1];
+			$attr = isset($action[2]) ? $action[2] : null;
 			
-			$template->set_current_block($model, $method, 'print');
+			$template->set_current_block($model, $method, 'print', $attr);
+			if ($template->current_params['pos1'] === false) continue;
 
 			$object = controller::get_object($model);
 			$data = $this->call_method($object, $method);
+			$pending = $template->pending_mark;
 			
 			event::dispatch("before_print");
 			$template->_print($data, $model, $method);
 			// a print inside a repeated render block has one copy per row:
 			// fill them all with the same value
 			for ($copies = 0; $copies < 1000; $copies++) {
-				$template->set_current_block($model, $method, 'print');
+				$template->set_current_block($model, $method, 'print', $attr);
+				$template->pending_mark = $pending;
 				if ($template->current_params['pos1'] === false) break;
 				$template->_print($data, $model, $method);
 			}

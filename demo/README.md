@@ -91,6 +91,7 @@ php tests/demo.php                        # the whole matrix
 | C41 | bundled models send events from every path: cms over MCP, authentication.registered |
 | C42 | lint checks event bindings: missing models and methods, events nothing sends |
 | C43 | named queries: `:name` placeholders, the calling model's `sql/` by default, a missing name is an error that lint finds |
+| C44 | `print.@attr.model.method` outside render blocks sets an attribute from a model |
 | D1 | raster_form and honeypot on every post form |
 | D2 | the session token on forms for logged in users |
 | D3 | posts from other sites refused (Origin, Sec-Fetch-Site, Referer, /api too) |
@@ -132,16 +133,19 @@ php tests/demo.php                        # the whole matrix
 | E14 | page revisions |
 | E15 | an empty value shows the default |
 | E16 | a new annotation becomes a column (development) |
-| E17 | the editor toolbar for editors only |
-| E18 | editing a page field in the page |
-| E19 | adding, editing and removing items in the page |
-| E20 | editor endpoints need an editor |
-| E21 | image upload and crop |
+| E17 | the in-page editor only for editors; visitors get the plain page |
+| E18 | the editor saves page fields, site-wide ones included, as revisions |
+| E19 | the editor adds, changes, hides and deletes items |
+| E20 | editor endpoints need an editor and the session token |
+| E21 | picture upload: only real images, new file names |
 | E22 | reserved names are lint errors |
 | E23 | `raster_page_size` for collections without their own |
 | E24 | order by `-field` and `oldest`; pagination follows the filter argument |
 | E25 | item pages fall back to the collection view |
 | E26 | the built-in editor login page, toolbar assets, logout by POST with the token |
+| E27 | editor marks: fields, attribute fields, items, lists with their mock-up; fields out of reach (in <head>) listed as hidden |
+| E28 | page history and restoring a revision from the editor |
+| E29 | photos: page and item image fields; an empty value keeps the template's picture |
 | F1 | schema status as JSON |
 | F2 | schema --check |
 | F3 | schema --apply in production, including model tables |

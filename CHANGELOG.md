@@ -5,6 +5,20 @@ file changes for you; `php bin/raster doctor` shows what is left.
 
 ## Unreleased
 
+- A new in-page editor replaces the old toolbar and its modal forms: the
+  page is the editor, it takes the site's colours and fonts, saves as you
+  go with undo, handles items (details, duplicate, hide, schedule, delete,
+  add from the template's mock-up), photos (choose or drop, framed in the
+  browser), fields the page can't show, and the page's history. English and
+  Romanian. No jQuery or other scripts from elsewhere.
+- `print.@attr.model.method` sets an attribute outside render blocks, so a
+  page can have photo fields: `<!-- print.@src.cms.photo --><img src="a.jpg"><!-- /print.@src.cms.photo -->`.
+- In render blocks, `print.@attr.key` with an empty value keeps the
+  mock-up's attribute instead of emptying it.
+- Removed: the old editor endpoints (`edit_variable`, `edit_data`,
+  `edit_item`, `add_item`, `remove_item`, `upload_media`, `crop_media`,
+  `css`, `script`) and posting `raster_action` to a page.
+
 - Named queries: calling one that doesn't exist throws
   `BadMethodCallException` (it returned `false`), and `lint` reports such
   calls. `:name` placeholders are documented.

@@ -225,8 +225,8 @@ test('schema matches after rendering', function () {
 	same(false, $status['drift']);
 });
 test('anonymous users cannot edit', function () use ($base) {
-	same(403, http('POST', "$base/api/cms/edit_data", 'name=users', array('Content-Type: application/x-www-form-urlencoded'))[0]);
-	same(404, http('POST', "$base/api/cms/save_page", 'raster_action=save_page')[0]);
+	same(403, http('POST', "$base/api/cms/editor_save_item", 'collection=users', array('Content-Type: application/x-www-form-urlencoded'))[0]);
+	same(404, http('POST', "$base/api/cms/save_page", 'x=1')[0]);
 	same(404, http('GET', "$base/api/mcp/call_tool/site_overview")[0]);
 	http('POST', "$base/about", 'raster_action=save_page&page_name=aboutpage&variable_name=heading&raster_page_value=Hacked', array('Content-Type: application/x-www-form-urlencoded'));
 	check(strpos(http('GET', "$base/about")[1], 'Hacked') === false);
@@ -238,11 +238,11 @@ test('editor login and csrf', function () use ($base) {
 	same(303, $status);
 	$cookie = preg_replace('/^Set-Cookie:\s*([^;]+).*$/i', '$1', current(preg_grep('/^Set-Cookie/i', $headers)));
 	$page = http('GET', "$base/about", null, array("Cookie: $cookie"))[1];
-	check(preg_match('/Raster_Admin.csrf = "([a-f0-9]+)"/', $page, $m), 'toolbar missing');
+	check(preg_match('/"csrf":"([a-f0-9]+)"/', $page, $m), 'editor missing');
 	$form = array('Content-Type: application/x-www-form-urlencoded', "Cookie: $cookie");
-	same(403, http('POST', "$base/about", 'raster_action=save_page&page_name=aboutpage&variable_name=heading&raster_page_value=Nope', $form)[0]);
-	$body = http('POST', "$base/about", 'raster_action=save_page&csrf='.$m[1].'&page_name=aboutpage&variable_name=heading&raster_page_value=Edited', $form)[1];
-	check(strpos($body, '<h1>Edited</h1>') !== false, 'edit not saved');
+	same(403, http('POST', "$base/api/cms/editor_save_field", 'type=aboutpage&slug=/about&field=heading&value=Nope', $form)[0]);
+	same(200, http('POST', "$base/api/cms/editor_save_field", 'type=aboutpage&slug=/about&field=heading&value=Edited&csrf='.$m[1], $form)[0]);
+	check(strpos(http('GET', "$base/about")[1], '<h1>Edited</h1>') !== false, 'edit not saved');
 	list($status, $body) = http('POST', "$base/login", 'login=editor&password=wrong', array('Content-Type: application/x-www-form-urlencoded'));
 	same(200, $status, 'wrong password must not log in');
 	check(strpos($body, 'Wrong email or password') !== false);
