@@ -90,7 +90,7 @@ Anything else is ignored at runtime, and `lint` reports it.
 | `<!-- remove --> … <!-- /remove -->` | Mock-up content. Removed before anything runs. Can't be nested. |
 | `<!-- res.name --> … <!-- /res.name -->` | A reusable fragment. |
 | `<!-- dry.view.name /-->` | Inserts fragment `res.name` from `view.html` (e.g. `dry._layout.header`). |
-| `<!-- print.if.flag --> … <!-- /print.if.flag -->` | Shown only when the template flag is true (`template::set('flag')->to(true)`). |
+| `<!-- print.if.flag --> … <!-- /print.if.flag -->` | Shown only when the template flag is true (`template::set('flag')->to(true)`). `if.live` is true on the running site and `if.static` in a static export. |
 | `<!-- print.self.name /-->` | A value set on the template, for example in emails. |
 | `<!-- print.session.key /-->` | `$_SESSION['key']`. |
 
@@ -467,11 +467,20 @@ of lists and filter pages come along; drafts and the editor don't.
   links when neither is set).
 - Every language after the first goes in `/<lang>/`, and the language
   switcher links there.
+- **Forms need PHP**, so a page that still shows one stops the export and
+  nothing is written. Wrap forms in `<!-- print.if.live -->` and write what
+  the static site shows instead in `<!-- print.if.static -->` (a phone
+  number, an email address, the RSS feed).
 - Left out: pages that need an account, login, sign-up, password and
   newsletter pages, `/api`, and paths in `config::set('export_skip')` or
-  `--skip=/path`. The command lists forms, links to left-out pages and
-  query strings, since a static host can't answer them.
-- `--clean` replaces an earlier export in the same folder.
+  `--skip=/path`. The command lists links to left-out pages and query
+  strings, since a static host can't answer them.
+- **Exporting again** to the same folder writes only files that changed and
+  removes the ones the site no longer has, so a deploy uploads just those.
+  When nothing the site is made of changed (content, templates, models,
+  theme, media), it does nothing. `.raster-export.json` in the folder keeps
+  track; files the export didn't write are left alone. `--clean` starts the
+  folder over.
 
 ## Editors and agents
 

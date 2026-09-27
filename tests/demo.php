@@ -1009,7 +1009,7 @@ test('N5', 'raster export: the site as static files', function () use ($tmp) {
 	same(0, $code, $output);
 	has($output, 'linked to https://cafe.example/');
 	has($output, 'Left out (they need an account): /members, /staff');
-	has($output, 'The reservation.book form (/visit) needs the PHP site');
+	lacks($output, 'form');
 	has($output, 'Pages link to what the export leaves out: /login');
 	foreach (array('index.html', 'about/index.html', 'menu/index.html', 'menu/menu_page/2/index.html', 'menu/menu_item/americano/index.html', 'menu/menu_items/category/cakes/index.html', 'journal.rss', 'feed.json', 'sitemap.xml', 'hours.txt', '404.html', 'demo/views/cafe/style.css', 'demo/views/cafe/img/menu/flat-white.jpg', 'print/menu/index.html', 'ro/index.html', 'ro/menu/index.html', '.raster-export.json') as $file) {
 		check(is_file("$out/$file"), "missing $file");
@@ -1030,11 +1030,55 @@ test('N5', 'raster export: the site as static files', function () use ($tmp) {
 	has(file_get_contents("$out/journal.rss"), '<link>https://cafe.example/journal/journal_item/');
 	$left = trim(shell_exec('grep -rl "127.0.0.1" '.escapeshellarg($out).' 2>/dev/null'));
 	same('', $left, 'no local addresses left');
-	same(1, raster(array('export', $out))[0], 'a folder with files needs --clean');
 	list($code, $output) = raster(array('export', $out, '--clean', '--skip=/lab'));
 	same(0, $code, $output);
 	check(!file_exists("$out/lab/index.html"), '--skip');
 	has(file_get_contents("$out/index.html"), 'href="/menu"', 'root-relative links without --url');
+	mkdir("$tmp/not-an-export");
+	touch("$tmp/not-an-export/notes.txt");
+	same(1, raster(array('export', "$tmp/not-an-export"))[0], 'a folder with other files is left alone');
+});
+test('N6', 'print.if.live and print.if.static: forms stay out of a static export', function () use ($tmp, $base, $views) {
+	$visit = file_get_contents("$tmp/static/visit/index.html");
+	has($visit, 'Call us on <a href="tel:+40721000000">', 'print.if.static shows in the export');
+	lacks($visit, '<form', 'print.if.live is hidden in the export');
+	lacks(file_get_contents("$tmp/static/index.html"), 'name="raster_form"');
+	$live = http('GET', "$base/visit")[1];
+	has($live, 'name="raster_form" value="reservation.book"');
+	lacks($live, 'Call us on', 'print.if.static is hidden on the live site');
+	// a form the template doesn't wrap stops the export, and nothing is written
+	with_file("$views/export-probe.html", '<!doctype html><html><body><!-- render.reservation.contact --><form method="post"><input name="email"><button>Send</button></form><!-- /render.reservation.contact --></body></html>', function () use ($tmp) {
+		list($code, $output) = raster(array('export', "$tmp/probe"));
+		same(1, $code, $output);
+		has($output, 'The reservation.contact form (/export-probe) needs PHP. Wrap it in <!-- print.if.live -->');
+		has($output, 'Nothing was written');
+		check(!file_exists("$tmp/probe/index.html"));
+	});
+});
+test('N7', 'exporting again writes only what changed', function () use ($tmp, $base) {
+	$out = "$tmp/incremental";
+	same(0, raster(array('export', $out, '--url=https://cafe.example/'))[0]);
+	list($code, $output) = raster(array('export', $out, '--url=https://cafe.example/'));
+	same(0, $code, $output);
+	has($output, 'Nothing changed since the last export');
+	$about = filemtime("$out/about/index.html");
+	touch("$out/extra.txt");
+	$item = mcp($base, 'create_item', array('collection' => 'journal', 'fields' => array('title' => 'Exported once', 'author' => 'Ana')));
+	sleep(1);
+	list($code, $output) = raster(array('export', $out, '--url=https://cafe.example/'));
+	same(0, $code, $output);
+	check(preg_match('/\((\d+) written, 0 removed, (\d+) unchanged\)/', $output, $m), $output);
+	check($m[1] > 0 && $m[1] < $m[2], 'a few files written: '.$m[0]);
+	check(is_file("$out/journal/journal_item/exported-once/index.html"), 'the new item');
+	same($about, filemtime("$out/about/index.html"), 'unchanged pages are not written again');
+	mcp($base, 'delete_item', array('collection' => 'journal', 'id' => $item['id']));
+	list($code, $output) = raster(array('export', $out, '--url=https://cafe.example/'));
+	has($output, 'removed');
+	check(!file_exists("$out/journal/journal_item/exported-once/index.html"), 'the deleted item is removed');
+	check(!is_dir("$out/journal/journal_item/exported-once"), 'and its folder');
+	check(is_file("$out/extra.txt"), 'files the export did not write are kept');
+	$manifest = json_decode(file_get_contents("$out/.raster-export.json"), true);
+	check(isset($manifest['files']['about/index.html']) && !empty($manifest['fingerprint']));
 });
 test('N4', 'serve', function () use ($root) {
 	$port = free_port();

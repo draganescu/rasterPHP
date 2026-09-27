@@ -17,8 +17,16 @@
 // Theme files and media are copied next to them. Links become --url (or
 // root-relative links when it's not given). With several languages, each
 // other language goes in /<lang>/, and the language switcher links there.
-// What a static site can't do (forms, accounts, query strings) is listed at
-// the end so nothing fails quietly.
+// A static host can't answer forms, so the export stops when a page still
+// has one: templates wrap forms in <!-- print.if.live --> and say what shows
+// instead in <!-- print.if.static -->. Accounts are left out, and links with
+// a query string are listed at the end.
+//
+// Exporting again to the same folder changes only what changed: when nothing
+// the site is made of changed (content, templates, models, assets, media),
+// nothing runs; otherwise every page is rendered again, but only files whose
+// bytes differ are written, and files the site no longer has are removed.
+// The list lives in the folder's .raster-export.json.
 class raster_export {
 
 	public $root;
@@ -27,7 +35,12 @@ class raster_export {
 	public $skip = array();
 	public $pages = array();      // path => array(language => file written)
 	public $warnings = array();
-	public $files = 0;
+	public $errors = array();
+	public $written = array();    // files new or changed
+	public $removed = array();    // files the site no longer has
+	public $unchanged = 0;
+	public $current = false;      // true when nothing changed since the last export
+	public $clean = false;
 	public $skipped = array();
 	protected $linked = array();    // pages that redirect (they need an account)
 	protected $base;              // the local server's address
@@ -39,6 +52,7 @@ class raster_export {
 	protected $languages = array();
 	protected $default_language = '';
 	protected $raw = array();     // path|lang => response body
+	protected $output = array();  // relative file => array('body' => …) or array('from' => file)
 
 	function __construct($root, $target, $url = '/') {
 		$this->root = $root;
@@ -55,6 +69,12 @@ class raster_export {
 
 	// ##Running
 	function run() {
+		$manifest = $this->manifest();
+		raster_cache::publish_due();
+		if (!$this->clean && $manifest && isset($manifest['fingerprint']) && $manifest['fingerprint'] === $this->fingerprint()) {
+			$this->current = true;
+			return $this;
+		}
 		$this->start_server();
 		try {
 			$this->languages = class_exists('i18n') ? i18n::available() : array();
@@ -72,26 +92,59 @@ class raster_export {
 				}
 			}
 			$this->not_found();
-			$this->write_pages();
-			$this->copy_assets();
 		} finally {
 			$this->stop_server();
 		}
+		// forms need PHP: nothing is written while a page still shows one
 		$by_form = array();
 		foreach ($this->forms as $path => $owners) foreach (array_unique($owners) as $owner) $by_form[$owner][] = $path;
 		foreach ($by_form as $owner => $paths) {
 			$where = count($paths) > 3 ? count($paths).' pages' : implode(', ', $paths);
-			$this->warnings[] = "The $owner form ($where) needs the PHP site; a static host can't answer it";
+			$this->errors[] = "The $owner form ($where) needs PHP. Wrap it in <!-- print.if.live --> and put what the static site shows instead in <!-- print.if.static -->";
 		}
+		if ($this->errors) return $this;
+		$this->collect_pages();
+		$this->collect_assets();
+		$this->sync($manifest);
 		$missing = array_diff(array_keys($this->linked), array_keys($this->pages), array('/404'));
 		if ($missing) $this->warnings[] = 'Pages link to what the export leaves out: '.implode(', ', array_slice($missing, 0, 8)).(count($missing) > 8 ? ', …' : '');
 		if ($this->queries) {
 			$this->warnings[] = 'Links with a query string point to the same static page: '.implode(', ', array_slice(array_unique($this->queries), 0, 8)).(count(array_unique($this->queries)) > 8 ? ', …' : '');
 		}
-		file_put_contents($this->target.'/.raster-export.json', json_encode(array(
-			'exported_at' => date(DATE_ATOM), 'url' => $this->url, 'pages' => count($this->pages), 'files' => $this->files,
-		), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)."\n");
 		return $this;
+	}
+
+	// ##What changed
+
+	protected function manifest() {
+		$file = $this->target.'/.raster-export.json';
+		$manifest = is_file($file) ? json_decode((string)file_get_contents($file), true) : null;
+		return is_array($manifest) ? $manifest : null;
+	}
+
+	// everything the pages are made of: the app's files (templates, models,
+	// config, translations, theme), uploads, the database, content changes
+	// (util::content_changed), the framework's version and these options
+	function fingerprint() {
+		$parts = array($this->url, json_encode($this->skip), raster_cache::version(), @file_get_contents(BASE.'VERSION'));
+		$folders = array(rtrim(APPBASE, '/'), dirname(BASE).'/'.trim(config::get('raster_media_folder', 'media'), '/'));
+		foreach ($folders as $folder) {
+			if (!is_dir($folder)) continue;
+			$iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($folder, FilesystemIterator::SKIP_DOTS));
+			foreach ($iterator as $file) {
+				$path = $file->getPathname();
+				if (strpos($path, rtrim(APPBASE, '/').'/data/') === 0) continue;
+				$parts[] = $path.'|'.$file->getMTime().'|'.$file->getSize();
+			}
+		}
+		$databases = glob(APPBASE.'data/*.sqlite*') ?: array();
+		if (getenv('RASTER_DB')) $databases = array_merge($databases, glob(getenv('RASTER_DB').'*') ?: array());
+		foreach (array_unique($databases) as $file) {
+			clearstatcache(true, $file);
+			$parts[] = $file.'|'.filemtime($file).'|'.filesize($file);
+		}
+		sort($parts);
+		return sha1(implode("\n", $parts));
 	}
 
 	// every page the templates define, feed views and literal routes; the
@@ -187,15 +240,12 @@ class raster_export {
 		return $this->target.$prefix.($path === '/' ? '' : $path).'/index.html';
 	}
 
-	protected function write_pages() {
+	protected function collect_pages() {
 		$page_paths = array_keys($this->pages);
 		foreach ($this->raw as $key => $body) {
 			list($path, $language) = explode('|', $key, 2);
-			$body = $this->rewrite($body, $language, $page_paths);
-			$file = $this->file_for($path, $language);
-			if (!is_dir(dirname($file))) mkdir(dirname($file), 0775, true);
-			file_put_contents($file, $body);
-			$this->files++;
+			$file = substr($this->file_for($path, $language), strlen($this->target) + 1);
+			$this->output[$file] = array('body' => $this->rewrite($body, $language, $page_paths));
 		}
 	}
 
@@ -229,7 +279,7 @@ class raster_export {
 	function is_format_path($path) { return $this->is_format($path); }
 
 	// theme files (not views) and uploads, where the pages expect them
-	protected function copy_assets() {
+	protected function collect_assets() {
 		$views = APPBASE.config::get('views_path', 'views');
 		$folders = array();
 		foreach (glob($views.'/*', GLOB_ONLYDIR) ?: array() as $theme) $folders[] = $theme;
@@ -241,13 +291,39 @@ class raster_export {
 				if (!$file->isFile()) continue;
 				$name = $file->getFilename();
 				if ($name[0] === '.' || preg_match('/\.(html|rss|atom|xml|json|txt|php)$/i', $name)) continue;
-				$relative = substr($file->getPathname(), strlen(dirname(BASE)) + 1);
-				$to = $this->target.'/'.$relative;
-				if (!is_dir(dirname($to))) mkdir(dirname($to), 0775, true);
-				copy($file->getPathname(), $to);
-				$this->files++;
+				$this->output[substr($file->getPathname(), strlen(dirname(BASE)) + 1)] = array('from' => $file->getPathname());
 			}
 		}
+	}
+
+	// write what's new or different, remove what the site no longer has
+	protected function sync($manifest) {
+		$before = ($manifest && isset($manifest['files']) && is_array($manifest['files'])) ? $manifest['files'] : array();
+		$files = array();
+		ksort($this->output);
+		foreach ($this->output as $relative => $source) {
+			$hash = isset($source['body']) ? sha1($source['body']) : sha1_file($source['from']);
+			$files[$relative] = $hash;
+			$to = $this->target.'/'.$relative;
+			if (isset($before[$relative]) && $before[$relative] === $hash && is_file($to)) { $this->unchanged++; continue; }
+			if (!is_dir(dirname($to))) mkdir(dirname($to), 0775, true);
+			if (isset($source['body'])) file_put_contents($to, $source['body']);
+			else copy($source['from'], $to);
+			$this->written[] = $relative;
+		}
+		// only files an earlier export wrote are ever removed
+		foreach (array_diff_key($before, $files) as $relative => $hash) {
+			if (strpos($relative, '..') !== false) continue;
+			$file = $this->target.'/'.$relative;
+			if (is_file($file)) unlink($file);
+			$this->removed[] = $relative;
+			for ($dir = dirname($file); $dir !== $this->target && strpos($dir, $this->target.'/') === 0 && @rmdir($dir); $dir = dirname($dir));
+		}
+		file_put_contents($this->target.'/.raster-export.json', json_encode(array(
+			'exported_at' => date(DATE_ATOM), 'url' => $this->url, 'pages' => count($this->pages),
+			// after the run: rendering may touch the database (a fluid schema)
+			'fingerprint' => $this->fingerprint(), 'files' => $files,
+		), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)."\n");
 	}
 
 	// ##The local server
@@ -257,7 +333,7 @@ class raster_export {
 		fclose($socket);
 		$port = (int)substr($name, strrpos($name, ':') + 1);
 		$this->base = "http://127.0.0.1:$port/";
-		$env = array_merge(getenv(), array('RASTER_URL' => $this->base, 'RASTER_APP' => boot::$appname));
+		$env = array_merge(getenv(), array('RASTER_URL' => $this->base, 'RASTER_APP' => boot::$appname, 'RASTER_EXPORT' => '1'));
 		$this->server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", $this->root.'/index.php'), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $this->root, $env);
 		for ($i = 0; $i < 100 && !@fsockopen('127.0.0.1', $port); $i++) usleep(50000);
 	}

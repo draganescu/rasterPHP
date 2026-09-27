@@ -7,7 +7,11 @@ file changes for you; `php bin/raster doctor` shows what is left.
 
 - `raster export <folder>` writes the site as static files: every page,
   item, list page and feed, the 404 page, theme files and uploads, and each
-  language in its own folder. It reports what needs PHP (forms, accounts).
+  language in its own folder. Exporting again writes only what changed,
+  removes what's gone, and does nothing when nothing changed.
+- `print.if.live` and `print.if.static`: forms go in the first, what a static
+  export shows instead in the second. An export stops when a page still
+  shows a form.
 - Uploaded pictures are stored with root-relative addresses (`/media/…`),
   so they survive a new domain or a static export.
 

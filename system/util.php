@@ -172,6 +172,7 @@ class raster_cache {
 	}
 
 	static function enabled() {
+		if (getenv('RASTER_EXPORT')) return false;
 		return (bool)config::get('page_cache', config::get('environment') === 'production');
 	}
 
@@ -214,13 +215,18 @@ class raster_cache {
 		if ($next === 0 || $next <= time() || $timestamp < $next) @file_put_contents($file, (string)$timestamp, LOCK_EX);
 	}
 
-	static function serve() {
-		if (!self::cacheable()) return;
+	// a scheduled item's time has come: that's a content change too
+	static function publish_due() {
 		$next = self::dir().'next';
 		if (is_file($next) && (int)file_get_contents($next) <= time()) {
 			@unlink($next);
 			self::bump();
 		}
+	}
+
+	static function serve() {
+		if (!self::cacheable()) return;
+		self::publish_due();
 		$file = self::dir().self::key();
 		if (!is_file($file)) return;
 		$handle = fopen($file, 'r');

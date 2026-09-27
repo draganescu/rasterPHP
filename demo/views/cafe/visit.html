@@ -9,6 +9,8 @@
   <main class="two-columns">
     <section>
       <h1>Book a table</h1>
+      <!-- print.if.static --><p>Call us on <a href="tel:+40721000000">+40 721 000 000</a> and we'll keep a table for you.</p><!-- /print.if.static -->
+      <!-- print.if.live -->
       <p class="error-count"><!-- print.self.error_count -->0<!-- /print.self.error_count --> problems</p>
       <!-- print.validation.alert('booked') --><p class="notice">Thank you, your table is booked. We sent the details to the staff.</p><!-- /print.validation.alert('booked') -->
       <!-- render.reservation.book -->
@@ -41,9 +43,12 @@
         <button>Book</button>
       </form>
       <!-- /render.reservation.book -->
+      <!-- /print.if.live -->
     </section>
     <section>
       <h2>Write to us</h2>
+      <!-- print.if.static --><p>Write to <a href="mailto:hello@cafe.test">hello@cafe.test</a>.</p><!-- /print.if.static -->
+      <!-- print.if.live -->
       <!-- print.validation.alert('contacted') --><p class="notice">Thanks, we will write back soon.</p><!-- /print.validation.alert('contacted') -->
       <!-- render.reservation.contact -->
       <form method="post" class="stack">
@@ -57,6 +62,7 @@
         <button>Send</button>
       </form>
       <!-- /render.reservation.contact -->
+      <!-- /print.if.live -->
     </section>
   </main>
   <!-- dry._layout.footer /-->

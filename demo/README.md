@@ -225,4 +225,6 @@ php tests/demo.php                        # the whole matrix
 | N3 | raster render and its exit codes |
 | N4 | raster serve |
 | N5 | `raster export`: pages, items, lists, feeds, the 404 page, assets and every language as static files; what needs PHP is reported |
+| N6 | `print.if.live` / `print.if.static`: forms on the live site, what shows instead in the export; an unwrapped form stops the export |
+| N7 | exporting again writes only files that changed, removes what the site no longer has, and does nothing when nothing changed |
 | O1 | the sitemap skips private pages and lists items |

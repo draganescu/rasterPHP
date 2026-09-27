@@ -370,23 +370,30 @@ switch ($command) {
 		require_once BASE.'tools/export.php';
 		$target = rtrim($positional[0], '/');
 		$marker = $target.'/.raster-export.json';
+		// an earlier export is updated in place; anything else is left alone
 		if (is_dir($target) && count(scandir($target)) > 2) {
-			if (!isset($options['clean'])) {
-				fwrite(STDERR, "$target is not empty. Pass --clean to replace ".(is_file($marker) ? 'the previous export' : 'what is in it')." (only an earlier export is removed).\n");
-				exit(1);
-			}
 			if (!is_file($marker)) {
 				fwrite(STDERR, "$target has files that don't come from raster export; choose an empty folder.\n");
 				exit(1);
 			}
-			exec('rm -rf '.escapeshellarg($target));
+			if (isset($options['clean'])) exec('rm -rf '.escapeshellarg($target));
 		}
 		if (!is_dir($target)) mkdir($target, 0775, true);
 		$url = isset($options['url']) && is_string($options['url']) ? $options['url'] : (getenv('RASTER_URL') ?: '/');
 		$export = new raster_export($root, realpath($target), $url);
 		foreach ((array)(isset($options['skip']) ? $options['skip'] : array()) as $skip) if (is_string($skip)) $export->skip[] = $skip;
 		$export->run();
-		echo $paint('Exported '.count($export->pages).' page(s)', '32')." and {$export->files} file(s) to $target, linked to {$export->url}\n";
+		if ($export->current) {
+			echo "Nothing changed since the last export to $target\n";
+			exit(0);
+		}
+		if ($export->errors) {
+			foreach ($export->errors as $error) echo $paint('✗', '31')." $error\n";
+			echo $paint('Nothing was written', '31')."\n";
+			exit(1);
+		}
+		$changes = count($export->written).' written, '.count($export->removed).' removed, '.$export->unchanged.' unchanged';
+		echo $paint('Exported '.count($export->pages).' page(s)', '32')." to $target, linked to {$export->url} ($changes)\n";
 		if ($export->skipped) echo "Left out (they need an account): ".implode(', ', $export->skipped)."\n";
 		foreach ($export->warnings as $warning) echo $paint('!', '33')." $warning\n";
 		exit(0);
