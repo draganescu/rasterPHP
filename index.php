@@ -8,15 +8,14 @@
 // ### Development server
 // `php -S localhost:8000 index.php` runs the site with no web server.
 // Static files (theme css, images, media) are served as they are, while code,
-// configuration and data are never exposed (the same rules as .htaccess).
+// configuration and data are never exposed. The rules are the ones in
+// system/private_paths.php, which .htaccess and `raster deploy` also come from.
 if (PHP_SAPI === 'cli-server') {
 	$path = preg_replace('#/+#', '/', rawurldecode((string)parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH)));
-	// every app folder (application/, demo/, ...) keeps its code and data private
-	$apps = array();
-	foreach (glob(__DIR__.'/*/config', GLOB_ONLYDIR) as $dir) $apps[] = preg_quote(basename(dirname($dir)), '#');
-	$apps = implode('|', $apps ?: array('application'));
-	$blocked = '#(^|/)\.|^/(system|bin|tests)(/|$)|^/('.$apps.')/(config|models|data|i18n)(/|$)|^/('.$apps.')/views/.*\.(html|rss|atom|xml|json|txt)$|\.(php|sqlite|sql|md)$|-(journal|wal|shm)$#i';
-	if (preg_match($blocked, $path) && $path !== '/index.php') {
+	// the same rules as .htaccess and the configs `raster deploy` prints, from
+	// the one list in system/private_paths.php
+	require_once __DIR__.'/system/private_paths.php';
+	if (private_paths::blocked($path)) {
 		http_response_code(403);
 		exit('Forbidden');
 	}

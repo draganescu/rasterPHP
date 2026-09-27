@@ -199,6 +199,26 @@ test('doctor in production', function () use ($site) {
 	has($out, '✓ Site address');
 });
 
+test('a new site can keep code out of the web', function () use ($site) {
+	// the .htaccess a site is made with carries every rule, whatever app
+	// folders it has, and deploy prints it back
+	has(raster($site, array('doctor'))[1], '✓ .htaccess has every rule');
+	list($code, $out) = raster($site, array('deploy', '--config=apache'));
+	same(0, $code, $out);
+	same(trim(file_get_contents("$site/.htaccess")), trim($out));
+	// the same rules for any site: no app folder is named anywhere
+	$caddy = raster($site, array('deploy', '--config=caddy', '--host=new.example'))[1];
+	has($caddy, 'new.example');
+	has($caddy, 'phar');
+	check(strpos($caddy, 'demo') === false, 'no app folder of the Raster repository');
+	check(strpos($caddy, 'application') === false, 'and not this site\'s either');
+	// an older .htaccess is reported, not silently trusted
+	file_put_contents("$site/.htaccess", "RewriteEngine on\n");
+	has(raster($site, array('doctor'))[1], '.htaccess is missing');
+	unlink("$site/.htaccess");
+	has(raster($site, array('doctor'))[1], '.htaccess is missing');
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";
 exit($failed ? 1 : 0);
