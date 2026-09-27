@@ -15,6 +15,8 @@
 //   php bin/raster doctor [--json]
 //   php bin/raster deploy --config=apache|nginx|caddy [--host=…] [--root=…] [--socket=…]
 //   php bin/raster annotations [--json]
+//   php bin/raster vocabulary [--json]
+//   php bin/raster describe [--json] [--sections=a,b]
 //   php bin/raster version
 
 if (PHP_SAPI !== 'cli') exit;
@@ -214,6 +216,42 @@ switch ($command) {
 		}
 		echo "\n";
 		foreach ($grammar['structure'] as $rule) echo '  '.$rule."\n";
+		exit(0);
+
+	case 'vocabulary':
+		// every name a template may call, read from the code
+		$vocabulary = (new raster_inspector())->vocabulary();
+		if (isset($options['json'])) { $json($vocabulary); exit(0); }
+		foreach ($vocabulary['models'] as $name => $model) {
+			echo $paint($name, '1').($model['bundled'] ? ' (bundled)' : ' ('.$model['file'].')').($model['any_method'] ? ' — __call: any method' : '')."\n";
+			foreach ($model['methods'] as $method => $shape) echo '    '.$shape['reads']."\n";
+			if ($model['queries']) echo '    sql/: '.implode(', ', $model['queries'])."\n";
+		}
+		if ($vocabulary['shared_queries']) echo "\n".$paint('models/sql.php', '1').': '.implode(', ', $vocabulary['shared_queries'])."\n";
+		echo "\n".$paint('handled by the engine', '1').': '.implode(', ', $vocabulary['engine_models'])."\n";
+		echo $paint('row keys Raster fills in', '1').': '.implode(', ', $vocabulary['row_keys_from_raster'])."\n";
+		echo $paint('reserved field names', '1').': '.implode(', ', $vocabulary['reserved']['fields'])."\n";
+		echo $paint('reserved collection names', '1').': '.implode(', ', $vocabulary['reserved']['collections'])."\n";
+		if ($vocabulary['events']['listened_to']) {
+			echo "\n".$paint('events with listeners', '1')."\n";
+			foreach ($vocabulary['events']['listened_to'] as $event => $listeners) echo "    $event -> ".implode(', ', $listeners)."\n";
+		}
+		echo "\n".count($vocabulary['events']['sent'])." event name(s) something sends; --json for all of it\n";
+		exit(0);
+
+	case 'describe':
+		// the whole site in one answer, for an agent meeting it for the first time
+		require_once BASE.'tools/describe.php';
+		$sections = isset($options['sections']) && is_string($options['sections']) ? explode(',', $options['sections']) : null;
+		$started = microtime(true);
+		$described = raster_describe::site($sections);
+		$ms = (microtime(true) - $started) * 1000;
+		if (isset($options['json'])) { $json($described); exit(0); }
+		foreach ($described as $section => $data) {
+			echo $paint('## '.$section, '1')."\n";
+			echo preg_replace('/^/m', '  ', json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE))."\n\n";
+		}
+		echo 'described '.boot::$appname.'/ in '.($ms < 10 ? round($ms, 1) : round($ms))." ms (sections: ".implode(', ', raster_describe::sections()).")\n";
 		exit(0);
 
 	case 'schema':
@@ -493,6 +531,11 @@ Raster command line
   php bin/raster lint [--json]           check every view for annotation errors
         --fix                            repair what is mechanical (spacing, misspelled keywords)
   php bin/raster annotations [--json]    the annotation grammar, as data
+  php bin/raster vocabulary [--json]     every name a template may call: models, methods and
+                                         their signatures, SQL queries, events, reserved names
+  php bin/raster describe [--json]       the whole site in one answer, for an agent meeting it
+        --sections=pages,vocabulary      just these (site, routing, pages, collections,
+                                         vocabulary, settings, lint, schema, views)
   php bin/raster schema [--json]         compare the templates' content model with the database
         --apply                          create missing tables and columns (needed when frozen)
         --check                          exit with 1 when they differ (for CI)

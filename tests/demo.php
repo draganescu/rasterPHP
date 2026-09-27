@@ -134,6 +134,30 @@ function mcp($base, $name, $arguments = array()) {
 	if (!empty($result['isError'])) throw new Exception("mcp $name: ".$result['content'][0]['text']);
 	return $result['structuredContent'];
 }
+// MCP over stdio, where an agent has the files: one process, several calls
+function mcp_stdio($calls) {
+	global $root;
+	$process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, getenv());
+	fwrite($pipes[0], json_encode(array('jsonrpc' => '2.0', 'id' => 1, 'method' => 'initialize', 'params' => array()))."\n");
+	foreach ($calls as $i => $call) {
+		fwrite($pipes[0], json_encode(array('jsonrpc' => '2.0', 'id' => 100 + $i, 'method' => 'tools/call', 'params' => array('name' => $call[0], 'arguments' => isset($call[1]) ? $call[1] : array())))."\n");
+	}
+	fclose($pipes[0]);
+	$out = stream_get_contents($pipes[1]);
+	$err = stream_get_contents($pipes[2]);
+	proc_close($process);
+	$answers = array();
+	foreach (array_filter(explode("\n", $out)) as $line) {
+		$message = json_decode($line, true);
+		if (!isset($message['id']) || $message['id'] < 100) continue;
+		$result = $message['result'];
+		$answers[$message['id'] - 100] = !empty($result['isError'])
+			? array('error' => $result['content'][0]['text'])
+			: $result['structuredContent'];
+	}
+	if ($err !== '') $answers['stderr'] = $err;
+	return $answers;
+}
 function between($html, $id) {
 	return preg_match('#<section id="'.$id.'">(.*?)</section>#s', $html, $m) ? $m[1] : '';
 }
@@ -938,7 +962,18 @@ test(array('M1', 'M2', 'M3'), 'the MCP endpoint', function () use ($base) {
 	same(202, $call(array('jsonrpc' => '2.0', 'method' => 'notifications/initialized'))[0]);
 	same(array(), json_decode($call(array('jsonrpc' => '2.0', 'id' => 2, 'method' => 'ping'))[1], true)['result']);
 	$tools = json_decode($call(array('jsonrpc' => '2.0', 'id' => 3, 'method' => 'tools/list'))[1], true)['result']['tools'];
-	same(11, count($tools));
+	$names = array_map(function ($t) { return $t['name']; }, $tools);
+	foreach (array('site_overview', 'get_page', 'update_page', 'page_history', 'list_items', 'get_item',
+		'create_item', 'update_item', 'delete_item', 'lint_templates', 'schema_status',
+		'describe', 'vocabulary', 'annotations', 'list_views', 'read_view', 'check_view', 'render_url') as $name) {
+		check(in_array($name, $names), "tools/list lacks $name");
+	}
+	// writing templates stays off over HTTP until the site turns it on
+	check(!in_array('write_view', $names), 'write_view is not offered over HTTP');
+	$refused = json_decode($call(array('jsonrpc' => '2.0', 'id' => 30, 'method' => 'tools/call', 'params' => array('name' => 'write_view', 'arguments' => array('view' => 'x.html', 'content' => 'x'))))[1], true);
+	check(!empty($refused['result']['isError']), 'and calling it anyway is an error');
+	has($refused['result']['content'][0]['text'], 'Unknown tool');
+	same(count($names), count(array_unique($names)), 'no tool is listed twice');
 	$batch = json_decode($call(array(array('jsonrpc' => '2.0', 'id' => 4, 'method' => 'ping'), array('jsonrpc' => '2.0', 'id' => 5, 'method' => 'nope')))[1], true);
 	same(-32601, $batch[1]['error']['code']);
 	same(-32700, json_decode(http('POST', "$base/mcp", 'not json', array('Authorization: Bearer demo-token'))[1], true)['error']['code']);
@@ -975,6 +1010,149 @@ test('M6', 'MCP over stdio', function () use ($root) {
 	proc_close($process);
 	same(2, count($lines), 'notifications get no answer');
 	same('Café Raster', json_decode(end($lines), true)['result']['structuredContent']['fields']['site_name']);
+});
+
+test('M10', 'describe: the site in one call', function () use ($base) {
+	$all = mcp($base, 'describe');
+	same(array('site', 'routing', 'pages', 'collections', 'vocabulary', 'settings', 'lint', 'schema', 'views'), array_keys($all));
+	same('demo', $all['site']['app']);
+	same('cafe', $all['site']['theme']);
+	check(in_array('/menu', array_map(function ($p) { return $p['url']; }, $all['pages'])), 'the pages are there');
+	same(array('events', 'faq', 'journal', 'menu'), array_map(function ($c) { return $c['name']; }, $all['collections']));
+	same(4, $all['collections'][3]['page_size'], 'menu_page_size');
+	same(0, $all['lint']['errors']);
+	check(count($all['views']) > 20, 'the view files');
+	// the extra routes of the demo
+	$patterns = array_map(function ($r) { return $r['pattern']; }, $all['routing']['extra_routes']);
+	check(in_array('specials', $patterns) && in_array('print/menu', $patterns), implode(', ', $patterns));
+	// settings an agent needs, and nothing that could be a secret
+	same('cafe', $all['settings']['theme']);
+	same(10, $all['settings']['password_min_length']);
+	foreach (array('mcp_token', 'mail') as $secret) check(!array_key_exists($secret, $all['settings']), "$secret must not be in describe");
+	check(strpos(json_encode($all['settings']), 'demo-token') === false, 'and the token is nowhere in it');
+	// by section, and an unknown section is an error
+	$some = mcp($base, 'describe', array('sections' => array('site', 'lint')));
+	same(array('site', 'lint'), array_keys($some));
+	list(, $body) = http('POST', "$base/mcp", json_encode(array('jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => array('name' => 'describe', 'arguments' => array('sections' => array('nope'))))), array('Authorization: Bearer demo-token', 'Content-Type: application/json'));
+	has(json_decode($body, true)['result']['content'][0]['text'], 'Unknown section');
+});
+test('M11', 'vocabulary: every name a template may call', function () use ($base) {
+	$vocabulary = mcp($base, 'vocabulary');
+	check(isset($vocabulary['models']['cafe']), 'the app model');
+	check(isset($vocabulary['models']['authentication']), 'and the bundled ones');
+	check($vocabulary['models']['authentication']['bundled'], 'marked as bundled');
+	check(!$vocabulary['models']['cafe']['bundled']);
+	// signatures, so an agent knows what to pass
+	same('category_count(category)', $vocabulary['models']['cafe']['methods']['category_count']['reads']);
+	same(1, $vocabulary['models']['cafe']['methods']['category_count']['needs']);
+	same('links(source, filter = …)', $vocabulary['models']['pagination']['methods']['links']['reads']);
+	same(1, $vocabulary['models']['pagination']['methods']['links']['needs']);
+	same(0, $vocabulary['models']['cafe']['methods']['hours']['needs']);
+	// the queries that are files, not PHP
+	check(in_array('count_category', $vocabulary['models']['cafe']['queries']), 'sql/ queries');
+	check(in_array('dish_names', $vocabulary['shared_queries']), 'models/sql.php: '.implode(', ', $vocabulary['shared_queries']));
+	// what the engine answers itself, and what it fills in
+	same(array('session', 'self', 'if'), $vocabulary['engine_models']);
+	check(in_array('raster_detail_link', $vocabulary['row_keys_from_raster']));
+	// names the CMS keeps
+	foreach (array('slug', 'id', 'enabled', 'published_at', 'style', 'login') as $name) {
+		check(in_array($name, $vocabulary['reserved']['fields']), "$name is reserved");
+	}
+	same(array('users', 'raster'), $vocabulary['reserved']['collections']);
+	// events: what is sent, and who listens
+	check(in_array('reservation.booked', $vocabulary['events']['sent']), 'the demo sends it');
+	check(isset($vocabulary['events']['listened_to']['reservation.booked']), 'and cafe listens');
+	has($vocabulary['events']['listened_to']['reservation.booked'][0], 'cafe.subscribe_guest');
+});
+test('M12', 'annotations: the grammar over MCP', function () use ($base) {
+	$grammar = mcp($base, 'annotations');
+	same(2, $grammar['version']);
+	same(array('open', 'close', 'self_closing', 'note', 'in_scripts'), array_keys($grammar['spelling']));
+	same('<!-- /{name} -->', $grammar['spelling']['close']);
+	has($grammar['structure']['full_close'], 'carries the whole name', 'a closing tag is not shortened');
+	check($grammar['keywords']['render']['repeats']);
+	check(!$grammar['keywords']['render']['self_closing']);
+	// the same data lint checks against
+	same(array_keys($grammar['keywords']), array('print', 'render', 'remove', 'res', 'dry'));
+});
+test('M13', 'list_views and read_view', function () use ($base) {
+	$views = mcp($base, 'list_views');
+	same('cafe', $views['theme']);
+	check(in_array('about.html', $views['views']) && in_array('docs/setup.html', $views['views']), 'nested views too');
+	check(in_array('journal.rss', $views['views']), 'and feeds');
+	$about = mcp($base, 'read_view', array('view' => 'about.html'));
+	has($about['content'], '<!-- print.cms.heading -->');
+	same(strlen($about['content']), $about['bytes']);
+	same(1, count(mcp($base, 'list_views', array('theme' => 'print'))['views']), 'another theme');
+	// nothing outside the theme folder, and nothing that is not a view
+	foreach (array('../../../system/boot.php', '/etc/passwd', 'about.php', '', 'nope.html', '../about.html', 'docs/../../_layout.html') as $bad) {
+		$error = null;
+		try { mcp($base, 'read_view', array('view' => $bad)); } catch (Exception $e) { $error = $e->getMessage(); }
+		check($error !== null, "read_view accepted '$bad'");
+	}
+});
+test('M14', 'check_view lints a draft and writes nothing', function () use ($base, $views) {
+	$bad = mcp($base, 'check_view', array('content' => "<p><!-- print.cafe.category_count -->0<!-- /print.cafe.category_count --></p>", 'view' => 'draft.html'));
+	same(1, $bad['errors']);
+	has($bad['problems'][0]['message'], 'needs 1 argument');
+	same('draft.html', $bad['problems'][0]['file']);
+	$good = mcp($base, 'check_view', array('content' => "<p><!-- print.cafe.category_count('cakes') -->0<!-- /print.cafe.category_count('cakes') --></p>"));
+	same(0, $good['errors']);
+	// a dry reference resolves against the theme, as it would once written
+	same(0, mcp($base, 'check_view', array('content' => '<!-- dry._layout.head /-->'))['errors']);
+	same(1, mcp($base, 'check_view', array('content' => '<!-- dry._layout.nothing /-->'))['errors']);
+	check(!file_exists("$views/draft.html"), 'check_view writes nothing');
+});
+test('M15', 'write_view refuses markup that does not lint', function () use ($views) {
+	$good = "<h1><!-- print.cms.heading -->Board<!-- /print.cms.heading --></h1>\n<ul><!-- render.cms.menu('order=name&limit=2') --><li><!-- print.name -->Dish<!-- /print.name --></li><!-- /render.cms.menu('order=name&limit=2') --></ul>\n";
+	$bad = str_replace('order=name&limit=2', "order=name&limit=2') --><!-- render.cms.menu('x=1", $good);
+	$answers = mcp_stdio(array(
+		array('write_view', array('view' => 'zz-board.html', 'content' => $bad)),
+		array('list_views'),
+		array('write_view', array('view' => 'zz-board.html', 'content' => $good)),
+		array('read_view', array('view' => 'zz-board.html')),
+		array('write_view', array('view' => 'zz-board.html', 'content' => $good)),
+		array('write_view', array('view' => '../zz-escape.html', 'content' => $good)),
+		array('write_view', array('view' => 'zz-board.php', 'content' => $good)),
+		array('write_view', array('view' => 'docs/../../zz-deep.html', 'content' => $good)),
+	));
+	try {
+		same(false, $answers[0]['written'], 'the broken one is refused');
+		check($answers[0]['errors'] >= 1, 'with the problems');
+		check(!in_array('zz-board.html', $answers[1]['views']), 'and nothing was written');
+		same(true, $answers[2]['written']);
+		same(true, $answers[2]['created']);
+		check(is_file("$views/zz-board.html"), 'the file is there');
+		has($answers[3]['content'], 'print.cms.heading');
+		same(false, $answers[4]['created'], 'writing again replaces it');
+		check(isset($answers[5]['error']), 'no path outside the theme');
+		check(isset($answers[6]['error']), 'and only view extensions');
+		check(isset($answers[7]['error']), "nor a path that climbs back out through ..");
+		check(!file_exists(dirname($views).'/zz-escape.html'), 'nothing escaped');
+		check(!file_exists(dirname(dirname($views)).'/zz-deep.html'), 'nothing escaped deeper either');
+		// the new annotation is a new field, and the answer says so
+		check(isset($answers[2]['schema']['drift']), 'the schema is reported');
+	} finally {
+		@unlink("$views/zz-board.html");
+	}
+});
+test('M16', 'render_url renders without a web server', function () use ($base) {
+	$page = mcp($base, 'render_url', array('url' => '/about'));
+	same(true, $page['ok']);
+	same(200, $page['status']);
+	has($page['html'], '<h1>About us</h1>');
+	same(strlen($page['html']), $page['bytes'], 'not truncated');
+	$short = mcp($base, 'render_url', array('url' => '/about', 'limit' => 200));
+	same(true, $short['truncated']);
+	same(200, strlen($short['html']));
+	$missing = mcp($base, 'render_url', array('url' => '/nope'));
+	same(false, $missing['ok']);
+	same(404, $missing['status']);
+	$error = null;
+	try { mcp($base, 'render_url', array('url' => 'about')); } catch (Exception $e) { $error = $e->getMessage(); }
+	has((string)$error, 'starts with /');
+	// the server is still answering: rendering happens in its own process
+	same(0, mcp($base, 'lint_templates')['errors']);
 });
 
 // ## F. Schema, and N. the command line
@@ -1034,6 +1212,23 @@ test(array('N1', 'N2', 'N3', 'E22'), 'help, lint and render', function () use ($
 	has($out, '<h1>About us</h1>');
 	same(1, raster(array('render', '/nope'))[0]);
 });
+test('C46', 'lint checks the arguments, and names the nearest method', function () use ($views) {
+	with_file("$views/zz-args.html", "<p><!-- print.cafe.category_count -->0<!-- /print.cafe.category_count --></p>\n"
+		."<p><!-- print.cafe.category_count('a', 'b') -->0<!-- /print.cafe.category_count('a', 'b') --></p>\n"
+		."<p><!-- print.cafe.dishes_between(11) -->x<!-- /print.cafe.dishes_between(11) --></p>\n"
+		."<p><!-- print.cafe.categry_count('a') -->0<!-- /print.cafe.categry_count('a') --></p>\n"
+		."<p><!-- print.cafe.hours /--></p>\n"
+		."<p><!-- print.cafe.guestbook -->none<!-- /print.cafe.guestbook --></p>\n", function () {
+		list($code, $out) = raster(array('lint'));
+		same(1, $code);
+		has($out, 'cafe.category_count(category) needs 1 argument(s), 0 given');
+		has($out, 'cafe.category_count(category) takes 1 argument(s), 2 given');
+		has($out, 'cafe.dishes_between(low, high) needs 2 argument(s), 1 given');
+		has($out, "did you mean 'category_count'?");
+		lacks($out, 'cafe.hours', 'a method with no arguments is fine');
+		lacks($out, 'cafe.guestbook', 'and so is one whose argument has a default');
+	});
+});
 test('N5', 'annotations: the grammar as data', function () {
 	list($code, $out) = raster(array('annotations', '--json'));
 	same(0, $code, $out);
@@ -1075,6 +1270,30 @@ test('N6', 'lint --fix repairs what is mechanical', function () use ($views) {
 		lacks($out, 'fixed');
 		has(file_get_contents("$views/zz-fix.html"), 'prnit', 'the typo is left as written');
 	});
+});
+test('N12', 'vocabulary on the command line', function () {
+	list($code, $out) = raster(array('vocabulary', '--json'));
+	same(0, $code, $out);
+	$vocabulary = json_decode($out, true);
+	same('category_count(category)', $vocabulary['models']['cafe']['methods']['category_count']['reads']);
+	$text = raster(array('vocabulary'))[1];
+	has($text, 'category_count(category)');
+	has($text, 'sql/: count_category, dishes_between');
+	has($text, 'reserved field names');
+	has($text, 'reservation.booked -> cafe.subscribe_guest');
+});
+test('N13', 'describe on the command line', function () {
+	list($code, $out) = raster(array('describe', '--json'));
+	same(0, $code, $out);
+	$described = json_decode($out, true);
+	same('demo', $described['site']['app']);
+	same(9, count($described));
+	list($code, $out) = raster(array('describe', '--sections=site,vocabulary'));
+	same(0, $code, $out);
+	has($out, '## site');
+	has($out, '## vocabulary');
+	lacks($out, '## pages');
+	has($out, 'described demo/ in ');
 });
 test('N7', 'deploy prints the server configuration', function () use ($root) {
 	list($code, $apache) = raster(array('deploy', '--config=apache'));

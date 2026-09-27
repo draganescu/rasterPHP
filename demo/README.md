@@ -94,6 +94,7 @@ php tests/demo.php                        # the whole matrix
 | C43 | named queries: `:name` placeholders, the calling model's `sql/` by default, a missing name is an error that lint finds |
 | C44 | `print.@attr.model.method` outside render blocks sets an attribute from a model |
 | C45 | a short closing tag (`<!-- /render -->`) is a lint error that names the full closing tag |
+| C46 | lint checks how many arguments a method takes, and names the nearest real method |
 | D1 | raster_form and honeypot on every post form |
 | D2 | the session token on forms for logged in users |
 | D3 | posts from other sites refused (Origin, Sec-Fetch-Site, Referer, /api too) |
@@ -222,6 +223,13 @@ php tests/demo.php                        # the whole matrix
 | M7 | invalid requests; unknown protocol versions get the newest |
 | M8 | slug and enabled are writable on items |
 | M9 | `mcp_token` in config |
+| M10 | `describe`: the whole site in one call, by section, with no secrets in the settings |
+| M11 | `vocabulary`: models, methods with their signatures, SQL queries, events, reserved names |
+| M12 | `annotations`: the grammar over MCP, the same data lint checks against |
+| M13 | `list_views` and `read_view`, and the paths they refuse |
+| M14 | `check_view` lints a draft and writes nothing |
+| M15 | `write_view` refuses markup that does not lint, writes markup that does, and is off over HTTP |
+| M16 | `render_url` renders a page without a web server, in its own process |
 | N1 | raster help and unknown commands |
 | N2 | raster lint and --json, --all-themes |
 | N3 | raster render and its exit codes |
@@ -233,4 +241,6 @@ php tests/demo.php                        # the whole matrix
 | N9 | `raster export`: pages, items, lists, feeds, the 404 page, assets and every language as static files; what needs PHP is reported |
 | N10 | `print.if.live` / `print.if.static`: forms on the live site, what shows instead in the export; an unwrapped form stops the export |
 | N11 | exporting again writes only files that changed, removes what the site no longer has, and does nothing when nothing changed |
+| N12 | raster vocabulary, and --json |
+| N13 | raster describe, and --sections |
 | O1 | the sitemap skips private pages and lists items |

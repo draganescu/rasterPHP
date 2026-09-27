@@ -13,14 +13,22 @@ https://draganescu.github.io/rto/specs/2014/06/29/rto.html
 ## Your loop
 
 ```sh
+php bin/raster describe           # the whole site in one answer; start here
+php bin/raster vocabulary         # every name a template may call, with signatures
+php bin/raster annotations        # the annotation grammar, as data
 php bin/raster serve              # http://localhost:8000, no setup, SQLite
 php bin/raster lint               # after every template edit; exit 1 on errors
 php bin/raster lint --fix         # repair what is mechanical, report the rest
-php bin/raster annotations --json # the annotation grammar as data, to check against
 php bin/raster schema             # what the CMS will store, compared with the database
 php bin/raster render /about      # print a page without a server (exit 1 on 4xx/5xx)
 php bin/raster doctor             # is this site healthy, up to date, ready for production?
 ```
+
+`describe`, `vocabulary`, `annotations`, `lint`, `schema` and `doctor` all take
+`--json`. If you can speak MCP, use that instead: the same answers come from one
+long-lived process (`php bin/raster mcp`, already in `.mcp.json`) rather than
+starting PHP again for every question — `describe` costs about 70 ms, everything
+else under 20. See **Editors and agents**.
 
 The demo café in the Raster repository
 (https://github.com/draganescu/rasterPHP/tree/master/demo) is a complete site
@@ -140,6 +148,12 @@ in, so write the short form if it is quicker and let the fix finish it.
 Literals only: `render.news.latest(3, 'sports', true, -1)`. Numbers, quoted
 strings, `true`, `false` and `null` are allowed. Nothing is ever passed to
 `eval`.
+
+Because they are literals, `lint` knows how many you passed and checks it
+against the method: too few or too many is an error, naming the signature it
+read. `raster vocabulary` lists every method that way
+(`category_count(category)`, `links(source, filter = …)`), so there is no need
+to guess.
 
 ## Models
 
@@ -548,13 +562,35 @@ of lists and filter pages come along; drafts and the editor don't.
   - over stdio: `php bin/raster mcp`, already set up in `.mcp.json`;
   - over HTTP: POST to `/mcp` with `Authorization: Bearer $RASTER_MCP_TOKEN`.
     It's off until that token is set.
-- **Tools:** `site_overview`, `get_page`, `update_page`, `page_history`,
-  `list_items`, `get_item`, `create_item`, `update_item`, `delete_item`,
-  `lint_templates`, `schema_status`.
+- **Tools for the site itself:**
+  - `describe` — how URLs reach views, the pages and collections the markup
+    declares, the vocabulary, the settings that change behaviour, and whether
+    the templates lint clean. Ask this first. `sections` narrows it.
+  - `vocabulary` — every model with its methods and their signatures, the
+    named SQL queries, the events and who listens, the names the CMS keeps.
+    Read from the code, so it cannot be out of date. Check it before writing
+    an annotation instead of guessing a method name.
+  - `annotations` — the grammar, the same data `lint` checks against.
+  - `list_views`, `read_view` — the templates.
+  - `check_view` — lint markup that isn't written yet; nothing is saved.
+  - `write_view` — write a view, but only if it lints: on an error the file is
+    left alone and the problems come back. The answer says what the change
+    does to the content model.
+  - `render_url` — the page's status and HTML, no web server. It runs in its
+    own process, so a page that dies can't take the server down.
+- **Tools for content:** `site_overview`, `get_page`, `update_page`,
+  `page_history`, `list_items`, `get_item`, `create_item`, `update_item`,
+  `delete_item`, `lint_templates`, `schema_status`.
 - **Addressing pages:** by URL (`/about`), by view (`about`), or `site` for the
   `site_*` fields.
 - **Writes** are limited to fields in the templates, plus `slug`, `enabled`
   and `published_at` on items.
+- **`write_view` edits code, not content**, since a template can call any
+  model. Over stdio the agent is already on the machine with the files, so it
+  is available. Over HTTP it is not offered until the site sets
+  `config::set('mcp_write_views')->to(true)`.
+- `describe` leaves out anything that could be a secret: the MCP token and the
+  mail transport are never in its settings.
 
 ## Extending
 
@@ -601,6 +637,7 @@ Set in `config/the_app.php` with `config::set('name')->to(value)`.
 | `languages`, `domain_language`, `language_cookie` | none, none, `lang` | |
 | `page_cache`, `page_cache_ttl`, `page_cache_skip` | on in production, 3600, none | |
 | `mcp_token` | none | same as `RASTER_MCP_TOKEN` |
+| `mcp_write_views` | false | lets MCP over HTTP write templates (`write_view`); over stdio it always can |
 | `api_system_models` | `cms` | system models reachable at `/api` |
 | `allow_deprecated` | none | `array('<id>' => true or path pattern(s))`: uses of deprecated features this site keeps on purpose, so `doctor` counts them apart instead of warning |
 
@@ -638,9 +675,8 @@ command-line output). They win over the settings above.
   templates, the database, whether `.htaccess` still carries every rule in
   `system/private_paths.php`, uses of deprecated features
   (`system/tools/deprecations.php`, minus the ones config `allow_deprecated`
-  says are on purpose) and, in production, the site address, mail and
-  tokens. Exit 1
-  when something must be fixed.
+  says are on purpose) and, in production, the site address, mail and tokens.
+  Exit 1 when something must be fixed.
 - `php bin/raster new <folder>` starts a new site from this copy of Raster.
 - `CHANGELOG.md` in the repository lists what changed in each release.
 

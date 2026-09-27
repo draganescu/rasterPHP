@@ -655,6 +655,85 @@ test('allow_deprecated counts a use apart instead of warning', function () use (
 	}
 });
 
+// ## The vocabulary: what a template may name
+
+test('signatures are read from the tokens', function () {
+	$shape = function ($code) {
+		$tokens = token_get_all("<?php class x { $code }");
+		foreach ($tokens as $i => $t) {
+			if (is_array($t) && $t[0] === T_FUNCTION) {
+				for ($j = $i + 1; $j < count($tokens); $j++) {
+					if (is_array($tokens[$j]) && $tokens[$j][0] === T_STRING) return raster_inspector::signature($tokens, $j + 1);
+				}
+			}
+		}
+		return null;
+	};
+	$none = $shape('function a() {}');
+	same(array(0, 0, false), array($none['required'], $none['total'], $none['variadic']));
+	$one = $shape('function a($x) {}');
+	same(array(1, 1), array($one['required'], $one['total']));
+	$default = $shape('function a($x, $y = 3) {}');
+	same(array(1, 2), array($default['required'], $default['total']));
+	// a default that is itself a call, so the parser must follow the nesting
+	$nested = $shape('function a($x, $y = array(1, 2), $z = null) {}');
+	same(array(1, 3), array($nested['required'], $nested['total']));
+	$typed = $shape('function a(string $x, ?int $y = null): array {}');
+	same(array(1, 2), array($typed['required'], $typed['total']));
+	$variadic = $shape('function a($x, ...$rest) {}');
+	same(array(1, 2, true), array($variadic['required'], $variadic['total'], $variadic['variadic']));
+	$reference = $shape('function a(&$x) {}');
+	same(array(1, 1), array($reference['required'], $reference['total']));
+	same('a(x, y = …)', raster_inspector::signature_text('a', $default));
+	same('a(x, …rest)', raster_inspector::signature_text('a', $variadic));
+});
+test('lint checks the number of arguments', function () {
+	// site.nav() in the starter app takes none
+	check(has_problem(lint_html("<!-- render.site.nav(1) -->x<!-- /render.site.nav(1) -->"), 'takes 0 argument(s), 1 given'));
+	same(array(), lint_html("<!-- render.site.nav -->x<!-- /render.site.nav -->"));
+	// the starter app's site model has year() and nav()
+	check(has_problem(lint_html('<!-- print.site.yaer /-->'), "did you mean 'year'?"), 'and names the nearest method');
+	check(!has_problem(lint_html('<!-- print.site.nothing_like_it /-->'), 'did you mean'), 'but only when there is one');
+});
+test('the vocabulary is read from the code', function () {
+	$vocabulary = (new raster_inspector())->vocabulary();
+	check(isset($vocabulary['models']['site']), 'the app model: '.implode(', ', array_keys($vocabulary['models'])));
+	check(isset($vocabulary['models']['cms']) && $vocabulary['models']['cms']['bundled'], 'the bundled ones');
+	check(isset($vocabulary['models']['cms']['methods']['style']), 'with their methods');
+	foreach ($vocabulary['models'] as $name => $model) {
+		foreach ($model['methods'] as $method => $shape) {
+			check(isset($shape['reads']) && array_key_exists('needs', $shape), "$name.$method has no shape");
+		}
+	}
+	same(array('session', 'self', 'if'), $vocabulary['engine_models']);
+	check(in_array('slug', $vocabulary['reserved']['fields']) && in_array('style', $vocabulary['reserved']['fields']));
+	check(in_array('launch', $vocabulary['events']['sent']) && in_array('cms.item_saved', $vocabulary['events']['sent']));
+	// cms has __call (print.cms.<field> is any field), so lint cannot check its names
+	check($vocabulary['models']['cms']['any_method'] === true, 'cms takes any method');
+	check($vocabulary['models']['site']['any_method'] === false, 'an ordinary model does not');
+});
+test('lint_source lints markup that is not on disk', function () {
+	$inspector = new raster_inspector();
+	same(array(), $inspector->lint_source('<!-- dry._layout.head /-->'), 'dry resolves against the theme');
+	$problems = $inspector->lint_source('<!-- print.nosuch.x /-->', 'draft.html');
+	same(1, count($problems));
+	same('draft.html', $problems[0]['file'], 'reported under the name it would be saved as');
+});
+test('describe answers by section, and never with a secret', function () use ($root) {
+	require_once BASE.'tools/describe.php';
+	$all = raster_describe::site();
+	same(raster_describe::sections(), array_keys($all));
+	same('application', $all['site']['app']);
+	check(count($all['pages']) > 3 && count($all['views']) > 3);
+	same(array('site', 'schema'), array_keys(raster_describe::site(array('site', 'schema'))));
+	// the settings whitelist decides what an agent sees
+	config::set('mcp_token')->to('super-secret-token-value');
+	$settings = raster_describe::site(array('settings'))['settings'];
+	check(strpos(json_encode($settings), 'super-secret') === false, 'the token must not be in describe');
+	check(!array_key_exists('mail', $settings), 'nor the mail DSN, which can hold a password');
+	config::set('mcp_token')->to(null);
+});
+
 // ## RedBean loads without a MySQL driver
 
 test('the ORM does not need pdo_mysql for an SQLite site', function () {
