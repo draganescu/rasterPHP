@@ -1,5 +1,5 @@
 <?php
-// Mutation check for the demo suite: php tests/mutate.php [--jobs=N] [--only=text] [--suite=demo|run|both]
+// Mutation check: php tests/mutate.php [--all] [--jobs=N] [--only=text] [--suite=demo|run|both] [--base=ref]
 //
 // Each entry in tests/mutations.json breaks the framework on purpose (one
 // exact search and replace). The suite runs against a copy of the project
@@ -7,20 +7,71 @@
 // feature is not really tested. Stale entries (the search text is gone, or
 // is not unique) fail too, so the list keeps up with the code.
 //
-// A maintainer tool, slow by design: every mutation runs the whole suite.
+// Every mutation runs a whole suite, and a suite run costs what it costs: on a
+// three core machine, measured, about a minute per mutation once a few run at
+// once. All 76 is an hour of waiting.
+//
+// **By default it only runs the mutations whose file this branch touched**
+// (against --base, `master` by default, plus anything not committed yet). An
+// ordinary change is a handful: editing system/tools/inspector.php selects 9,
+// which is minutes rather than an hour. `--all` is the full sweep, for a
+// release or after editing the framework widely. Don't set --jobs above the
+// number of cores; the suites start their own servers and thrash.
 
 if (PHP_SAPI !== 'cli') exit;
 $root = dirname(__DIR__);
-$options = array('jobs' => 2, 'only' => '', 'suite' => 'demo');
+$options = array('jobs' => 2, 'only' => '', 'suite' => 'demo', 'base' => 'master', 'all' => false);
 foreach (array_slice($argv, 1) as $arg) {
-	if (preg_match('/^--(jobs|only|suite)=(.*)$/', $arg, $m)) $options[$m[1]] = $m[2];
-	else exit("Usage: php tests/mutate.php [--jobs=N] [--only=text] [--suite=demo|run|both]\n");
+	if ($arg === '--all') $options['all'] = true;
+	elseif (preg_match('/^--(jobs|only|suite|base)=(.*)$/', $arg, $m)) $options[$m[1]] = $m[2];
+	else exit("Usage: php tests/mutate.php [--all] [--jobs=N] [--only=text] [--suite=demo|run|both] [--base=ref]\n");
+}
+
+// ##What this branch touched
+//
+// The files changed against the base, plus anything not committed yet. Returns
+// null when git can't answer (no repository, no such ref), and the run then
+// covers everything rather than pretending a change touched nothing.
+function changed_files($root, $base) {
+	$git = 'git -C '.escapeshellarg($root).' ';
+	exec($git.'rev-parse --git-dir 2>/dev/null', $ignored, $code);
+	if ($code !== 0) return null;
+	$ref = null;
+	foreach (array('origin/'.$base, $base) as $candidate) {
+		exec($git.'rev-parse --verify --quiet '.escapeshellarg($candidate).' 2>/dev/null', $ignored, $found);
+		if ($found === 0) { $ref = $candidate; break; }
+	}
+	if ($ref === null) return null;
+	$files = array();
+	foreach (array('diff --name-only '.escapeshellarg($ref).'...HEAD', 'diff --name-only', 'diff --name-only --cached') as $command) {
+		$lines = array();
+		exec($git.$command.' 2>/dev/null', $lines);
+		foreach ($lines as $line) if (trim($line) !== '') $files[trim($line)] = true;
+	}
+	return array_keys($files);
 }
 $suites = $options['suite'] === 'both' ? array('demo', 'run') : array($options['suite']);
 $mutations = json_decode(file_get_contents(__DIR__.'/mutations.json'), true);
 if (!is_array($mutations)) exit("tests/mutations.json is not valid JSON\n");
+$total = count($mutations);
+$scope = 'all '.$total;
 if ($options['only'] !== '') {
 	$mutations = array_values(array_filter($mutations, function ($m) use ($options) { return strpos($m['name'], $options['only']) !== false; }));
+	$scope = "matching '{$options['only']}'";
+} elseif (!$options['all']) {
+	$changed = changed_files($root, $options['base']);
+	if ($changed === null) {
+		$scope = "all $total (no git to compare with)";
+	} else {
+		$mutations = array_values(array_filter($mutations, function ($m) use ($changed) { return in_array($m['file'], $changed); }));
+		$scope = 'for the '.count($changed).' file(s) this branch touched, of '.$total.' (--all for every one)';
+		if (!$mutations) {
+			echo "Nothing to check: no mutation targets a file this branch changed against {$options['base']}.\n";
+			echo "The files it changed: ".($changed ? implode(', ', $changed) : '(none)')."\n";
+			echo "--all runs every mutation; --base=<ref> compares with something else.\n";
+			exit(0);
+		}
+	}
 }
 
 $work = sys_get_temp_dir().'/raster-mutate-'.getmypid();
@@ -37,7 +88,7 @@ $results = array();
 $queue = $mutations;
 $running = array();
 $started = microtime(true);
-echo count($mutations)." mutation(s), ".(int)$options['jobs']." at a time\n";
+echo count($mutations)." mutation(s) $scope, ".(int)$options['jobs']." at a time\n";
 while ($queue || $running) {
 	while ($queue && count($running) < max(1, (int)$options['jobs'])) {
 		$mutation = array_shift($queue);
