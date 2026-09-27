@@ -299,7 +299,7 @@ class raster_inspector {
 		$info = false;
 		foreach ($candidates as $file) {
 			if (!file_exists($file)) continue;
-			$info = array('file' => $file, 'methods' => array(), 'magic' => false, 'class' => false);
+			$info = array('file' => $file, 'methods' => array(), 'signatures' => array(), 'magic' => false, 'class' => false, 'loose' => strpos(file_get_contents($file), 'func_get_args') !== false);
 			$tokens = token_get_all(file_get_contents($file));
 			$count = count($tokens);
 			$class_depth = null; $depth = 0; $pending_class = false;
@@ -326,7 +326,10 @@ class raster_inspector {
 						if (is_array($tokens[$j]) && $tokens[$j][0] === T_STRING) {
 							$name = $tokens[$j][1];
 							if ($name === '__call') $info['magic'] = true;
-							elseif ($visibility === 'public') $info['methods'][] = $name;
+							elseif ($visibility === 'public') {
+								$info['methods'][] = $name;
+								$info['signatures'][$name] = self::signature($tokens, $j + 1);
+							}
 							break;
 						}
 						if ($tokens[$j] === '(') break;
@@ -339,7 +342,10 @@ class raster_inspector {
 				if (file_exists($parent)) {
 					$base_info = $this->parent_info($parent);
 					$info['methods'] = array_values(array_unique(array_merge($info['methods'], $base_info['methods'])));
+					// the override's own signature wins over the one it replaces
+					$info['signatures'] = $info['signatures'] + $base_info['signatures'];
 					$info['magic'] = $info['magic'] || $base_info['magic'];
+					$info['loose'] = $info['loose'] || !empty($base_info['loose']);
 				}
 			}
 			break;
@@ -349,19 +355,145 @@ class raster_inspector {
 
 	// methods of a system model file, for overrides
 	protected function parent_info($file) {
-		$info = array('methods' => array(), 'magic' => false);
-		$tokens = token_get_all(file_get_contents($file));
+		$source = file_get_contents($file);
+		$info = array('methods' => array(), 'signatures' => array(), 'magic' => false, 'loose' => strpos($source, 'func_get_args') !== false);
+		$tokens = token_get_all($source);
 		foreach ($tokens as $i => $t) {
 			if (!is_array($t) || $t[0] !== T_FUNCTION) continue;
 			for ($j = $i + 1; $j < count($tokens); $j++) {
 				if (is_array($tokens[$j]) && $tokens[$j][0] === T_STRING) {
-					if ($tokens[$j][1] === '__call') $info['magic'] = true; else $info['methods'][] = $tokens[$j][1];
+					if ($tokens[$j][1] === '__call') $info['magic'] = true;
+					else {
+						$info['methods'][] = $tokens[$j][1];
+						$info['signatures'][$tokens[$j][1]] = self::signature($tokens, $j + 1);
+					}
 					break;
 				}
 				if ($tokens[$j] === '(') break;
 			}
 		}
 		return $info;
+	}
+
+	// ##The vocabulary
+	//
+	// Everything a template is allowed to name: the models and their methods
+	// with signatures, the named SQL queries, the events and who listens, and
+	// the names the CMS keeps for itself. Nothing is executed, and for a site
+	// the size of the demo café it takes about a millisecond, so it is read
+	// fresh every time instead of cached — a stale vocabulary is worse than no
+	// vocabulary.
+	function vocabulary() {
+		$models_path = config::get('models_path', 'models');
+		$found = array();
+		foreach (array(APPBASE.$models_path, BASE.$models_path) as $dir) {
+			foreach (glob($dir.'/*', GLOB_ONLYDIR) ?: array() as $folder) {
+				$name = basename($folder);
+				// the_<name> is an override of <name>, called by the original name
+				$found[strpos($name, 'the_') === 0 ? substr($name, 4) : $name] = true;
+			}
+		}
+		$models = array();
+		foreach (array_keys($found) as $name) {
+			$info = $this->model_info($name);
+			if ($info === false || !$info['class']) continue;
+			$methods = array();
+			foreach ($info['methods'] as $method) {
+				$signature = isset($info['signatures'][$method]) ? $info['signatures'][$method] : null;
+				$methods[$method] = $signature
+					? array('reads' => self::signature_text($method, $signature), 'needs' => $signature['required'], 'takes' => $signature['variadic'] ? null : $signature['total'])
+					: array('reads' => $method.'(…)', 'needs' => 0, 'takes' => null);
+			}
+			ksort($methods);
+			$models[$name] = array(
+				'file' => self::short($info['file']),
+				'bundled' => strpos($info['file'], BASE) === 0,
+				'any_method' => !empty($info['magic']),
+				'queries' => $this->model_queries($name),
+				'methods' => $methods,
+			);
+		}
+		ksort($models);
+		$listeners = array();
+		foreach ($this->listeners() as $l) {
+			$listeners[$l['event']][] = $l['model'].'.'.$l['method'].' ('.$l['file'].':'.$l['line'].')';
+		}
+		$reserved = self::grammar()['references'];
+		return array(
+			'models' => $models,
+			'engine_models' => $reserved['builtin_models'],
+			'row_keys_from_raster' => $reserved['builtin_keys'],
+			'shared_queries' => array_keys(database::named_queries()),
+			'events' => array('sent' => $this->dispatched_events(), 'listened_to' => $listeners),
+			'reserved' => array(
+				'fields' => array_values(array_unique(array_merge($reserved['reserved_fields'], class_exists('cms') ? get_class_methods('cms') : array()))),
+				'collections' => $reserved['reserved_collections'],
+			),
+		);
+	}
+
+	// the named queries a model can call as methods: its own sql/ folder
+	function model_queries($model) {
+		$dir = APPBASE.config::get('models_path', 'models')."/$model/sql";
+		$names = array();
+		foreach (glob("$dir/*.sql") ?: array() as $file) $names[] = basename($file, '.sql');
+		sort($names);
+		return $names;
+	}
+
+	// ##Signatures
+	//
+	// A method's parameter list, read from its tokens: how many arguments it
+	// needs, how many it takes, and whether it is variadic. Annotations pass
+	// literals only, so the count is known at lint time and can be checked.
+	static function signature($tokens, $from) {
+		$count = count($tokens);
+		$empty = array('required' => 0, 'total' => 0, 'variadic' => false, 'params' => array());
+		for ($i = $from; $i < $count && $tokens[$i] !== '('; $i++) {
+			if ($tokens[$i] === '{' || $tokens[$i] === ';') return $empty;
+		}
+		$depth = 0; $params = array(); $current = null; $variadic = false; $rest = false;
+		for (; $i < $count; $i++) {
+			$t = $tokens[$i];
+			if ($t === '(') { $depth++; continue; }
+			if ($t === ')') { $depth--; if ($depth === 0) break; continue; }
+			// anything nested is part of a default value, e.g. array(1, 2)
+			if ($depth !== 1) continue;
+			if (is_array($t) && $t[0] === T_ELLIPSIS) { $variadic = true; $rest = true; continue; }
+			if (is_array($t) && $t[0] === T_VARIABLE) {
+				$params[] = array('name' => ltrim($t[1], '$'), 'optional' => $variadic, 'rest' => !empty($rest));
+				$rest = false;
+				$current = count($params) - 1;
+				continue;
+			}
+			if ($t === '=' && $current !== null) $params[$current]['optional'] = true;
+		}
+		$required = 0;
+		foreach ($params as $param) if (empty($param['optional'])) $required++;
+		return array('required' => $required, 'total' => count($params), 'variadic' => $variadic, 'params' => $params);
+	}
+
+	// The nearest real name, when there is an obvious one. Agents and people
+	// mistype the same way, and the list of real names is right here.
+	static function did_you_mean($name, $names) {
+		$best = null; $distance = null;
+		foreach ($names as $candidate) {
+			$d = levenshtein($name, $candidate);
+			if ($d > 0 && $d <= max(2, (int)floor(strlen($name) / 3)) && ($distance === null || $d < $distance)) {
+				$best = $candidate; $distance = $d;
+			}
+		}
+		return $best === null ? '' : "; did you mean '$best'?";
+	}
+
+	// how a signature reads in a message: method(a, b = …)
+	static function signature_text($method, $signature) {
+		$parts = array();
+		foreach ($signature['params'] as $param) {
+			if (!empty($param['rest'])) $parts[] = '…'.$param['name'];
+			else $parts[] = $param['name'].(empty($param['optional']) ? '' : ' = …');
+		}
+		return $method.'('.implode(', ', $parts).')';
 	}
 
 	// ##Lint
@@ -417,14 +549,20 @@ class raster_inspector {
 
 	// Lints any view file by its path
 	function lint_path($path, $theme = null) {
+		return $this->lint_source(file_get_contents($path), self::short($path), $theme);
+	}
+
+	// Lints a view that is not on disk yet, so a draft can be checked before
+	// anything is written. `dry` references resolve against the theme, as they
+	// will once the file is there.
+	function lint_source($html, $name = 'view', $theme = null) {
 		$theme = $theme ?: $this->theme;
-		$html = file_get_contents($path);
 		list($blocks, $problems) = self::blocks($html);
 		$this->lint_blocks($blocks, $problems, null, $theme);
 		$this->lint_forms($html, $problems, $theme);
 		usort($problems, function ($a, $b) { return $a['line'] <=> $b['line'] ?: $a['column'] <=> $b['column']; });
 		foreach ($problems as &$problem) {
-			$problem['file'] = self::short($path);
+			$problem['file'] = $name;
 		}
 		unset($problem);
 		return $problems;
@@ -492,8 +630,19 @@ class raster_inspector {
 			return;
 		}
 		if (!in_array($method, $info['methods']) && !$info['magic']) {
-			$problems[] = self::problem('error', $block, "Model '{$ref['model']}' has no public method '$method' (".self::short($info['file']).")");
+			$problems[] = self::problem('error', $block, "Model '{$ref['model']}' has no public method '$method' (".self::short($info['file']).")".self::did_you_mean($method, $info['methods']));
 			return;
+		}
+		// the arguments are literals, so the count is known here
+		if (isset($info['signatures'][$method]) && empty($info['loose'])) {
+			$signature = $info['signatures'][$method];
+			$given = count($arguments);
+			$reads = self::signature_text($method, $signature);
+			if ($given < $signature['required']) {
+				$problems[] = self::problem('error', $block, "{$ref['model']}.$reads needs {$signature['required']} argument(s), $given given");
+			} elseif (!$signature['variadic'] && $given > $signature['total']) {
+				$problems[] = self::problem('error', $block, "{$ref['model']}.$reads takes {$signature['total']} argument(s), $given given");
+			}
 		}
 		if ($ref['model'] === 'cms') {
 			$template_methods = array('style', 'login', 'login_message', 'buttons');

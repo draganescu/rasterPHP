@@ -400,5 +400,59 @@
   "file": "system/private_paths.php",
   "search": "\t\treturn '#'.implode('|', $fragments).'#i';",
   "replace": "\t\treturn '#'.implode('|', $fragments).'#';"
+ },
+ {
+  "name": "C46-arity-not-checked",
+  "file": "system/tools/inspector.php",
+  "search": "\t\tif (isset($info['signatures'][$method]) && empty($info['loose'])) {",
+  "replace": "\t\tif (false) {"
+ },
+ {
+  "name": "C46-no-nearest-method",
+  "file": "system/tools/inspector.php",
+  "search": "\t\treturn $best === null ? '' : \"; did you mean '$best'?\";",
+  "replace": "\t\treturn '';"
+ },
+ {
+  "name": "M10-describe-can-leak-a-secret",
+  "file": "system/tools/describe.php",
+  "search": "\t\t'allow_deprecated',\n\t);",
+  "replace": "\t\t'allow_deprecated', 'mcp_token',\n\t);"
+ },
+ {
+  "name": "M11-vocabulary-without-signatures",
+  "file": "system/tools/inspector.php",
+  "search": "\t\t\t\t$signature = isset($info['signatures'][$method]) ? $info['signatures'][$method] : null;",
+  "replace": "\t\t\t\t$signature = null;"
+ },
+ {
+  "name": "M15-write_view-writes-broken-markup",
+  "file": "system/models/mcp/mcp.php",
+  "search": "\t\tif ($errors) {\n\t\t\treturn array(\n\t\t\t\t'written' => false, 'view' => $view, 'errors' => count($errors),",
+  "replace": "\t\tif (false) {\n\t\t\treturn array(\n\t\t\t\t'written' => false, 'view' => $view, 'errors' => count($errors),"
+ },
+ {
+  "name": "M15-write_view-on-over-http",
+  "file": "system/models/mcp/mcp.php",
+  "search": "\t\tif (self::$transport !== 'http') return true;\n\t\treturn (bool)config::get('mcp_write_views', false);",
+  "replace": "\t\treturn true;"
+ },
+ {
+  "name": "M15-view-path-may-escape",
+  "file": "system/models/mcp/mcp.php",
+  "search": "\t\tif (strpos(realpath($parent).'/', realpath($dir).'/') !== 0) {",
+  "replace": "\t\tif (false) {"
+ },
+ {
+  "name": "M16-render-status-always-ok",
+  "file": "system/models/mcp/mcp.php",
+  "search": "\t\t$status = preg_match('/HTTP (\\d{3})/', $errors, $m) ? (int)$m[1] : ($exit === 0 ? 200 : null);",
+  "replace": "\t\t$status = 200;"
+ },
+ {
+  "name": "N13-describe-ignores-sections",
+  "file": "system/tools/describe.php",
+  "search": "\t\t\treturn $sections === null || in_array($name, (array)$sections);",
+  "replace": "\t\t\treturn true;"
  }
 ]

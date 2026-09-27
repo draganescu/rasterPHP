@@ -3,6 +3,7 @@
 require_once BASE.'models/cms/cms.php';
 require_once BASE.'tools/inspector.php';
 require_once BASE.'tools/schema.php';
+require_once BASE.'tools/describe.php';
 
 /**
 * MCP server
@@ -25,6 +26,7 @@ class mcp
 	// ##HTTP transport, bound to the finding_route event
 	public function http()
 	{
+		self::$transport = 'http';
 		$segments = (array)config::get('uri_segments');
 		if ($segments[0] !== 'mcp' || count(array_filter($segments)) > 1) return false;
 
@@ -74,6 +76,7 @@ class mcp
 
 	// ##stdio transport: one JSON-RPC message per line
 	public function stdio($in = STDIN, $out = STDOUT) {
+		self::$transport = 'stdio';
 		while (($line = fgets($in)) !== false) {
 			$line = trim($line);
 			if ($line === '') continue;
@@ -103,7 +106,7 @@ class mcp
 					'protocolVersion' => in_array($requested, self::$protocol_versions) ? $requested : self::$protocol_versions[0],
 					'capabilities' => array('tools' => array('listChanged' => false)),
 					'serverInfo' => array('name' => 'raster', 'version' => self::SERVER_VERSION),
-					'instructions' => 'This is a Raster site. Its content model comes from HTML templates: call site_overview first to see pages, collections and their fields. Page edits create a new revision (see page_history). Fields that are not in the templates cannot be written; to add a field, edit the templates.',
+					'instructions' => 'This is a Raster site: views are plain HTML and the dynamic parts are HTML comments. Call describe first — it returns how URLs reach views, the content model the markup declares, every name a template may call, and whether the templates lint clean. Before writing an annotation, check vocabulary (the models and their signatures) and annotations (the grammar); both are read from the code, so neither can be out of date. To change a template use check_view then write_view, which refuses markup that does not lint, and render_url to see the result. Content edits go through get_page/update_page and the item tools: page edits keep revisions, and fields that are not in the templates cannot be written — to add a field, edit the template.',
 				));
 			case 'ping':
 				return $this->result($id, new stdClass());
@@ -143,8 +146,8 @@ class mcp
 				'annotations' => $annotations,
 			);
 		};
-		return array(
-			$tool('site_overview', 'Lists the pages (URL, view, editable fields) and collections (fields, item count) of the site, and which models listen to which events. Start here.', array(), array(), $read_only),
+		$tools = array(
+			$tool('site_overview', 'Lists the pages (URL, view, editable fields) and collections (fields, item count) of the site, and which models listen to which events. A short answer for content work; describe is the full one.', array(), array(), $read_only),
 			$tool('get_page', 'Current values of the editable fields of a page.', array('page' => $page), array('page'), $read_only),
 			$tool('update_page', 'Changes fields of a page. Stores a new revision; nothing is overwritten.', array('page' => $page, 'fields' => $fields), array('page', 'fields'), $write),
 			$tool('page_history', 'Previous revisions of a page, newest first.', array('page' => $page, 'limit' => array('type' => 'integer', 'default' => 10)), array('page'), $read_only),
@@ -155,7 +158,37 @@ class mcp
 			$tool('delete_item', 'Deletes a collection item.', array('collection' => $collection, 'id' => $id), array('collection', 'id'), array('readOnlyHint' => false, 'destructiveHint' => true, 'openWorldHint' => false)),
 			$tool('lint_templates', 'Checks every template for annotation errors (unclosed blocks, unknown models, typos) with file:line positions.', array(), array(), $read_only),
 			$tool('schema_status', 'Compares the content model in the templates with the database: missing columns, orphaned columns, likely renames.', array(), array(), $read_only),
+			// ##Working on the site itself, not only its content
+			$tool('describe', 'The whole site in one answer: how URLs reach views, the pages and collections the markup declares, every name a template may call, the settings that change behaviour, and whether the templates lint clean. Ask this first when you meet a Raster site.',
+				array('sections' => array('type' => 'array', 'items' => array('type' => 'string', 'enum' => raster_describe::sections()), 'description' => 'Limit the answer to these sections. All of them by default.')), array(), $read_only),
+			$tool('vocabulary', 'Every name a template is allowed to call: each model with its methods and their signatures, the named SQL queries, the events and who listens, and the names the CMS keeps for itself. Read from the code, never executed. Use it before writing an annotation instead of guessing a method name.',
+				array(), array(), $read_only),
+			$tool('annotations', 'The annotation grammar as data: the exact spelling of each directive, what each keyword does, how arguments and attributes work, and how blocks nest. lint checks against this same description.',
+				array(), array(), $read_only),
+			$tool('list_views', 'The view files of a theme, as paths relative to the theme folder.', array('theme' => array('type' => 'string', 'description' => 'Defaults to the site\'s theme')), array(), $read_only),
+			$tool('read_view', 'The source of one view.', array('view' => array('type' => 'string', 'description' => 'Path inside the theme folder, e.g. about.html or docs/setup.html'), 'theme' => array('type' => 'string')), array('view'), $read_only),
+			$tool('check_view', 'Lints a view that is not written yet: pass the markup and get back the problems, with line and column. Nothing is written. Use it on a draft before write_view.',
+				array('content' => array('type' => 'string', 'description' => 'The markup to check'), 'view' => array('type' => 'string', 'description' => 'The name it would be saved as, for the messages'), 'theme' => array('type' => 'string')), array('content'), $read_only),
+			$tool('write_view', 'Writes a view, but only if it lints clean: the file is left untouched when there are errors, and the problems come back instead. Warnings do not stop the write. Also reports what the change does to the content model.',
+				array('view' => array('type' => 'string', 'description' => 'Path inside the theme folder, e.g. about.html'), 'content' => array('type' => 'string'), 'theme' => array('type' => 'string')), array('view', 'content'), $write),
+			$tool('render_url', 'Renders a URL of this site and returns the status and the HTML, without a web server. The fastest way to see whether a change works. Runs in a separate process, so a page that fails cannot take this server down.',
+				array('url' => array('type' => 'string', 'description' => 'A path on the site, e.g. / or /menu/menu_item/flat-white'), 'limit' => array('type' => 'integer', 'description' => 'Characters of HTML to return, 20000 by default')), array('url'), $read_only),
 		);
+		if (!self::may_write_views()) {
+			$tools = array_values(array_filter($tools, function ($t) { return $t['name'] !== 'write_view'; }));
+		}
+		return $tools;
+	}
+
+	// write_view edits the site's templates, which is a bigger thing than
+	// editing content: a template can call any model. Over stdio the agent is
+	// already on the machine with the files. Over HTTP it is not, so it stays
+	// off until the site says otherwise.
+	static $transport = 'stdio';
+
+	static function may_write_views() {
+		if (self::$transport !== 'http') return true;
+		return (bool)config::get('mcp_write_views', false);
 	}
 
 	public function call_tool($name, $arguments) {
@@ -331,5 +364,148 @@ class mcp
 	protected function tool_schema_status($arguments) {
 		$schema = new raster_schema();
 		return $schema->status();
+	}
+
+	// ##Working on the site, not only its content
+	//
+	// These read and write the templates. They are here rather than in the
+	// command line so an agent pays for starting PHP once a session instead of
+	// once a call: describing this site takes about 70 ms, everything else
+	// under 20, and none of it needs a web server.
+
+	protected function tool_describe($arguments) {
+		$sections = $this->arg($arguments, 'sections', null);
+		if ($sections !== null && !is_array($sections)) throw new InvalidArgumentException("'sections' must be a list of section names");
+		if ($sections) {
+			$unknown = array_diff($sections, raster_describe::sections());
+			if ($unknown) throw new InvalidArgumentException('Unknown section(s): '.implode(', ', $unknown).'. Sections: '.implode(', ', raster_describe::sections()));
+		}
+		return raster_describe::site($sections ?: null);
+	}
+
+	protected function tool_vocabulary($arguments) {
+		return (new raster_inspector())->vocabulary();
+	}
+
+	protected function tool_annotations($arguments) {
+		return raster_inspector::grammar();
+	}
+
+	protected function inspector_for($arguments) {
+		$theme = $this->arg($arguments, 'theme', null);
+		return new raster_inspector(null, is_string($theme) && $theme !== '' ? $theme : null);
+	}
+
+	protected function tool_list_views($arguments) {
+		$inspector = $this->inspector_for($arguments);
+		return array('theme' => $inspector->theme, 'folder' => raster_inspector::short($inspector->theme_dir()), 'views' => $inspector->views());
+	}
+
+	// Where a view lives, refusing every name that points somewhere else. The
+	// extensions come from the same list that decides what is never served raw.
+	protected function view_file($inspector, $view) {
+		$view = ltrim(str_replace('\\', '/', (string)$view), '/');
+		// a null byte would make the path functions below throw, not refuse
+		if ($view === '' || strpos($view, "\0") !== false) {
+			throw new InvalidArgumentException("'$view' is not a name inside the theme folder");
+		}
+		$extensions = array_values(array_unique(array_merge(array(ltrim($inspector->ext, '.')), private_paths::$view_extensions)));
+		if (!preg_match('/\.([a-z0-9]+)$/', $view, $m) || !in_array($m[1], $extensions)) {
+			throw new InvalidArgumentException("A view ends in .".implode(', .', $extensions));
+		}
+		$dir = $inspector->theme_dir();
+		$path = $dir.'/'.$view;
+		$parent = dirname($path);
+		if (!is_dir($parent)) throw new InvalidArgumentException('There is no folder '.raster_inspector::short($parent).' to put it in');
+		// the one check that matters: wherever ..'s and links lead, it has to
+		// land inside this theme
+		if (strpos(realpath($parent).'/', realpath($dir).'/') !== 0) {
+			throw new InvalidArgumentException("'$view' is outside the theme folder");
+		}
+		return $path;
+	}
+
+	protected function tool_read_view($arguments) {
+		$inspector = $this->inspector_for($arguments);
+		$view = (string)$this->arg($arguments, 'view');
+		$path = $this->view_file($inspector, $view);
+		if (!is_file($path)) throw new InvalidArgumentException("There is no view '$view' in theme '{$inspector->theme}'. list_views has the names.");
+		$content = file_get_contents($path);
+		return array('view' => $view, 'theme' => $inspector->theme, 'bytes' => strlen($content), 'content' => $content);
+	}
+
+	protected function tool_check_view($arguments) {
+		$inspector = $this->inspector_for($arguments);
+		$content = (string)$this->arg($arguments, 'content');
+		$name = (string)$this->arg($arguments, 'view', 'draft'.$inspector->ext);
+		$problems = $inspector->lint_source($content, $name, $inspector->theme);
+		$errors = count(array_filter($problems, function ($p) { return $p['severity'] === 'error'; }));
+		return array('view' => $name, 'errors' => $errors, 'warnings' => count($problems) - $errors, 'problems' => $problems);
+	}
+
+	protected function tool_write_view($arguments) {
+		if (!self::may_write_views()) {
+			throw new RuntimeException('Writing views is off over HTTP: a template can call any model. Set config mcp_write_views to true to allow it, or use MCP over stdio on the machine with the files.');
+		}
+		$inspector = $this->inspector_for($arguments);
+		$view = (string)$this->arg($arguments, 'view');
+		$content = (string)$this->arg($arguments, 'content');
+		$path = $this->view_file($inspector, $view);
+		// lint the markup before it exists on disk, so a view with errors is
+		// never written and nothing has to be rolled back
+		$problems = $inspector->lint_source($content, $view, $inspector->theme);
+		$errors = array_values(array_filter($problems, function ($p) { return $p['severity'] === 'error'; }));
+		if ($errors) {
+			return array(
+				'written' => false, 'view' => $view, 'errors' => count($errors),
+				'problems' => $problems,
+				'hint' => 'The file was not changed. check_view lints a draft the same way, without writing.',
+			);
+		}
+		$existed = is_file($path);
+		if (file_put_contents($path, $content) === false) {
+			throw new RuntimeException('Could not write '.raster_inspector::short($path));
+		}
+		util::content_changed();
+		$result = array(
+			'written' => true, 'view' => $view, 'created' => !$existed,
+			'bytes' => strlen($content), 'warnings' => count($problems), 'problems' => $problems,
+		);
+		// a new print.cms or render.cms annotation declares a field: say so
+		try {
+			$status = (new raster_schema())->status();
+			$result['schema'] = array(
+				'drift' => (bool)$status['drift'],
+				'next' => $status['drift'] ? (database::$frozen ? 'php bin/raster schema --apply' : 'development adds the columns on the next request') : null,
+			);
+		} catch (Exception $e) {
+			$result['schema'] = array('error' => $e->getMessage());
+		}
+		return $result;
+	}
+
+	protected function tool_render_url($arguments) {
+		$url = (string)$this->arg($arguments, 'url');
+		if ($url === '' || $url[0] !== '/') throw new InvalidArgumentException("'url' is a path on this site and starts with /, e.g. /about");
+		$limit = max(200, min(200000, (int)$this->arg($arguments, 'limit', 20000)));
+		$root = dirname(rtrim(BASE, '/'));
+		// a separate process: a page that dies, redirects or exits cannot take
+		// this server down between calls
+		$env = array('RASTER_APP' => boot::$appname, 'PATH' => (string)getenv('PATH'), 'HOME' => (string)getenv('HOME'), 'NO_COLOR' => '1');
+		foreach (array('RASTER_DB', 'RASTER_URL', 'RASTER_ENV', 'RASTER_MAIL', 'RASTER_MAIL_FROM') as $name) {
+			$value = getenv($name);
+			if ($value !== false) $env[$name] = $value;
+		}
+		$process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'render', $url), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, $env);
+		if (!is_resource($process)) throw new RuntimeException('Could not start a process to render '.$url);
+		$html = stream_get_contents($pipes[1]);
+		$errors = trim(stream_get_contents($pipes[2]));
+		$exit = proc_close($process);
+		$status = preg_match('/HTTP (\d{3})/', $errors, $m) ? (int)$m[1] : ($exit === 0 ? 200 : null);
+		return array(
+			'url' => $url, 'ok' => $exit === 0, 'status' => $status, 'bytes' => strlen($html),
+			'truncated' => strlen($html) > $limit, 'html' => substr($html, 0, $limit),
+			'errors' => $errors === '' ? null : $errors,
+		);
 	}
 }

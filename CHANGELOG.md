@@ -5,6 +5,29 @@ file changes for you; `php bin/raster doctor` shows what is left.
 
 ## Unreleased
 
+- **Tooling an agent can afford.** Everything an agent needs to work on a
+  Raster site is now an MCP tool, so it is asked and answered in one
+  long-lived process instead of starting PHP again per question: `describe`
+  (~70 ms) returns how URLs reach views, the content model the markup
+  declares, the vocabulary, the behaviour-changing settings and the current
+  lint state; `vocabulary` lists every model with its methods **and their
+  signatures**, the named SQL queries, the events and who listens, and the
+  names the CMS keeps; `annotations` is the grammar; `list_views`, `read_view`,
+  `check_view`, `write_view` and `render_url` cover reading, checking, writing
+  and seeing a template. `write_view` refuses markup that does not lint and
+  leaves the file untouched, so a hallucinated model or method cannot land.
+  `render_url` runs in its own process, so a page that dies cannot take the
+  server down. On the command line: `php bin/raster describe` and
+  `php bin/raster vocabulary`, both with `--json`.
+- **`lint` checks the arguments.** Annotations pass literals, so the count is
+  known without running anything: too few or too many is now an error, naming
+  the signature it read (`cafe.category_count(category) needs 1 argument(s), 0
+  given`). A method name that does not exist also gets the nearest one that
+  does.
+- `write_view` edits code, not content — a template can call any model — so
+  over HTTP it is not offered until a site sets `mcp_write_views`. Over stdio,
+  where the agent is already on the machine with the files, it is available.
+  `describe` never includes the MCP token or the mail transport.
 - **One list of what is never served.** The rules were kept twice, in
   `.htaccess` and in the router in `index.php`, and they had already drifted:
   neither refused `.phar`, so a `composer.phar` in a site folder was

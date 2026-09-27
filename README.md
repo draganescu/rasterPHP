@@ -13,10 +13,12 @@ php bin/raster serve          # http://localhost:8000 (PHP 8.1+, SQLite, nothing
 php bin/raster user admin     # an editor account; log in at /login
 php bin/raster lint           # check every view: annotations, forms, alerts, emails
 php bin/raster lint --fix     # and repair what is mechanical
+php bin/raster describe       # the whole site in one answer, for an agent meeting it
+php bin/raster vocabulary     # every name a template may call, with signatures
 php bin/raster annotations    # the annotation grammar, as data for agents
 php bin/raster schema         # the content model the templates define, compared with the database
 php bin/raster send /news/news_item/hello   # email a page to newsletter subscribers
-php bin/raster mcp            # let an agent edit the content (MCP over stdio; /mcp over HTTP)
+php bin/raster mcp            # let an agent work on the site (MCP over stdio; /mcp over HTTP)
 php bin/raster doctor         # checks the site, including production settings
 php bin/raster deploy --config=caddy        # the server config: what must never be served
 php bin/raster export site/   # the whole site as static files, for any static host
@@ -30,6 +32,9 @@ Included:
 - **Newsletter:** double opt-in, one-click unsubscribe, and sending any page as an issue.
 - **Feeds and sitemaps:** views such as `news.rss` and `sitemap.xml`.
 - **Other:** translations, pagination, mail over SMTP, page caching, and an MCP server for agents.
+- **For agents:** one call describes the whole site; another lists every name a template may
+  call, with signatures; templates are written through a check that refuses markup which doesn't
+  lint. All of it read from the code, none of it a document that can go stale.
 - **Deploying:** one list of what is never served (`system/private_paths.php`), and the Apache,
   nginx or Caddy configuration generated from it.
 
