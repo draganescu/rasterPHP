@@ -171,6 +171,11 @@ class controller {
 
 		// obvious right?
 		$this->current_route = $route;
+		// print.if.live shows what needs PHP behind it (forms), print.if.static
+		// what a static export shows instead
+		$static = (bool)getenv('RASTER_EXPORT');
+		template::set('live')->to(!$static);
+		template::set('static')->to($static);
 		event::dispatch('route_set');
 
 		if (!$route) {

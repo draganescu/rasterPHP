@@ -19,6 +19,7 @@ php bin/raster send /news/news_item/hello   # email a page to newsletter subscri
 php bin/raster mcp            # let an agent edit the content (MCP over stdio; /mcp over HTTP)
 php bin/raster doctor         # checks the site, including production settings
 php bin/raster deploy --config=caddy        # the server config: what must never be served
+php bin/raster export site/   # the whole site as static files, for any static host
 php bin/raster update         # the latest release of the framework; your app is left alone
 ```
 

@@ -99,7 +99,7 @@ an agent can read it and be sure.
 | `<!-- remove --> … <!-- /remove -->` | Mock-up content. Removed before anything runs. Can't be nested. |
 | `<!-- res.name --> … <!-- /res.name -->` | A reusable fragment. |
 | `<!-- dry.view.name /-->` | Inserts fragment `res.name` from `view.html` (e.g. `dry._layout.header`). |
-| `<!-- print.if.flag --> … <!-- /print.if.flag -->` | Shown only when the template flag is true (`template::set('flag')->to(true)`). |
+| `<!-- print.if.flag --> … <!-- /print.if.flag -->` | Shown only when the template flag is true (`template::set('flag')->to(true)`). `if.live` is true on the running site and `if.static` in a static export. |
 | `<!-- print.self.name /-->` | A value set on the template, for example in emails. |
 | `<!-- print.session.key /-->` | `$_SESSION['key']`. |
 
@@ -486,6 +486,34 @@ use `'model.method'`: `method(true)` returns
     your own models), and so does the moment a scheduled item is published.
   - Settings: `page_cache_ttl` (3600 seconds) and `page_cache_skip` (path
     patterns). Responses carry `X-Raster-Cache: hit|miss`.
+
+## Static export
+
+`php bin/raster export <folder> [--url=https://example.com/]` writes the site
+as plain files for any static host (GitHub Pages, Netlify, a bucket). It
+visits every page as a visitor would and follows the links, so items, pages
+of lists and filter pages come along; drafts and the editor don't.
+
+- `/about` becomes `about/index.html`, feeds keep their names, a missing
+  page becomes `404.html`, and theme files and `media/` are copied.
+- Links point at `--url` (the site's address, `RASTER_URL`, or root-relative
+  links when neither is set).
+- Every language after the first goes in `/<lang>/`, and the language
+  switcher links there.
+- **Forms need PHP**, so a page that still shows one stops the export and
+  nothing is written. Wrap forms in `<!-- print.if.live -->` and write what
+  the static site shows instead in `<!-- print.if.static -->` (a phone
+  number, an email address, the RSS feed).
+- Left out: pages that need an account, login, sign-up, password and
+  newsletter pages, `/api`, and paths in `config::set('export_skip')` or
+  `--skip=/path`. The command lists links to left-out pages and query
+  strings, since a static host can't answer them.
+- **Exporting again** to the same folder writes only files that changed and
+  removes the ones the site no longer has, so a deploy uploads just those.
+  When nothing the site is made of changed (content, templates, models,
+  theme, media), it does nothing. `.raster-export.json` in the folder keeps
+  track; files the export didn't write are left alone. `--clean` starts the
+  folder over.
 
 ## Editors and agents
 

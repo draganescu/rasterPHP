@@ -8,6 +8,7 @@
 //   php bin/raster mcp
 //   php bin/raster serve [--port=8000]
 //   php bin/raster render <url>
+//   php bin/raster export <folder> [--url=…] [--skip=…] [--clean]
 //   php bin/raster new <folder>
 //   php bin/raster update [latest|<version>|<branch>|<folder>|<file.tar.gz>] [--dry-run] [--force]
 //   php bin/raster upgrade [--dry-run]
@@ -414,6 +415,42 @@ switch ($command) {
 		echo "\n".($fails ? $paint("$fails problem(s) to fix", '31') : $paint('Ready', '32'))."\n";
 		exit($fails ? 1 : 0);
 
+	case 'export':
+		if (empty($positional[0])) {
+			fwrite(STDERR, "Usage: php bin/raster export <folder> [--url=https://example.com/] [--skip=/path] [--clean]\n");
+			exit(2);
+		}
+		require_once BASE.'tools/export.php';
+		$target = rtrim($positional[0], '/');
+		$marker = $target.'/.raster-export.json';
+		// an earlier export is updated in place; anything else is left alone
+		if (is_dir($target) && count(scandir($target)) > 2) {
+			if (!is_file($marker)) {
+				fwrite(STDERR, "$target has files that don't come from raster export; choose an empty folder.\n");
+				exit(1);
+			}
+			if (isset($options['clean'])) exec('rm -rf '.escapeshellarg($target));
+		}
+		if (!is_dir($target)) mkdir($target, 0775, true);
+		$url = isset($options['url']) && is_string($options['url']) ? $options['url'] : (getenv('RASTER_URL') ?: '/');
+		$export = new raster_export($root, realpath($target), $url);
+		foreach ((array)(isset($options['skip']) ? $options['skip'] : array()) as $skip) if (is_string($skip)) $export->skip[] = $skip;
+		$export->run();
+		if ($export->current) {
+			echo "Nothing changed since the last export to $target\n";
+			exit(0);
+		}
+		if ($export->errors) {
+			foreach ($export->errors as $error) echo $paint('✗', '31')." $error\n";
+			echo $paint('Nothing was written', '31')."\n";
+			exit(1);
+		}
+		$changes = count($export->written).' written, '.count($export->removed).' removed, '.$export->unchanged.' unchanged';
+		echo $paint('Exported '.count($export->pages).' page(s)', '32')." to $target, linked to {$export->url} ($changes)\n";
+		if ($export->skipped) echo "Left out (they need an account): ".implode(', ', $export->skipped)."\n";
+		foreach ($export->warnings as $warning) echo $paint('!', '33')." $warning\n";
+		exit(0);
+
 	case 'mcp':
 		controller::load_model('mcp');
 		controller::get_object('mcp')->stdio();
@@ -469,6 +506,8 @@ Raster command line
                                          email a page to newsletter subscribers
   php bin/raster mcp                     MCP server over stdio for local agents
   php bin/raster render <url>            print the HTML of a URL
+  php bin/raster export <folder> [--url=https://example.com/] [--skip=/path] [--clean]
+                                         the site as static files for any static host
   php bin/raster doctor [--json]         check the project: PHP, versions, edited framework
                                          files, templates, database, what is private,
                                          deprecations, production

@@ -230,4 +230,7 @@ php tests/demo.php                        # the whole matrix
 | N6 | raster lint --fix repairs spacing and short closing tags, and leaves typos and the rest |
 | N7 | raster deploy --config=apache\|nginx\|caddy |
 | N8 | raster doctor: .htaccess rules, `allow_deprecated` |
+| N9 | `raster export`: pages, items, lists, feeds, the 404 page, assets and every language as static files; what needs PHP is reported |
+| N10 | `print.if.live` / `print.if.static`: forms on the live site, what shows instead in the export; an unwrapped form stops the export |
+| N11 | exporting again writes only files that changed, removes what the site no longer has, and does nothing when nothing changed |
 | O1 | the sitemap skips private pages and lists items |

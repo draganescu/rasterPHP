@@ -219,7 +219,9 @@ class cms_editor {
 		if (!is_dir($dir)) @mkdir($dir, 0775, true);
 		$name = date('Ymd').'-'.bin2hex(random_bytes(6)).'.'.$types[$info[2]];
 		if (!move_uploaded_file($_FILES['image']['tmp_name'], $dir.$name)) return self::fail('The picture could not be stored', 500);
-		return array('url' => config::get('base_uri').$folder.'/'.$name, 'width' => $info[0], 'height' => $info[1]);
+		// from the site's root, so the address survives a new domain or a static export
+		$path = rtrim((string)parse_url(config::get('base_uri'), PHP_URL_PATH), '/');
+		return array('url' => $path.'/'.$folder.'/'.$name, 'width' => $info[0], 'height' => $info[1]);
 	}
 
 	static function script() {

@@ -40,6 +40,16 @@ file changes for you; `php bin/raster doctor` shows what is left.
   error when PHP has no MySQL driver.
 - `raster_project::apps()` and the router agreed that any top level folder
   with a `config/` inside is an app folder, which made `system/` one.
+- `raster export <folder>` writes the site as static files: every page,
+  item, list page and feed, the 404 page, theme files and uploads, and each
+  language in its own folder. Exporting again writes only what changed,
+  removes what's gone, and does nothing when nothing changed.
+- `print.if.live` and `print.if.static`: forms go in the first, what a static
+  export shows instead in the second. An export stops when a page still
+  shows a form.
+- Uploaded pictures are stored with root-relative addresses (`/media/…`),
+  so they survive a new domain or a static export.
+
 - A new in-page editor replaces the old toolbar and its modal forms: the
   page is the editor, it takes the site's colours and fonts, saves as you
   go with undo, handles items (details, duplicate, hide, schedule, delete,
