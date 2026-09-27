@@ -40,6 +40,7 @@ php tests/demo.php                        # the whole matrix
 | A13 | a custom 404 page (`error_document_404`) |
 | A14 | a route to a view in another theme (`->from('print')`) |
 | A15 | `rewrite` off: every link goes through index.php |
+| A16 | the private extensions are 403, `composer.phar` too (system/private_paths.php) |
 | B1 | RSS: content type, well-formed, escaped |
 | B2 | Atom |
 | B3 | JSON views: rows become a list |
@@ -92,6 +93,7 @@ php tests/demo.php                        # the whole matrix
 | C42 | lint checks event bindings: missing models and methods, events nothing sends |
 | C43 | named queries: `:name` placeholders, the calling model's `sql/` by default, a missing name is an error that lint finds |
 | C44 | `print.@attr.model.method` outside render blocks sets an attribute from a model |
+| C45 | a short closing tag (`<!-- /render -->`) is a lint error that names the full closing tag |
 | D1 | raster_form and honeypot on every post form |
 | D2 | the session token on forms for logged in users |
 | D3 | posts from other sites refused (Origin, Sec-Fetch-Site, Referer, /api too) |
@@ -224,4 +226,8 @@ php tests/demo.php                        # the whole matrix
 | N2 | raster lint and --json, --all-themes |
 | N3 | raster render and its exit codes |
 | N4 | raster serve |
+| N5 | raster annotations, and --json: the grammar as data |
+| N6 | raster lint --fix repairs spacing and short closing tags, and leaves typos and the rest |
+| N7 | raster deploy --config=apache\|nginx\|caddy |
+| N8 | raster doctor: .htaccess rules, `allow_deprecated` |
 | O1 | the sitemap skips private pages and lists items |

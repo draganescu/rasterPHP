@@ -192,6 +192,25 @@ test(array('A10', 'A11'), 'assets are served, code and raw views are not', funct
 		same(403, http('GET', $base.$path)[0], $path);
 	}
 });
+test('A16', 'the private extensions, composer.phar included, are never served', function () use ($base, $root) {
+	// the rules are in system/private_paths.php; index.php, .htaccess and the
+	// configs `raster deploy` prints all come from there
+	same(403, http('GET', "$base/composer.phar")[0], 'a phar in the site folder');
+	foreach (array('/x.lock', '/x.ini', '/x.bak', '/demo/views/cafe/style.css.bak') as $path) {
+		same(403, http('GET', $base.$path)[0], $path);
+	}
+	same(200, http('GET', "$base/index.php")[0], 'the entry point is the exception');
+	// and the same check without a web server
+	require_once "$root/system/private_paths.php";
+	$apps = private_paths::apps($root);
+	check(in_array('demo', $apps), 'demo is an app folder');
+	check(!in_array('system', $apps), 'system is not');
+	foreach (array('/composer.phar', '/system/boot.php', '/demo/data/x.sqlite-wal', '/.git/HEAD') as $path) {
+		check(private_paths::blocked($path), "$path is private");
+	}
+	check(!private_paths::blocked('/index.php'), 'index.php is not');
+	check(!private_paths::blocked('/demo/views/cafe/style.css'), 'theme assets are not');
+});
 test('A12', 'query strings do not change the route', function () use ($base) {
 	has(http('GET', "$base/about?utm=x")[1], '<h1>About us</h1>');
 });
@@ -274,6 +293,13 @@ test(array('C11', 'C12', 'C13'), 'attributes, nested rows, repeated tags', funct
 	has(between($lab, 'nested'), '<ul><li>Carrot cake</li></ul>');
 	has(between($lab, 'repeated'), 'https://example.com/a and again https://example.com/a');
 	has(between($lab, 'repeated'), 'https://example.com/b and again https://example.com/b');
+});
+test('C45', 'a short closing tag is ignored by the engine, and lint says how to write it', function () use ($views) {
+	with_file("$views/zz-short.html", "<!-- render.cms.journal('limit=1') --><!-- print.title -->t<!-- /print.title --><!-- /render -->", function () {
+		list($code, $out) = raster(array('lint'));
+		same(1, $code, 'an error');
+		has($out, "write <!-- /render.cms.journal('limit=1') -->");
+	});
 });
 test(array('C14', 'C15', 'C16', 'C17'), 'arguments, escaping, replace, memory', function () use ($base, &$lab) {
 	has(between($lab, 'args'), '[3,"soup",true,-1,null]');
@@ -680,7 +706,12 @@ test(array('E18', 'E19', 'E28'), 'the editor saves pages and items, keeps revisi
 	list($status, $error) = $save('editor_save_field', array('type' => 'aboutpage', 'slug' => '/about', 'field' => 'made_up', 'value' => 'x'));
 	same(400, $status);
 	has($error['error'], "Unknown field 'made_up'");
-	same(400, $save('editor_save_field', array('type' => 'userpage', 'field' => 'password', 'value' => 'x'))[0], 'only CMS page tables');
+	same(400, $save('editor_save_field', array('type' => 'userpage', 'field' => 'password', 'value' => 'x'))[0], 'a page table that does not exist');
+	// a table that does exist but is not a page: the name must end in "page"
+	list($status, $error) = $save('editor_save_field', array('type' => 'user', 'field' => 'role', 'value' => 'admin'));
+	same(400, $status, 'only CMS page tables');
+	has($error['error'], 'Unknown page');
+	same(400, $save('editor_save_field', array('type' => 'subscriber', 'field' => 'email', 'value' => 'x@y.zz'))[0]);
 	list(, $history) = $save('editor_history', array('type' => 'aboutpage'));
 	check(count($history['revisions']) >= 2, 'revisions');
 	same('Edited in the page', $history['revisions'][0]['fields']['heading']);
@@ -1002,6 +1033,74 @@ test(array('N1', 'N2', 'N3', 'E22'), 'help, lint and render', function () use ($
 	same(0, $code);
 	has($out, '<h1>About us</h1>');
 	same(1, raster(array('render', '/nope'))[0]);
+});
+test('N5', 'annotations: the grammar as data', function () {
+	list($code, $out) = raster(array('annotations', '--json'));
+	same(0, $code, $out);
+	$grammar = json_decode($out, true);
+	same(2, $grammar['version']);
+	check(!isset($grammar['spelling']['short_close']), 'closing tags carry the full name');
+	has($grammar['structure']['full_close'], 'lint --fix');
+	check($grammar['keywords']['render']['repeats'], 'render repeats its content');
+	check(!$grammar['keywords']['render']['self_closing'], 'render cannot self-close');
+	check($grammar['keywords']['print']['self_closing'], 'print can');
+	check(!$grammar['keywords']['remove']['name'], 'remove takes no name');
+	// the same list the inspector lints with
+	same(array_keys($grammar['keywords']), raster_inspector::keywords());
+	same($grammar['references']['builtin_models'], raster_inspector::builtin_models());
+	has(raster(array('annotations'))[1], 'may self-close');
+});
+test('N6', 'lint --fix repairs what is mechanical', function () use ($views) {
+	// spacing the engine cannot read, and short closing tags
+	$broken = "<!--print.cms.heading-->T<!-- /print.cms.heading -->\n<!--  render.cms.journal  --><!-- print.title -->x<!-- /print --><!-- /render -->\n<!-- render.cms.menu('order=name') --><!-- print.name -->x<!-- /print.name --><!--/render.cms.menu-->\n";
+	with_file("$views/zz-fix.html", $broken, function () use ($views) {
+		same(1, raster(array('lint'))[0], 'errors before');
+		list($code, $out) = raster(array('lint', '--fix'));
+		same(0, $code, $out);
+		has($out, '<!--print.cms.heading--> -> <!-- print.cms.heading -->');
+		has($out, '<!-- /render --> -> <!-- /render.cms.journal -->');
+		$fixed = file_get_contents("$views/zz-fix.html");
+		has($fixed, '<!-- print.cms.heading -->');
+		has($fixed, '<!-- render.cms.journal --><!-- print.title -->x<!-- /print.title --><!-- /render.cms.journal -->');
+		has($fixed, "<!-- /render.cms.menu('order=name') -->", 'spaced out, then written in full');
+		same(0, raster(array('lint'))[0], 'and nothing is left');
+	});
+	// what needs a decision is reported, not guessed at: a typo may be an
+	// ordinary comment, an unclosed block needs its closing tag placed
+	with_file("$views/zz-fix.html", "<!-- prnit.cms.intro -->I<!-- /print.cms.intro -->\n<!-- render.cms.journal -->", function () use ($views) {
+		list($code, $out) = raster(array('lint', '--fix'));
+		same(1, $code);
+		has($out, 'never closed');
+		has($out, "did you mean 'print'");
+		lacks($out, 'fixed');
+		has(file_get_contents("$views/zz-fix.html"), 'prnit', 'the typo is left as written');
+	});
+});
+test('N7', 'deploy prints the server configuration', function () use ($root) {
+	list($code, $apache) = raster(array('deploy', '--config=apache'));
+	same(0, $code, $apache);
+	same(trim(file_get_contents("$root/.htaccess")), trim($apache), 'the .htaccess in the repository is this file');
+	foreach (array('nginx', 'caddy') as $server) {
+		list($code, $out) = raster(array('deploy', "--config=$server", '--host=cafe.example.com', '--root=/srv/cafe'));
+		same(0, $code, $out);
+		has($out, 'cafe.example.com');
+		has($out, '/srv/cafe');
+		has($out, 'phar', 'the private extensions are in there');
+		lacks($out, '/demo/', 'no rule names an app folder, so adding an app needs no change');
+	}
+	same(2, raster(array('deploy'))[0], 'no --config is a usage error');
+	same(1, raster(array('deploy', '--config=iis'))[0]);
+});
+test('N8', 'doctor: the rules on disk, and intentional deprecations', function () use ($root) {
+	list($code, $out) = raster(array('doctor'));
+	has($out, '.htaccess has every rule');
+	// the demo keeps the older validation regions on purpose (D14)
+	has($out, 'kept on purpose');
+	lacks($out, 'use(s) of deprecated features'."\n    regions", 'so they are not a warning');
+	// a .htaccess from an older Raster is missing the newer rules
+	with_file("$root/.htaccess", "RewriteEngine on\nRewriteRule (^|/)\\. - [F,L]\n", function () {
+		has(raster(array('doctor'))[1], 'is missing');
+	});
 });
 test('N4', 'serve', function () use ($root) {
 	$port = free_port();

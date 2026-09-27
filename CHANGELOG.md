@@ -5,6 +5,41 @@ file changes for you; `php bin/raster doctor` shows what is left.
 
 ## Unreleased
 
+- **One list of what is never served.** The rules were kept twice, in
+  `.htaccess` and in the router in `index.php`, and they had already drifted:
+  neither refused `.phar`, so a `composer.phar` in a site folder was
+  downloadable. They now live once, in `system/private_paths.php`, which the
+  router reads and which `php bin/raster deploy --config=apache|nginx|caddy`
+  turns into the configuration for the server in front (the shipped
+  `.htaccess` is that output). `.phar`, `.lock`, `.ini` and `.bak` join the
+  private extensions, matching ignores case on every server (a
+  case-insensitive disk could otherwise hand out `/DEMO/DATA/SITE.SQLITE`),
+  and `/.well-known/` is the one dot folder that is served. `doctor` checks
+  that the `.htaccess` on disk still carries every rule; a site's own
+  `.htaccess` from an older Raster is reported, and
+  `php bin/raster deploy --config=apache > .htaccess` replaces it.
+  No rule names an app folder any more, so `config/`, `models/`, `data/` and
+  `i18n/` are private under every top level folder, not only app folders: a
+  static file at `/assets/data/x.json` is now a 403. Put public files
+  elsewhere (`media/`, or the theme folder).
+- **`lint --fix`** repairs what has one right answer: spacing the engine
+  can't read (`<!--print.cms.x-->`) and short closing tags. The engine still
+  needs the whole name in a closing tag; lint now says which block a
+  `<!-- /render -->` meant and writes `<!-- /render.cms.menu('order=name') -->`
+  in. A likely misspelled keyword stays a warning, since it may be an
+  ordinary comment, and everything else that needs a decision is reported.
+- **The annotation grammar is data:** `system/tools/annotations.php`, printed
+  by `php bin/raster annotations [--json]`. `lint` checks against that same
+  file, so what an agent is told and what is enforced cannot drift apart.
+- Config `allow_deprecated` marks uses of deprecated features a site keeps on
+  purpose (`array('<id>' => true or path pattern(s))`); `doctor` counts them
+  apart instead of warning. The demo café uses it for the older validation
+  regions its suite still covers.
+- The ORM no longer needs `pdo_mysql` to be loaded on an SQLite-only site:
+  `rb.php` read `PDO::MYSQL_ATTR_INIT_COMMAND` as it loaded, which is a fatal
+  error when PHP has no MySQL driver.
+- `raster_project::apps()` and the router agreed that any top level folder
+  with a `config/` inside is an app folder, which made `system/` one.
 - A new in-page editor replaces the old toolbar and its modal forms: the
   page is the editor, it takes the site's colours and fonts, saves as you
   go with undo, handles items (details, duplicate, hide, schedule, delete,

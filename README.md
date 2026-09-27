@@ -12,10 +12,13 @@ php bin/raster new mysite     # a new site (or clone this repository and work in
 php bin/raster serve          # http://localhost:8000 (PHP 8.1+, SQLite, nothing to install)
 php bin/raster user admin     # an editor account; log in at /login
 php bin/raster lint           # check every view: annotations, forms, alerts, emails
+php bin/raster lint --fix     # and repair what is mechanical
+php bin/raster annotations    # the annotation grammar, as data for agents
 php bin/raster schema         # the content model the templates define, compared with the database
 php bin/raster send /news/news_item/hello   # email a page to newsletter subscribers
 php bin/raster mcp            # let an agent edit the content (MCP over stdio; /mcp over HTTP)
 php bin/raster doctor         # checks the site, including production settings
+php bin/raster deploy --config=caddy        # the server config: what must never be served
 php bin/raster update         # the latest release of the framework; your app is left alone
 ```
 
@@ -26,6 +29,8 @@ Included:
 - **Newsletter:** double opt-in, one-click unsubscribe, and sending any page as an issue.
 - **Feeds and sitemaps:** views such as `news.rss` and `sitemap.xml`.
 - **Other:** translations, pagination, mail over SMTP, page caching, and an MCP server for agents.
+- **Deploying:** one list of what is never served (`system/private_paths.php`), and the Apache,
+  nginx or Caddy configuration generated from it.
 
 **Working on a Raster site with an AI agent?** [AGENTS.md](AGENTS.md) is the complete specification.
 
