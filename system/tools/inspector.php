@@ -1040,6 +1040,12 @@ class raster_inspector {
 			if (!$info['fields']) {
 				$problems[] = $at + array('severity' => 'error', 'message' => "The type '$name' declares no fields ('fields' => array('name' => '', ...))");
 			}
+			// RedBean reads x_id as a link to an x record, and then never stores x
+			foreach (array_keys($info['fields']) as $field) {
+				if (isset($info['fields'][$field.'_id'])) {
+					$problems[] = $at + array('severity' => 'error', 'message' => "The type '$name' has '$field' and '{$field}_id': the database reads '{$field}_id' as a link to a '$field' record and never stores '$field'. Rename one of them.");
+				}
+			}
 			if (method_exists($info['class'], 'check') && !(new ReflectionMethod($info['class'], 'check'))->isStatic()) {
 				$problems[] = $at + array('severity' => 'error', 'message' => "{$info['class']}::check() must be static: a public method is reachable at /api/{$info['model']}/check");
 			}
