@@ -460,7 +460,11 @@ class reservation {
 - **Actions** are what staff do to a record beyond changing a field. The type
   maps each to the least role that may run it (`editor` or `admin`);
   the model has `static function <action>($item, $input)` that writes through
-  `cms_records` and returns the record, or refuses. The in-page editor shows a
+  `cms_records` and returns the record, or refuses. `$item` is the record as
+  the action started; an action that depends on it (only an unpaid order can
+  be cancelled) reads it again inside `cms_records::transaction()` with its
+  writes, and keeps calls to other services (a refund at the payment
+  provider) outside that transaction. The in-page editor shows a
   button for each action the person's role allows (`POST
   /api/cms/editor_action`); MCP has `run_action`, trusted like an admin. Name
   a button in the site's words with `application/i18n/<lang>/raster_editor.php`:

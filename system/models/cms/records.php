@@ -365,6 +365,11 @@ class cms_records {
 	// fn($item, $input), that makes its writes through cms_records and returns
 	// the record (or refuses). The editor shows them as buttons, MCP as
 	// run_action. $trusted skips the role check (MCP holds the site's token).
+	//
+	// An action is not one transaction: each write is (with its check()),
+	// and writes that must go together go in cms_records::transaction(). That
+	// leaves room for what can't be rolled back, like asking a payment
+	// provider for a refund, to happen outside the lock.
 	static function act($collection, $id, $action, $input = array(), $trusted = false) {
 		$info = self::required($collection);
 		if (!isset($info['actions'][$action])) {
@@ -373,13 +378,11 @@ class cms_records {
 		if (!$trusted && !authentication::can($info['actions'][$action])) throw new cms_refused(array('not_allowed'));
 		if (!self::is_action_method($info['class'], $action)) throw new RuntimeException("{$info['class']}::$action() is missing or not static");
 		$input = is_array($input) ? $input : array();
-		return self::transaction(function () use ($info, $collection, $id, $action, $input) {
-			$item = self::get($collection, $id);
-			if (!$item) throw new InvalidArgumentException("No $collection $id");
-			$result = call_user_func(array($info['class'], $action), $item, $input);
-			$fresh = self::get($collection, $id);
-			return $fresh ?: (is_array($result) ? $result : $item);
-		});
+		$item = self::get($collection, $id);
+		if (!$item) throw new InvalidArgumentException("No $collection $id");
+		$result = call_user_func(array($info['class'], $action), $item, $input);
+		$fresh = self::get($collection, $id);
+		return $fresh ?: (is_array($result) ? $result : $item);
 	}
 
 	static function is_action_method($class, $action) {

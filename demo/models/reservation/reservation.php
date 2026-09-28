@@ -40,9 +40,14 @@ class reservation
 		return $problems;
 	}
 
+	// read again with the write, so a booking cancelled a moment ago is not
+	// confirmed from a page that still showed it as new
 	static function confirm($booking, $input) {
-		if ($booking['status'] === 'cancelled') cms_records::refuse('already_cancelled');
-		return cms_records::update('reservation', $booking['id'], array('status' => 'confirmed'));
+		return cms_records::transaction(function () use ($booking) {
+			$booking = cms_records::get('reservation', $booking['id']);
+			if ($booking['status'] === 'cancelled') cms_records::refuse('already_cancelled');
+			return cms_records::update('reservation', $booking['id'], array('status' => 'confirmed'));
+		});
 	}
 
 	static function cancel($booking, $input) {
