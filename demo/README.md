@@ -257,3 +257,4 @@ php tests/demo.php                        # the whole matrix
 | R11 | lint checks types: static check(), a method for each action, keys that mean nothing |
 | R12 | `schema --apply` creates record tables in production, with every column and no row |
 | R13 | `raster make model <name> --from=<view>`: a model for the records a form sends |
+| R14 | a staff page lists records by status (`status=new&order=date`), and filter addresses (`/reservation/reservation_items/date/…`) show one evening, for staff only |

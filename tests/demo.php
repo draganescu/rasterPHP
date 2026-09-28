@@ -1815,15 +1815,14 @@ test(array('R2', 'R4'), 'a form stores a record; visitors never see records, edi
 	$staff = login($base, 'staff@cafe.test', 'staff password');
 	$body = http('GET', "$base/staff", null, array("Cookie: $staff"))[1];
 	has($body, 'Radu &lt;em&gt;R&lt;/em&gt;', 'what visitors typed prints as text');
-	// a page anyone can open that lists bookings, and so gives them item URLs
-	with_file(dirname(__DIR__).'/demo/views/cafe/reservation.html', '<html><body><ul><!-- render.cms.reservation --><li><!-- print.name -->Ana<!-- /print.name --></li><!-- /render.cms.reservation --></ul></body></html>', function () use ($base, $row, $staff) {
-		list($status, $body) = http('GET', "$base/reservation");
-		same(200, $status);
-		lacks($body, 'Radu', 'visitors see no records');
-		lacks($body, '<li>', 'not even the mock-up');
-		same(404, http('GET', "$base/reservation/reservation_item/{$row->id}")[0], 'item URLs are not a way in');
-		same(200, http('GET', "$base/reservation/reservation_item/{$row->id}", null, array("Cookie: $staff"))[0], 'but staff can open them');
-	});
+	// /reservation lists bookings, and so gives them item URLs; anyone can open it
+	list($status, $body) = http('GET', "$base/reservation");
+	same(200, $status);
+	lacks($body, 'Radu', 'visitors see no records');
+	lacks($body, 'class="booking"', 'not even the mock-up');
+	same(404, http('GET', "$base/reservation/reservation_item/{$row->id}")[0], 'item URLs are not a way in');
+	same(200, http('GET', "$base/reservation/reservation_item/{$row->id}", null, array("Cookie: $staff"))[0], 'but staff can open them');
+	lacks(http('GET', "$base/reservation/reservation_items/status/new")[1], 'class="booking"', 'nor filter addresses');
 	lacks(http('GET', "$base/sitemap.xml")[1], 'reservation', 'nor the sitemap');
 	with_file(dirname(__DIR__).'/demo/views/cafe/zz-feed.rss', '<rss><channel><!-- render.feed.items(\'reservation\') --><item><!-- print.name -->x<!-- /print.name --></item><!-- /render.feed.items(\'reservation\') --></channel></rss>', function () use ($base) {
 		lacks(http('GET', "$base/zz-feed.rss")[1], 'Radu', 'nor feeds');
@@ -1913,6 +1912,31 @@ test(array('R6', 'R8'), 'readonly fields and actions: buttons for the roles allo
 	same(403, http('POST', "$base/api/cms/editor_action", array('collection' => 'reservation', 'id' => $booking->id, 'action' => 'confirm'), array("Cookie: $member"))[0], 'members have no actions');
 	same(404, http('GET', "$base/api/reservation/confirm")[0], 'actions are static: /api never reaches them');
 	same(404, http('GET', "$base/api/reservation/check")[0]);
+});
+
+function booking_rows($html) { return substr_count(preg_replace('#<template data-raster-mockup.*?</template>#s', '', $html), 'class="booking"'); }
+test('R14', 'staff see bookings grouped by status, and one evening at a time', function () use ($base) {
+	$staff = login($base, 'staff@cafe.test', 'staff password');
+	$h = array("Cookie: $staff");
+	database::instance('cms');
+	$new = R::findOne('reservationdata', ' status = ? ', array('new'));
+	$cancelled = R::findOne('reservationdata', ' status = ? ', array('cancelled'));
+	check($new && $cancelled, 'bookings in both states');
+	$page = http('GET', "$base/staff", null, $h)[1];
+	$confirm = substr($page, strpos($page, '<h3>To confirm</h3>'), strpos($page, '<h3>Confirmed</h3>') - strpos($page, '<h3>To confirm</h3>'));
+	$gone = substr($page, strpos($page, '<h3>Cancelled lately</h3>'));
+	has($confirm, util::e($new->name), 'a new booking is to confirm');
+	same((int)R::count('reservationdata', ' status = ? ', array('new')), booking_rows($confirm), 'only new ones are to confirm');
+	has($gone, util::e($cancelled->name), 'it is with the cancelled');
+	has($page, 'href="'.$base.'/reservation/reservation_items/date/'.$new->date.'/"', 'each date links to its evening');
+	$evening = http('GET', "$base/reservation/reservation_items/date/{$new->date}/", null, $h)[1];
+	has($evening, util::e($new->name));
+	same((int)R::count('reservationdata', ' date = ? ', array($new->date)), booking_rows($evening), 'only that evening');
+	$open = http('GET', "$base/reservation/reservation_items/status/new", null, $h)[1];
+	has($open, util::e($new->name));
+	same((int)R::count('reservationdata', ' status = ? ', array('new')), booking_rows($open), 'only what is to confirm');
+	check(booking_rows($open) < (int)R::count('reservationdata'), 'which is not all of them');
+	same((int)R::count('reservationdata'), booking_rows(http('GET', "$base/reservation", null, $h)[1]), 'every booking on /reservation');
 });
 
 // A second model, only while these tests run, for what the café's

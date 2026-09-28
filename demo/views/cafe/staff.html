@@ -9,12 +9,25 @@
   <main class="">
     <h1>Staff</h1>
     <p>Only editors and admins can see this page. Log in as staff to edit any text on the site from the toolbar.</p>
-    <h2>Latest reservations</h2>
-    <p>Bookings are records: the reservation model declares them, and the page editor lets staff change them or confirm and cancel them.</p>
+    <h2>Reservations</h2>
+    <p>Bookings are records: the reservation model declares them, and the page editor lets staff change them, or confirm and cancel them. A date shows that evening's bookings; <a href="reservation.html">all bookings</a> are on one page.</p>
+    <h3>To confirm</h3>
     <table class="list"><tbody>
-      <!-- render.cms.reservation('order=newest&limit=20') -->
-      <tr><td><!-- print.name -->Ana<!-- /print.name --></td><td><!-- print.date -->2026-10-01<!-- /print.date --></td><td><!-- print.guests -->2<!-- /print.guests --></td><td><!-- print.notes -->Window seat<!-- /print.notes --></td><td class="status"><!-- print.status -->new<!-- /print.status --></td></tr>
-      <!-- /render.cms.reservation('order=newest&limit=20') -->
+      <!-- render.cms.reservation('status=new&order=date') -->
+      <tr class="booking"><td><!-- print.name -->Ana<!-- /print.name --></td><td><!-- print.@href.raster_filter@date --><a href="reservation/reservation_items/date/2026-10-01"><!-- print.date -->2026-10-01<!-- /print.date --></a><!-- /print.@href.raster_filter@date --></td><td><!-- print.guests -->2<!-- /print.guests --> guests</td><td><!-- print.notes -->Window seat<!-- /print.notes --></td><td class="status"><!-- print.status -->new<!-- /print.status --></td></tr>
+      <!-- /render.cms.reservation('status=new&order=date') -->
+    </tbody></table>
+    <h3>Confirmed</h3>
+    <table class="list"><tbody>
+      <!-- render.cms.reservation('status=confirmed&order=date') -->
+      <tr class="booking"><td><!-- print.name -->Ana<!-- /print.name --></td><td><!-- print.@href.raster_filter@date --><a href="reservation/reservation_items/date/2026-10-01"><!-- print.date -->2026-10-01<!-- /print.date --></a><!-- /print.@href.raster_filter@date --></td><td><!-- print.guests -->2<!-- /print.guests --> guests</td><td><!-- print.notes -->Window seat<!-- /print.notes --></td><td class="status"><!-- print.status -->new<!-- /print.status --></td></tr>
+      <!-- /render.cms.reservation('status=confirmed&order=date') -->
+    </tbody></table>
+    <h3>Cancelled lately</h3>
+    <table class="list"><tbody>
+      <!-- render.cms.reservation('status=cancelled&order=newest&limit=10') -->
+      <tr class="booking"><td><!-- print.name -->Ana<!-- /print.name --></td><td><!-- print.@href.raster_filter@date --><a href="reservation/reservation_items/date/2026-10-01"><!-- print.date -->2026-10-01<!-- /print.date --></a><!-- /print.@href.raster_filter@date --></td><td><!-- print.guests -->2<!-- /print.guests --> guests</td><td><!-- print.notes -->Window seat<!-- /print.notes --></td><td class="status"><!-- print.status -->new<!-- /print.status --></td></tr>
+      <!-- /render.cms.reservation('status=cancelled&order=newest&limit=10') -->
     </tbody></table>
   </main>
   <!-- dry._layout.footer /-->
