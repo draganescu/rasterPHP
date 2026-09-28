@@ -120,6 +120,11 @@ file changes for you; `php bin/raster doctor` shows what is left.
 - Named queries: calling one that doesn't exist throws
   `BadMethodCallException` (it returned `false`), and `lint` reports such
   calls. `:name` placeholders are documented.
+- A link inside a `print.validation.alert()` block goes to the route. The
+  block is only a placeholder while the page renders, so the markup a
+  listener puts back at the end used to miss the pass that turns
+  `cart.html` into `/cart`. Anything added on `before_output`, the CMS
+  toolbar included, is fixed up now.
 
 ## 2.0.0
 

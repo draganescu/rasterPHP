@@ -1240,6 +1240,16 @@ test('C46', 'lint checks the arguments, and names the nearest method', function 
 		lacks($out, 'cafe.guestbook', 'and so is one whose argument has a default');
 	});
 });
+test('C47', 'a link inside an alert goes to the route, not the view file', function () use ($base, $views) {
+	$alert = "<!-- print.validation.alert('linked') --><p>Done. <a href=\"about.html\">See it</a></p><!-- /print.validation.alert('linked') -->";
+	with_file("$views/zz-alert-link.html", "<!doctype html>\n<html>\n<body>\n$alert\n</body>\n</html>\n", function () use ($base) {
+		list($code, $body) = http('GET', "$base/zz-alert-link?done=linked");
+		same(200, $code);
+		has($body, 'See it', 'the alert shows when done names it');
+		lacks($body, 'href="about.html"', 'the view file never reaches the page');
+		has($body, 'href="'.$base.'/about"', 'the block a listener put back was fixed up too');
+	});
+});
 test('N5', 'annotations: the grammar as data', function () {
 	list($code, $out) = raster(array('annotations', '--json'));
 	same(0, $code, $out);

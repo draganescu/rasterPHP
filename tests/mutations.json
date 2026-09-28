@@ -490,5 +490,11 @@
   "file": "system/models/cms/store.php",
   "search": "\t\t\t\t$bean->owner = $user ? (int)$user['id'] : 0;",
   "replace": "\t\t\t\t$bean->owner = 0;"
+ },
+ {
+  "name": "C47-alert-link-not-fixed",
+  "file": "system/controller.php",
+  "search": "\t\t$this->fix_links();\n\t\traster_cache::store($template->output);",
+  "replace": "\t\traster_cache::store($template->output);"
  }
 ]

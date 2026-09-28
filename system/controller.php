@@ -500,6 +500,10 @@ class controller {
 		$template = template::instance();
 		// last chance to change the page, e.g. the CMS adds its toolbar here
 		event::dispatch('before_output');
+		// markup a listener just put in has not been through fix_links: an alert
+		// block is only a placeholder while render runs, so a relative link in one
+		// would still point at the view instead of the route
+		$this->fix_links();
 		raster_cache::store($template->output);
 		echo $template->output;
 		event::dispatch('land');

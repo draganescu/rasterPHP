@@ -95,6 +95,7 @@ php tests/demo.php                        # the whole matrix
 | C44 | `print.@attr.model.method` outside render blocks sets an attribute from a model |
 | C45 | a short closing tag (`<!-- /render -->`) is a lint error that names the full closing tag |
 | C46 | lint checks how many arguments a method takes, and names the nearest real method |
+| C47 | a relative link inside a `print.validation.alert()` block goes to the route, not the view file |
 | D1 | raster_form and honeypot on every post form |
 | D2 | the session token on forms for logged in users |
 | D3 | posts from other sites refused (Origin, Sec-Fetch-Site, Referer, /api too) |
