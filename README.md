@@ -42,7 +42,7 @@ Included:
 
 **Updating:** `raster update` replaces only the framework files (`system/`, `bin/raster`, `index.php`, `.htaccess`, `AGENTS.md`), refuses if you edited them, and then runs the upgrade steps each app needs. What changed is in [CHANGELOG.md](CHANGELOG.md).
 
-Tests: `php tests/run.php` for the framework, `php tests/update.php` for updates, and `php tests/demo.php` for [the demo café](demo/README.md), a complete site that uses every feature. Each feature has an ID, and the suite fails if any of them lacks a passing test. `php tests/mutate.php` breaks the framework on purpose, one change at a time from `tests/mutations.json`, and fails if the demo suite doesn't notice.
+Tests: `php tests/run.php` for the framework, `php tests/update.php` for updates, and `php tests/demo.php` for [the demo café](demo/README.md), a complete site that uses every feature. Each feature has an ID, and the suite fails if any of them lacks a passing test. `php tests/mutate.php` breaks the framework on purpose, one change at a time from `tests/mutations.json`, and fails if the demo suite doesn't notice. It checks the tests rather than the code, takes about an hour for the full list, and is meant for an occasional sweep before a release, not for every change.
 
 ---
 

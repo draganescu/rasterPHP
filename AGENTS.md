@@ -688,9 +688,16 @@ In the Raster repository, not in sites made with it:
 php tests/run.php                 # framework test suite
 php tests/demo.php                # the demo café: every feature, end to end
 php tests/update.php              # new, update, upgrade, doctor
-php tests/mutate.php              # slow: would the demo suite notice a regression?
 node tests/editor-browser.js      # the in-page editor in Chromium (needs Playwright)
 ```
+
+`php tests/mutate.php` is not one of the tests. It checks the tests: each
+entry in `tests/mutations.json` breaks the framework on purpose and the demo
+suite must notice. It costs about a minute per mutation, so do not run it
+while working on a change, before a commit or as a gate on a branch. Run it
+only when asked, or with `--all` before a release or after a wide rewrite
+of the framework. Commits that change a mutation's `search` text leave that
+entry stale; fixing the entry can wait for the next sweep.
 
 A new feature gets an ID in `demo/README.md`, a use in the demo and a test.
 A change that sites must follow gets an upgrade step, and anything it

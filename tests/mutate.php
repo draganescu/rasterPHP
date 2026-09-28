@@ -15,7 +15,8 @@
 // (against --base, `master` by default, plus anything not committed yet). An
 // ordinary change is a handful: editing system/tools/inspector.php selects 9,
 // which is minutes rather than an hour. `--all` is the full sweep, for a
-// release or after editing the framework widely. Don't set --jobs above the
+// release or after editing the framework widely. It is not a gate: agents run
+// it only when asked (see AGENTS.md). Don't set --jobs above the
 // number of cores; the suites start their own servers and thrash.
 
 if (PHP_SAPI !== 'cli') exit;
