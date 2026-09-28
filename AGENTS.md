@@ -398,7 +398,7 @@ class reservation {
             'hidden'   => array(),             // never shown to editors or agents (payment ids, tokens)
             'html'     => array(),             // fields printed as HTML; the rest print escaped
             'actions'  => array('confirm' => 'editor', 'refund' => 'admin'),
-        ));   // a type's name is lowercase letters and digits
+        ));   // a type's name is lowercase letters and digits; no field x next to x_id
     }
     static function check($type, $after, $before) {   // every write passes here
         $problems = array();

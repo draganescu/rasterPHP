@@ -2023,11 +2023,12 @@ test(array('R7', 'R9', 'R10', 'R11'), 'hidden fields, lists, transactions and li
 			// lint: static hooks, action methods, keys that mean nothing
 			$problems = (new raster_inspector())->lint_types();
 			check(has_message($problems, "The type 'ticket' has 'surprise', which means nothing"), 'unknown keys');
-			with_file("$probe_dir/probe.php", str_replace(array("'surprise' => true,", 'static function check('), array("'actions' => array('ship' => 'editor', 'check' => 'admin'),", 'function check('), file_get_contents("$probe_dir/probe.php")), function () use ($probe_dir) {
+			with_file("$probe_dir/probe.php", str_replace(array("'surprise' => true,", 'static function check(', "'link' => ''"), array("'actions' => array('ship' => 'editor', 'check' => 'admin'),", 'function check(', "'link' => '', 'pay' => '', 'pay_id' => ''"), file_get_contents("$probe_dir/probe.php")), function () use ($probe_dir) {
 				$lint = shell_exec(escapeshellarg(PHP_BINARY).' '.escapeshellarg(dirname($probe_dir, 3).'/bin/raster').' lint 2>&1');
 				has($lint, 'probe::check() must be static');
 				has($lint, "has the action 'ship' but probe has no public static function ship(");
 				has($lint, "'check' can't be an action of 'ticket'");
+				has($lint, "has 'pay' and 'pay_id'");
 			});
 		});
 	} finally {
