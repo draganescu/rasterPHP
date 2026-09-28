@@ -155,6 +155,8 @@ class mcp
 			$tool('get_item', 'One item of a collection.', array('collection' => $collection, 'id' => $id), array('collection', 'id'), $read_only),
 			$tool('create_item', 'Adds an item to a collection.', array('collection' => $collection, 'fields' => $fields), array('collection', 'fields'), $write),
 			$tool('update_item', 'Changes fields of a collection item.', array('collection' => $collection, 'id' => $id, 'fields' => $fields), array('collection', 'id', 'fields'), $write),
+			$tool('run_action', 'Runs an action a record type declares (ship an order, confirm a booking): what editors do to a record beyond changing a field. site_overview lists each type\'s actions. The model may refuse, and says why.',
+				array('collection' => $collection, 'id' => $id, 'action' => array('type' => 'string'), 'input' => array('type' => 'object', 'description' => 'Values the action takes, if any', 'additionalProperties' => array('type' => 'string'))), array('collection', 'id', 'action'), $write),
 			$tool('delete_item', 'Deletes a collection item.', array('collection' => $collection, 'id' => $id), array('collection', 'id'), array('readOnlyHint' => false, 'destructiveHint' => true, 'openWorldHint' => false)),
 			$tool('lint_templates', 'Checks every template for annotation errors (unclosed blocks, unknown models, typos) with file:line positions.', array(), array(), $read_only),
 			$tool('schema_status', 'Compares the content model in the templates with the database: missing columns, orphaned columns, likely renames.', array(), array(), $read_only),
@@ -270,6 +272,12 @@ class mcp
 				'used_in' => $collection['views'],
 				'item_url' => '/'.$collection['name'].'/'.$collection['name'].'_item/{id}',
 			);
+			// records of a type a model declares: private unless it says public,
+			// with fields only the model writes, and actions
+			if (isset($collection['model'])) {
+				$collections[count($collections) - 1] += array('declared_by' => $collection['model'], 'public' => $collection['public'], 'readonly' => $collection['readonly'], 'actions' => array_keys($collection['actions']));
+				$collections[count($collections) - 1]['fields'] = array_values(array_diff(array_keys($collection['fields']), $collection['hidden']));
+			}
 		}
 		// who listens to what: saving an item or a booking may do more than it says
 		$events = array();
@@ -323,7 +331,9 @@ class mcp
 		$collection = $this->find_collection($this->arg($arguments, 'collection'));
 		$limit = min(200, max(1, (int)$this->arg($arguments, 'limit', 50)));
 		$offset = max(0, (int)$this->arg($arguments, 'offset', 0));
-		return array('collection' => $collection['name'], 'fields' => array_keys($collection['fields'])) + cms_store::list_items($collection['type'], $limit, $offset);
+		$fields = array_keys($collection['fields']);
+		if (isset($collection['model'])) $fields = array_values(array_diff($fields, $collection['hidden']));
+		return array('collection' => $collection['name'], 'fields' => $fields) + cms_store::list_items($collection['type'], $limit, $offset);
 	}
 
 	protected function tool_get_item($arguments) {
@@ -344,6 +354,16 @@ class mcp
 		cms_store::connect();
 		$collection = $this->find_collection($this->arg($arguments, 'collection'));
 		return cms_store::save_item($collection['type'], (int)$this->arg($arguments, 'id'), $this->fields_argument($arguments), array_keys($collection['fields']));
+	}
+
+	protected function tool_run_action($arguments) {
+		cms_store::connect();
+		$collection = $this->find_collection($this->arg($arguments, 'collection'));
+		if (!isset($collection['model'])) throw new InvalidArgumentException("{$collection['name']} is content, not a record type; it has no actions");
+		$input = $this->arg($arguments, 'input', array());
+		// the site's token is trusted like an admin
+		$item = cms_records::act($collection['name'], (int)$this->arg($arguments, 'id'), (string)$this->arg($arguments, 'action'), is_array($input) ? $input : array(), true);
+		return cms_records::shown(cms_records::info($collection['name']), $item);
 	}
 
 	protected function tool_delete_item($arguments) {

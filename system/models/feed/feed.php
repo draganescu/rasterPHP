@@ -21,6 +21,8 @@ class feed
 	// the newest published items of a collection, limit from config feed_limit (20)
 	function items($collection, $limit = null) {
 		if (!preg_match('/^[a-z][a-z0-9_]*$/', (string)$collection)) return array();
+		// records of a private type (orders, bookings) are never in a feed or the sitemap
+		if (cms_records::is_private($collection)) return array();
 		$type = cms::collection_type($collection);
 		database::instance('cms');
 		if (!database::configured() || !cms_store::table_exists($type)) return array();
@@ -29,7 +31,10 @@ class feed
 		$limit = (int)($limit ?: config::get('feed_limit', 20));
 		$sql .= ' ORDER BY '.cms_store::order_sql('newest', $columns).' LIMIT '.max(1, $limit);
 		$rows = array();
+		$record = cms_records::info($collection);
 		foreach (R::exportAll(R::find($type, $sql, $bindings)) as $item) {
+			// a public record type: lists decoded, hidden fields out, what visitors typed as text
+			if ($record) $item = cms_records::for_template($record, cms_records::shown($record, cms_records::decode($record, $item)));
 			$date = !empty($item['published_at']) ? $item['published_at'] : (!empty($item['updated_at']) ? $item['updated_at'] : 'now');
 			$time = strtotime($date) ?: time();
 			$item['url'] = rtrim(config::get('link_uri'), '/').'/'.$collection.'/'.$collection.'_item/'.(!empty($item['slug']) ? rawurlencode($item['slug']) : $item['id']);

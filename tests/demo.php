@@ -161,6 +161,17 @@ function mcp_stdio($calls) {
 function between($html, $id) {
 	return preg_match('#<section id="'.$id.'">(.*?)</section>#s', $html, $m) ? $m[1] : '';
 }
+function has_message($problems, $needle) {
+	foreach ($problems as $p) if (strpos($p['message'], $needle) !== false) return true;
+	return false;
+}
+function php_parses($code) {
+	$file = tempnam(sys_get_temp_dir(), 'raster-php');
+	file_put_contents($file, $code);
+	exec(escapeshellarg(PHP_BINARY).' -l '.escapeshellarg($file).' 2>&1', $out, $status);
+	unlink($file);
+	return $status === 0;
+}
 function with_file($path, $content, $fn) {
 	$existed = file_exists($path);
 	$original = $existed ? file_get_contents($path) : null;
@@ -451,7 +462,7 @@ test(array('D17', 'I1', 'I2', 'C23'), 'a valid booking: stored, emailed, redirec
 	has($mail['html'], 'Near the &lt;script&gt;');
 	has($mail['text'], 'booked a table for 3 on 2026-10-07');
 	database::instance('cms');
-	same(1, (int)R::count('reservation'));
+	same(1, (int)R::count('reservationdata'));
 });
 test('D20', 'forms filled with data and spa_ classes', function () use ($base) {
 	http('POST', "$base/about", array('raster_form' => 'newsletter.signup', 'email' => 'reader@example.com'));
@@ -983,7 +994,7 @@ test('M4', 'every MCP tool', function () use ($base) {
 	$urls = array_map(function ($p) { return $p['url']; }, $overview['pages']);
 	foreach (array('site', '/', '/about', '/menu', '/docs/setup') as $url) check(in_array($url, $urls), "overview lacks $url");
 	$collections = array_map(function ($c) { return $c['name']; }, $overview['collections']);
-	same(array('events', 'faq', 'journal', 'menu'), $collections);
+	same(array('events', 'faq', 'journal', 'menu', 'reservation'), $collections);
 	same('About us', mcp($base, 'get_page', array('page' => '/about'))['fields']['heading']);
 	$item = mcp($base, 'create_item', array('collection' => 'journal', 'fields' => array('title' => 'MCP post', 'author' => 'Agent')));
 	same('Agent', mcp($base, 'get_item', array('collection' => 'journal', 'id' => $item['id']))['author']);
@@ -1018,7 +1029,7 @@ test('M10', 'describe: the site in one call', function () use ($base) {
 	same('demo', $all['site']['app']);
 	same('cafe', $all['site']['theme']);
 	check(in_array('/menu', array_map(function ($p) { return $p['url']; }, $all['pages'])), 'the pages are there');
-	same(array('events', 'faq', 'journal', 'menu'), array_map(function ($c) { return $c['name']; }, $all['collections']));
+	same(array('events', 'faq', 'journal', 'menu', 'reservation'), array_map(function ($c) { return $c['name']; }, $all['collections']));
 	same(4, $all['collections'][3]['page_size'], 'menu_page_size');
 	same(0, $all['lint']['errors']);
 	check(count($all['views']) > 20, 'the view files');
@@ -1770,6 +1781,284 @@ test(array('L7', 'L3'), 'page cache: skipped paths, time to live, turned off', f
 	$off = server(free_port(), array_merge($env, array('CAFE_PAGE_CACHE' => 'off')));
 	http('GET', "$off/faq");
 	same(null, header_value(http('GET', "$off/faq")[2], 'X-Raster-Cache'), 'page_cache off');
+});
+
+// ## R. Records: types a model declares, stored and shown by the CMS
+
+test('R1', 'a model declares a type: a collection with its fields, no mock-up row', function () use ($base) {
+	$overview = mcp($base, 'site_overview');
+	$types = array_values(array_filter($overview['collections'], function ($c) { return $c['name'] === 'reservation'; }));
+	same('reservation', $types[0]['declared_by']);
+	same(false, $types[0]['public']);
+	same(array('confirm', 'cancel'), $types[0]['actions']);
+	check(in_array('status', $types[0]['fields']) && in_array('guests', $types[0]['fields']), 'the model\'s fields');
+	same(array('staff.html', 'account.html'), array_values(array_intersect(array('staff.html', 'account.html'), $types[0]['used_in'])), 'where views show it');
+	$described = array_values(array_filter(mcp($base, 'describe', array('sections' => array('collections')))['collections'], function ($c) { return $c['name'] === 'reservation'; }));
+	same('visitor', $described[0]['create']);
+	same(array('status'), $described[0]['readonly']);
+	database::instance('cms');
+	foreach (R::find('reservationdata') as $row) check($row->name !== 'Ana' || $row->notes !== 'Window seat', 'the mock-up is never stored as a record');
+	list($code, $out) = raster(array('schema'));
+	has($out, 'records reservation  (declared by the reservation model');
+});
+
+test(array('R2', 'R4'), 'a form stores a record; visitors never see records, editors see them all', function () use ($base) {
+	list($status, , $headers) = http('POST', "$base/visit", array('raster_form' => 'reservation.book', 'name' => 'Radu <em>R</em>', 'email' => 'radu@example.com', 'date' => '2026-11-03', 'guests' => '2', 'seating' => 'inside', 'terms' => '1', 'status' => 'confirmed', 'owner' => '1'));
+	same(303, $status);
+	same("$base/visit?done=booked", header_value($headers, 'Location'));
+	database::instance('cms');
+	$row = R::findOne('reservationdata', ' email = ? ', array('radu@example.com'));
+	same('new', $row->status, 'a visitor can\'t set a readonly field');
+	same(0, (int)$row->owner, 'nor the owner');
+	check($row->created_at !== '', 'records get created_at');
+	same('', (string)$row->occasion, 'fields the type does not declare are not stored');
+	$staff = login($base, 'staff@cafe.test', 'staff password');
+	$body = http('GET', "$base/staff", null, array("Cookie: $staff"))[1];
+	has($body, 'Radu &lt;em&gt;R&lt;/em&gt;', 'what visitors typed prints as text');
+	// a page anyone can open that lists bookings, and so gives them item URLs
+	with_file(dirname(__DIR__).'/demo/views/cafe/reservation.html', '<html><body><ul><!-- render.cms.reservation --><li><!-- print.name -->Ana<!-- /print.name --></li><!-- /render.cms.reservation --></ul></body></html>', function () use ($base, $row, $staff) {
+		list($status, $body) = http('GET', "$base/reservation");
+		same(200, $status);
+		lacks($body, 'Radu', 'visitors see no records');
+		lacks($body, '<li>', 'not even the mock-up');
+		same(404, http('GET', "$base/reservation/reservation_item/{$row->id}")[0], 'item URLs are not a way in');
+		same(200, http('GET', "$base/reservation/reservation_item/{$row->id}", null, array("Cookie: $staff"))[0], 'but staff can open them');
+	});
+	lacks(http('GET', "$base/sitemap.xml")[1], 'reservation', 'nor the sitemap');
+	with_file(dirname(__DIR__).'/demo/views/cafe/zz-feed.rss', '<rss><channel><!-- render.feed.items(\'reservation\') --><item><!-- print.name -->x<!-- /print.name --></item><!-- /render.feed.items(\'reservation\') --></channel></rss>', function () use ($base) {
+		lacks(http('GET', "$base/zz-feed.rss")[1], 'Radu', 'nor feeds');
+	});
+});
+
+test('R3', 'check() runs on every write: the form, the editor, MCP and the model\'s own code', function () use ($base) {
+	$book = function ($name, $guests) use ($base) {
+		return http('POST', "$base/visit", array('raster_form' => 'reservation.book', 'name' => $name, 'email' => 'big@example.com', 'date' => '2026-12-01', 'guests' => (string)$guests, 'terms' => '1'));
+	};
+	for ($i = 0; $i < 2; $i++) same(303, $book("Group $i", 8)[0]);
+	list($status, $body) = $book('One too many', 5);
+	same(200, $status);
+	has($body, 'We are full that day.', 'the problem is an alert the template words');
+	has($body, 'value="One too many"', 'and the form keeps what was typed');
+	database::instance('cms');
+	same(2, (int)R::count('reservationdata', ' date = ? ', array('2026-12-01')));
+	$group = R::findOne('reservationdata', ' name = ? ', array('Group 0'));
+	$staff = login($base, 'staff@cafe.test', 'staff password');
+	$h = array("Cookie: $staff");
+	$token = token_in(http('GET', "$base/staff", null, $h)[1]);
+	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'reservation', 'id' => $group->id, 'fields' => array('guests' => '8', 'name' => 'Group 0 (8)'), 'csrf' => $token), $h);
+	same(200, $status, 'the booking itself is not counted twice');
+	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'reservation', 'id' => 0, 'fields' => array('name' => 'Phone booking', 'date' => '2026-12-01', 'guests' => '6'), 'csrf' => $token), $h);
+	same(422, $status);
+	same(array('fully_booked'), json_decode($body, true)['problems']);
+	$refused = json_decode(http('POST', "$base/mcp", json_encode(array('jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => array('name' => 'create_item', 'arguments' => array('collection' => 'reservation', 'fields' => array('name' => 'Agent', 'date' => '2026-12-01', 'guests' => '6'))))), array('Authorization: Bearer demo-token', 'Content-Type: application/json'))[1], true)['result'];
+	check(!empty($refused['isError']), 'MCP is refused too');
+	has($refused['content'][0]['text'], 'fully_booked');
+	cms_records::forget();
+	try {
+		cms_records::create('reservation', array('name' => 'Code', 'date' => '2026-12-01', 'guests' => 5));
+		check(false, 'the model\'s own code is checked');
+	} catch (cms_refused $e) {
+		same(array('fully_booked'), $e->problems);
+	}
+});
+
+test('R5', 'owners read their own records', function () use ($base) {
+	$member = login($base, 'maria@example.com', 'reset password');
+	$h = array("Cookie: $member");
+	$token = token_in(http('GET', "$base/visit", null, $h)[1]);
+	same(303, http('POST', "$base/visit", array('raster_form' => 'reservation.book', 'name' => 'Maria', 'email' => 'maria@example.com', 'date' => '2026-11-20', 'guests' => '3', 'terms' => '1', 'csrf' => $token), $h)[0]);
+	$account = http('GET', "$base/account", null, $h)[1];
+	has($account, '2026-11-20, 3 guests: new');
+	lacks($account, 'Radu', 'only their own');
+	database::instance('cms');
+	$user = R::findOne('user', ' email = ? ', array('maria@example.com'));
+	same((int)$user->id, (int)R::findOne('reservationdata', ' date = ? ', array('2026-11-20'))->owner);
+});
+
+test(array('R6', 'R8'), 'readonly fields and actions: buttons for the roles allowed, editor_action, run_action, refusals', function () use ($base) {
+	database::instance('cms');
+	$booking = R::findOne('reservationdata', ' email = ? ', array('radu@example.com'));
+	$staff = login($base, 'staff@cafe.test', 'staff password');
+	$h = array("Cookie: $staff");
+	$page = http('GET', "$base/staff", null, $h)[1];
+	$config = editor_config($page);
+	list($id, $mark) = mark_of($config, 'item', function ($m) use ($booking) { return $m['collection'] === 'reservation' && $m['id'] === (int)$booking->id; });
+	check($id !== null, 'the booking is marked for the editor');
+	same(true, $mark['record']);
+	same(array('confirm', 'cancel'), $mark['actions']);
+	check(in_array('status', $mark['readonly']), 'status is shown, not edited');
+	list(, $field) = mark_of($config, 'item_field', function ($m) use ($id) { return $m['item'] === (int)$id && $m['field'] === 'status'; });
+	same(true, $field['readonly'], 'the status is marked readonly: shown, updated by actions, never editable');
+	$token = token_in($page);
+	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'reservation', 'id' => $booking->id, 'fields' => array('status' => 'confirmed'), 'csrf' => $token), $h);
+	same(400, $status);
+	has(json_decode($body, true)['error'], "'status' can't be changed here");
+	list($status, $body) = http('POST', "$base/api/cms/editor_action", array('collection' => 'reservation', 'id' => $booking->id, 'action' => 'confirm', 'csrf' => $token), $h);
+	same(200, $status);
+	same('confirmed', json_decode($body, true)['status']);
+	list($status, $body) = http('POST', "$base/api/cms/editor_action", array('collection' => 'reservation', 'id' => $booking->id, 'action' => 'refund', 'csrf' => $token), $h);
+	same(400, $status);
+	has(json_decode($body, true)['error'], 'no action');
+	same('cancelled', mcp($base, 'run_action', array('collection' => 'reservation', 'id' => (int)$booking->id, 'action' => 'cancel'))['status']);
+	list($status, $body) = http('POST', "$base/api/cms/editor_action", array('collection' => 'reservation', 'id' => $booking->id, 'action' => 'confirm', 'csrf' => $token), $h);
+	same(422, $status);
+	same(array('already_cancelled'), json_decode($body, true)['problems']);
+	$member = login($base, 'maria@example.com', 'reset password');
+	same(403, http('POST', "$base/api/cms/editor_action", array('collection' => 'reservation', 'id' => $booking->id, 'action' => 'confirm'), array("Cookie: $member"))[0], 'members have no actions');
+	same(404, http('GET', "$base/api/reservation/confirm")[0], 'actions are static: /api never reaches them');
+	same(404, http('GET', "$base/api/reservation/check")[0]);
+});
+
+// A second model, only while these tests run, for what the café's
+// bookings don't need: hidden fields, lists, transactions, public records
+$probe_dir = dirname(__DIR__).'/demo/models/probe';
+$probe = <<<'PHP'
+<?php
+class probe {
+	static function types() {
+		return array('ticket' => array(
+			'fields' => array('title' => '', 'lines' => array(), 'secret' => '', 'stock' => 0, 'link' => ''),
+			'hidden' => array('secret'),
+			'public' => true,
+			'create' => 'visitor',
+			'surprise' => true,
+		));
+	}
+	function send() {
+		return cms_records::submit('ticket', 'sent');
+	}
+	static function check($type, $after, $before) {
+		if ($after && (int)$after['stock'] < 0) cms_records::refuse('sold_out');
+	}
+	function seen($saved) {
+		if ($saved['collection'] === 'ticket') file_put_contents(APPBASE.'data/probe.log', $saved['item']['title']."\n", FILE_APPEND);
+	}
+}
+PHP;
+test(array('R7', 'R9', 'R10', 'R11'), 'hidden fields, lists, transactions and lint, with a probe model', function () use ($base, $probe_dir, $probe, $root) {
+	@mkdir($probe_dir);
+	$log = "$root/demo/data/probe.log";
+	@unlink($log);
+	try {
+		with_file("$probe_dir/probe.php", $probe, function () use ($base, $log, $root, $probe_dir) {
+			cms_records::forget();
+			require_once "$probe_dir/probe.php";
+			event::bind('cms.item_saved')->to('probe', 'seen');
+			$ticket = cms_records::create('ticket', array('title' => 'Mugs', 'stock' => 1, 'secret' => 'tok_123', 'lines' => array(array('name' => '<i>Mug</i>', 'qty' => 2))));
+			same(array(array('name' => '<i>Mug</i>', 'qty' => 2)), $ticket['lines'], 'lists come back as lists');
+			same('tok_123', $ticket['secret'], 'the model sees hidden fields');
+			$shown = mcp($base, 'get_item', array('collection' => 'ticket', 'id' => $ticket['id']));
+			check(!array_key_exists('secret', $shown), 'MCP never sees hidden fields');
+			same('<i>Mug</i>', $shown['lines'][0]['name']);
+			try {
+				mcp($base, 'update_item', array('collection' => 'ticket', 'id' => $ticket['id'], 'fields' => array('secret' => 'x')));
+				check(false, 'MCP cannot write a hidden field');
+			} catch (Exception $e) { has($e->getMessage(), "'secret' can't be changed here"); }
+			// all or nothing, and events wait for the commit
+			file_put_contents($log, '');
+			try {
+				cms_records::transaction(function () use ($ticket, $log) {
+					cms_records::update('ticket', $ticket['id'], array('stock' => 0));
+					cms_records::create('ticket', array('title' => 'Rolled back', 'stock' => 5));
+					same('', file_get_contents($log), 'no event before the commit');
+					cms_records::update('ticket', $ticket['id'], array('stock' => -1));
+				});
+				check(false, 'the transaction should have been refused');
+			} catch (cms_refused $e) { same(array('sold_out'), $e->problems); }
+			same(1, (int)cms_records::get('ticket', $ticket['id'])['stock'], 'rolled back');
+			same(array(), cms_records::find('ticket', array('title' => 'Rolled back')));
+			same('', file_get_contents($log), 'and nothing was announced');
+			cms_records::transaction(function () use ($ticket) {
+				cms_records::update('ticket', $ticket['id'], array('stock' => 0));
+				cms_records::create('ticket', array('title' => 'Kept', 'stock' => 5));
+			});
+			same("Mugs\nKept\n", file_get_contents($log), 'events after the commit');
+			// lists render as nested rows; public records show to visitors
+			$views = "$root/demo/views/cafe";
+			with_file("$views/zz-tickets.html", "<html><body><!-- render.cms.ticket('order=oldest') --><h2><!-- print.title -->T<!-- /print.title --></h2><!-- print.lines --><p><!-- print.name -->n<!-- /print.name --> x<!-- print.qty -->1<!-- /print.qty --></p><!-- /print.lines --><!-- /render.cms.ticket('order=oldest') --></body></html>", function () use ($base) {
+				$body = http('GET', "$base/zz-tickets")[1];
+				has($body, '<h2>Mugs</h2><p>&lt;i&gt;Mug&lt;/i&gt; x2</p>', 'nested rows, escaped');
+				lacks($body, 'tok_123');
+				$staff = login($base, 'staff@cafe.test', 'staff password');
+				lacks(http('GET', "$base/zz-tickets", null, array("Cookie: $staff"))[1], 'tok_123', 'the editor never gets hidden values');
+			});
+			// a form that leaves fields out keeps the type's defaults; a link a
+			// visitor typed can't run script; hidden fields are no filter
+			with_file("$views/zz-ticket-form.html", "<html><body><!-- render.probe.send --><form method=\"post\"><input name=\"title\" required><input name=\"link\"><button>Go</button></form><!-- /render.probe.send --><!-- render.cms.ticket('title=Form') --><!-- print.@href.link --><a class=\"t\" href=\"#\">x</a><!-- /print.@href.link --><!-- /render.cms.ticket('title=Form') --></body></html>", function () use ($base) {
+				same(303, http('POST', "$base/zz-ticket-form", array('raster_form' => 'probe.send', 'title' => 'Form', 'link' => 'javascript:alert(1)'))[0]);
+				$row = cms_records::find('ticket', array('title' => 'Form'))[0];
+				same(0, (int)$row['stock'], 'the default');
+				same('[]', json_encode($row['lines']));
+				$page = http('GET', "$base/zz-ticket-form")[1];
+				has($page, '>x</a>', 'the record is shown');
+				lacks($page, 'javascript:', 'but not a script link a visitor typed');
+			});
+			with_file("$views/ticket.html", "<html><body><!-- render.cms.ticket --><p><!-- print.title -->T<!-- /print.title --></p><!-- /render.cms.ticket --></body></html>", function () use ($base) {
+				same(http('GET', "$base/ticket/ticket_items/secret/nope")[1], http('GET', "$base/ticket/ticket_items/secret/tok_123")[1], 'hidden fields are no filter for visitors');
+				has(http('GET', "$base/ticket/ticket_items/title/Mugs")[1], '<p>Mugs</p>', 'other fields are');
+				lacks(http('GET', "$base/ticket/ticket_items/title/Kept")[1], '<p>Mugs</p>');
+			});
+			with_file("$views/zz-tickets.rss", "<rss><channel><!-- render.feed.items('ticket') --><item><title><!-- print.title -->t<!-- /print.title --></title><!-- print.secret -->s<!-- /print.secret --></item><!-- /render.feed.items('ticket') --></channel></rss>", function () use ($base) {
+				$feed = http('GET', "$base/zz-tickets.rss")[1];
+				has($feed, '<title>Mugs</title>', 'a public type is in feeds');
+				lacks($feed, 'tok_123', 'without its hidden fields');
+			});
+			// a model with an ordinary types() method declares nothing, and breaks nothing
+			$plain = dirname($probe_dir).'/zzplain';
+			@mkdir($plain);
+			try {
+				with_file("$plain/zzplain.php", "<?php\nclass zzplain { function types() { return array('widget' => array('fields' => array('a' => ''))); } }\n", function () use ($base) {
+					same(200, http('GET', "$base/menu")[0]);
+					$names = array_map(function ($c) { return $c['name']; }, mcp($base, 'site_overview')['collections']);
+					check(!in_array('widget', $names), 'not a type');
+				});
+			} finally { @rmdir($plain); }
+			// lint: static hooks, action methods, keys that mean nothing
+			$problems = (new raster_inspector())->lint_types();
+			check(has_message($problems, "The type 'ticket' has 'surprise', which means nothing"), 'unknown keys');
+			with_file("$probe_dir/probe.php", str_replace(array("'surprise' => true,", 'static function check('), array("'actions' => array('ship' => 'editor', 'check' => 'admin'),", 'function check('), file_get_contents("$probe_dir/probe.php")), function () use ($probe_dir) {
+				$lint = shell_exec(escapeshellarg(PHP_BINARY).' '.escapeshellarg(dirname($probe_dir, 3).'/bin/raster').' lint 2>&1');
+				has($lint, 'probe::check() must be static');
+				has($lint, "has the action 'ship' but probe has no public static function ship(");
+				has($lint, "'check' can't be an action of 'ticket'");
+			});
+		});
+	} finally {
+		@unlink($log);
+		@rmdir($probe_dir);
+		cms_records::forget();
+		database::instance('cms');
+		if (cms_store::table_exists('ticketdata')) R::exec('DROP TABLE ticketdata');
+	}
+});
+
+test(array('R12', 'R13'), 'schema --apply creates record tables in production; make model writes a model from a form', function () use ($tmp, $root) {
+	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => "$tmp/records-prod.sqlite");
+	list($code, $out) = raster(array('schema', '--apply'), $env);
+	same(0, $code, $out);
+	has($out, 'created table reservationdata');
+	$pdo = new PDO("sqlite:$tmp/records-prod.sqlite");
+	same(0, (int)$pdo->query('SELECT COUNT(*) FROM reservationdata')->fetchColumn(), 'no row left behind');
+	$columns = array_map(function ($c) { return $c['name']; }, $pdo->query('PRAGMA table_info(reservationdata)')->fetchAll(PDO::FETCH_ASSOC));
+	foreach (array('status', 'guests', 'owner', 'created_at', 'enabled', 'slug') as $column) check(in_array($column, $columns), "column $column");
+	list($code, $out) = raster(array('schema', '--check'), $env);
+	same(0, $code, $out);
+	// the contact form on /visit, as a type
+	list($code, $out) = raster(array('make', 'model', 'reservation', '--from=visit.html'));
+	same(1, $code);
+	has($out, 'exists; --force replaces it');
+	list($code, $code_out) = raster(array('make', 'model', 'reservation', '--from=visit', '--form=contact', '--dry-run'));
+	same(0, $code, $code_out);
+	has($code_out, "'email' => '',");
+	has($code_out, "'message' => '',");
+	has($code_out, 'static function check($type, $after, $before)');
+	has($code_out, "return cms_records::submit('reservation', 'reservation_sent');");
+	has($code_out, 'function contact()');
+	lacks($code_out, "'name' => ''", 'only the contact form\'s fields');
+	check(php_parses($code_out), 'the code parses');
+	list($code, $out) = raster(array('make', 'model', 'Bad!', '--from=visit.html'));
+	same(1, $code);
+	same(2, raster(array('make', 'model'))[0], 'usage');
 });
 
 // ## No PHP warnings, notices or deprecations on any request

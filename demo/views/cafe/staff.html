@@ -10,11 +10,12 @@
     <h1>Staff</h1>
     <p>Only editors and admins can see this page. Log in as staff to edit any text on the site from the toolbar.</p>
     <h2>Latest reservations</h2>
-    <table class="list">
-      <!-- render.reservation.latest -->
-      <tr><td><!-- print.name -->Ana<!-- /print.name --></td><td><!-- print.date -->2026-10-01<!-- /print.date --></td><td><!-- print.guests -->2<!-- /print.guests --></td><td><!-- print.notes -->Window seat<!-- /print.notes --></td></tr>
-      <!-- /render.reservation.latest -->
-    </table>
+    <p>Bookings are records: the reservation model declares them, and the page editor lets staff change them or confirm and cancel them.</p>
+    <table class="list"><tbody>
+      <!-- render.cms.reservation('order=newest&limit=20') -->
+      <tr><td><!-- print.name -->Ana<!-- /print.name --></td><td><!-- print.date -->2026-10-01<!-- /print.date --></td><td><!-- print.guests -->2<!-- /print.guests --></td><td><!-- print.notes -->Window seat<!-- /print.notes --></td><td class="status"><!-- print.status -->new<!-- /print.status --></td></tr>
+      <!-- /render.cms.reservation('order=newest&limit=20') -->
+    </tbody></table>
   </main>
   <!-- dry._layout.footer /-->
 </body>

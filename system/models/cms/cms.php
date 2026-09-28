@@ -266,8 +266,18 @@ class cms
 			$roffset = $page > 1 ? ($page-1)*$page_size : 0;
 		}
 
+		// a type a model declares: the model's fields, no mock-up row, and
+		// private records only for editors and their owners
+		$record = cms_records::info($name);
+		if ($record) {
+			cms_records::ensure($record);
+			if (!cms_store::table_exists($this->data_name)) return array();
+		}
+
 		$exists = cms_store::table_exists($this->data_name);
-		if (!$exists || R::count($this->data_name) == 0) {
+		if ($record) {
+			// nothing to seed or add: the model declares the fields
+		} elseif (!$exists || R::count($this->data_name) == 0) {
 			if (database::$frozen) return false;
 			// the first item is the placeholder content from the template
 			$item = R::dispense($this->data_name);
@@ -306,6 +316,16 @@ class cms
 		$fields = cms_store::columns($this->data_name);
 		// drafts (enabled = 0) and future posts are hidden, except for editors
 		list($sql, $bindings) = cms_store::published_sql($fields, cms::loggedin());
+		if ($record) {
+			list($visible, $more) = cms_records::visibility_sql($record);
+			$sql .= $visible;
+			$bindings += $more;
+		}
+		// a record's hidden fields are no filter for visitors (no asking
+		// "did this email book?")
+		if ($record && !cms::loggedin()) {
+			foreach (array_merge($record['hidden'], array('owner')) as $hidden) unset($filters[$hidden]);
+		}
 		foreach ($filters as $key => $value) {
 			if (!array_key_exists($key, $fields) || !preg_match('/^[a-z0-9_]+$/', $key)) {
 				if ($key === 'id' || $key === 'slug') return array();
@@ -316,6 +336,9 @@ class cms
 		}
 		$sql .= ' ORDER BY '.cms_store::order_sql(isset($options['order']) ? $options['order'] : '', $fields).' LIMIT '.(int)$page_size.' OFFSET '.(int)$roffset;
 		$data = R::exportAll(R::find($this->data_name, $sql, $bindings));
+		if ($record) {
+			foreach ($data as $key => $row) $data[$key] = cms_records::for_template($record, cms_records::decode($record, $row));
+		}
 
 		// items made before slugs existed get one (development only)
 		if (!database::$frozen && array_key_exists('slug', $fields)) {
@@ -387,6 +410,7 @@ class cms
 	public function editor_history() { return cms_editor::history(); }
 	public function editor_restore() { return cms_editor::restore(); }
 	public function editor_upload() { return cms_editor::upload(); }
+	public function editor_action() { return cms_editor::action(); }
 	public function editor_script() { return cms_editor::script(); }
 
 	function style() {

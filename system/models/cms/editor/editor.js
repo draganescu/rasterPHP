@@ -37,9 +37,17 @@
 		link_prompt: 'Link address', bold: 'Bold', italic: 'Italic', link: 'Link', list: 'List', clear: 'Plain text',
 		items: '{n} items', one_item: '1 item', hidden_count: '{n} hidden', empty_field: 'Empty: the template’s text shows',
 		new_item: 'New', edit_mode_on: 'Editing. Click anything that glows.', edit_mode_off: 'Done editing',
+		action_done: 'Done: {action}',
 		keyboard: 'E to edit · Esc to stop · ⌘Z to undo', fields_changed: '{fields}', page_fields: 'Fields', nothing_here: 'Nothing on this page comes from the CMS.'
 	};
 	for (var k in (C.strings || {})) T[k] = C.strings[k];
+	function problem(name) { return T['problem_' + name] || human(name); }
+	function readonly(info) { return info.readonly || []; }
+	function writable(info, values) {
+		var out = Object.assign({}, values);
+		readonly(info).forEach(function (k) { delete out[k]; });
+		return out;
+	}
 	function t(key, vars) {
 		return String(T[key] || key).replace(/\{(\w+)\}/g, function (_, n) { return vars && vars[n] != null ? vars[n] : ''; });
 	}
@@ -75,7 +83,7 @@
 		body.append('csrf', C.csrf);
 		Object.keys(data || {}).forEach(function (key) {
 			var value = data[key];
-			if (value && typeof value === 'object') Object.keys(value).forEach(function (f) { body.append(key + '[' + f + ']', value[f] == null ? '' : value[f]); });
+			if (value && typeof value === 'object') Object.keys(value).forEach(function (f) { var v = value[f]; body.append(key + '[' + f + ']', v == null ? '' : (typeof v === 'object' ? JSON.stringify(v) : v)); });
 			else body.append(key, value == null ? '' : value);
 		});
 		if (file) body.append('image', file, file.name || 'photo.jpg');
@@ -83,6 +91,8 @@
 			return response.text().then(function (text) {
 				var json = null;
 				try { json = JSON.parse(text); } catch (e) {}
+				// a record's model said no: its problems, in the site's words if it has them
+				if (json && json.problems) throw new Error(json.problems.map(problem).join(', '));
 				if (!response.ok || !json || json.error) throw new Error(json && json.error ? json.error : (text.slice(0, 120) || response.status));
 				return json;
 			});
@@ -236,6 +246,8 @@
 				if (!field.item) return;
 				field.item.fields.push(field);
 				field.key = 'item:' + info.item + ':' + info.field;
+				// a record's readonly field: kept up to date, never editable
+				if (info.readonly) return;
 			} else {
 				field.key = 'page:' + info.type + ':' + info.field;
 			}
@@ -719,17 +731,34 @@
 		activeItem = item;
 		item.el.classList.add('raster-active');
 		var state = itemState(item.info);
-		handle = h('div', { class: 'float handle surface', role: 'toolbar', 'aria-label': itemName(item) }, [
-			button('pencil', t('details'), function () { openDetails(item); }),
-			button('copy', t('duplicate'), function () { duplicate(item); }),
+		// a record (a booking, an order) has the actions its model declares
+		// instead of duplicate and schedule, which only make sense for content
+		var record = !!item.info.record;
+		handle = h('div', { class: 'float handle surface', role: 'toolbar', 'aria-label': itemName(item) }, [].concat(
+			(item.info.actions || []).map(function (name) {
+				return h('button', { class: 'text', text: actionLabel(name), onclick: function (e) { e.stopPropagation(); runAction(item, name); } });
+			}),
+			[button('pencil', t('details'), function () { openDetails(item); }),
+			record ? null : button('copy', t('duplicate'), function () { duplicate(item); }),
 			button(state === 'draft' ? 'eye' : 'eyeoff', state === 'draft' ? t('show') : t('hide'), function () { toggleHidden(item); }),
-			button('clock', t('schedule'), function () { openSchedule(item); }),
-			button('trash', t('delete'), function () { remove(item); }, 'danger')
-		]);
+			record ? null : button('clock', t('schedule'), function () { openSchedule(item); }),
+			button('trash', t('delete'), function () { remove(item); }, 'danger')]
+		));
 		handle.addEventListener('mouseleave', function (e) { if (!item.el.contains(e.relatedTarget)) scheduleDeactivate(); });
 		handle.addEventListener('mouseenter', cancelDeactivate);
 		ui.floats.appendChild(handle);
 		place();
+	}
+	function actionLabel(name) { return T['action_' + name] || human(name); }
+	function runAction(item, name) {
+		working(1);
+		call('editor_action', { collection: item.info.collection, id: item.info.id, action: name }).then(function (saved) {
+			working(-1);
+			item.info.values = Object.assign({}, item.info.values, saved);
+			applyValues(item, saved);
+			tick(item.el);
+			toast(t('action_done', { action: actionLabel(name) }));
+		}, function (e) { working(-1); failed(e); });
 	}
 	function button(name, label, action, extra) {
 		return h('button', { class: extra || '', title: label, 'aria-label': label, html: icon(name), onclick: function (e) { e.stopPropagation(); action(); } });
@@ -828,9 +857,11 @@
 			working(-1);
 			var putBack;
 			setTimeout(function () { putBack = detachItem(item); delete items[item.id]; refreshBadges(); }, reduceMotion ? 0 : 340);
-			toast(t('deleted', { name: itemName(item) }), function () {
-				var values = Object.assign({}, result.item);
-				delete values.id; delete values.updated_at;
+			// a record can't come back the way it was (its model's own fields,
+			// who made it), so deleting one has no undo
+			toast(t('deleted', { name: itemName(item) }), item.info.record ? null : function () {
+				var values = writable(item.info, result.item);
+				['id', 'updated_at', 'created_at', 'owner'].forEach(function (k) { delete values[k]; });
 				return call('editor_save_item', { collection: item.info.collection, id: 0, fields: values }).then(function (saved) {
 					item.info.id = saved.id;
 					item.info.values = saved;
@@ -957,6 +988,8 @@
 			var long = value.length > 70 || /<[a-z]/i.test(value);
 			var input = long ? h('textarea', { class: 'in' }) : h('input', { class: 'in', type: 'text' });
 			input.value = value;
+			// fields the record's model sets are shown, not edited
+			if (readonly(item.info).indexOf(name) >= 0) { input.disabled = true; body.push(h('label', { class: 'field' }, [human(name), input])); return; }
 			inputs[name] = input;
 			body.push(h('label', { class: 'field' }, [human(name), input]));
 		});
@@ -1091,8 +1124,10 @@
 	}
 	function createFrom(ghost, parts) {
 		var list = ghost.list, fieldsOut = Object.assign({}, list.info.filters && !Array.isArray(list.info.filters) ? list.info.filters : {});
+		readonly(list.info).forEach(function (k) { delete fieldsOut[k]; });
 		parts.forEach(function (node) {
 			var name = node.getAttribute('data-raster-name');
+			if (readonly(list.info).indexOf(name) >= 0 || (list.info.lists || []).indexOf(name) >= 0) return;
 			if (node.tagName === 'IMG') { fieldsOut[name] = node.getAttribute('data-raster-value') || (list.info.fields || {})[name] || ''; return; }
 			fieldsOut[name] = node.getAttribute('data-raster-edit') === 'text' ? node.innerText.replace(/\s+/g, ' ').trim() : clean(node.innerHTML).trim();
 		});

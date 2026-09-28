@@ -729,9 +729,14 @@ class template {
 
 		// editor marks for CMS collections
 		$marking = $this->marks !== null && $model === 'cms' && !array_key_exists('__', $data_arr);
+		$record = null;
 		if ($marking) {
 			$call = self::parse_call($method);
 			$collection = $call ? $call[0] : $method;
+			// a type a model declares: its readonly and hidden fields are not
+			// editable, and its actions become buttons
+			$record = cms_records::info($collection);
+			$locked = $record ? array_merge($record['readonly'], $record['hidden'], array('owner', 'created_at')) : array();
 		}
 		
 		foreach($data_arr as $data)
@@ -744,12 +749,17 @@ class template {
 
 			$item_mark = null;
 			if ($marking && isset($data['id'])) {
-				$item_mark = $this->mark(array(
+				$values = array_filter($data, function ($v, $k) { return is_scalar($v) && strpos($k, 'raster_') !== 0; }, ARRAY_FILTER_USE_BOTH);
+				$details = array(
 					'kind' => 'item', 'collection' => $collection, 'id' => (int)$data['id'],
 					'enabled' => isset($data['enabled']) ? (string)$data['enabled'] : '1',
 					'published_at' => isset($data['published_at']) ? (string)$data['published_at'] : '',
-					'values' => array_filter($data, function ($v, $k) { return is_scalar($v) && strpos($k, 'raster_') !== 0; }, ARRAY_FILTER_USE_BOTH),
-				));
+				);
+				if ($record) {
+					foreach ($record['hidden'] as $hidden) unset($values[$hidden]);
+					$details += array('record' => true, 'readonly' => array_values(array_intersect(array_keys($values), $locked)), 'actions' => cms_records::allowed_actions($record));
+				}
+				$item_mark = $this->mark($details + array('values' => $values));
 			}
 
 			$rendered_tpl = $render_template;
@@ -828,6 +838,8 @@ class template {
 		              {
 		                if($is_attr)
 		                {
+		                	// a link a visitor typed into a record can't run script
+		                	if (isset($data['raster_escape']) && is_array($data['raster_escape']) && in_array($datakey, $data['raster_escape'], true) && preg_match('/^\s*(javascript|data|vbscript):/i', (string)$data[$datakey])) $data[$datakey] = false;
 		                	if (is_string($data[$datakey])) $data[$datakey] = htmlspecialchars($data[$datakey], ENT_QUOTES, 'UTF-8', false);
 			                // an empty value keeps the mock-up's attribute (a new image field, say)
 			                if($data[$datakey] === null || $data[$datakey] === '')
@@ -841,7 +853,7 @@ class template {
 				                	$attrchange = preg_replace("% ".$dataattr."(.*?)=(.*?)('|\")(.*?)('|\")%", " ".$dataattr.'="'.str_replace('$', '\$', $data[$datakey]).'"', $current_item);
 			                }
 
-			                if ($item_mark !== null && strpos($datakey, 'raster_') !== 0) {
+			                if ($item_mark !== null && strpos($datakey, 'raster_') !== 0 && !($record && in_array($datakey, $locked))) {
 			                	$attrchange = '<!--raster:a '.$this->mark(array('kind' => 'item_attr', 'item' => $item_mark, 'field' => $datakey, 'attr' => $dataattr)).'-->'.$attrchange;
 			                }
 			                $rendered_tpl = substr_replace($rendered_tpl, $attrchange, $rpos1, $rpos2);
@@ -850,8 +862,14 @@ class template {
 		                else
 		                {
 		                	$printed = $this->escape($data[$datakey]);
-		                	if ($item_mark !== null && is_scalar($data[$datakey]) && strpos($datakey, 'raster_') !== 0) {
-		                		$field_mark = $this->mark(array('kind' => 'item_field', 'item' => $item_mark, 'field' => $datakey));
+		                	// records (cms_records::for_template) print what visitors typed as text
+		                	if ($this->format === 'html' && isset($data['raster_escape']) && is_array($data['raster_escape']) && in_array($datakey, $data['raster_escape'], true)) {
+		                		$printed = htmlspecialchars((string)$data[$datakey], ENT_QUOTES, 'UTF-8');
+		                	}
+		                	if ($item_mark !== null && is_scalar($data[$datakey]) && strpos($datakey, 'raster_') !== 0 && !($record && in_array($datakey, $record['hidden']))) {
+		                		// a record's readonly fields are marked so the editor can show
+		                		// what an action changed, but not made editable
+		                		$field_mark = $this->mark(array('kind' => 'item_field', 'item' => $item_mark, 'field' => $datakey) + ($record && in_array($datakey, $locked) ? array('readonly' => true) : array()));
 		                		$printed = '<!--raster:s '.$field_mark.'-->'.$printed.'<!--raster:e '.$field_mark.'-->';
 		                	}
 		                	$rendered_tpl = substr_replace($rendered_tpl, $printed, $rpos1, $rpos2);
@@ -901,7 +919,9 @@ class template {
 				}
 			}
 			$mockup = $this->mockup($render_template);
-			$list_mark = $this->mark(array('kind' => 'collection', 'collection' => $collection, 'filters' => $filters, 'fields' => $mockup['fields']));
+			$list = array('kind' => 'collection', 'collection' => $collection, 'filters' => $filters, 'fields' => $mockup['fields']);
+			if ($record) $list += array('record' => true, 'readonly' => $locked, 'lists' => $record['lists']);
+			$list_mark = $this->mark($list);
 			$rendered_data = '<!--raster:s '.$list_mark.'-->'.$rendered_data.'<template data-raster-mockup="'.$list_mark.'">'.$mockup['html'].'</template><!--raster:e '.$list_mark.'-->';
 		}
 

@@ -16,7 +16,7 @@ php tests/demo.php                        # the whole matrix
 | `/menu`, `/menu/menu_item/<slug>` | a collection with pagination, category filter links, counts from an SQL file |
 | `/events`, `/journal` | ordering, drafts, scheduled items, author filter links |
 | `/visit` | a booking form using every validation rule, a contact form, the newsletter form: three forms on one page |
-| `/members`, `/staff`, `/account`, `/login`, `/register`, `/forgot`, `/password/new` | accounts, roles and protected pages |
+| `/members`, `/staff`, `/account`, `/login`, `/register`, `/forgot`, `/password/new` | accounts, roles and protected pages; bookings are records the staff page lists and members see on /account |
 | `/lab` | the engine's edge cases, one section each |
 | `/journal.rss`, `/journal.atom`, `/feed.json`, `/sitemap.xml`, `/hours.txt` | formats |
 | `?lang=ro` | the Romanian translation |
@@ -244,3 +244,16 @@ php tests/demo.php                        # the whole matrix
 | N12 | raster vocabulary, and --json |
 | N13 | raster describe, and --sections |
 | O1 | the sitemap skips private pages and lists items |
+| R1 | a model declares a type (`types()`): a collection with the model's fields and no mock-up row, in site_overview, describe and schema |
+| R2 | `cms_records::submit`: a form stores a record with only the fields people may write; what visitors typed prints as text |
+| R3 | `check()` runs on every write: the form (an alert), the editor (422 with the problems), MCP and the model's own code |
+| R4 | records are private unless the type says `public`: no pages, feeds, sitemap or item URLs for visitors; editors see them all |
+| R5 | `owner`: a record remembers who made it, and they read their own (/account) |
+| R6 | `readonly` fields: shown to editors, not editable, refused from the editor and MCP, written by the model |
+| R7 | `hidden` fields: never shown to the editor or MCP |
+| R8 | actions: buttons for the roles allowed, `editor_action`, MCP `run_action`, refusals; hooks are static so /api can't reach them |
+| R9 | `cms_records::transaction`: every write or none, and events wait for the commit |
+| R10 | list fields: stored as JSON, back as lists, rendered as nested rows |
+| R11 | lint checks types: static check(), a method for each action, keys that mean nothing |
+| R12 | `schema --apply` creates record tables in production, with every column and no row |
+| R13 | `raster make model <name> --from=<view>`: a model for the records a form sends |

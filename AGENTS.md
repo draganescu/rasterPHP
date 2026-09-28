@@ -378,6 +378,118 @@ item of a collection is the mock-up content.
   `--force` overrides that check. `--check` exits 1 when the templates and the
   database differ (for CI).
 
+## Records: types a model declares
+
+Collections declared by markup are content: editors write them, visitors read
+them. Bookings, orders and applications are **records**: a model declares
+what they hold and what makes them valid, and the CMS stores them, shows them
+wherever a view renders them, and lets editors and agents change them with
+the same in-page editor and MCP tools as any item.
+
+```php
+class reservation {
+    static function types() {
+        return array('reservation' => array(
+            'fields'   => array('name' => '', 'date' => '', 'guests' => 0, 'status' => 'new', 'lines' => array()),
+            'create'   => 'visitor',           // who may send the form: visitor, member, editor (default)
+            'owner'    => true,                // remember who made it; they may read their own
+            'public'   => false,               // the default: only editors (and owners) see records
+            'readonly' => array('status'),     // shown to editors, written only by the model
+            'hidden'   => array(),             // never shown to editors or agents (payment ids, tokens)
+            'html'     => array(),             // fields printed as HTML; the rest print escaped
+            'actions'  => array('confirm' => 'editor', 'refund' => 'admin'),
+        ));   // a type's name is lowercase letters and digits
+    }
+    static function check($type, $after, $before) {   // every write passes here
+        $problems = array();
+        if ($after && $after['guests'] > 8) $problems[] = 'too_many';
+        return $problems;                              // names of alerts, or nothing
+    }
+    static function confirm($item, $input) {           // an action
+        return cms_records::update('reservation', $item['id'], array('status' => 'confirmed'));
+    }
+    function book() {                                  // the form: render.reservation.book
+        return cms_records::submit('reservation', 'booked');
+    }
+}
+```
+
+- **The type is a collection** named after it (table `reservationdata`):
+  `render.cms.reservation('order=newest')` lists records, item URLs and
+  filters work, and `site_overview`, `describe` and `schema` list it with the
+  model that declares it. Its fields come from `types()`, not the markup, and
+  no mock-up row is ever stored. Records also get `created_at` and, with
+  `owner`, the account id in `owner`.
+- **`check($type, $after, $before)` runs before every write**, whoever makes
+  it: a form, the in-page editor, MCP, or the model's own code. `$after` is
+  the whole record as it would be stored (`null` when deleting), `$before` as
+  it was (`null` when creating). Return the names of what is wrong; each is an
+  alert the template words (`<!-- print.validation.alert('too_many') -->`).
+  `cms_records::refuse('name')` stops a write from anywhere in the same way.
+  Write problems as `$problems[] = 'name'` or `refuse('name')` so `lint`
+  knows the alerts are raised.
+- **Hooks are static** — `types()`, `check()`, actions — so
+  `/api/<model>/<method>` can never call them. `lint` reports a `check()` that
+  is not static and an action without its method. (Event listeners named in
+  `listens()` are ordinary public methods: return early when the payload is
+  not an array, since /api can call them with none.)
+- **Privacy.** A type is private unless it says `'public' => true`: visitors
+  get no rows from `render.cms.<type>`, item URLs are 404, and `feed.items`,
+  the sitemap and a static export leave it out. Editors see every record;
+  with `owner`, a logged in person sees their own. Records print what
+  visitors typed as text: every field is escaped unless the type lists it in
+  `html`, and a link a visitor typed (`print.@href.website`) can't be a
+  `javascript:` URL. Visitors can't filter a public type by its hidden fields
+  (`/guestbook/guestbook_items/email/…`).
+- **Forms.** `cms_records::submit($type, $done)` is the whole handler: it
+  shows the form (`false`), shows it again with the values when the HTML
+  rules fail, keeps only the fields people may write (declared, not readonly
+  or hidden; a field the form doesn't send keeps the type's default), runs
+  `check()` and raises each problem as an alert, or stores
+  the record and redirects with `?done=$done` (the type's name by default).
+  `$done = false` returns the stored record instead, for a checkout that goes
+  on to pay. A visitor who may not create gets `login_required` (member
+  types) or `not_allowed`.
+- **Editors and agents** change records like items, except that readonly
+  fields are shown and not editable, hidden fields never reach them, and the
+  item's handle has the type's actions instead of Duplicate and Schedule.
+  Deleting a record has no undo. A refused write answers 422 with
+  `problems`; MCP returns an error naming them.
+- **Actions** are what staff do to a record beyond changing a field. The type
+  maps each to the least role that may run it (`editor` or `admin`);
+  the model has `static function <action>($item, $input)` that writes through
+  `cms_records` and returns the record, or refuses. The in-page editor shows a
+  button for each action the person's role allows (`POST
+  /api/cms/editor_action`); MCP has `run_action`, trusted like an admin. Name
+  a button in the site's words with `application/i18n/<lang>/raster_editor.php`:
+  `'action_confirm' => 'Confirm table'`, and a refusal with `'problem_<name>'`.
+- **The model's own code** writes with `cms_records::create($type, $values)`,
+  `update($type, $id, $values)` and `delete($type, $id)` (these may write
+  readonly and hidden fields and `owner`, and still pass `check()`), and reads
+  with `get($type, $id)` and `find($type, array('field' => 'value'), $order)`.
+  A field whose default is `array()` is a list (line items), stored as JSON
+  and handed back as a list; inside `render.cms.<type>` its rows repeat like
+  any nested rows.
+- **Transactions.** `cms_records::transaction(function () { … })` makes every
+  write in it happen, or none: an exception or a refusal rolls all of them
+  back. On SQLite the database is locked for writing from the start, so two
+  checkouts can't both take the last item. Events (`cms.item_saved` and the
+  rest) wait for the commit, so nothing is emailed about a write that was
+  rolled back. Every single write of a record is already one (its `check()`
+  and the write together); a transaction started inside another joins it.
+- **Starting from a form:** `php bin/raster make model inquiry --from=contact.html`
+  writes `models/inquiry/inquiry.php` with the type (fields from the form's
+  inputs, passwords left out), an empty `check()` and the handler.
+  `--form=<method>` picks one of several forms, `--dry-run` prints it.
+- **In production** `php bin/raster schema --apply` creates the table with
+  every declared column, and no row.
+- **Calls from other sites.** A payment provider's webhook is a server posting
+  to `/api/<model>/<method>`: it sends no browser headers and no session, so
+  the cross-site check lets it through. The method reads the body with
+  `file_get_contents('php://input')`, verifies the provider's signature itself,
+  sets `http_response_code()` when it refuses, and returns what to answer
+  (as JSON).
+
 ## Bundled models
 
 **authentication**: accounts, with every screen written in your templates.
@@ -580,7 +692,7 @@ of lists and filter pages come along; drafts and the editor don't.
     own process, so a page that dies can't take the server down.
 - **Tools for content:** `site_overview`, `get_page`, `update_page`,
   `page_history`, `list_items`, `get_item`, `create_item`, `update_item`,
-  `delete_item`, `lint_templates`, `schema_status`.
+  `delete_item`, `run_action` (records), `lint_templates`, `schema_status`.
 - **Addressing pages:** by URL (`/about`), by view (`about`), or `site` for the
   `site_*` fields.
 - **Writes** are limited to fields in the templates, plus `slug`, `enabled`
