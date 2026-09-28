@@ -321,6 +321,13 @@ class cms
 			$sql .= $visible;
 			$bindings += $more;
 		}
+		// owner=me: the logged in person's own records, editors included
+		// (their /account shows what they made, not everyone's)
+		if ($record && isset($filters['owner']) && $filters['owner'] === 'me') {
+			$user = authentication::user();
+			if (!$user || !$record['owner']) return array();
+			$filters['owner'] = (string)$user['id'];
+		}
 		// a record's hidden fields are no filter for visitors (no asking
 		// "did this email book?")
 		if ($record && !cms::loggedin()) {

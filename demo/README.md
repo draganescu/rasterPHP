@@ -248,7 +248,7 @@ php tests/demo.php                        # the whole matrix
 | R2 | `cms_records::submit`: a form stores a record with only the fields people may write; what visitors typed prints as text |
 | R3 | `check()` runs on every write: the form (an alert), the editor (422 with the problems), MCP and the model's own code |
 | R4 | records are private unless the type says `public`: no pages, feeds, sitemap or item URLs for visitors; editors see them all |
-| R5 | `owner`: a record remembers who made it, and they read their own (/account) |
+| R5 | `owner`: a record remembers who made it, and they read their own; `owner=me` lists only the logged in person's (/account), editors included |
 | R6 | `readonly` fields: shown to editors, not editable, refused from the editor and MCP, written by the model |
 | R7 | `hidden` fields: never shown to the editor or MCP |
 | R8 | actions: buttons for the roles allowed, `editor_action`, MCP `run_action`, refusals; hooks are static so /api can't reach them |

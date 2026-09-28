@@ -436,7 +436,10 @@ class reservation {
 - **Privacy.** A type is private unless it says `'public' => true`: visitors
   get no rows from `render.cms.<type>`, item URLs are 404, and `feed.items`,
   the sitemap and a static export leave it out. Editors see every record;
-  with `owner`, a logged in person sees their own. Records print what
+  with `owner`, a logged in person sees their own. A page listing someone's
+  own records (an account page) filters with `owner=me`:
+  `render.cms.order('owner=me&order=newest')` shows the logged in person
+  what they made, editors included, and visitors nothing. Records print what
   visitors typed as text: every field is escaped unless the type lists it in
   `html`, and a link a visitor typed (`print.@href.website`) can't be a
   `javascript:` URL. Visitors can't filter a public type by its hidden fields
