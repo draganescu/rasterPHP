@@ -151,7 +151,9 @@ class cms_records {
 		$want = self::columns($info);
 		if ($have && !array_diff_key($want, $have)) return;
 		$bean = R::dispense($type);
-		foreach ($want as $column => $default) $bean->$column = is_int($default) ? $default : (string)$default;
+		// a column takes the kind of its first value: numbers for integer
+		// defaults, text for the rest (so "24.00" stays "24.00")
+		foreach ($want as $column => $default) $bean->$column = is_int($default) ? $default : 'raster text';
 		R::store($bean);
 		R::trash($bean);
 	}
