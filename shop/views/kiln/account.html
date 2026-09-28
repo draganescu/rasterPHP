@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <!-- dry._layout.head /-->
+  <title>Your orders</title>
+</head>
+<body>
+  <!-- dry._layout.header /-->
+  <main class="narrow">
+    <h1>Your orders</h1>
+    <p class="meta">Orders you placed while logged in.</p>
+    <!-- render.cms.order('order=newest') -->
+    <article class="order">
+      <header><strong><!-- print.number -->BH-1001<!-- /print.number --></strong> · <!-- print.total -->24.00<!-- /print.total --> <!-- print.currency -->EUR<!-- /print.currency --> · <span class="status"><!-- print.status -->paid<!-- /print.status --></span></header>
+      <ul><!-- print.lines --><li><!-- print.qty -->1<!-- /print.qty --> × <!-- print.piece -->Morning mug<!-- /print.piece --></li><!-- /print.lines --></ul>
+      <p class="meta">Tracking: <!-- print.tracking -->not shipped yet<!-- /print.tracking --></p>
+    </article>
+    <!-- /render.cms.order('order=newest') -->
+    <!-- render.authentication.logout -->
+    <form method="post"><button class="secondary">Log out</button></form>
+    <!-- /render.authentication.logout -->
+  </main>
+  <!-- dry._layout.footer /-->
+</body>
+</html>

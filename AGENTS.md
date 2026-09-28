@@ -489,6 +489,10 @@ class reservation {
   `--form=<method>` picks one of several forms, `--dry-run` prints it.
 - **In production** `php bin/raster schema --apply` creates the table with
   every declared column, and no row.
+- **A worked example:** `shop/` in the Raster repository is a small shop
+  built this way: public products, private orders with an owner, a
+  checkout that takes stock in a transaction, actions to ship, cancel and
+  refund, and a payment provider's webhook. See `shop/README.md`.
 - **Calls from other sites.** A payment provider's webhook is a server posting
   to `/api/<model>/<method>`: it sends no browser headers and no session, so
   the cross-site check lets it through. The method reads the body with
@@ -806,6 +810,7 @@ In the Raster repository, not in sites made with it:
 php tests/run.php                 # framework test suite
 php tests/demo.php                # the demo café: every feature, end to end
 php tests/update.php              # new, update, upgrade, doctor
+php tests/shop.php                # the example shop in shop/: records, checkout, payments
 node tests/editor-browser.js      # the in-page editor in Chromium (needs Playwright)
 ```
 

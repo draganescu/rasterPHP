@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <!-- dry._layout.head /-->
+  <title>Your cart</title>
+</head>
+<body>
+  <!-- dry._layout.header /-->
+  <main>
+    <h1>Your cart</h1>
+    <!-- print.if.cart_changed --><p class="notice">Some pieces sold out or left the shop since you added them, so your cart changed.</p><!-- /print.if.cart_changed -->
+    <!-- render.cart.update -->
+    <form method="post">
+      <table class="lines"><tbody>
+        <!-- render.cart.lines_shown -->
+        <tr>
+          <td><!-- print.@href.url --><a href="product/product_item/morning-mug"><!-- print.name -->Morning mug<!-- /print.name --></a><!-- /print.@href.url --></td>
+          <td><!-- print.qty -->1<!-- /print.qty --> × <!-- print.price -->€24.00<!-- /print.price --></td>
+          <td class="amount"><!-- print.subtotal -->€24.00<!-- /print.subtotal --></td>
+          <td><!-- print.@value.slug --><button class="secondary" name="remove" value="morning-mug">Remove</button><!-- /print.@value.slug --></td>
+        </tr>
+        <!-- /render.cart.lines_shown -->
+      </tbody></table>
+    </form>
+    <!-- /render.cart.update -->
+    <!-- print.if.cart_empty --><p>Nothing here yet. <a href="index.html">Have a look around.</a></p><!-- /print.if.cart_empty -->
+    <!-- print.if.cart_full -->
+    <p class="total">Total <strong><!-- print.cart.total -->€24.00<!-- /print.cart.total --></strong></p>
+    <p><a class="button" href="checkout.html">Check out</a></p>
+    <!-- /print.if.cart_full -->
+  </main>
+  <!-- dry._layout.footer /-->
+</body>
+</html>

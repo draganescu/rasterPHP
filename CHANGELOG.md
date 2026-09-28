@@ -25,6 +25,12 @@ file changes for you; `php bin/raster doctor` shows what is left.
   existing sites. See the Records section of AGENTS.md.
 - The editor's item handle shows a record type's actions instead of Duplicate
   and Schedule, and never makes a readonly field editable.
+- **An example shop** in `shop/` (Blue Hour Ceramics): public products,
+  private orders with an owner, a cart in the session, a checkout that takes
+  stock in a transaction so the last piece can't sell twice, Ship, Cancel and
+  Refund actions, and payments through Stripe Checkout or a pretend provider,
+  with a signed webhook at `/api/order/webhook`. It is an example to copy, not
+  part of the framework. `php tests/shop.php` runs it end to end.
 - The demo café's bookings are records: `/staff` lists them for staff to
   confirm or cancel, a day holds 20 guests, and members see their own bookings
   on `/account`.

@@ -136,3 +136,5 @@ This writes `models/inquiry/inquiry.php`: the type with a field for each input o
 ## In production
 
 `php bin/raster schema --apply` creates the records' table with every column the model declares. See [The database](The-Database).
+
+A complete example built this way is the [example shop](https://github.com/draganescu/rasterPHP/tree/master/shop) in the Raster repository: public products, private orders, a checkout that takes stock in a transaction, and a payment provider's webhook.
