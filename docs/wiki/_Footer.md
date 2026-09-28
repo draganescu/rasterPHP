@@ -1,0 +1,1 @@
+Raster PHP · [Repository](https://github.com/draganescu/rasterPHP) · [AGENTS.md (full specification)](https://github.com/draganescu/rasterPHP/blob/master/AGENTS.md) · [Changelog](https://github.com/draganescu/rasterPHP/blob/master/CHANGELOG.md) · [Demo café](https://github.com/draganescu/rasterPHP/tree/master/demo)
