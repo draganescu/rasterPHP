@@ -920,7 +920,7 @@ class template {
 			}
 			$mockup = $this->mockup($render_template);
 			$list = array('kind' => 'collection', 'collection' => $collection, 'filters' => $filters, 'fields' => $mockup['fields']);
-			if ($record) $list += array('record' => true, 'readonly' => $locked, 'lists' => $record['lists']);
+			if ($record) $list += array('record' => true, 'readonly' => $locked, 'lists' => $record['lists'], 'create' => $record['create']);
 			$list_mark = $this->mark($list);
 			$rendered_data = '<!--raster:s '.$list_mark.'-->'.$rendered_data.'<template data-raster-mockup="'.$list_mark.'">'.$mockup['html'].'</template><!--raster:e '.$list_mark.'-->';
 		}

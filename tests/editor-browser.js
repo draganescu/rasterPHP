@@ -118,6 +118,7 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 		await inShadow(page, h => [...h.shadowRoot.querySelectorAll('.handle button')].find(b => b.textContent === 'Confirm').click());
 		await page.waitForTimeout(900);
 		check((await booking.locator('td.status').innerText()).trim() === 'confirmed', 'the action\'s result shows in the page');
+		check(await page.locator('.raster-ghost').count() === 0, 'no card for a new booking: guests book with the form');
 		check((await (await fetch(base + '/api/reservation/confirm')).status) === 404, 'actions are not reachable over /api');
 		await page.screenshot({ path: path.join(screens, 'records.png') });
 

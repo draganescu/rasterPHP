@@ -1887,6 +1887,8 @@ test(array('R6', 'R8'), 'readonly fields and actions: buttons for the roles allo
 	same(true, $mark['record']);
 	same(array('confirm', 'cancel'), $mark['actions']);
 	check(in_array('status', $mark['readonly']), 'status is shown, not edited');
+	list(, $list) = mark_of($config, 'collection', function ($m) { return $m['collection'] === 'reservation'; });
+	same('visitor', $list['create'], 'no card for a new booking: guests book with the form');
 	list(, $field) = mark_of($config, 'item_field', function ($m) use ($id) { return $m['item'] === (int)$id && $m['field'] === 'status'; });
 	same(true, $field['readonly'], 'the status is marked readonly: shown, updated by actions, never editable');
 	$token = token_in($page);

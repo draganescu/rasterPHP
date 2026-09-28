@@ -1053,6 +1053,9 @@
 		if (/_item\//.test(location.pathname)) return;
 		lists.forEach(function (list) {
 			if (!list.template) return;
+			// records visitors send (bookings, orders) come from their forms; the
+			// card for a new one is only for records staff make themselves
+			if (list.info.record && list.info.create !== 'editor') return;
 			var box = document.createElement('div');
 			box.appendChild(list.template.content.cloneNode(true));
 			var el = Array.prototype.filter.call(box.childNodes, function (n) { return n.nodeType === 1; })[0];

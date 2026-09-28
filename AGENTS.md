@@ -453,7 +453,9 @@ class reservation {
 - **Editors and agents** change records like items, except that readonly
   fields are shown and not editable, hidden fields never reach them, and the
   item's handle has the type's actions instead of Duplicate and Schedule.
-  Deleting a record has no undo. A refused write answers 422 with
+  Deleting a record has no undo. The card for a new item at the end of a
+  list only appears for types staff make themselves (`create` is `editor`,
+  the default): bookings and orders come from their forms. A refused write answers 422 with
   `problems`; MCP returns an error naming them.
 - **Actions** are what staff do to a record beyond changing a field. The type
   maps each to the least role that may run it (`editor` or `admin`);
