@@ -1,0 +1,36 @@
+# Publishes docs/wiki/ to the repository's GitHub wiki
+# (https://github.com/draganescu/rasterPHP/wiki). The pages are written and
+# reviewed here, like code; the wiki is a copy. Edits made directly in the
+# wiki are overwritten by the next publish, so change docs/wiki/ instead.
+#
+# Page links use wiki page names (Getting-Started, The-CMS), so they work in
+# the wiki rather than when browsing this folder.
+name: Publish wiki
+
+on:
+  push:
+    branches: [master]
+    paths: ['docs/wiki/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  wiki:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Copy docs/wiki to the wiki
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git clone "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" wiki
+          rsync -a --delete --exclude .git docs/wiki/ wiki/
+          cd wiki
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then echo "The wiki is up to date"; exit 0; fi
+          git commit -m "Update from ${GITHUB_SHA::7}"
+          git push
