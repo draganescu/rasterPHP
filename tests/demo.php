@@ -1870,6 +1870,10 @@ test('R5', 'owners read their own records', function () use ($base) {
 	$account = http('GET', "$base/account", null, $h)[1];
 	has($account, '2026-11-20, 3 guests: new');
 	lacks($account, 'Radu', 'only their own');
+	$staff = login($base, 'staff@cafe.test', 'staff password');
+	$staff_account = http('GET', "$base/account", null, array("Cookie: $staff"))[1];
+	lacks($staff_account, '2026-11-20', 'owner=me: staff see their own bookings on /account, not everyone\'s');
+	has(http('GET', "$base/staff", null, array("Cookie: $staff"))[1], 'Maria', 'while /staff lists every booking');
 	database::instance('cms');
 	$user = R::findOne('user', ' email = ? ', array('maria@example.com'));
 	same((int)$user->id, (int)R::findOne('reservationdata', ' date = ? ', array('2026-11-20'))->owner);
