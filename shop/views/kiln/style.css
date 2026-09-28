@@ -38,6 +38,9 @@ button.secondary { background: transparent; color: var(--fg); border: 1px solid 
 .order ul { margin: 6px 0; padding-left: 18px; }
 .order.muted { opacity: .8; }
 .status { text-transform: capitalize; }
+fieldset.payment { border: 1px solid var(--line); border-radius: 10px; display: grid; gap: 6px; font: 15px/1.4 system-ui, sans-serif; }
+fieldset.payment label { display: flex; gap: 8px; align-items: center; }
+fieldset.payment input { width: auto; }
 .error { color: #b3261e; margin: 0; font: 14px/1.4 system-ui, sans-serif; }
 .notice { background: color-mix(in srgb, var(--accent) 14%, transparent); padding: 9px 13px; border-radius: 9px; font: 15px/1.4 system-ui, sans-serif; }
 .pay { padding-top: 48px; }

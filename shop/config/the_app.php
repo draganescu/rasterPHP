@@ -12,14 +12,15 @@ config::set('shop_name')->to('Blue Hour Ceramics');
 config::set('mail_from')->to('Blue Hour Ceramics <hello@bluehour.test>');
 config::set('shop_staff_email')->to('studio@bluehour.test');
 
-// Payments. 'test' is a pretend provider built into this example, for
-// development only: its pay page (views/kiln/pay/test.html) sends the same
-// signed event Stripe would.
+// Payments. Buyers can always pay the courier on delivery. To also take
+// cards, set a provider: 'test' is a pretend one built into this example,
+// for development only (its page, views/kiln/pay/test.html, sends the same
+// signed event Stripe would).
 // 'stripe' uses Stripe Checkout: set SHOP_PAYMENTS=stripe, STRIPE_SECRET_KEY
 // and STRIPE_WEBHOOK_SECRET, and point a Stripe webhook for
 // checkout.session.completed at https://<your site>/api/order/webhook
 $env = function ($name, $default) { $value = getenv($name); return $value === false || $value === '' ? $default : $value; };
-config::set('shop_payments')->to($env('SHOP_PAYMENTS', 'test'));
+config::set('shop_payments')->to($env('SHOP_PAYMENTS', ''));
 config::set('stripe_secret_key')->to($env('STRIPE_SECRET_KEY', ''));
 // signs the events the webhook accepts; the test provider signs with it too.
 // The default is public, so it only works in development.

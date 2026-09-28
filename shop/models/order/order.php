@@ -15,7 +15,8 @@ class order
 {
 	// which status may follow which
 	static $next = array(
-		'unpaid' => array('paid', 'cancelled'),
+		// an order paid on delivery ships unpaid (check() allows it for those only)
+		'unpaid' => array('paid', 'cancelled', 'shipped'),
 		'paid' => array('shipped', 'refunded'),
 		'shipped' => array('refunded'),
 		// paid after it was cancelled: the money goes straight back
@@ -31,7 +32,9 @@ class order
 			'fields' => array(
 				'number' => '', 'email' => '', 'name' => '', 'address' => '', 'city' => '', 'postcode' => '', 'country' => '',
 				'lines' => array(), 'total' => '0.00', 'currency' => '', 'status' => 'unpaid',
-				'tracking' => '', 'payment_id' => '', 'payment_url' => '', 'paid_at' => '', 'shipped_at' => '',
+				// how the buyer pays: 'delivery' (cash to the courier) or 'card'
+				'payment' => 'delivery',
+				'tracking' => '', 'provider_ref' => '', 'provider_url' => '', 'paid_at' => '', 'shipped_at' => '',
 			),
 			// buyers make orders, through the checkout (never a new card on
 			// /orders); one who was logged in sees theirs on /account
@@ -40,10 +43,10 @@ class order
 			// what was bought and what happened to it only change through the
 			// checkout, the provider and the actions; the studio can fix an
 			// address or type the tracking number
-			'readonly' => array('number', 'lines', 'total', 'currency', 'status', 'paid_at', 'shipped_at'),
+			'readonly' => array('number', 'lines', 'total', 'currency', 'status', 'payment', 'paid_at', 'shipped_at'),
 			// the provider's ids are for this model, not for people
-			'hidden' => array('payment_id', 'payment_url'),
-			'actions' => array('ship' => 'editor', 'cancel' => 'editor', 'refund' => 'admin'),
+			'hidden' => array('provider_ref', 'provider_url'),
+			'actions' => array('ship' => 'editor', 'mark_paid' => 'editor', 'cancel' => 'editor', 'refund' => 'admin'),
 		));
 	}
 
@@ -60,6 +63,8 @@ class order
 			$problems[] = 'not_now';
 		}
 		if ($after['status'] === 'shipped' && trim((string)$after['tracking']) === '') $problems[] = 'tracking_missing';
+		// only an order paid on delivery ships before it is paid
+		if ($before && $before['status'] === 'unpaid' && $after['status'] === 'shipped' && $after['payment'] !== 'delivery') $problems[] = 'not_now';
 		return $problems;
 	}
 
@@ -85,9 +90,20 @@ class order
 	static function ship($order, $input) {
 		$changes = array('status' => 'shipped', 'shipped_at' => date('Y-m-d H:i:s'));
 		if (!empty($input['tracking'])) $changes['tracking'] = (string)$input['tracking'];
-		$shipped = self::move($order['id'], 'paid', $changes);
+		// paid by card, or to be paid to the courier
+		$shipped = self::move($order['id'], array('paid', 'unpaid'), $changes);
 		cms_records::dispatch('order.shipped', $shipped);
 		return $shipped;
+	}
+
+	// The courier brought the money for an order paid on delivery. The
+	// status stays shipped; paid_at says the money is in.
+	static function mark_paid($order, $input) {
+		return cms_records::transaction(function () use ($order) {
+			$order = cms_records::get('order', $order['id']);
+			if ($order['payment'] !== 'delivery' || $order['status'] !== 'shipped' || $order['paid_at'] !== '') cms_records::refuse('not_now');
+			return cms_records::update('order', $order['id'], array('paid_at' => date('Y-m-d H:i:s')));
+		});
 	}
 
 	// Cancel an order nobody paid for: the provider stops taking payment for
@@ -104,6 +120,8 @@ class order
 	// back on the shelf.
 	static function refund($order, $input) {
 		if (!in_array($order['status'], array('paid', 'shipped'), true)) cms_records::refuse('not_now');
+		// an order paid on delivery can only be refunded once the money came in
+		if ($order['payment'] === 'delivery' && $order['paid_at'] === '') cms_records::refuse('not_now');
 		if (!order_payments::refund($order)) cms_records::refuse('refund_failed');
 		return self::move($order['id'], array('paid', 'shipped'), array('status' => 'refunded'));
 	}
@@ -117,10 +135,11 @@ class order
 		}
 	}
 
-	// unpaid orders older than HOLD_MINUTES give their pieces back
+	// card orders nobody paid for in HOLD_MINUTES give their pieces back
+	// (orders paid on delivery wait for the studio)
 	static function release_stale() {
 		$cutoff = date('Y-m-d H:i:s', time() - self::HOLD_MINUTES * 60);
-		foreach (cms_records::find('order', array('status' => 'unpaid')) as $order) {
+		foreach (cms_records::find('order', array('status' => 'unpaid', 'payment' => 'card')) as $order) {
 			if ($order['created_at'] > $cutoff || !order_payments::close($order)) continue;
 			try {
 				self::move($order['id'], 'unpaid', array('status' => 'cancelled'));
@@ -138,9 +157,12 @@ class order
 	// provider can't take them, the order is cancelled and the cart kept.
 	function checkout() {
 		$v = validation::get();
+		// the card choice only shows when a provider can take cards
+		template::set('card_available')->to(order_payments::available());
 		if (!$v->submitted()) return false;
 		if (!$v->valid()) return template::instance()->form_state();
-		if (!order_payments::available()) {
+		$payment = util::post('payment') === 'card' ? 'card' : 'delivery';
+		if ($payment === 'card' && !order_payments::available()) {
 			$v->raise('payment_unavailable');
 			return template::instance()->form_state();
 		}
@@ -158,7 +180,7 @@ class order
 		$buyer = array();
 		foreach (array('email', 'name', 'address', 'city', 'postcode', 'country') as $field) $buyer[$field] = trim((string)util::post($field));
 		try {
-			$order = cms_records::transaction(function () use ($cart, $buyer) {
+			$order = cms_records::transaction(function () use ($cart, $buyer, $payment) {
 				$lines = array();
 				$total = 0;
 				foreach ($cart as $slug => $qty) {
@@ -173,6 +195,7 @@ class order
 					$total += $cents * (int)$qty;
 				}
 				$order = cms_records::create('order', $buyer + array(
+					'payment' => $payment,
 					'lines' => $lines, 'total' => number_format($total / 100, 2, '.', ''),
 					'currency' => config::get('shop_currency', 'EUR'), 'status' => 'unpaid',
 				));
@@ -181,6 +204,13 @@ class order
 		} catch (cms_refused $e) {
 			foreach ($e->problems as $problem) $v->raise($problem);
 			return template::instance()->form_state();
+		}
+		if ($payment === 'delivery') {
+			// nothing to pay now: the order is placed, the buyer and the studio hear
+			cms_records::dispatch('order.placed', $order);
+			cart::store(array());
+			$_SESSION['last_order'] = $order['number'];
+			util::redirect('thanks');
 		}
 		try {
 			$url = order_payments::start($order);
@@ -228,7 +258,8 @@ class order
 		// the session this shop opened for this order, for its total, in its currency
 		$why = '';
 		if (!$order) $why = 'no such order';
-		elseif (($session['id'] ?? '') !== $order['payment_id'] && ($session['payment_intent'] ?? '') !== $order['payment_id']) $why = 'not this order\'s checkout';
+		elseif ($order['payment'] !== 'card') $why = 'paid on delivery';
+		elseif (($session['id'] ?? '') !== $order['provider_ref'] && ($session['payment_intent'] ?? '') !== $order['provider_ref']) $why = 'not this order\'s checkout';
 		elseif ((int)($session['amount_total'] ?? -1) !== cart::cents($order['total']) || strtolower((string)($session['currency'] ?? '')) !== strtolower($order['currency'])) $why = 'not the order\'s total';
 		// a bank transfer or a debit may complete the checkout before the money arrives
 		elseif (($session['payment_status'] ?? '') !== 'paid') $why = 'not paid yet';
@@ -238,7 +269,7 @@ class order
 		}
 		$intent = (string)($session['payment_intent'] ?? $session['id']);
 		try {
-			$paid = self::move($order['id'], 'unpaid', array('status' => 'paid', 'paid_at' => date('Y-m-d H:i:s'), 'payment_id' => $intent));
+			$paid = self::move($order['id'], 'unpaid', array('status' => 'paid', 'paid_at' => date('Y-m-d H:i:s'), 'provider_ref' => $intent));
 			cms_records::dispatch('order.paid', $paid);
 			return array('received' => true, 'paid' => $order['number']);
 		} catch (cms_refused $e) {
@@ -247,9 +278,9 @@ class order
 		}
 		// paid after the studio cancelled it (the provider's page was still
 		// open): the money goes straight back, and the studio hears about it
-		$refunded = order_payments::refund(array('payment_id' => $intent) + $order);
+		$refunded = order_payments::refund(array('provider_ref' => $intent) + $order);
 		if ($refunded) {
-			$late = self::move($order['id'], 'cancelled', array('status' => 'refunded', 'payment_id' => $intent));
+			$late = self::move($order['id'], 'cancelled', array('status' => 'refunded', 'provider_ref' => $intent));
 			cms_records::dispatch('order.refunded_late', $late);
 		} else {
 			log::warning("shop webhook: {$order['number']} was paid after it was cancelled and the refund failed");
@@ -260,7 +291,16 @@ class order
 	// ##Emails
 
 	static function listens() {
-		return array('order.paid' => 'paid_mail', 'order.shipped' => 'shipped_mail', 'order.refunded_late' => 'late_mail');
+		return array('order.placed' => 'placed_mail', 'order.paid' => 'paid_mail', 'order.shipped' => 'shipped_mail', 'order.refunded_late' => 'late_mail');
+	}
+
+	// an order paid on delivery: the buyer knows what to have ready, the studio what to pack
+	function placed_mail($order) {
+		if (!is_array($order) || empty($order['email'])) return null;
+		$vars = self::mail_vars($order);
+		mail::send_view('_email/order_placed', $order['email'], $vars);
+		mail::send_view('_email/new_order', config::get('shop_staff_email'), $vars);
+		return null;
 	}
 
 	function paid_mail($order) {
@@ -290,6 +330,7 @@ class order
 			'number' => $order['number'], 'name' => $order['name'], 'items' => implode(', ', $items),
 			'total' => cart::money(cart::cents($order['total'])),
 			'address' => trim($order['address'].', '.$order['postcode'].' '.$order['city'].', '.$order['country'], ', '),
+			'payment' => $order['payment'] === 'card' ? 'paid by card' : 'to be paid on delivery',
 		);
 	}
 
@@ -307,8 +348,10 @@ class order
 		foreach ($order['lines'] as $line) {
 			$lines[] = array('name' => util::e($line['piece']), 'qty' => (string)$line['qty'], 'subtotal' => util::e($line['subtotal']));
 		}
-		template::set('order_paid')->to($order['status'] === 'paid');
-		template::set('order_unpaid')->to($order['status'] === 'unpaid');
+		$card = $order['payment'] === 'card';
+		template::set('order_paid')->to($card && $order['status'] === 'paid');
+		template::set('order_unpaid')->to($card && $order['status'] === 'unpaid');
+		template::set('order_on_delivery')->to(!$card && $order['status'] === 'unpaid');
 		template::set('can_pay')->to(order_payments::pay_url($order) !== '');
 		return array(array(
 			'number' => util::e($order['number']), 'email' => util::e($order['email']),
@@ -321,7 +364,7 @@ class order
 	function test_payment() {
 		if (!order_payments::testing()) return array();
 		$found = cms_records::find('order', array('number' => (string)(isset($_GET['order']) ? $_GET['order'] : '')));
-		if (!$found || $found[0]['status'] !== 'unpaid') return array();
+		if (!$found || $found[0]['status'] !== 'unpaid' || $found[0]['payment'] !== 'card') return array();
 		$order = $found[0];
 		$v = validation::get();
 		if ($v->submitted()) {

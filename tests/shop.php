@@ -102,7 +102,7 @@ class visitor {
 	}
 	function checkout($buyer = array()) {
 		$csrf = $this->token('/checkout');
-		return $this->go('POST', '/checkout', array_merge(array('raster_form' => 'order.checkout', 'email' => 'ana@example.com', 'name' => 'Ana Pop', 'address' => 'Strada Exemplu 1', 'city' => 'București', 'postcode' => '010101', 'country' => 'Romania', 'csrf' => $csrf), $buyer));
+		return $this->go('POST', '/checkout', array_merge(array('raster_form' => 'order.checkout', 'email' => 'ana@example.com', 'name' => 'Ana Pop', 'address' => 'Strada Exemplu 1', 'city' => 'București', 'postcode' => '010101', 'country' => 'Romania', 'payment' => 'card', 'csrf' => $csrf), $buyer));
 	}
 }
 function mails() {
@@ -137,7 +137,8 @@ function signed_event($base, $event, $signature = null) {
 // ## The shop, seeded as the README says
 
 $out = shell_exec(escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/shop/seed.php").' 2>&1');
-$base = server(array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'RASTER_MCP_TOKEN' => 'shop-token'));
+// cards through the pretend provider; the shop without a provider is further down
+$base = server(array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'RASTER_MCP_TOKEN' => 'shop-token', 'SHOP_PAYMENTS' => 'test'));
 database::instance('cms');
 
 test('the seed puts four pieces on the shelf and makes the studio\'s account', function () use ($out) {
@@ -202,7 +203,7 @@ test('checkout: the HTML rules, an empty cart, then an order and the stock leave
 
 test('the last piece, wanted twice at the same moment: one checkout wins, the other writes nothing', function () use ($base, $db, $maildir) {
 	// a second server on the same database, so the two checkouts really race
-	$other = server(array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir"));
+	$other = server(array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'SHOP_PAYMENTS' => 'test'));
 	$a = new visitor($base);
 	$b = new visitor($other);
 	same(1, stock('tall-vase'));
@@ -213,7 +214,7 @@ test('the last piece, wanted twice at the same moment: one checkout wins, the ot
 	foreach (array($a, $b) as $i => $v) {
 		$handle = curl_init($v->base.'/checkout');
 		curl_setopt_array($handle, array(CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true, CURLOPT_HTTPHEADER => array('Cookie: '.implode('; ', $v->cookies)),
-			CURLOPT_POSTFIELDS => http_build_query(array('raster_form' => 'order.checkout', 'email' => "racer$i@example.com", 'name' => "Racer $i", 'address' => 'A 1', 'city' => 'C', 'postcode' => '1', 'country' => 'RO'))));
+			CURLOPT_POSTFIELDS => http_build_query(array('raster_form' => 'order.checkout', 'email' => "racer$i@example.com", 'name' => "Racer $i", 'address' => 'A 1', 'city' => 'C', 'postcode' => '1', 'country' => 'RO', 'payment' => 'delivery'))));
 		curl_multi_add_handle($multi, $handle);
 		$handles[] = $handle;
 	}
@@ -221,7 +222,7 @@ test('the last piece, wanted twice at the same moment: one checkout wins, the ot
 	$codes = array_map(function ($h) { return curl_getinfo($h, CURLINFO_HTTP_CODE); }, $handles);
 	$bodies = array_map('curl_multi_getcontent', $handles);
 	sort($codes);
-	same(array(200, 303), $codes, 'one goes to pay, one stays');
+	same(array(200, 302), $codes, 'one order is placed, the other checkout stays');
 	check(strpos(implode('', $bodies), 'bought the last of a piece') !== false || strpos(implode('', $bodies), 'changed while you were here') !== false, 'and is told why');
 	same(0, stock('tall-vase'), 'never below zero');
 	same($orders + 1, count(cms_records::find('order')), 'and no second order');
@@ -237,7 +238,7 @@ test('the pretend provider: paying marks the order paid, and emails the buyer an
 	same(302, $v->go('POST', "/pay/test?order=$number", array('raster_form' => 'order.test_payment'))[0]);
 	$order = order_by_number($number);
 	same('paid', $order['status']);
-	check($order['paid_at'] !== '' && strpos($order['payment_id'], 'pi_test_') === 0, 'paid_at and the provider\'s id');
+	check($order['paid_at'] !== '' && strpos($order['provider_ref'], 'pi_test_') === 0, 'paid_at and the provider\'s id');
 	$sent = array_slice(mails(), $before);
 	same(array('bea@example.com', 'studio@bluehour.test'), array_map(function ($m) { return $m['to']; }, $sent));
 	has($sent[0]['text'], "payment for order $number");
@@ -276,7 +277,7 @@ test('the webhook: only this shop\'s session, for the total, when the money is i
 	list($status, $body) = signed_event($base, $event());
 	same(200, $status);
 	same(array('received' => true, 'paid' => $number), json_decode($body, true));
-	same('pi_real_1', order_by_number($number)['payment_id']);
+	same('pi_real_1', order_by_number($number)['provider_ref']);
 	$mails = count(mails());
 	same(array('received' => true, 'already' => 'paid'), json_decode(signed_event($base, $event())[1], true), 'a replay changes nothing');
 	same($mails, count(mails()), 'and sends nothing');
@@ -319,8 +320,8 @@ test('the studio: orders to ship, Ship needs a tracking number and happens once,
 	$config = json_decode($m[1], true);
 	$mark = null;
 	foreach ($config['marks'] as $candidate) if ($candidate['kind'] === 'item' && $candidate['collection'] === 'order' && $candidate['id'] === (int)$order['id']) $mark = $candidate;
-	same(array('ship', 'cancel', 'refund'), $mark['actions'], 'an admin gets every button');
-	check(!array_key_exists('payment_id', $mark['values']) && !array_key_exists('payment_url', $mark['values']), 'the provider\'s ids stay hidden');
+	same(array('ship', 'mark_paid', 'cancel', 'refund'), $mark['actions'], 'an admin gets every button');
+	check(!array_key_exists('provider_ref', $mark['values']) && !array_key_exists('provider_url', $mark['values']), 'the provider\'s ids stay hidden');
 	$token = $studio->token('/orders');
 	$act = function ($action, $id) use ($studio, $token) {
 		list($status, $body) = $studio->go('POST', '/api/cms/editor_action', array('collection' => 'order', 'id' => $id, 'action' => $action, 'csrf' => $token));
@@ -441,7 +442,7 @@ test('agents: orders over MCP with the same rules, and the run_action tool', fun
 	foreach ($overview['collections'] as $c) $types[$c['name']] = $c;
 	same('order', $types['order']['declared_by']);
 	same(true, $types['product']['public']);
-	check(!in_array('payment_id', $types['order']['fields']), 'hidden from agents');
+	check(!in_array('provider_ref', $types['order']['fields']), 'hidden from agents');
 	$pending = cms_records::find('order', array('status' => 'unpaid'))[0];
 	$refused = $call('update_item', array('collection' => 'order', 'id' => (int)$pending['id'], 'fields' => array('total' => '0.01')));
 	check(!empty($refused['isError']), 'an agent can\'t change a total');
@@ -449,6 +450,74 @@ test('agents: orders over MCP with the same rules, and the run_action tool', fun
 	has($refused['content'][0]['text'], 'not_now', 'nor ship an unpaid order');
 	$made = $call('create_item', array('collection' => 'product', 'fields' => array('name' => 'Free mug', 'price' => '0', 'stock' => '1')));
 	has($made['content'][0]['text'], 'price_invalid', 'product::check applies to agents too');
+});
+
+test('pay on delivery, the default: no provider, no pretending the order is paid', function () use ($base, $db, $maildir) {
+	$plain = server(array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir"));
+	$v = new visitor($plain);
+	$csrf = $v->token('/product/product_item/soup-bowl');
+	same(303, $v->go('POST', '/product/product_item/soup-bowl', array('raster_form' => 'cart.add', 'qty' => '1'))[0]);
+	list(, $form) = $v->go('GET', '/checkout');
+	has($form, 'value="delivery" checked');
+	lacks($form, 'value="card"', 'no card choice without a provider');
+	list(, $body) = $v->go('POST', '/checkout', array('raster_form' => 'order.checkout', 'email' => 'mihai@example.com', 'name' => 'Mihai', 'address' => 'Strada 2', 'city' => 'Cluj', 'postcode' => '400001', 'country' => 'Romania', 'payment' => 'card'));
+	has($body, 'We can\'t take payments right now', 'asking for a card anyway');
+	$before = count(mails());
+	list($status, , $headers) = $v->go('POST', '/checkout', array('raster_form' => 'order.checkout', 'email' => 'mihai@example.com', 'name' => 'Mihai', 'address' => 'Strada 2', 'city' => 'Cluj', 'postcode' => '400001', 'country' => 'Romania'));
+	same(302, $status);
+	same("$plain/thanks", header_value($headers, 'Location'), 'straight to the receipt, no payment page');
+	$order = cms_records::find('order', array('email' => 'mihai@example.com'), 'newest', 1)[0];
+	same('delivery', $order['payment']);
+	same('unpaid', $order['status'], 'not paid, and not pretending');
+	same('', $order['paid_at']);
+	$thanks = $v->go('GET', '/thanks')[1];
+	has($thanks, 'You\'ll pay €32.00 to the courier when it arrives');
+	lacks($thanks, 'Paid, thank you');
+	lacks($thanks, 'Pay now');
+	$sent = array_slice(mails(), $before);
+	same(array('mihai@example.com', 'studio@bluehour.test'), array_map(function ($m) { return $m['to']; }, $sent));
+	has($sent[0]['text'], 'You\'ll pay €32.00 to the courier');
+	has($sent[1]['text'], 'to be paid on delivery');
+	// the studio ships it unpaid, and marks it paid when the courier brings the money
+	$studio = new visitor($plain);
+	$studio->login('studio@bluehour.test', 'studio password');
+	$page = $studio->go('GET', '/orders')[1];
+	has($page, $order['number'], 'in To ship');
+	$token = $studio->token('/orders');
+	$act = function ($action) use ($studio, $token, $order) {
+		list($status, $body) = $studio->go('POST', '/api/cms/editor_action', array('collection' => 'order', 'id' => $order['id'], 'action' => $action, 'csrf' => $token));
+		return array($status, json_decode($body, true));
+	};
+	same(array('not_now'), $act('mark_paid')[1]['problems'], 'not before it ships');
+	same(array('not_now'), $act('refund')[1]['problems'], 'nothing to refund yet');
+	$studio->go('POST', '/api/cms/editor_save_item', array('collection' => 'order', 'id' => $order['id'], 'fields' => array('tracking' => 'RO999'), 'csrf' => $token));
+	list($status, $shipped) = $act('ship');
+	same(200, $status);
+	same('shipped', $shipped['status']);
+	same('', $shipped['paid_at']);
+	list($status, $paid) = $act('mark_paid');
+	same(200, $status);
+	check($paid['paid_at'] !== '', 'the money is in');
+	same('shipped', $paid['status']);
+	same(array('not_now'), $act('mark_paid')[1]['problems'], 'once');
+	// a card order can't ship before it is paid
+	$card = cms_records::find('order', array('status' => 'unpaid', 'payment' => 'card'))[0];
+	list($status, $body) = $studio->go('POST', '/api/cms/editor_action', array('collection' => 'order', 'id' => $card['id'], 'action' => 'ship', 'input' => array('tracking' => 'X'), 'csrf' => $token));
+	same(array('not_now'), json_decode($body, true)['problems']);
+	// and an order paid on delivery waits for the studio, however long
+	R::exec('UPDATE orderdata SET created_at = ? WHERE payment = ? AND status = ?', array(date('Y-m-d H:i:s', time() - 5 * 3600), 'delivery', 'unpaid'));
+	$waiting = count(cms_records::find('order', array('status' => 'unpaid', 'payment' => 'delivery')));
+	(new visitor($plain))->buy('espresso-cup', 1, array('payment' => 'delivery'));
+	same($waiting + 1, count(cms_records::find('order', array('status' => 'unpaid', 'payment' => 'delivery'))), 'none cancelled');
+});
+
+test('the studio\'s own account lists the studio\'s own orders, not everyone\'s', function () use ($base) {
+	$studio = new visitor($base);
+	$studio->login('studio@bluehour.test', 'studio password');
+	// (the editor's own copy of the template's example is left out)
+	$account = preg_replace('#<template data-raster-mockup.*?</template>#s', '', $studio->go('GET', '/account')[1]);
+	same(0, substr_count($account, 'class="order"'), 'a guest\'s order is not the studio\'s');
+	check(substr_count($studio->go('GET', '/orders')[1], 'class="order') > 3, 'while /orders has them all');
 });
 
 test('outside development the pretend provider and the example\'s secret are off, and checkout sells nothing', function () use ($tmp, $root, $maildir) {

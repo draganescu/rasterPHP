@@ -27,7 +27,11 @@
         <!-- render.validation.field('postcode') --><p class="error">The postcode, please.</p><!-- /render.validation.field('postcode') -->
         <label>Country <input type="text" name="country" required maxlength="60" value="Romania"></label>
         <!-- render.validation.field('country') --><p class="error">Which country?</p><!-- /render.validation.field('country') -->
-        <button>Go to payment</button>
+        <fieldset class="payment"><legend>Payment</legend>
+          <label><input type="radio" name="payment" value="delivery" checked> Pay the courier on delivery</label>
+          <!-- print.if.card_available --><label><input type="radio" name="payment" value="card"> Pay now by card</label><!-- /print.if.card_available -->
+        </fieldset>
+        <button>Place the order</button>
       </form>
       <!-- /render.order.checkout -->
     </section>

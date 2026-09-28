@@ -16,10 +16,10 @@ Log in at `/login` as `studio@bluehour.test` with the password `studio password`
 |---|---|
 | `models/product` | The pieces for sale: a **public** record type. The studio edits them in place on any page that lists them. `check()` never lets stock go below zero. |
 | `models/cart` | The cart lives in the visitor's session. It isn't anybody's record until it becomes an order. |
-| `models/order` | Orders: a **private** record type with an **owner**. `check()` decides which status may follow which, and that a shipped order has a tracking number. The actions are **Ship**, **Cancel** (puts the pieces back on the shelf) and **Refund** (admins only). |
+| `models/order` | Orders: a **private** record type with an **owner**. `check()` decides which status may follow which, and that a shipped order has a tracking number. The actions are **Ship**, **Mark paid** (for orders paid on delivery), **Cancel** (puts the pieces back on the shelf) and **Refund** (admins only). |
 | `models/order/payments.php` | The payment provider: Stripe Checkout, or a pretend provider for trying the shop. |
 | `views/kiln/orders.html` | The studio's page: orders to ship, orders waiting for payment, orders shipped, and the shelf. Press E to edit. |
-| `views/kiln/account.html` | A buyer's own orders, for people who made an account. |
+| `views/kiln/account.html` | The logged in person's own orders (`owner=me`), studio accounts included. |
 
 ### Checkout, and the last piece
 
@@ -27,9 +27,11 @@ Log in at `/login` as `studio@bluehour.test` with the password `studio password`
 
 ### Payments
 
-Set `shop_payments` in `config/the_app.php`, or use environment variables:
+Out of the box the shop takes no money online: buyers **pay the courier on delivery**. Checkout places the order unpaid, emails the buyer what to have ready, and tells the studio. The studio ships it unpaid, and presses **Mark paid** when the courier brings the money. Nothing pretends an order is paid before it is.
 
-- **test** (the default, development only): checkout sends the buyer to `/pay/test`, a pretend provider page. Pressing Pay signs the same `checkout.session.completed` event Stripe would send and hands it to the code the webhook runs. Anywhere other than development it's off, and so is the example's public webhook secret. Checkout then refuses before touching the shelf.
+To also take cards, set `shop_payments` in `config/the_app.php`, or use environment variables. Checkout then offers a choice between the two.
+
+- **test** (development only): checkout sends the buyer to `/pay/test`, a pretend provider page. Pressing Pay signs the same `checkout.session.completed` event Stripe would send and hands it to the code the webhook runs. Anywhere other than development it's off, and so is the example's public webhook secret. Checkout then refuses before touching the shelf.
 - **stripe**: set `SHOP_PAYMENTS=stripe`, `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`. Checkout creates a Stripe Checkout Session for cards and sends the buyer there. In Stripe's dashboard, add a webhook for `checkout.session.completed` pointing at `https://<your site>/api/order/webhook`.
 
 The webhook is an ordinary public model method reached through `/api`. A server posting has no browser headers and no session, so Raster's cross-site check lets it through. The method does these checks itself:
@@ -45,11 +47,12 @@ If Stripe can't be reached at checkout, the order it started is cancelled and it
 
 ### What each action guards against
 
-- **Ship** only moves a paid order, once, and needs a tracking number.
+- **Ship** only moves a paid order, or an order paid on delivery, once, and needs a tracking number.
+- **Mark paid** records the courier's money for an order paid on delivery, once it has shipped.
 - **Cancel** only moves an unpaid order. It first closes the Stripe session so nobody can pay any more, then puts the pieces back by product id, so a piece renamed or taken off the shop still gets its stock back. If a buyer manages to pay a cancelled order anyway, the webhook refunds them straight away and emails the studio.
 - **Refund** (admins only) asks Stripe first, outside any transaction, with an idempotency key. Pressing it again after a timeout therefore never refunds twice. Pieces of an order that never shipped go back on the shelf.
 
-Unpaid orders hold their pieces for an hour (`order::HOLD_MINUTES`, which is also the Stripe session's expiry). The next checkout after that cancels them and frees the pieces.
+Card orders nobody pays hold their pieces for an hour (`order::HOLD_MINUTES`, which is also the Stripe session's expiry). The next checkout after that cancels them and frees the pieces. Orders paid on delivery wait for the studio.
 
 ### Before a real shop opens
 

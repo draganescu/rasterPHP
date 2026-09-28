@@ -1,7 +1,9 @@
 <?php
 // #Payments
 //
-// Two providers, chosen with config shop_payments:
+// Buyers can always pay on delivery: no provider, the order is shipped
+// unpaid and the studio marks it paid when the courier brings the money.
+// Paying by card needs a provider, chosen with config shop_payments:
 //
 // - stripe: Stripe Checkout. start() creates a Checkout Session and sends the
 //   buyer to Stripe; Stripe calls /api/order/webhook with a signed
@@ -15,7 +17,8 @@
 class order_payments
 {
 	static function provider() {
-		return config::get('shop_payments', 'test') === 'stripe' ? 'stripe' : 'test';
+		$provider = config::get('shop_payments', '');
+		return in_array($provider, array('stripe', 'test'), true) ? $provider : 'none';
 	}
 
 	// the pretend provider only works while developing: anywhere a stranger
@@ -24,9 +27,10 @@ class order_payments
 		return self::provider() === 'test' && config::get('environment') === 'development';
 	}
 
-	// can the shop take a payment right now?
+	// can buyers pay by card right now?
 	static function available() {
-		return self::provider() === 'stripe' ? (string)config::get('stripe_secret_key') !== '' && self::secret() !== '' : self::testing();
+		if (self::provider() === 'stripe') return (string)config::get('stripe_secret_key') !== '' && self::secret() !== '';
+		return self::testing();
 	}
 
 	// Where the buyer goes to pay. The provider's session id is kept with the
@@ -35,29 +39,29 @@ class order_payments
 		if (self::provider() === 'test') {
 			if (!self::testing()) throw new RuntimeException('The test payments only work in development');
 			$url = config::get('link_uri').'pay/test?order='.rawurlencode($order['number']);
-			cms_records::update('order', $order['id'], array('payment_id' => 'cs_test_'.$order['number'], 'payment_url' => $url));
+			cms_records::update('order', $order['id'], array('provider_ref' => 'cs_test_'.$order['number'], 'provider_url' => $url));
 			return $url;
 		}
 		$session = self::stripe('checkout/sessions', self::checkout_session($order), 'checkout-'.$order['number']);
 		if (!$session || empty($session['url']) || empty($session['id'])) throw new RuntimeException('Stripe did not start a checkout session');
-		cms_records::update('order', $order['id'], array('payment_id' => (string)$session['id'], 'payment_url' => (string)$session['url']));
+		cms_records::update('order', $order['id'], array('provider_ref' => (string)$session['id'], 'provider_url' => (string)$session['url']));
 		return $session['url'];
 	}
 
 	// the link to pay an order that isn't paid yet
 	static function pay_url($order) {
-		if ($order['status'] !== 'unpaid') return '';
-		return self::provider() === 'test' && !self::testing() ? '' : (string)$order['payment_url'];
+		if ($order['status'] !== 'unpaid' || $order['payment'] !== 'card') return '';
+		return self::provider() === 'test' && !self::testing() ? '' : (string)$order['provider_url'];
 	}
 
 	// Stops the provider taking payment for an order (before it is
 	// cancelled). False when the buyer already paid.
 	static function close($order) {
-		if (self::provider() === 'test' || strpos((string)$order['payment_id'], 'cs_') !== 0) return true;
-		$expired = self::stripe('checkout/sessions/'.rawurlencode($order['payment_id']).'/expire', array());
+		if ($order['payment'] !== 'card' || self::provider() !== 'stripe' || strpos((string)$order['provider_ref'], 'cs_') !== 0) return true;
+		$expired = self::stripe('checkout/sessions/'.rawurlencode($order['provider_ref']).'/expire', array());
 		if (is_array($expired) && ($expired['status'] ?? '') === 'expired') return true;
 		// already expired, or never opened: ask how it ended
-		$session = self::stripe_get('checkout/sessions/'.rawurlencode($order['payment_id']));
+		$session = self::stripe_get('checkout/sessions/'.rawurlencode($order['provider_ref']));
 		return is_array($session) && ($session['status'] ?? '') === 'expired';
 	}
 
@@ -88,8 +92,10 @@ class order_payments
 	// The money back. Stripe remembers a request by its idempotency key, so
 	// asking again after a timeout returns the first refund, not a second one.
 	static function refund($order) {
-		if (self::provider() === 'test') return self::testing();
-		$refund = self::stripe('refunds', array('payment_intent' => $order['payment_id']), 'refund-'.$order['number'], $error);
+		// cash from a courier goes back by hand
+		if (($order['payment'] ?? 'card') !== 'card') return true;
+		if (self::provider() !== 'stripe') return self::testing();
+		$refund = self::stripe('refunds', array('payment_intent' => $order['provider_ref']), 'refund-'.$order['number'], $error);
 		if (is_array($refund) && in_array($refund['status'] ?? '', array('succeeded', 'pending'), true)) return true;
 		return $error === 'charge_already_refunded';
 	}
