@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <!-- dry._layout.head /-->
+  <title>A piece</title>
+</head>
+<body>
+  <!-- dry._layout.header /-->
+  <main class="two-columns">
+    <!-- render.cms.product -->
+    <div>
+      <!-- print.@src.photo --><img class="photo wide" src="img/mug.svg" alt=""><!-- /print.@src.photo -->
+    </div>
+    <div>
+      <h1><!-- print.name -->Morning mug<!-- /print.name --></h1>
+      <p class="price">€<!-- print.price -->24.00<!-- /print.price --> · <!-- print.stock -->3<!-- /print.stock --> left</p>
+      <div class="description"><!-- print.description --><p>Stoneware, 300 ml, glazed in a deep evening blue.</p><!-- /print.description --></div>
+      <!-- print.validation.alert('added') --><p class="notice">Added. <a href="cart.html">See your cart</a></p><!-- /print.validation.alert('added') -->
+      <!-- print.validation.alert('not_enough') --><p class="error">There aren't that many left.</p><!-- /print.validation.alert('not_enough') -->
+      <!-- print.validation.alert('sold_out') --><p class="error">This one is sold out.</p><!-- /print.validation.alert('sold_out') -->
+      <!-- render.cart.add -->
+      <form method="post" class="inline-form">
+        <label>How many <input type="number" name="qty" value="1" min="1" max="20" required></label>
+        <button>Add to cart</button>
+      </form>
+      <!-- /render.cart.add -->
+      <p><a href="index.html">All pieces</a></p>
+    </div>
+    <!-- /render.cms.product -->
+  </main>
+  <!-- dry._layout.footer /-->
+</body>
+</html>

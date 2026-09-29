@@ -36,6 +36,8 @@ jobs:
         run: php tests/update.php
       - name: Demo café (every feature)
         run: php tests/demo.php
+      - name: Example shop
+        run: php tests/shop.php
       - name: Lint
         run: |
           php bin/raster lint

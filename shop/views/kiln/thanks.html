@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <!-- dry._layout.head /-->
+  <title>Thank you</title>
+</head>
+<body>
+  <!-- dry._layout.header /-->
+  <main class="narrow">
+    <!-- render.order.receipt -->
+    <h1>Order <!-- print.number -->BH-1001<!-- /print.number --></h1>
+    <!-- print.if.order_paid --><p class="notice">Paid, thank you. A receipt is on its way to <!-- print.email -->you@example.com<!-- /print.email -->.</p><!-- /print.if.order_paid -->
+    <!-- print.if.order_on_delivery --><p class="notice">Thank you. You'll pay <!-- print.total -->€24.00<!-- /print.total --> to the courier when it arrives; the details are on their way to <!-- print.email -->you@example.com<!-- /print.email -->.</p><!-- /print.if.order_on_delivery -->
+    <!-- print.if.order_unpaid --><p>We haven't heard from the payment provider yet.</p><!-- /print.if.order_unpaid -->
+    <!-- print.if.can_pay --><p><!-- print.@href.pay_url --><a class="button" href="pay/test.html">Pay now</a><!-- /print.@href.pay_url --></p><!-- /print.if.can_pay -->
+    <ul class="receipt">
+      <!-- print.lines --><li><!-- print.qty -->1<!-- /print.qty --> × <!-- print.name -->Morning mug<!-- /print.name --> <span class="amount"><!-- print.subtotal -->€24.00<!-- /print.subtotal --></span></li><!-- /print.lines -->
+    </ul>
+    <p class="total">Total <strong><!-- print.total -->€24.00<!-- /print.total --></strong></p>
+    <!-- /render.order.receipt -->
+    <p><a href="index.html">Back to the shop</a></p>
+  </main>
+  <!-- dry._layout.footer /-->
+</body>
+</html>

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <!-- dry._layout.head /-->
+  <title>Studio: orders</title>
+</head>
+<body>
+  <!-- dry._layout.header /-->
+  <main class="studio">
+    <h1>Orders</h1>
+    <p class="meta">Only the studio sees this page. Press E to edit: type a tracking number into an order, then press Ship. When the courier brings the money for an order paid on delivery, press Mark paid. Cancel puts an unpaid order's pieces back on the shelf; Refund (admins) returns the money.</p>
+
+    <h2>To ship</h2>
+    <p class="meta">Paid by card, or to be paid to the courier on delivery.</p>
+    <!-- render.cms.order('status=paid&order=oldest') -->
+    <article class="order">
+      <header><strong><!-- print.number -->BH-1001<!-- /print.number --></strong> · <!-- print.name -->Ana Pop<!-- /print.name --> · <!-- print.total -->24.00<!-- /print.total --> <!-- print.currency -->EUR<!-- /print.currency --> · <span class="status">paid by card</span></header>
+      <p><!-- print.address -->Strada Exemplu 1<!-- /print.address -->, <!-- print.postcode -->010101<!-- /print.postcode --> <!-- print.city -->București<!-- /print.city -->, <!-- print.country -->Romania<!-- /print.country --> · <!-- print.email -->ana@example.com<!-- /print.email --></p>
+      <ul><!-- print.lines --><li><!-- print.qty -->1<!-- /print.qty --> × <!-- print.piece -->Morning mug<!-- /print.piece --></li><!-- /print.lines --></ul>
+      <p class="meta">Tracking: <span class="tracking"><!-- print.tracking -->none yet<!-- /print.tracking --></span></p>
+    </article>
+    <!-- /render.cms.order('status=paid&order=oldest') -->
+    <!-- render.cms.order('status=unpaid&payment=delivery&order=oldest') -->
+    <article class="order">
+      <header><strong><!-- print.number -->BH-1003<!-- /print.number --></strong> · <!-- print.name -->Mihai<!-- /print.name --> · <!-- print.total -->32.00<!-- /print.total --> <!-- print.currency -->EUR<!-- /print.currency --> · <span class="status">pay on delivery</span></header>
+      <p><!-- print.address -->Strada Exemplu 2<!-- /print.address -->, <!-- print.postcode -->010102<!-- /print.postcode --> <!-- print.city -->Cluj<!-- /print.city -->, <!-- print.country -->Romania<!-- /print.country --> · <!-- print.email -->mihai@example.com<!-- /print.email --></p>
+      <ul><!-- print.lines --><li><!-- print.qty -->1<!-- /print.qty --> × <!-- print.piece -->Soup bowl<!-- /print.piece --></li><!-- /print.lines --></ul>
+      <p class="meta">Tracking: <span class="tracking"><!-- print.tracking -->none yet<!-- /print.tracking --></span></p>
+    </article>
+    <!-- /render.cms.order('status=unpaid&payment=delivery&order=oldest') -->
+
+    <h2>Waiting for a card payment</h2>
+    <!-- render.cms.order('status=unpaid&payment=card&order=oldest') -->
+    <article class="order muted">
+      <header><strong><!-- print.number -->BH-1002<!-- /print.number --></strong> · <!-- print.name -->Radu<!-- /print.name --> · <!-- print.total -->48.00<!-- /print.total --> · since <!-- print.created_at -->2026-10-01<!-- /print.created_at --></header>
+    </article>
+    <!-- /render.cms.order('status=unpaid&payment=card&order=oldest') -->
+
+    <h2>Shipped</h2>
+    <!-- render.cms.order('status=shipped&order=newest&limit=20') -->
+    <article class="order muted">
+      <header><strong><!-- print.number -->BH-1000<!-- /print.number --></strong> · <!-- print.name -->Ioana<!-- /print.name --> · <span class="status"><!-- print.status -->shipped<!-- /print.status --></span> <!-- print.shipped_at -->2026-09-30<!-- /print.shipped_at --> · <!-- print.tracking -->RO123<!-- /print.tracking --> · <!-- print.payment -->delivery<!-- /print.payment -->, paid <span class="paid"><!-- print.paid_at -->not yet<!-- /print.paid_at --></span></header>
+    </article>
+    <!-- /render.cms.order('status=shipped&order=newest&limit=20') -->
+
+    <h2>The shelf</h2>
+    <p class="meta">Change a piece in place; the card at the end adds a new one.</p>
+    <table class="lines"><tbody>
+      <!-- render.cms.product('order=oldest') -->
+      <tr><td><!-- print.name -->Morning mug<!-- /print.name --></td><td>€<!-- print.price -->24.00<!-- /print.price --></td><td><!-- print.stock -->3<!-- /print.stock --> left</td></tr>
+      <!-- /render.cms.product('order=oldest') -->
+    </tbody></table>
+  </main>
+  <!-- dry._layout.footer /-->
+</body>
+</html>

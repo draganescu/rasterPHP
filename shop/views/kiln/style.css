@@ -1,0 +1,48 @@
+:root { --fg: #1f2430; --muted: #6b7185; --bg: #f6f4f1; --card: #fffdfa; --line: #e3ded6; --accent: #2f4a7a; --on-accent: #fff; }
+@media (prefers-color-scheme: dark) { :root { --fg: #eceef4; --muted: #a2a8ba; --bg: #14171f; --card: #1c2029; --line: #2e3442; --accent: #9db7e8; --on-accent: #14171f; } }
+* { box-sizing: border-box; }
+body { margin: 0; font: 17px/1.6 ui-serif, Georgia, "Iowan Old Style", serif; color: var(--fg); background: var(--bg); }
+a { color: var(--accent); }
+main, .site-header, .site-footer { max-width: 1000px; margin: 0 auto; padding: 0 20px; }
+.site-header { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; justify-content: space-between; padding: 22px 20px; border-bottom: 1px solid var(--line); }
+.brand { display: flex; gap: 10px; align-items: center; font-weight: 700; letter-spacing: .01em; text-decoration: none; color: var(--fg); }
+.main-nav { display: flex; flex-wrap: wrap; gap: 18px; font: 15px/1.4 system-ui, sans-serif; }
+.main-nav a { text-decoration: none; }
+.hero { padding: 56px 0 28px; }
+.hero h1 { font-size: clamp(2.2rem, 6vw, 3.4rem); line-height: 1.05; margin: 0 0 12px; font-weight: 600; }
+.lede { font-size: 1.15rem; color: var(--muted); max-width: 38em; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 22px; padding-bottom: 24px; }
+.piece-link { text-decoration: none; color: inherit; }
+.piece h2 { font-size: 1.15rem; margin: 10px 0 2px; }
+.photo { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 14px; background: var(--line); }
+.photo.wide { margin: 28px 0; }
+.meta, .price { color: var(--muted); font: 14px/1.5 system-ui, sans-serif; margin: 0; }
+.price { font-size: 16px; }
+.two-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 36px; padding-top: 12px; }
+.narrow { max-width: 520px; padding-top: 12px; }
+.stack { display: grid; gap: 10px; }
+.stack label { display: grid; gap: 4px; font: 15px/1.4 system-ui, sans-serif; }
+.inline-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; font: 15px/1.4 system-ui, sans-serif; }
+.inline-form label { display: grid; gap: 4px; }
+input, select, textarea { font: 16px/1.4 system-ui, sans-serif; padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--card); color: var(--fg); width: 100%; }
+.inline-form input { width: 6em; }
+.button, button { display: inline-block; font: 600 15px/1 system-ui, sans-serif; padding: 12px 18px; border-radius: 999px; border: 0; background: var(--accent); color: var(--on-accent); text-decoration: none; cursor: pointer; }
+button.secondary { background: transparent; color: var(--fg); border: 1px solid var(--line); padding: 7px 12px; }
+.lines { width: 100%; border-collapse: collapse; font: 15px/1.5 system-ui, sans-serif; }
+.lines td { padding: 10px 8px; border-bottom: 1px solid var(--line); }
+.amount { text-align: right; white-space: nowrap; }
+.total { font: 17px/1.5 system-ui, sans-serif; text-align: right; }
+.receipt { padding: 0; list-style: none; font: 15px/1.5 system-ui, sans-serif; }
+.receipt li { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line); padding: 8px 0; }
+.order { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px 18px; margin-bottom: 12px; font: 15px/1.5 system-ui, sans-serif; }
+.order ul { margin: 6px 0; padding-left: 18px; }
+.order.muted { opacity: .8; }
+.status { text-transform: capitalize; }
+fieldset.payment { border: 1px solid var(--line); border-radius: 10px; display: grid; gap: 6px; font: 15px/1.4 system-ui, sans-serif; }
+fieldset.payment label { display: flex; gap: 8px; align-items: center; }
+fieldset.payment input { width: auto; }
+.error { color: #b3261e; margin: 0; font: 14px/1.4 system-ui, sans-serif; }
+.notice { background: color-mix(in srgb, var(--accent) 14%, transparent); padding: 9px 13px; border-radius: 9px; font: 15px/1.4 system-ui, sans-serif; }
+.pay { padding-top: 48px; }
+.site-footer { margin-top: 56px; padding: 24px 20px 48px; border-top: 1px solid var(--line); color: var(--muted); font-size: 15px; }
+@media (max-width: 520px) { .site-header { padding: 16px; } main { padding: 0 16px; } }

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <!-- dry._layout.head /-->
+  <title>Check out</title>
+</head>
+<body>
+  <!-- dry._layout.header /-->
+  <main class="two-columns">
+    <section>
+      <h1>Check out</h1>
+      <!-- print.validation.alert('sold_out') --><p class="error">Someone bought the last of a piece in your cart while you were here. <a href="cart.html">Check your cart</a> and try again.</p><!-- /print.validation.alert('sold_out') -->
+      <!-- print.validation.alert('cart_changed') --><p class="error">Something in your cart changed while you were here (a piece sold out or left the shop). <a href="cart.html">Check your cart</a>.</p><!-- /print.validation.alert('cart_changed') -->
+      <!-- print.validation.alert('payment_unavailable') --><p class="error">We can't take payments right now, so nothing was ordered. Your cart is kept; please try again later.</p><!-- /print.validation.alert('payment_unavailable') -->
+      <!-- print.validation.alert('cart_empty') --><p class="error">Your cart is empty.</p><!-- /print.validation.alert('cart_empty') -->
+      <!-- render.order.checkout -->
+      <form method="post" class="stack">
+        <label>Email <input type="email" name="email" required></label>
+        <!-- render.validation.field('email') --><p class="error">We need an email for the receipt.</p><!-- /render.validation.field('email') -->
+        <label>Name <input type="text" name="name" required maxlength="100"></label>
+        <!-- render.validation.field('name') --><p class="error">Who is it for?</p><!-- /render.validation.field('name') -->
+        <label>Address <input type="text" name="address" required maxlength="200"></label>
+        <!-- render.validation.field('address') --><p class="error">Where should it go?</p><!-- /render.validation.field('address') -->
+        <label>City <input type="text" name="city" required maxlength="100"></label>
+        <!-- render.validation.field('city') --><p class="error">And the city.</p><!-- /render.validation.field('city') -->
+        <label>Postcode <input type="text" name="postcode" required maxlength="20"></label>
+        <!-- render.validation.field('postcode') --><p class="error">The postcode, please.</p><!-- /render.validation.field('postcode') -->
+        <label>Country <input type="text" name="country" required maxlength="60" value="Romania"></label>
+        <!-- render.validation.field('country') --><p class="error">Which country?</p><!-- /render.validation.field('country') -->
+        <fieldset class="payment"><legend>Payment</legend>
+          <label><input type="radio" name="payment" value="delivery" checked> Pay the courier on delivery</label>
+          <!-- print.if.card_available --><label><input type="radio" name="payment" value="card"> Pay now by card</label><!-- /print.if.card_available -->
+        </fieldset>
+        <button>Place the order</button>
+      </form>
+      <!-- /render.order.checkout -->
+    </section>
+    <aside>
+      <h2>Your order</h2>
+      <table class="lines"><tbody>
+        <!-- render.cart.lines_shown -->
+        <tr><td><!-- print.qty -->1<!-- /print.qty --> × <!-- print.name -->Morning mug<!-- /print.name --></td><td class="amount"><!-- print.subtotal -->€24.00<!-- /print.subtotal --></td></tr>
+        <!-- /render.cart.lines_shown -->
+      </tbody></table>
+      <p class="total">Total <strong><!-- print.cart.total -->€24.00<!-- /print.cart.total --></strong></p>
+    </aside>
+  </main>
+  <!-- dry._layout.footer /-->
+</body>
+</html>

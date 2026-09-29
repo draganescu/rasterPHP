@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <!-- dry._layout.head /-->
+  <title>Make an account</title>
+</head>
+<body>
+  <!-- dry._layout.header /-->
+  <main class="narrow">
+    <h1>Make an account</h1>
+    <!-- print.validation.alert('email_taken') --><p class="error">There is already an account with that email.</p><!-- /print.validation.alert('email_taken') -->
+    <!-- print.validation.alert('email_invalid') --><p class="error">That email does not look right.</p><!-- /print.validation.alert('email_invalid') -->
+    <!-- print.validation.alert('password_short') --><p class="error">Use at least 8 characters.</p><!-- /print.validation.alert('password_short') -->
+    <!-- render.authentication.register -->
+    <form method="post" class="stack">
+      <label>Name <input type="text" name="name" maxlength="100"></label>
+      <label>Email <input type="email" name="email" required></label>
+      <label>Password <input type="password" name="password" required minlength="8"></label>
+      <button>Make the account</button>
+    </form>
+    <!-- /render.authentication.register -->
+  </main>
+  <!-- dry._layout.footer /-->
+</body>
+</html>
