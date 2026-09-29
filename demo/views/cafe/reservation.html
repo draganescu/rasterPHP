@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <!-- dry._layout.head /-->
+  <title>Bookings</title>
+</head>
+<body>
+  <!-- dry._layout.header /-->
+  <main class="">
+    <h1>Bookings</h1>
+    <p>Every booking, by date. Its filter addresses narrow it down: <code>/reservation/reservation_items/date/2026-10-07</code> is one evening, <code>/reservation/reservation_items/status/new</code> what is still to confirm. Bookings are private, so only staff see anything here. <a href="staff.html">Back to staff</a></p>
+    <table class="list"><tbody>
+      <!-- render.cms.reservation('order=date') -->
+      <tr class="booking"><td><!-- print.name -->Ana<!-- /print.name --></td><td><!-- print.@href.raster_filter@date --><a href="reservation/reservation_items/date/2026-10-01"><!-- print.date -->2026-10-01<!-- /print.date --></a><!-- /print.@href.raster_filter@date --></td><td><!-- print.guests -->2<!-- /print.guests --> guests</td><td><!-- print.seating -->window<!-- /print.seating --></td><td><!-- print.phone -->+40 721 000 000<!-- /print.phone --></td><td><!-- print.notes -->Window seat<!-- /print.notes --></td><td class="status"><!-- print.@href.raster_filter@status --><a href="reservation/reservation_items/status/new"><!-- print.status -->new<!-- /print.status --></a><!-- /print.@href.raster_filter@status --></td></tr>
+      <!-- /render.cms.reservation('order=date') -->
+    </tbody></table>
+  </main>
+  <!-- dry._layout.footer /-->
+</body>
+</html>

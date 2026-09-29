@@ -726,10 +726,20 @@ class raster_inspector {
 			if (!is_dir($dir)) continue;
 			foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS)) as $file) {
 				if (substr($file, -4) !== '.php') continue;
-				preg_match_all('/(?:raise|done)\(\s*[\'"]([a-z0-9_]+)[\'"]/', file_get_contents($file), $m);
+				$source = file_get_contents($file);
+				preg_match_all('/(?:raise|done|refuse)\(\s*[\'"]([a-z0-9_]+)[\'"]/', $source, $m);
 				$names = array_merge($names, $m[1]);
+				// problems a check() names: $problems[] = 'sold_out'
+				preg_match_all('/\$problems\[\]\s*=\s*[\'"]([a-z0-9_]+)[\'"]/', $source, $m);
+				$names = array_merge($names, $m[1]);
+				// cms_records::submit('reservation', 'booked') redirects with ?done=booked
+				// (the type's name when there is no second argument)
+				preg_match_all('/submit\(\s*[\'"]([a-z0-9_]+)[\'"](?:\s*,\s*[\'"]([a-z0-9_]+)[\'"])?/', $source, $m, PREG_SET_ORDER);
+				foreach ($m as $call) $names[] = isset($call[2]) && $call[2] !== '' ? $call[2] : $call[1];
 			}
 		}
+		// what a records form raises when the visitor may not create
+		$names = array_merge($names, array('login_required', 'not_allowed'));
 		return $names = array_unique($names);
 	}
 
@@ -915,7 +925,7 @@ class raster_inspector {
 			$iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS));
 			foreach ($iterator as $file) {
 				if (substr($file->getFilename(), -4) !== '.php' || strpos($file->getPathname(), '/libraries/') !== false || strpos($file->getPathname(), '/data/') !== false) continue;
-				if (preg_match_all('/event::dispatch\(\s*([\'"])([a-z0-9_.]+)\1/', file_get_contents($file->getPathname()), $m)) {
+				if (preg_match_all('/(?:event|cms_records)::dispatch\(\s*([\'"])([a-z0-9_.]+)\1/', file_get_contents($file->getPathname()), $m)) {
 					$names = array_merge($names, $m[2]);
 				}
 			}
@@ -1011,7 +1021,43 @@ class raster_inspector {
 				$problems = array_merge($problems, $this->lint_file($view, $theme));
 			}
 		}
-		return array_merge($problems, $this->lint_routes(), $this->lint_events(), $this->lint_queries());
+		return array_merge($problems, $this->lint_routes(), $this->lint_events(), $this->lint_queries(), $this->lint_types());
+	}
+
+	// Types models declare: the hooks must be static (so /api can't reach
+	// them) and every action needs its method.
+	function lint_types() {
+		$problems = array();
+		foreach (cms_records::types() as $name => $info) {
+			$reflection = new ReflectionClass($info['class']);
+			$at = array('file' => self::short($reflection->getFileName()), 'line' => $reflection->getStartLine(), 'column' => 1);
+			if (cms::reserved($name, 'collection')) {
+				$problems[] = $at + array('severity' => 'error', 'message' => "'$name' is a name the CMS keeps for itself; call the type something else");
+			}
+			foreach ($info['unknown'] as $key) {
+				$problems[] = $at + array('severity' => 'warning', 'message' => "The type '$name' has '$key', which means nothing. A type has: ".implode(', ', cms_records::$keys));
+			}
+			if (!$info['fields']) {
+				$problems[] = $at + array('severity' => 'error', 'message' => "The type '$name' declares no fields ('fields' => array('name' => '', ...))");
+			}
+			// RedBean reads x_id as a link to an x record, and then never stores x
+			foreach (array_keys($info['fields']) as $field) {
+				if (isset($info['fields'][$field.'_id'])) {
+					$problems[] = $at + array('severity' => 'error', 'message' => "The type '$name' has '$field' and '{$field}_id': the database reads '{$field}_id' as a link to a '$field' record and never stores '$field'. Rename one of them.");
+				}
+			}
+			if (method_exists($info['class'], 'check') && !(new ReflectionMethod($info['class'], 'check'))->isStatic()) {
+				$problems[] = $at + array('severity' => 'error', 'message' => "{$info['class']}::check() must be static: a public method is reachable at /api/{$info['model']}/check");
+			}
+			foreach ($info['actions'] as $action => $role) {
+				if (in_array($action, cms_records::$hooks, true)) {
+					$problems[] = $at + array('severity' => 'error', 'message' => "'$action' can't be an action of '$name': the name has a meaning of its own");
+				} elseif (!cms_records::is_action_method($info['class'], $action)) {
+					$problems[] = $at + array('severity' => 'error', 'message' => "The type '$name' has the action '$action' but {$info['class']} has no public static function $action(\$item, \$input)");
+				}
+			}
+		}
+		return $problems;
 	}
 
 	static function short($path) {
@@ -1097,6 +1143,18 @@ class raster_inspector {
 				$pages[] = array('view' => $page['view'], 'url' => $slug, 'slug' => $slug, 'type' => cms::page_type($slug), 'fields' => $page['fields']);
 				break;
 			}
+		}
+		// types models declare (static function types()) are collections too;
+		// their fields come from the model, not the markup
+		foreach (cms_records::types() as $name => $info) {
+			$views = isset($collections[$name]) ? $collections[$name]['views'] : array();
+			$fields = array();
+			foreach ($info['fields'] as $field => $default) $fields[$field] = array('default' => is_array($default) ? '[]' : (string)$default);
+			$collections[$name] = array(
+				'name' => $name, 'type' => $info['type'], 'fields' => $fields, 'views' => $views,
+				'model' => $info['model'], 'public' => $info['public'], 'owner' => $info['owner'], 'create' => $info['create'],
+				'readonly' => $info['readonly'], 'hidden' => $info['hidden'], 'actions' => $info['actions'],
+			);
 		}
 		ksort($collections);
 		if ($site) {

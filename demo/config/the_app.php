@@ -21,10 +21,11 @@ config::set('newsletter_unsubscribe_page')->to('letters/stop');
 config::set('menu_page_size')->to(4);
 config::set('events_page_size')->to(3);
 config::set('raster_page_size')->to(5);
+config::set('reservation_page_size')->to(50);
 config::set('feed_limit')->to(5);
 
 // the sitemap leaves out private and utility pages
-config::set('sitemap_skip')->to(array('login', 'account', 'register', 'forgot', 'password/new', 'letters/confirm', 'letters/stop', 'lab', '404'));
+config::set('sitemap_skip')->to(array('login', 'account', 'register', 'forgot', 'password/new', 'letters/confirm', 'letters/stop', 'lab', '404', 'reservation'));
 
 // a friendlier 404 page (views/cafe/404.html)
 config::set('error_document_404')->to('404');

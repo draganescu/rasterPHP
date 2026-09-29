@@ -5,6 +5,30 @@ file changes for you; `php bin/raster doctor` shows what is left.
 
 ## Unreleased
 
+- **Records: types a model declares, stored and shown by the CMS.** A model's
+  `static function types()` declares bookings, orders, applications: their
+  fields, who may create them, which fields are `readonly` or `hidden`, whether
+  they are `public` or have an `owner`, and their `actions`. The CMS stores
+  them as a collection named after the type, lists them wherever a view
+  renders `render.cms.<type>`, and lets editors and agents change them with
+  the in-page editor and the MCP item tools. The model's static
+  `check($type, $after, $before)` runs before every write — form, editor, MCP
+  or the model's own code — and names problems the template words as alerts.
+  Records are private unless the type says otherwise: visitors see none, and
+  feeds, the sitemap and exports leave them out. What visitors typed prints as
+  text. `cms_records::submit()` is a whole form handler;
+  `cms_records::transaction()` makes several writes happen together or not at
+  all, with events after the commit; list fields (line items) are stored as
+  JSON and render as nested rows. Actions are buttons in the editor for the
+  roles allowed, `run_action` over MCP. `php bin/raster make model <name>
+  --from=<view>` writes a model for a form's records. Nothing changes for
+  existing sites. See the Records section of AGENTS.md.
+- The editor's item handle shows a record type's actions instead of Duplicate
+  and Schedule, and never makes a readonly field editable.
+- The demo café's bookings are records: `/staff` lists them for staff to
+  confirm or cancel, a day holds 20 guests, and members see their own bookings
+  on `/account`.
+
 - **Tooling an agent can afford.** Everything an agent needs to work on a
   Raster site is now an MCP tool, so it is asked and answered in one
   long-lived process instead of starting PHP again per question: `describe`

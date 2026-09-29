@@ -290,7 +290,7 @@
  {
   "name": "C41-no-item-deleted-event",
   "file": "system/models/cms/store.php",
-  "search": "event::dispatch('cms.item_deleted'",
+  "search": "cms_records::dispatch('cms.item_deleted'",
   "replace": "array('cms.item_deleted'"
  },
  {
@@ -302,8 +302,8 @@
  {
   "name": "C42-events-not-linted",
   "file": "system/tools/inspector.php",
-  "search": "$this->lint_routes(), $this->lint_events(), $this->lint_queries());",
-  "replace": "$this->lint_routes(), $this->lint_queries());"
+  "search": "$this->lint_routes(), $this->lint_events(), $this->lint_queries(), $this->lint_types());",
+  "replace": "$this->lint_routes(), $this->lint_queries(), $this->lint_types());"
  },
  {
   "name": "C39-overview-without-events",
@@ -320,8 +320,8 @@
  {
   "name": "C43-queries-not-linted",
   "file": "system/tools/inspector.php",
-  "search": "$this->lint_events(), $this->lint_queries());",
-  "replace": "$this->lint_events());"
+  "search": "$this->lint_events(), $this->lint_queries(), $this->lint_types());",
+  "replace": "$this->lint_events(), $this->lint_types());"
  },
  {
   "name": "C43-named-params-dropped",
@@ -454,5 +454,41 @@
   "file": "system/tools/describe.php",
   "search": "\t\t\treturn $sections === null || in_array($name, (array)$sections);",
   "replace": "\t\t\treturn true;"
+ },
+ {
+  "name": "R3-check-skipped",
+  "file": "system/models/cms/records.php",
+  "search": "\t\tif (!method_exists($class, 'check')) return;",
+  "replace": "\t\treturn;"
+ },
+ {
+  "name": "R4-private-shown",
+  "file": "system/models/cms/records.php",
+  "search": "\t\tif ($info['public'] || cms::loggedin()) return array('', array());",
+  "replace": "\t\treturn array('', array());"
+ },
+ {
+  "name": "R2-typed-html-printed",
+  "file": "system/template.php",
+  "search": "if ($this->format === 'html' && isset($data['raster_escape'])",
+  "replace": "if (false && isset($data['raster_escape'])"
+ },
+ {
+  "name": "R6-readonly-writable",
+  "file": "system/models/cms/records.php",
+  "search": "return array_values(array_diff(array_keys($info['fields']), $info['readonly'], $info['hidden']));",
+  "replace": "return array_keys($info['fields']);"
+ },
+ {
+  "name": "R9-no-rollback",
+  "file": "system/models/cms/records.php",
+  "search": "\t\t\t$sqlite ? $pdo->exec('ROLLBACK') : $pdo->rollBack();",
+  "replace": "\t\t\t$sqlite ? $pdo->exec('COMMIT') : $pdo->commit();"
+ },
+ {
+  "name": "R5-owner-not-set",
+  "file": "system/models/cms/store.php",
+  "search": "\t\t\t\t$bean->owner = $user ? (int)$user['id'] : 0;",
+  "replace": "\t\t\t\t$bean->owner = 0;"
  }
 ]

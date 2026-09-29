@@ -21,4 +21,5 @@ return array(
 	'items' => '{n} elemente', 'one_item' => '1 element', 'hidden_count' => '{n} ascunse', 'empty_field' => 'Gol: se vede textul din șablon',
 	'new_item' => 'Nou', 'edit_mode_on' => 'Editezi. Apasă pe orice strălucește.', 'edit_mode_off' => 'Ai terminat de editat',
 	'keyboard' => 'E pentru editare · Esc ca să ieși · ⌘Z pentru anulare', 'page_fields' => 'Câmpuri', 'nothing_here' => 'Nimic din pagina asta nu vine din CMS.',
+	'action_done' => 'Gata: {action}',
 );

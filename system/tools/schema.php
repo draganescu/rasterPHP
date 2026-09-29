@@ -29,9 +29,17 @@ class raster_schema {
 			));
 		}
 		foreach ($model['collections'] as $collection) {
-			$tables[] = $this->compare('collection', $collection['type'], $collection['fields'], array(
-				'name' => $collection['name'], 'views' => $collection['views'],
-			));
+			$meta = array('name' => $collection['name'], 'views' => $collection['views']);
+			// a type a model declares: records, never a mock-up row
+			$fields = $collection['fields'];
+			if (isset($collection['model'])) {
+				$meta['model'] = $collection['model'];
+				// every column a record needs, Raster's own included
+				foreach (cms_records::columns(cms_records::info($collection['name'])) as $column => $default) {
+					if (!isset($fields[$column])) $fields[$column] = array('default' => (string)$default);
+				}
+			}
+			$tables[] = $this->compare(isset($collection['model']) ? 'record' : 'collection', $collection['type'], $fields, $meta);
 		}
 
 		// tables in the database that no template uses
@@ -96,6 +104,7 @@ class raster_schema {
 		$orphans = array();
 		foreach (array_keys($columns) as $column) {
 			if (in_array($column, cms_store::$system_fields)) continue;
+			if ($kind === 'record' && in_array($column, array('created_at', 'owner'))) continue;
 			if (!array_key_exists($column, $fields)) $orphans[] = $column;
 		}
 
@@ -154,6 +163,13 @@ class raster_schema {
 		R::freeze(false);
 		try {
 			foreach ($status['tables'] as $table) {
+				// records: every column the model declares, and no row left behind
+				if ($table['kind'] === 'record') {
+					if ($table['exists'] && !$table['missing']) continue;
+					cms_records::ensure(cms_records::info($table['name']), true);
+					$changes[] = $table['exists'] ? "added {$table['table']}.".implode(", {$table['table']}.", $table['missing']) : "created table {$table['table']}";
+					continue;
+				}
 				if ($table['kind'] === 'collection' && $table['exists']) {
 					$columns = cms_store::columns($table['table']);
 					foreach (array('slug', 'published_at') as $system) {

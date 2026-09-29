@@ -17,6 +17,7 @@
 //   php bin/raster annotations [--json]
 //   php bin/raster vocabulary [--json]
 //   php bin/raster describe [--json] [--sections=a,b]
+//   php bin/raster make model <name> --from=<view> [--form=<method>] [--dry-run] [--force]
 //   php bin/raster version
 
 if (PHP_SAPI !== 'cli') exit;
@@ -290,7 +291,9 @@ switch ($command) {
 			foreach ($status['tables'] as $table) {
 				$title = $table['kind'] === 'page'
 					? "page {$table['url']}  ({$table['view']})"
-					: "collection {$table['name']}  (used in ".implode(', ', $table['views']).")";
+					: ($table['kind'] === 'record'
+						? "records {$table['name']}  (declared by the {$table['model']} model".($table['views'] ? ', shown in '.implode(', ', $table['views']) : '').")"
+						: "collection {$table['name']}  (used in ".implode(', ', $table['views']).")");
 				$state = $table['exists'] ? "{$table['rows']} row(s)" : ($table['fields'] ? $paint('not in database', '33') : 'no page fields');
 				echo $paint($title, '1')."  table {$table['table']}, $state\n";
 				foreach ($table['fields'] as $name => $field) {
@@ -489,6 +492,34 @@ switch ($command) {
 		foreach ($export->warnings as $warning) echo $paint('!', '33')." $warning\n";
 		exit(0);
 
+	case 'make':
+		// raster make model <name> --from=<view> [--form=<method>] [--dry-run] [--force]
+		require_once BASE.'tools/make.php';
+		if ((isset($positional[0]) ? $positional[0] : '') !== 'model' || empty($positional[1]) || !isset($options['from']) || !is_string($options['from'])) {
+			fwrite(STDERR, "Usage: php bin/raster make model <name> --from=<view> [--form=<method>] [--dry-run] [--force]\n");
+			exit(2);
+		}
+		try {
+			$made = (new raster_make())->model($positional[1], $options['from'], isset($options['form']) && is_string($options['form']) ? $options['form'] : null);
+		} catch (Exception $e) {
+			fwrite(STDERR, $paint('error', '31').': '.$e->getMessage()."\n");
+			exit(1);
+		}
+		$short = raster_inspector::short($made['file']);
+		if (isset($options['dry-run'])) {
+			echo $made['code'];
+			exit(0);
+		}
+		if (is_file($made['file']) && !isset($options['force'])) {
+			fwrite(STDERR, $paint('error', '31').": $short exists; --force replaces it, --dry-run prints what it would write\n");
+			exit(1);
+		}
+		@mkdir(dirname($made['file']), 0775, true);
+		file_put_contents($made['file'], $made['code']);
+		echo $paint('✓', '32')." wrote $short: the type {$positional[1]} with ".implode(', ', $made['fields']).", check() and {$made['method']}()\n\nNext:\n";
+		foreach ($made['next'] as $step) echo "  - $step\n";
+		exit(0);
+
 	case 'mcp':
 		controller::load_model('mcp');
 		controller::get_object('mcp')->stdio();
@@ -545,6 +576,9 @@ Raster command line
   php bin/raster user <email|name> [--password=...] [--role=admin|editor|member]
                                          create a user or reset a password
   php bin/raster users                   list users
+  php bin/raster make model <name> --from=<view> [--form=<method>] [--dry-run] [--force]
+                                         a model for the records a form sends: its type,
+                                         an empty check() and the form handler
   php bin/raster send <url> [--to=email] [--dry-run] [--again]
                                          email a page to newsletter subscribers
   php bin/raster mcp                     MCP server over stdio for local agents

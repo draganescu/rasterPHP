@@ -120,6 +120,12 @@ class cms_editor {
 		return array('error' => $message);
 	}
 
+	// a check() or an action said no: the names, and a line to show
+	protected static function refused($e) {
+		http_response_code(422);
+		return array('error' => $e->getMessage(), 'problems' => $e->problems);
+	}
+
 	protected static function page_type() {
 		$type = strtolower((string)util::post('type'));
 		if (!preg_match('/^[a-z0-9]+page$/', $type) || !cms_store::table_exists($type)) return null;
@@ -150,14 +156,18 @@ class cms_editor {
 		$collection = (string)util::post('collection');
 		if (!preg_match('/^[a-z][a-z0-9_]*$/', $collection) || cms::reserved($collection, 'collection')) return self::fail('Unknown collection');
 		$type = cms::collection_type($collection);
+		$record = cms_records::info($collection);
+		if ($record) cms_records::ensure($record);
 		$columns = cms_store::columns($type);
 		if (!$columns) return self::fail('Unknown collection');
 		$fields = util::post('fields');
 		if (!is_array($fields)) $fields = array();
 		unset($fields['id'], $fields['updated_at']);
-		$allowed = array_diff(array_keys($columns), array('id', 'updated_at'));
+		$allowed = $record ? cms_records::writable($record) : array_diff(array_keys($columns), array('id', 'updated_at'));
 		try {
 			return cms_store::save_item($type, (int)util::post('id'), $fields, $allowed);
+		} catch (cms_refused $e) {
+			return self::refused($e);
 		} catch (Exception $e) {
 			return self::fail($e->getMessage());
 		}
@@ -171,8 +181,29 @@ class cms_editor {
 		$type = cms::collection_type($collection);
 		$item = cms_store::get_item($type, (int)util::post('id'));
 		if (!$item) return self::fail('No such item', 404);
-		cms_store::delete_item($type, (int)util::post('id'));
+		try {
+			cms_store::delete_item($type, (int)util::post('id'));
+		} catch (cms_refused $e) {
+			return self::refused($e);
+		}
 		return array('deleted' => true, 'item' => $item);
+	}
+
+	// collection, id, action, input[name]=value: runs one of the actions the
+	// record's type declares, if the editor's role allows it
+	static function action() {
+		cms::require_admin(true);
+		$collection = (string)util::post('collection');
+		if (!cms_records::info($collection)) return self::fail('Unknown collection');
+		$input = util::post('input');
+		try {
+			$item = cms_records::act($collection, (int)util::post('id'), (string)util::post('action'), is_array($input) ? $input : array());
+			return cms_records::shown(cms_records::info($collection), $item);
+		} catch (cms_refused $e) {
+			return self::refused($e);
+		} catch (Exception $e) {
+			return self::fail($e->getMessage());
+		}
 	}
 
 	// type: the page's revisions, newest first

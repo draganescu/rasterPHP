@@ -102,6 +102,26 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 		await page.waitForTimeout(1200);
 		check((await (await fetch(base + '/menu')).text()).includes('Cortado'), 'undo brings the item back');
 
+		// a record: the model's actions are buttons, its readonly fields are not editable
+		await fetch(base + '/visit', { method: 'POST', body: new URLSearchParams({ raster_form: 'reservation.book', name: 'Ilinca', email: 'ilinca@example.com', date: '2026-10-14', guests: '2', terms: '1' }), redirect: 'manual' });
+		await page.goto(base + '/staff');
+		await page.waitForTimeout(500);
+		const booking = page.locator('[data-raster-item]', { hasText: 'Ilinca' }).first();
+		check(await booking.locator('td.status').evaluate(el => !el.isContentEditable && !el.querySelector('[contenteditable]')), 'the status is not editable');
+		check(await booking.locator('td').first().evaluate(el => el.isContentEditable || !!el.querySelector('[contenteditable]')), 'the name is');
+		await page.mouse.move(2, 2);
+		await page.waitForTimeout(500);
+		await booking.hover({ position: { x: 10, y: 5 }, force: true });
+		await page.waitForTimeout(300);
+		const buttons = await inShadow(page, h => [...h.shadowRoot.querySelectorAll('.handle button')].map(b => b.textContent || b.getAttribute('aria-label')));
+		check(buttons.includes('Confirm') && buttons.includes('Cancel') && !buttons.includes('Duplicate') && !buttons.includes('Schedule'), 'a booking has its actions instead of duplicate and schedule: ' + buttons.join(', '));
+		await inShadow(page, h => [...h.shadowRoot.querySelectorAll('.handle button')].find(b => b.textContent === 'Confirm').click());
+		await page.waitForTimeout(900);
+		check((await booking.locator('td.status').innerText()).trim() === 'confirmed', 'the action\'s result shows in the page');
+		check(await page.locator('.raster-ghost').count() === 0, 'no card for a new booking: guests book with the form');
+		check((await (await fetch(base + '/api/reservation/confirm')).status) === 404, 'actions are not reachable over /api');
+		await page.screenshot({ path: path.join(screens, 'records.png') });
+
 		// the page panel
 		await page.goto(base + '/about');
 		await page.waitForTimeout(400);

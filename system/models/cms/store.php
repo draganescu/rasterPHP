@@ -6,6 +6,10 @@
 // - page fields are versioned: every save stores a new revision of the page
 // - only fields that exist in the templates can be written; to add a field,
 //   add an annotation to a view (the markup is the schema)
+// - records of a type a model declares (records.php) are checked by that
+//   model before every write, whoever makes it
+require_once __DIR__.'/records.php';
+
 class cms_store {
 
 	// columns RedBean or Raster manage, never edited as content
@@ -151,7 +155,7 @@ class cms_store {
 		R::store($page);
 		util::content_changed();
 		$saved = self::page_values($type);
-		event::dispatch('cms.page_saved', array('type' => $type, 'slug' => (string)$page->slug, 'changed' => array_keys($values), 'fields' => $saved));
+		cms_records::dispatch('cms.page_saved', array('type' => $type, 'slug' => (string)$page->slug, 'changed' => array_keys($values), 'fields' => $saved));
 		return $saved;
 	}
 
@@ -178,21 +182,44 @@ class cms_store {
 	static function list_items($type, $limit = 50, $offset = 0) {
 		if (!self::table_exists($type)) return array('total' => 0, 'items' => array());
 		$items = R::find($type, ' ORDER BY id ASC LIMIT '.max(1, (int)$limit).' OFFSET '.max(0, (int)$offset));
-		return array(
-			'total' => (int)R::count($type),
-			'items' => array_values(array_map(array('cms_store', 'export_item'), $items)),
-		);
+		$info = cms_records::for_table($type);
+		$items = array_values(array_map(array('cms_store', 'export_item'), $items));
+		if ($info) {
+			foreach ($items as $key => $item) $items[$key] = cms_records::shown($info, cms_records::decode($info, $item));
+		}
+		return array('total' => (int)R::count($type), 'items' => $items);
 	}
 
 	static function get_item($type, $id) {
 		if (!self::table_exists($type)) return null;
 		$bean = R::findOne($type, ' id = ? ', array((int)$id));
-		return $bean ? self::export_item($bean) : null;
+		if (!$bean) return null;
+		$info = cms_records::for_table($type);
+		return $info ? cms_records::shown($info, cms_records::decode($info, self::export_item($bean))) : self::export_item($bean);
 	}
 
-	static function save_item($type, $id, $values, $allowed) {
-		// slug, enabled (0 = draft) and published_at can always be set
-		$allowed = array_merge($allowed, array('slug', 'enabled', 'published_at'));
+	// Creates ($id 0) or changes an item. $allowed lists the fields the caller
+	// may write. $who is who asks: editor (the in-page editor and MCP), visitor
+	// (a form) or model (the model's own code, which may write readonly and
+	// hidden fields and the owner). Records of a declared type go through the
+	// model's check() first.
+	static function save_item($type, $id, $values, $allowed, $who = 'editor') {
+		$info = cms_records::for_table($type);
+		if (!$info) return self::store_item($type, $id, $values, $allowed, $who, null);
+		cms_records::ensure($info);
+		// the check and the write happen together, so two bookings can't both
+		// take the last seats
+		return cms_records::transaction(function () use ($type, $id, $values, $allowed, $who, $info) {
+			return cms_store::store_item($type, $id, $values, $allowed, $who, $info);
+		});
+	}
+
+	static function store_item($type, $id, $values, $allowed, $who, $info) {
+		if ($info) {
+			$allowed = $who === 'model' ? array_merge(array_keys($info['fields']), array('owner')) : array_values(array_intersect($allowed, cms_records::writable($info)));
+		}
+		// slug, enabled (0 = draft) and published_at can always be set, except by visitors
+		if ($who !== 'visitor') $allowed = array_merge($allowed, array('slug', 'enabled', 'published_at'));
 		if (isset($values['slug'])) $values['slug'] = self::unique_slug($type, $values['slug'] ?: 'item', (int)$id);
 		if (isset($values['published_at']) && $values['published_at'] !== '' && strtotime($values['published_at']) === false) {
 			throw new InvalidArgumentException("published_at must be a date like 2026-10-01 09:00");
@@ -200,7 +227,16 @@ class cms_store {
 		if (isset($values['published_at']) && $values['published_at'] !== '') $values['published_at'] = date('Y-m-d H:i:s', strtotime($values['published_at']));
 		foreach ($values as $field => $value) {
 			if (!in_array($field, $allowed, true)) {
-				throw new InvalidArgumentException("Unknown field '$field'. Fields come from the templates; known fields: ".implode(', ', $allowed));
+				if ($info && array_key_exists($field, $info['fields'])) {
+					throw new InvalidArgumentException("'$field' can't be changed here: the {$info['model']} model sets it");
+				}
+				throw new InvalidArgumentException("Unknown field '$field'. ".($info ? "The {$info['model']} model declares" : 'Fields come from the templates;')." known fields: ".implode(', ', $allowed));
+			}
+			// lists (line items, say) are stored as JSON
+			if ($info && in_array($field, $info['lists'])) {
+				if (is_string($value)) $value = json_decode($value, true);
+				if (!is_array($value)) throw new InvalidArgumentException("'$field' is a list");
+				$values[$field] = json_encode(array_values($value), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 			}
 		}
 		if ($id) {
@@ -210,6 +246,7 @@ class cms_store {
 			$bean = R::dispense($type);
 			$bean->enabled = '1';
 		}
+		$before = $id ? self::export_item($bean) : null;
 		foreach ($values as $field => $value) {
 			$bean->$field = self::clean_value($value);
 		}
@@ -220,21 +257,52 @@ class cms_store {
 			$bean->slug = self::unique_slug($type, self::slug_source($bean->export()), (int)$bean->id);
 		}
 		if ($bean->published_at === null) $bean->published_at = '';
+		if ($info && !$id) {
+			$bean->created_at = R::isoDateTime();
+			// a record remembers who made it, so they can read it later (a
+			// booking staff type in for a caller belongs to nobody)
+			if ($info['owner'] && !isset($values['owner']) && $who !== 'editor') {
+				$user = authentication::user();
+				$bean->owner = $user ? (int)$user['id'] : 0;
+			}
+			if ($info['owner'] && $bean->owner === null) $bean->owner = 0;
+			foreach ($info['fields'] as $field => $default) {
+				if ($bean->$field === null) $bean->$field = is_array($default) ? '[]' : (string)$default;
+			}
+		}
+		if ($info) {
+			$after = cms_records::decode($info, $bean->export());
+			cms_records::check($info, $after, $before ? cms_records::decode($info, $before) : null);
+		}
 		$bean->updated_at = R::isoDateTime();
 		R::store($bean);
 		util::content_changed();
 		$item = self::export_item($bean);
-		event::dispatch('cms.item_saved', array('collection' => self::collection_of($type), 'created' => !$id, 'item' => $item));
-		return $item;
+		if ($info) $item = cms_records::decode($info, $item);
+		cms_records::dispatch('cms.item_saved', array('collection' => self::collection_of($type), 'created' => !$id, 'item' => $item));
+		return $info && $who !== 'model' ? cms_records::shown($info, $item) : $item;
 	}
 
 	static function delete_item($type, $id) {
+		$info = cms_records::for_table($type);
+		if ($info) {
+			return cms_records::transaction(function () use ($type, $id) { return cms_store::remove_item($type, $id); });
+		}
+		return self::remove_item($type, $id);
+	}
+
+	static function remove_item($type, $id) {
 		$bean = self::table_exists($type) ? R::findOne($type, ' id = ? ', array((int)$id)) : null;
 		if (!$bean) return false;
 		$item = self::export_item($bean);
+		$info = cms_records::for_table($type);
+		if ($info) {
+			$item = cms_records::decode($info, $item);
+			cms_records::check($info, null, $item);
+		}
 		R::trash($bean);
 		util::content_changed();
-		event::dispatch('cms.item_deleted', array('collection' => self::collection_of($type), 'item' => $item));
+		cms_records::dispatch('cms.item_deleted', array('collection' => self::collection_of($type), 'item' => $item));
 		return true;
 	}
 
