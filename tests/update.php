@@ -41,8 +41,10 @@ $site = "$tmp/site";
 test('raster new', function () use ($repo, $rel200, $site) {
 	list($code, $out) = raster($repo, array('new', $rel200));
 	same(0, $code, $out);
-	has($out, 'Created a Raster 2.0.0 site');
-	// the "2.0.0" release ships a file that 2.1.0 drops
+	has($out, 'Created a Raster '.trim(file_get_contents("$repo/system/VERSION")).' site');
+	// the releases here are made up: "2.0.0" is this copy of Raster, labelled
+	// so, and ships a file that "2.1.0" drops
+	file_put_contents("$rel200/system/VERSION", "2.0.0\n");
 	file_put_contents("$rel200/system/obsolete.txt", "gone in 2.1.0\n");
 	list($code, $out) = raster($rel200, array('new', $site));
 	same(0, $code, $out);

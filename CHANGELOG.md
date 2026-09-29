@@ -3,7 +3,22 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
-## Unreleased
+## 2.1.0
+
+**What sites need to do** after `php bin/raster update`:
+
+- Run `php bin/raster doctor`. If it reports an `.htaccess` from an older
+  Raster, replace it: `php bin/raster deploy --config=apache > .htaccess`
+  (or `--config=nginx|caddy` for those servers).
+- Public files in a folder named `config/`, `models/`, `data/` or `i18n/`
+  anywhere in the site are now refused (403). Move them to `media/` or the
+  theme folder.
+- Code that called a named query that doesn't exist got `false`; it now
+  throws. `php bin/raster lint` finds those calls.
+- Anything that used the old editor endpoints (`edit_variable`, `edit_data`,
+  …) or posted `raster_action` needs the new editor or MCP instead.
+- Records are new and optional: nothing changes until a model declares a
+  type. In production, `php bin/raster schema --apply` then creates its table.
 
 - **Records: types a model declares, stored and shown by the CMS.** A model's
   `static function types()` declares bookings, orders, applications: their
@@ -20,21 +35,23 @@ file changes for you; `php bin/raster doctor` shows what is left.
   `cms_records::transaction()` makes several writes happen together or not at
   all, with events after the commit; list fields (line items) are stored as
   JSON and render as nested rows. Actions are buttons in the editor for the
-  roles allowed, `run_action` over MCP. `php bin/raster make model <name>
+  roles allowed, `run_action` over MCP. `owner=me` lists the logged in
+  person's own records (an account page). `php bin/raster make model <name>
   --from=<view>` writes a model for a form's records. Nothing changes for
   existing sites. See the Records section of AGENTS.md.
 - The editor's item handle shows a record type's actions instead of Duplicate
   and Schedule, and never makes a readonly field editable.
 - **An example shop** in `shop/` (Blue Hour Ceramics): public products,
   private orders with an owner, a cart in the session, a checkout that takes
-  stock in a transaction so the last piece can't sell twice, Ship, Cancel and
-  Refund actions, and payments through Stripe Checkout or a pretend provider,
-  with a signed webhook at `/api/order/webhook`. It is an example to copy, not
+  stock in a transaction so the last piece can't sell twice, and Ship, Mark
+  paid, Cancel and Refund actions. Buyers pay the courier on delivery by
+  default; cards go through Stripe Checkout (or a pretend provider in
+  development), with a signed webhook at `/api/order/webhook`. It is an example to copy, not
   part of the framework. `php tests/shop.php` runs it end to end.
-- The demo café's bookings are records: `/staff` lists them for staff to
-  confirm or cancel, a day holds 20 guests, and members see their own bookings
-  on `/account`.
-
+- The demo café's bookings are records: `/staff` groups them into to
+  confirm, confirmed and cancelled, `/reservation` lists them all with links
+  by evening and status, a day holds 20 guests, and members see their own
+  bookings on `/account`.
 - **Tooling an agent can afford.** Everything an agent needs to work on a
   Raster site is now an MCP tool, so it is asked and answered in one
   long-lived process instead of starting PHP again per question: `describe`
