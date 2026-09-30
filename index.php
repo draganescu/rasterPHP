@@ -12,6 +12,13 @@
 // system/private_paths.php, which .htaccess and `raster deploy` also come from.
 if (PHP_SAPI === 'cli-server') {
 	$path = preg_replace('#/+#', '/', rawurldecode((string)parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH)));
+	// a site whose RASTER_URL has a path (http://localhost:8000/shop/) is
+	// asked for under it; its files are still in this folder
+	$folder = rtrim((string)parse_url((string)getenv('RASTER_URL'), PHP_URL_PATH), '/');
+	$under_folder = $folder !== '' && strpos($path, $folder.'/') === 0;
+	if ($under_folder) {
+		$path = substr($path, strlen($folder));
+	}
 	// the same rules as .htaccess and the configs `raster deploy` prints, from
 	// the one list in system/private_paths.php
 	require_once __DIR__.'/system/private_paths.php';
@@ -20,7 +27,14 @@ if (PHP_SAPI === 'cli-server') {
 		exit('Forbidden');
 	}
 	if ($path !== '/' && is_file(__DIR__.$path) && strpos(realpath(__DIR__.$path), __DIR__.'/') === 0) {
-		return false;
+		if (!$under_folder) return false;
+		// PHP's server would look for the file under the folder, so it is sent from here
+		$types = array('css' => 'text/css; charset=UTF-8', 'js' => 'text/javascript; charset=UTF-8', 'json' => 'application/json', 'svg' => 'image/svg+xml', 'png' => 'image/png', 'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'gif' => 'image/gif', 'webp' => 'image/webp', 'avif' => 'image/avif', 'ico' => 'image/x-icon', 'woff' => 'font/woff', 'woff2' => 'font/woff2', 'ttf' => 'font/ttf', 'otf' => 'font/otf', 'txt' => 'text/plain; charset=UTF-8', 'html' => 'text/html; charset=UTF-8', 'xml' => 'application/xml', 'pdf' => 'application/pdf', 'mp4' => 'video/mp4', 'webm' => 'video/webm', 'mp3' => 'audio/mpeg');
+		$ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+		header('Content-Type: '.(isset($types[$ext]) ? $types[$ext] : 'application/octet-stream'));
+		header('Content-Length: '.filesize(__DIR__.$path));
+		readfile(__DIR__.$path);
+		exit;
 	}
 }
 

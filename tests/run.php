@@ -464,6 +464,26 @@ test('page cache in production', function () use ($root, $db) {
 	}
 });
 
+test('a site under a path: RASTER_URL with a folder', function () use ($root, $db) {
+	$port = 8965 + getmypid() % 100;
+	$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_URL' => "http://127.0.0.1:$port/preview/abc/", 'PATH' => getenv('PATH')));
+	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
+	try {
+		$base = "http://127.0.0.1:$port/preview/abc";
+		list($status, $body) = http('GET', "$base/about");
+		same(200, $status, 'page under the folder');
+		check(strpos($body, "href=\"$base/about\"") !== false || strpos($body, "$base/") !== false, 'links carry the folder');
+		check(!preg_match('#(href|src|action)=["\']http://127\.0\.0\.1:'.$port.'/(?!preview/abc/)#', $body), 'no link escapes the folder');
+		list($status, , $headers) = http('GET', "$base/application/views/default/style.css");
+		same(200, $status, 'static file under the folder');
+		check((bool)preg_grep('#^Content-Type: text/css#i', $headers), 'css type');
+		same(403, http('GET', "$base/application/config/the_app.php")[0], 'private paths still refused');
+		same(403, http('GET', "$base/system/boot.php")[0]);
+	} finally {
+		proc_terminate($server);
+	}
+});
+
 // ## Regressions from review
 
 test('forged Host header never gets a reset link', function () use ($base, $maildir) {

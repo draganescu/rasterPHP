@@ -38,6 +38,18 @@ in `api_system_models`.
   3. Remove the `api_open` line.
 - `api_open` stops working in 2.2.0.
 
+## Unreleased
+
+Nothing for sites to do.
+
+- **A site can live under a path.** When `RASTER_URL` (or `site_url`) has a
+  path, e.g. `https://example.com/shop/`, that path is where the site is:
+  requests under it are routed, and links, the `<base>` and emails carry it.
+  This works with `php -S` and `raster serve` too (PHP's built-in server
+  can't report the folder), including static files under the path, and
+  behind a proxy that forwards `/shop/...` unchanged. Private paths are
+  refused the same way under the folder.
+
 ## 2.1.0
 
 **What sites need to do** after `php bin/raster update`:

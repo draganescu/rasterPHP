@@ -617,7 +617,9 @@ use `'model.method'`: `method(true)` returns
   `config::set('site_url')`). Links in pages and emails then never depend on
   the visitor's `Host` header. In production, emails with links (password
   reset, newsletter confirmation) are not sent without it, and
-  `raster send` needs it.
+  `raster send` needs it. With a path (`https://example.com/shop/`) the site
+  lives under it: URLs are matched and links built under `/shop/`, also with
+  `raster serve` and behind a proxy that forwards the path unchanged.
 - **Database file:** `RASTER_DB=/path.sqlite` points at another database
   file.
 - **What the server must never serve.** A Raster site is one folder, and most
