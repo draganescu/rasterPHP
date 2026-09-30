@@ -1,6 +1,6 @@
 # Models
 
-A **model** is a plain PHP class that answers the questions a template asks. This page covers how to write one, what to return, the helpers you'll use most, and how models are also available as a JSON API.
+A **model** is a plain PHP class that answers the questions a template asks. This page covers how to write one, what to return, the helpers you'll use most, and how a model offers methods as a JSON API.
 
 ## Where models live
 
@@ -161,33 +161,43 @@ Since render blocks run before print blocks, a `print` method can always read wh
 
 To render a **whole other view** into a string, use `controller::render_view('partials/card', array('title' => 'Hi'))`. Values are available in that view as `print.self.<name>`. The emails Raster sends are made this way.
 
-## Every model is also a JSON API
+## A model's JSON API
 
-Every public method of every model in `application/models/` can be called over HTTP:
+A model can offer some of its methods over HTTP, as JSON:
 
 ```
 GET /api/<model>/<method>/<arg1>/<arg2>
 ```
 
-For example `/api/shop/latest/3/lamps` calls `shop::latest('3', 'lamps')` and returns the result as JSON. A method that returns `false` sends an empty response.
+It lists them in a static `api()` method, each with the least role that may call it:
 
-What is **not** reachable:
+```php
+class shop {
+    static function api() {
+        return array(
+            'latest'  => 'visitor',  // anyone
+            'orders'  => 'editor',   // staff only
+        );
+    }
+    function latest($limit = 3, $category = '') { … }
+    function orders() { … }
+}
+```
+
+`/api/shop/latest/3/lamps` then calls `shop::latest('3', 'lamps')` and returns the result as JSON. A method that returns `false` sends an empty response. The roles are `visitor`, `member`, `editor` and `admin`. Someone who isn't logged in gets `401` for a method that needs a role, and someone logged in without the role gets `403`.
+
+**Anything a model doesn't list answers `404`**, even when it's public: the methods templates call, form handlers, event listeners. A model with no `api()` offers nothing. So a staff-only list that a template renders on a protected page stays on that page; if you also want it as JSON, list it for `editor`.
+
+What is never reachable:
 
 - methods that are static, not public, or whose name starts with `_`
 - the bundled models, except `cms` (whose editor endpoints check for an editor and a security token). Allow others with `config::set('api_system_models')->to(array('cms', 'feed'))`.
 
 Posts to `/api` pass the same cross-site check as forms. When the visitor is logged in, the post must also include the session token as a `csrf` field, as forms do; your page's scripts can read it from a hidden `csrf` input of any post form on the page. Posts to `/api` don't count as form submissions, though: `validation::get()->submitted()` is `false`, so form handlers written as shown in [Forms and validation](Forms-and-Validation) do nothing over `/api`.
 
-**This matters for security.** If a public method changes data, anyone can call it. Put such methods behind a check:
+A method you list for visitors can be called by anyone, so one that changes data still checks what it's given (the shop's payment webhook verifies the provider's signature, for example). `php bin/raster lint` reports an `api()` that names a method the model doesn't have, one `/api` can't call, or a role that doesn't exist. `php bin/raster vocabulary` shows what each model offers.
 
-```php
-function delete_order($id) {
-    if (!authentication::can('admin')) return false;
-    …
-}
-```
-
-or make internal helpers `protected`, `static`, or start their name with `_`.
+**Sites made before Raster 2.1.1.** Until then every public method of every model was reachable, by anyone. `raster update` keeps that for sites that had models without `api()`, by adding `config::set('api_open')->to(true)` to `config/the_app.php`: models that don't list their methods then answer as before, and models that do keep their list. `raster doctor` warns while it's there. List what each model offers, then remove the line; it stops working in 2.2.0.
 
 ## Overriding a bundled model
 

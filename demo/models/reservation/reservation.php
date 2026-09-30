@@ -54,6 +54,18 @@ class reservation
 		return cms_records::update('reservation', $booking['id'], array('status' => 'cancelled'));
 	}
 
+	// /api/reservation/day/<date>: one evening's bookings as JSON, for staff
+	// only. Nothing else in this model is reachable over /api: not the form
+	// handlers, not the listener below.
+	static function api() {
+		return array('day' => 'editor');
+	}
+
+	function day($date = '') {
+		if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$date)) return array();
+		return cms_records::find('reservation', array('date' => $date));
+	}
+
 	// saving a new booking tells the staff and the rest of the site
 	static function listens() {
 		return array('cms.item_saved' => 'booked');

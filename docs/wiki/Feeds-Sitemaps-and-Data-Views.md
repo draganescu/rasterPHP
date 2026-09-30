@@ -93,7 +93,7 @@ In a `.json` view, the rows of a render block are separated by commas, so a bloc
 
 Printed values are escaped as the inside of a JSON string, so always put them between quotes. This is how the demo café builds a [JSON Feed](https://jsonfeed.org).
 
-If you just need a model's data as JSON, you may not need a view at all: every model method is already available at `/api/<model>/<method>`; see [Models](Models#every-model-is-also-a-json-api).
+If you just need a model's data as JSON, you may not need a view at all: a model can offer its methods at `/api/<model>/<method>` by listing them in `api()`; see [Models](Models#a-models-json-api).
 
 ## Plain text
 

@@ -42,16 +42,9 @@ return util::e($name);
 
 Values in feeds, JSON views, attributes set with `@`/`+`, and `print.self` are escaped for you. `print.session` isn't.
 
-**Protect methods that change data.** Every public method of every model in `application/models/` is callable at `/api/<model>/<method>`. A method that writes, deletes or sends something must check who's asking:
+**Offer over `/api` only what you mean to.** A model's methods are reachable at `/api/<model>/<method>` only when it lists them in `static function api()`, each with the least role that may call it (`visitor`, `member`, `editor`, `admin`). Everything else answers 404. A method listed for visitors can be called by anyone, so if it writes, deletes or sends something it checks what it's given. See [Models](Models#a-models-json-api).
 
-```php
-function export_orders() {
-    if (!authentication::can('admin')) return false;
-    …
-}
-```
-
-or be `protected`, `static`, or start with `_`. See [Models](Models#every-model-is-also-a-json-api).
+Sites made before Raster 2.1.1 may still have `config::set('api_open')->to(true)` in `config/the_app.php`, which keeps every public method of models without `api()` reachable by anyone. `raster doctor` warns about it; list what your models offer and remove it.
 
 **Protect private pages on the server side.** `print.if.is_editor` only hides markup. To keep a whole page private, list it in `config::set('protected')`. See [Accounts and roles](Accounts-and-Roles#protected-pages).
 

@@ -4,6 +4,13 @@
 // that is already in the view.
 class site {
 
+	// Methods offered as JSON at /api/site/<method>, with the least role that
+	// may call each one (visitor, member, editor, admin). Nothing that isn't
+	// listed is reachable there.
+	static function api() {
+		return array('year' => 'visitor');
+	}
+
 	function year() {
 		return date('Y');
 	}

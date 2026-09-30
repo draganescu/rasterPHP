@@ -282,7 +282,7 @@
   "replace": ""
  },
  {
-  "name": "C40-executed-uses-class-name",
+  "name": "C48-executed-uses-class-name",
   "file": "system/controller.php",
   "search": "$model = preg_replace('/^the_/', '', get_class($object));",
   "replace": "$model = get_class($object);"
@@ -496,5 +496,23 @@
   "file": "system/controller.php",
   "search": "\t\t$this->fix_links();\n\t\traster_cache::store($template->output);",
   "replace": "\t\traster_cache::store($template->output);"
+ },
+ {
+  "name": "C48-unlisted-methods-reachable",
+  "file": "system/models/api/api.php",
+  "search": "if (!isset($offered[$method])) $this->fail(404, 'unknown method');",
+  "replace": "if (!isset($offered[$method])) $offered[$method] = 'visitor';"
+ },
+ {
+  "name": "C48-roles-ignored",
+  "file": "system/models/api/api.php",
+  "search": "return $role === 'visitor' || authentication::can($role);",
+  "replace": "return true;"
+ },
+ {
+  "name": "C48-the_-override-addressed-directly",
+  "file": "system/models/api/api.php",
+  "search": "|| strpos($model, 'the_') === 0) $this->fail(404, 'unknown model');",
+  "replace": ") $this->fail(404, 'unknown model');"
  }
 ]

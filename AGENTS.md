@@ -273,11 +273,29 @@ template called it", not "it happened": `executed_authentication_register`
 runs on every view of the sign-up page, so listen to
 `authentication.registered` instead.
 
-Every public method of an application model is also JSON at
-`/api/<model>/<method>/<arg>/…`. Of the system models, only `cms` is
-reachable. Posts there pass the same site check as forms, but they are not
-form submissions: `validation::get()->submitted()` is false, so form models
-do nothing over `/api`. Keep anything else that changes data behind a check.
+A model offers methods as JSON at `/api/<model>/<method>/<arg>/…` by listing
+them, each with the least role that may call it (`visitor`, `member`,
+`editor`, `admin`):
+
+```php
+static function api() {
+    return array('hours' => 'visitor', 'day' => 'editor');
+}
+```
+
+Anything not listed answers 404, public or not: the methods templates call,
+form handlers, listeners. A model without `api()` offers nothing. A role the
+caller lacks answers 401 (not logged in) or 403. Static methods are never
+reachable, even listed. Of the system models, only `cms` is reachable, and
+an override (`the_feed`) only by the name it overrides. Posts
+there pass the same site check as forms, but they are not form submissions:
+`validation::get()->submitted()` is false, so form models do nothing over
+`/api`. A method listed for visitors can be called by anyone: if it changes
+data, it checks what it is given. `lint` reports an `api()` naming a method
+that doesn't exist or can't be called, or a role that doesn't exist, and
+`vocabulary` shows what each model offers. Sites made before 2.1.1 may have
+config `api_open`, which keeps every public method of models without `api()`
+reachable, as before; `doctor` warns, and 2.2.0 removes it.
 
 The database is RedBeanPHP (`R::find`, `R::dispense`, `R::store`), or
 `database::instance()->query('… WHERE a = ?', array($a))` with bound
@@ -431,8 +449,8 @@ class reservation {
 - **Hooks are static** — `types()`, `check()`, actions — so
   `/api/<model>/<method>` can never call them. `lint` reports a `check()` that
   is not static and an action without its method. (Event listeners named in
-  `listens()` are ordinary public methods: return early when the payload is
-  not an array, since /api can call them with none.)
+  `listens()` are ordinary public methods; /api reaches them only if the
+  model lists them in `api()`, which it shouldn't.)
 - **Privacy.** A type is private unless it says `'public' => true`: visitors
   get no rows from `render.cms.<type>`, item URLs are 404, and `feed.items`,
   the sitemap and a static export leave it out. Editors see every record;
@@ -497,11 +515,11 @@ class reservation {
   checkout that takes stock in a transaction, actions to ship, cancel and
   refund, and a payment provider's webhook. See `shop/README.md`.
 - **Calls from other sites.** A payment provider's webhook is a server posting
-  to `/api/<model>/<method>`: it sends no browser headers and no session, so
-  the cross-site check lets it through. The method reads the body with
-  `file_get_contents('php://input')`, verifies the provider's signature itself,
-  sets `http_response_code()` when it refuses, and returns what to answer
-  (as JSON).
+  to `/api/<model>/<method>`, listed in `api()` for `visitor`: it sends no
+  browser headers and no session, so the cross-site check lets it through.
+  The method reads the body with `file_get_contents('php://input')`,
+  verifies the provider's signature itself, sets `http_response_code()` when
+  it refuses, and returns what to answer (as JSON).
 
 ## Bundled models
 
@@ -764,6 +782,7 @@ Set in `config/the_app.php` with `config::set('name')->to(value)`.
 | `mcp_token` | none | same as `RASTER_MCP_TOKEN` |
 | `mcp_write_views` | false | lets MCP over HTTP write templates (`write_view`); over stdio it always can |
 | `api_system_models` | `cms` | system models reachable at `/api` |
+| `api_open` | false | sites made before 2.1.1: models without `api()` offer every public method at `/api`, to anyone, as before. `doctor` warns; removed in 2.2.0 |
 | `allow_deprecated` | none | `array('<id>' => true or path pattern(s))`: uses of deprecated features this site keeps on purpose, so `doctor` counts them apart instead of warning |
 
 Environment variables: `RASTER_ENV`, `RASTER_URL`, `RASTER_DB`,

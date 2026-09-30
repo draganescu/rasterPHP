@@ -34,7 +34,7 @@ To also take cards, set `shop_payments` in `config/the_app.php`, or use environm
 - **test** (development only): checkout sends the buyer to `/pay/test`, a pretend provider page. Pressing Pay signs the same `checkout.session.completed` event Stripe would send and hands it to the code the webhook runs. Anywhere other than development it's off, and so is the example's public webhook secret. Checkout then refuses before touching the shelf.
 - **stripe**: set `SHOP_PAYMENTS=stripe`, `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`. Checkout creates a Stripe Checkout Session for cards and sends the buyer there. In Stripe's dashboard, add a webhook for `checkout.session.completed` pointing at `https://<your site>/api/order/webhook`.
 
-The webhook is an ordinary public model method reached through `/api`. A server posting has no browser headers and no session, so Raster's cross-site check lets it through. The method does these checks itself:
+The webhook is an ordinary public model method reached through `/api`, the only one `order::api()` offers. A server posting has no browser headers and no session, so Raster's cross-site check lets it through. The method does these checks itself:
 
 - It verifies the provider's signature. This is Stripe's scheme: an HMAC of the timestamp and the body, with five minutes of leeway.
 - It only accepts the checkout session this shop opened for the order.

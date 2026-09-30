@@ -133,6 +133,7 @@ Set with `config::set('name')->to(value)` in `config/the_app.php`.
 | `mcp_token` | none | turns on MCP over HTTP (same as `RASTER_MCP_TOKEN`) |
 | `mcp_write_views` | `false` | lets MCP over HTTP rewrite templates |
 | `api_system_models` | `cms` | bundled models reachable at `/api` |
+| `api_open` | `false` | for sites made before 2.1.1: models without `api()` offer every public method at `/api`, to anyone. `doctor` warns; removed in 2.2.0 |
 | `api_blocked` | `mcp`, `api` | models never reachable at `/api`. Setting it replaces the list, so keep `mcp` and `api` in it: `array('mcp', 'api', 'billing')` |
 | `allow_deprecated` | none | deprecated features this site keeps on purpose, so `doctor` doesn't warn |
 

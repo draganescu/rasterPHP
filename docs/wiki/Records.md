@@ -53,7 +53,7 @@ What each part of the type means:
 | `html` | Fields printed as HTML. Everything else prints as plain text, because visitors typed it. |
 | `actions` | Buttons for staff, each with the least role that may press it. |
 
-The hooks (`types`, `check`, the actions) are `static`. That keeps them away from `/api/<model>/<method>`, which can call any ordinary public method.
+The hooks (`types`, `check`, the actions) are `static`. That keeps them away from `/api/<model>/<method>`, which never calls a static method, even one a model lists in `api()`.
 
 ## The form
 

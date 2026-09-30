@@ -227,6 +227,11 @@ switch ($command) {
 			echo $paint($name, '1').($model['bundled'] ? ' (bundled)' : ' ('.$model['file'].')').($model['any_method'] ? ' — __call: any method' : '')."\n";
 			foreach ($model['methods'] as $method => $shape) echo '    '.$shape['reads']."\n";
 			if ($model['queries']) echo '    sql/: '.implode(', ', $model['queries'])."\n";
+			if (isset($model['api'])) {
+				$api = (array)$model['api'];
+				if ($model['api'] === 'open') echo "    /api: every public method, to anyone (config api_open)\n";
+				elseif ($api) echo '    /api: '.implode(', ', array_map(function ($m, $r) { return "$m ($r)"; }, array_keys($api), $api))."\n";
+			}
 		}
 		if ($vocabulary['shared_queries']) echo "\n".$paint('models/sql.php', '1').': '.implode(', ', $vocabulary['shared_queries'])."\n";
 		echo "\n".$paint('handled by the engine', '1').': '.implode(', ', $vocabulary['engine_models'])."\n";

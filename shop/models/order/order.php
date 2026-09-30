@@ -290,6 +290,12 @@ class order
 
 	// ##Emails
 
+	// the one method reachable over /api: the provider's webhook, which
+	// checks the signature itself. The staff pages are views, protected by path.
+	static function api() {
+		return array('webhook' => 'visitor');
+	}
+
 	static function listens() {
 		return array('order.placed' => 'placed_mail', 'order.paid' => 'paid_mail', 'order.shipped' => 'shipped_mail', 'order.refunded_late' => 'late_mail');
 	}

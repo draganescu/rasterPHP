@@ -3,6 +3,11 @@
 // exist so the lab page (views/cafe/lab.html) can show every engine feature.
 class cafe
 {
+	// what /api/cafe/<method> answers, and for whom; nothing else here is reachable there
+	static function api() {
+		return array('hours' => 'visitor', 'category_count' => 'visitor');
+	}
+
 	// ##Pages
 
 	// opening hours: day, time, state (open or closed)

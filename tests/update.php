@@ -221,6 +221,41 @@ test('a new site can keep code out of the web', function () use ($site) {
 	has(raster($site, array('doctor'))[1], '.htaccess is missing');
 });
 
+test('2.1.1 closes /api, and keeps it open for older sites until they list', function () use ($repo, $tmp) {
+	$site = "$tmp/site211";
+	same(0, raster($repo, array('new', $site))[0]);
+	same(array(), array_values(array_filter(explode("\n", raster($site, array('upgrade', '--dry-run'))[1]), function ($l) { return strpos($l, 'api-open') !== false; })), 'a new site starts closed');
+	lacks(file_get_contents("$site/application/config/the_app.php"), 'api_open');
+	// a site made before 2.1.1, with a model that lists nothing
+	file_put_contents("$site/application/config/raster-version", "2.1.0\n");
+	mkdir("$site/application/models/orders");
+	file_put_contents("$site/application/models/orders/orders.php", "<?php\nclass orders { function all() { return array(); } }\n");
+	list($code, $out) = raster($site, array('upgrade'));
+	same(0, $code, $out);
+	has($out, 'api-open');
+	has(file_get_contents("$site/application/config/the_app.php"), "config::set('api_open')->to(true);");
+	same("2.1.1\n", file_get_contents("$site/application/config/raster-version"));
+	has(raster($site, array('doctor'))[1], 'api_open keeps every public method');
+	// once the model lists what it offers and the line is gone, doctor is quiet
+	file_put_contents("$site/application/models/orders/orders.php", "<?php\nclass orders {\n\tstatic function api() { return array('all' => 'editor'); }\n\tfunction all() { return array(); }\n}\n");
+	$config = "$site/application/config/the_app.php";
+	file_put_contents($config, preg_replace("/\n\/\/ Added by `raster upgrade` for Raster 2\.1\.1.*$/s", "\n", file_get_contents($config)));
+	lacks(raster($site, array('doctor'))[1], 'api_open');
+	// a config that ends with a closing tag still gets a working line
+	file_put_contents("$site/application/config/raster-version", "2.1.0\n");
+	file_put_contents("$site/application/models/orders/orders.php", "<?php\nclass orders { function all() { return array(); } }\n");
+	file_put_contents($config, rtrim(file_get_contents($config))."\n?>\n");
+	same(0, raster($site, array('upgrade'))[0]);
+	lacks(file_get_contents($config), '?>');
+	same(0, raster($site, array('render', '/'))[0], 'the page still renders');
+	lacks(raster($site, array('render', '/'))[1], 'Added by `raster upgrade`', 'and prints nothing from the config');
+	file_put_contents($config, preg_replace("/\n\/\/ Added by `raster upgrade` for Raster 2\.1\.1.*$/s", "\n", file_get_contents($config)));
+	file_put_contents("$site/application/models/orders/orders.php", "<?php\nclass orders {\n\tstatic function api() { return array('all' => 'editor'); }\n\tfunction all() { return array(); }\n}\n");
+	// an older site whose models already list theirs needs nothing
+	file_put_contents("$site/application/config/raster-version", "2.1.0\n");
+	lacks(raster($site, array('upgrade'))[1], 'api-open');
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";
 exit($failed ? 1 : 0);
