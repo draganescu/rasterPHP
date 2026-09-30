@@ -30,7 +30,7 @@ class cms_records {
 	// names a type declaration understands
 	static $keys = array('fields', 'public', 'owner', 'create', 'readonly', 'hidden', 'actions', 'html');
 	// the model methods with a meaning of their own, never actions
-	static $hooks = array('types', 'check', 'schema', 'listens');
+	static $hooks = array('types', 'check', 'schema', 'listens', 'api');
 	// events held back until the transaction they happened in commits
 	static $depth = 0;
 	static $queued = array();

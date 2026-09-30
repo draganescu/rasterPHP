@@ -19,7 +19,7 @@ Recommendations for building and running sites with Raster, collected from how t
 - **Return `false` when you have nothing to say**, so the template's text shows instead of a gap.
 - **Escape what visitors typed** with `util::e()` before returning it to an HTML view.
 - **Keep models about data, not wording.** If you catch yourself returning a sentence, return a flag or a value and let the template hold the words.
-- **Remember `/api`.** Every public method is reachable over HTTP. Check permissions in methods that change anything, and make internal helpers `protected`.
+- **Offer over `/api` only what a script needs.** List those methods in `static function api()` with the least role that may call them; everything else stays off `/api`.
 - **Use events for side effects.** When a booking should also subscribe someone to the newsletter, dispatch `reservation.booked` and let another model listen, rather than calling across models.
 - **Declare your tables** with a static `schema()` method so `schema --apply` creates them in production.
 - **Keep SQL in `.sql` files** next to the model when it's more than a line, and always use bound parameters.

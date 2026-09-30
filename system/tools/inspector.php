@@ -405,13 +405,16 @@ class raster_inspector {
 					: array('reads' => $method.'(…)', 'needs' => 0, 'takes' => null);
 			}
 			ksort($methods);
+			$bundled = strpos($info['file'], BASE) === 0;
 			$models[$name] = array(
 				'file' => self::short($info['file']),
-				'bundled' => strpos($info['file'], BASE) === 0,
+				'bundled' => $bundled,
 				'any_method' => !empty($info['magic']),
 				'queries' => $this->model_queries($name),
 				'methods' => $methods,
 			);
+			// what /api/<model>/<method> answers, and for whom
+			if (!$bundled) $models[$name]['api'] = $this->model_api($name);
 		}
 		ksort($models);
 		$listeners = array();
@@ -430,6 +433,22 @@ class raster_inspector {
 				'collections' => $reserved['reserved_collections'],
 			),
 		);
+	}
+
+	// What an application model offers over /api: array(method => role), or
+	// 'open' when config api_open leaves every public method reachable.
+	function model_api($model) {
+		$info = $this->model_info($model);
+		if (!$info) return array();
+		$class = strpos(basename(dirname($info['file'])), 'the_') === 0 ? 'the_'.$model : $model;
+		try {
+			if (!class_exists($class, false)) require_once $info['file'];
+			if (!class_exists($class, false)) return array();
+			$offered = api::offered($class);
+		} catch (Throwable $e) {
+			return array();
+		}
+		return $offered === null ? 'open' : $offered;
 	}
 
 	// the named queries a model can call as methods: its own sql/ folder
@@ -1021,7 +1040,48 @@ class raster_inspector {
 				$problems = array_merge($problems, $this->lint_file($view, $theme));
 			}
 		}
-		return array_merge($problems, $this->lint_routes(), $this->lint_events(), $this->lint_queries(), $this->lint_types());
+		return array_merge($problems, $this->lint_routes(), $this->lint_events(), $this->lint_queries(), $this->lint_types(), $this->lint_api());
+	}
+
+	// What models offer over /api (static function api()): every method
+	// listed must be a public method that isn't static, with a known role.
+	function lint_api() {
+		$problems = array();
+		$models_path = config::get('models_path', 'models');
+		foreach (glob(APPBASE.$models_path.'/*', GLOB_ONLYDIR) ?: array() as $folder) {
+			$class = basename($folder);
+			$file = "$folder/$class.php";
+			if (!is_file($file) || strpos(file_get_contents($file), 'function api(') === false) continue;
+			try {
+				if (!class_exists($class, false)) require_once $file;
+				if (!class_exists($class, false) || !method_exists($class, 'api')) continue;
+				$declaration = new ReflectionMethod($class, 'api');
+				$at = array('file' => self::short($file), 'line' => $declaration->getStartLine(), 'column' => 1);
+				if (!$declaration->isStatic()) {
+					$problems[] = $at + array('severity' => 'error', 'message' => "$class::api() must be static: as a public method it is itself reachable at /api, and it offers nothing");
+					continue;
+				}
+				$listed = (array)call_user_func(array($class, 'api'));
+			} catch (Throwable $e) {
+				$problems[] = array('file' => self::short($file), 'line' => 1, 'column' => 1, 'severity' => 'error', 'message' => "$class::api(): ".$e->getMessage());
+				continue;
+			}
+			foreach ($listed as $method => $role) {
+				if (is_int($method)) { $method = $role; $role = 'visitor'; }
+				if (!is_string($method) || !method_exists($class, $method)) {
+					$problems[] = $at + array('severity' => 'error', 'message' => "$class::api() offers '$method', but $class has no such method");
+					continue;
+				}
+				$m = new ReflectionMethod($class, $method);
+				if (!$m->isPublic() || $m->isStatic()) {
+					$problems[] = $at + array('severity' => 'error', 'message' => "$class::api() offers '$method', which /api can't call: it must be public and not static");
+				}
+				if (!in_array($role, api::$roles, true)) {
+					$problems[] = $at + array('severity' => 'error', 'message' => "$class::api() gives '$method' the role '".(is_scalar($role) ? $role : gettype($role))."'; the roles are ".implode(', ', api::$roles).". Until it is one of them, nobody can call it");
+				}
+			}
+		}
+		return $problems;
 	}
 
 	// Types models declare: the hooks must be static (so /api can't reach

@@ -3,6 +3,40 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.1.1
+
+**Security: `/api` answers only what a model lists.** Until now every public
+method of every application model answered at `/api/<model>/<method>`, to
+anyone. That included methods written for templates on protected pages: a
+staff page's `unpaid_orders()` was protected at `/orders` and readable by
+any visitor at `/api/…/unpaid_orders`, and `cms_records::find()` (which is
+for the model's own code) returns private records to whoever calls it. Now a
+model lists what it offers, with the least role that may call each method:
+
+```php
+static function api() {
+    return array('hours' => 'visitor', 'webhook' => 'visitor', 'day' => 'editor');
+}
+```
+
+Anything not listed answers 404. A role the caller lacks answers 401 (not
+logged in) or 403. `lint` checks `api()`, and `vocabulary` shows what each
+model offers. Overrides of bundled models (`the_feed`) are no longer
+reachable unless the model is in `api_system_models`.
+
+**What sites need to do** after `php bin/raster update`:
+
+- If any of your models has no `api()`, the upgrade adds
+  `config::set('api_open')->to(true)` to `config/the_app.php`, so `/api`
+  keeps answering as before and nothing a script depends on breaks. That
+  also keeps the hole open. `php bin/raster doctor` warns about it until you
+  close it:
+  1. Find what calls your `/api` (page scripts, webhooks, other servers).
+  2. List those methods in each model's `static function api()`, with the
+     least role that may call them.
+  3. Remove the `api_open` line.
+- `api_open` stops working in 2.2.0.
+
 ## 2.1.0
 
 **What sites need to do** after `php bin/raster update`:

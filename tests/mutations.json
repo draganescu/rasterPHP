@@ -496,5 +496,17 @@
   "file": "system/controller.php",
   "search": "\t\t$this->fix_links();\n\t\traster_cache::store($template->output);",
   "replace": "\t\traster_cache::store($template->output);"
+ },
+ {
+  "name": "C40-unlisted-methods-reachable",
+  "file": "system/models/api/api.php",
+  "search": "if (!isset($offered[$method])) $this->fail(404, 'unknown method');",
+  "replace": "if (!isset($offered[$method])) $offered[$method] = 'visitor';"
+ },
+ {
+  "name": "C40-roles-ignored",
+  "file": "system/models/api/api.php",
+  "search": "return $role === 'visitor' || authentication::can($role);",
+  "replace": "return true;"
  }
 ]

@@ -27,7 +27,7 @@ class raster_describe
 		'password_min_length', 'newsletter_double_opt_in',
 		'newsletter_confirm_page', 'newsletter_unsubscribe_page', 'mail_from',
 		'languages', 'domain_language', 'language_cookie', 'page_cache',
-		'page_cache_ttl', 'page_cache_skip', 'api_system_models',
+		'page_cache_ttl', 'page_cache_skip', 'api_system_models', 'api_open',
 		'allow_deprecated',
 	);
 

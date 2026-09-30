@@ -88,6 +88,7 @@ php tests/demo.php                        # the whole matrix
 | C37 | `strict_templates` off renders broken templates anyway |
 | C38 | a model sends an event and another listens (`listens()`): a booking subscribes the guest |
 | C39 | MCP site_overview lists who listens to what |
+| C40 | /api answers only what a model lists in `api()`, for the roles it names; `api_open` keeps the old open /api; lint checks `api()` |
 | C40 | `executed_<model>_<method>` uses the model's own name (also under a `the_` override) and carries the result |
 | C41 | bundled models send events from every path: cms over MCP, authentication.registered |
 | C42 | lint checks event bindings: missing models and methods, events nothing sends |

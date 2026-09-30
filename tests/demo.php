@@ -477,8 +477,19 @@ test('D20', 'forms filled with data and spa_ classes', function () use ($base) {
 test('D21', '/api never runs form models', function () use ($base) {
 	$before = count(mails());
 	list($status, $body) = http('POST', "$base/api/reservation/contact", array('email' => 'x@example.com', 'message' => 'via api'));
-	same(200, $status);
-	same('', $body);
+	same(404, $status, 'a form handler the model does not list');
+	// and one a model does list is not a form submission there
+	$dir = dirname(__DIR__).'/demo/models/zzform';
+	@mkdir($dir);
+	try {
+		with_file("$dir/zzform.php", "<?php\nclass zzform {\n\tstatic function api() { return array('send' => 'visitor'); }\n\tfunction send() { return validation::get()->submitted() ? 'ran' : false; }\n}\n", function () use ($base) {
+			list($status, $body) = http('POST', "$base/api/zzform/send", array('email' => 'x@example.com'));
+			same(200, $status);
+			same('', $body);
+		});
+	} finally {
+		@rmdir($dir);
+	}
 	same($before, count(mails()));
 });
 
@@ -2101,6 +2112,53 @@ test(array('R12', 'R13'), 'schema --apply creates record tables in production; m
 	list($code, $out) = raster(array('make', 'model', 'Bad!', '--from=visit.html'));
 	same(1, $code);
 	same(2, raster(array('make', 'model'))[0], 'usage');
+});
+
+test('C40', '/api answers only what a model lists, for the roles it names', function () use ($base, $root) {
+	// listed for visitors
+	same(200, http('GET', "$base/api/cafe/hours")[0]);
+	// public methods a model doesn't list are not there, whatever they return
+	same(404, http('GET', "$base/api/cafe/stamp")[0], 'an event handler');
+	same(404, http('GET', "$base/api/reservation/booked")[0], 'a listener');
+	same(404, http('GET', "$base/api/reservation/book")[0], 'a form handler');
+	// listed for staff: one evening's bookings, private records
+	list($status, $body) = http('GET', "$base/api/reservation/day/2026-12-01");
+	same(401, $status, 'visitors are asked to log in');
+	lacks($body, 'Group');
+	$member = login($base, 'maria@example.com', 'reset password');
+	same(403, http('GET', "$base/api/reservation/day/2026-12-01", null, array("Cookie: $member"))[0], 'members are not staff');
+	$staff = login($base, 'staff@cafe.test', 'staff password');
+	list($status, $body) = http('GET', "$base/api/reservation/day/2026-12-01", null, array("Cookie: $staff"));
+	same(200, $status);
+	check((bool)preg_grep('/^Group /', array_column(json_decode($body, true), 'name')), 'staff get the bookings');
+	// the vocabulary tells agents what each model offers
+	$vocabulary = json_decode(raster(array('vocabulary', '--json'))[1], true);
+	same(array('day' => 'editor'), $vocabulary['models']['reservation']['api']);
+	check(!isset($vocabulary['models']['cms']['api']), 'bundled models guard themselves');
+	// api_open, which the 2.1.1 upgrade writes for older sites: models that
+	// list nothing answer as before, models that list keep their list
+	$dir = "$root/demo/models/zzopen";
+	@mkdir($dir);
+	try {
+		with_file("$dir/zzopen.php", "<?php\nclass zzopen { function ping() { return 'pong'; } }\n", function () {
+			$open = array('CAFE_API_OPEN' => 'on', 'RASTER_APP' => 'demo');
+			lacks(raster(array('render', '/api/zzopen/ping'))[1], 'pong', 'closed by default');
+			same('"pong"', trim(raster(array('render', '/api/zzopen/ping'), $open)[1]), 'open with api_open');
+			has(raster(array('render', '/api/cafe/stamp'), $open)[1], 'unknown method', 'a model that lists keeps its list');
+			// lint checks what api() offers
+			file_put_contents(__DIR__.'/../demo/models/zzopen/zzopen.php', "<?php\nclass zzopen {\n\tstatic function api() { return array('ping' => 'visitor', 'nope' => 'visitor', 'hidden' => 'visitor', 'odd' => 'boss'); }\n\tfunction ping() { return 'pong'; }\n\tstatic function hidden() { return 1; }\n\tfunction odd() { return 1; }\n}\n");
+			list($code, $out) = raster(array('lint'));
+			same(1, $code);
+			has($out, "zzopen::api() offers 'nope', but zzopen has no such method");
+			has($out, "zzopen::api() offers 'hidden', which /api can't call");
+			has($out, "zzopen::api() gives 'odd' the role 'boss'");
+			lacks($out, "offers 'ping'");
+			file_put_contents(__DIR__.'/../demo/models/zzopen/zzopen.php', "<?php\nclass zzopen {\n\tfunction api() { return array(); }\n}\n");
+			has(raster(array('lint'))[1], 'zzopen::api() must be static');
+		});
+	} finally {
+		@rmdir($dir);
+	}
 });
 
 // ## No PHP warnings, notices or deprecations on any request
