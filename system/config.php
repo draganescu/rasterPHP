@@ -109,6 +109,13 @@ class config {
 			$folder_path = '/'.trim($parts['path'], '/').'/';
 		}
 		$config->folder_path = $folder_path;
+		// the folder itself without its slash (/shop) goes to /shop/, so
+		// relative links and the <base> resolve inside it
+		if (PHP_SAPI !== 'cli' && $folder_path != '/' && $request_uri === rtrim($folder_path, '/')) {
+			$query = isset($_SERVER['QUERY_STRING']) && $_SERVER['QUERY_STRING'] !== '' ? '?'.$_SERVER['QUERY_STRING'] : '';
+			header('Location: '.$folder_path.$query, true, 301);
+			exit;
+		}
 		
 	    if($folder_path != '/' && strpos($request_uri, $folder_path) === 0) {
 	  		$request_uri = '/'.substr($request_uri, strlen($folder_path));

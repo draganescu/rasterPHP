@@ -619,7 +619,10 @@ use `'model.method'`: `method(true)` returns
   reset, newsletter confirmation) are not sent without it, and
   `raster send` needs it. With a path (`https://example.com/shop/`) the site
   lives under it: URLs are matched and links built under `/shop/`, also with
-  `raster serve` and behind a proxy that forwards the path unchanged.
+  `raster serve` and behind a proxy that forwards the path unchanged. With
+  `php -S` directly, use `RASTER_URL`, not `site_url`. Addresses outside the
+  folder still answer (`/about` as well as `/shop/about`); a server or proxy
+  in front that only passes `/shop/` keeps the site to one address.
 - **Database file:** `RASTER_DB=/path.sqlite` points at another database
   file.
 - **What the server must never serve.** A Raster site is one folder, and most
