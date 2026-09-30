@@ -286,7 +286,8 @@ static function api() {
 Anything not listed answers 404, public or not: the methods templates call,
 form handlers, listeners. A model without `api()` offers nothing. A role the
 caller lacks answers 401 (not logged in) or 403. Static methods are never
-reachable, even listed. Of the system models, only `cms` is reachable. Posts
+reachable, even listed. Of the system models, only `cms` is reachable, and
+an override (`the_feed`) only by the name it overrides. Posts
 there pass the same site check as forms, but they are not form submissions:
 `validation::get()->submitted()` is false, so form models do nothing over
 `/api`. A method listed for visitors can be called by anyone: if it changes
@@ -515,10 +516,10 @@ class reservation {
   refund, and a payment provider's webhook. See `shop/README.md`.
 - **Calls from other sites.** A payment provider's webhook is a server posting
   to `/api/<model>/<method>`, listed in `api()` for `visitor`: it sends no
-  browser headers and no session, so the cross-site check lets it through. The method reads the body with
-  `file_get_contents('php://input')`, verifies the provider's signature itself,
-  sets `http_response_code()` when it refuses, and returns what to answer
-  (as JSON).
+  browser headers and no session, so the cross-site check lets it through.
+  The method reads the body with `file_get_contents('php://input')`,
+  verifies the provider's signature itself, sets `http_response_code()` when
+  it refuses, and returns what to answer (as JSON).
 
 ## Bundled models
 

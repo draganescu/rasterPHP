@@ -22,7 +22,7 @@ return array(
 		},
 		'apply' => function ($c) {
 			$config = $c['app'].'/config/the_app.php';
-			$before = is_file($config) ? rtrim(file_get_contents($config))."\n" : "<?php\n";
+			$before = is_file($config) ? rtrim(preg_replace('/\?>\s*$/', '', file_get_contents($config)))."\n" : "<?php\n";
 			file_put_contents($config, $before."\n"
 				."// Added by `raster upgrade` for Raster 2.1.1. Until 2.1.1 every public method\n"
 				."// of every model answered at /api/<model>/<method>, to anyone. Now a model\n"

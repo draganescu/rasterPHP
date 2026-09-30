@@ -241,6 +241,16 @@ test('2.1.1 closes /api, and keeps it open for older sites until they list', fun
 	$config = "$site/application/config/the_app.php";
 	file_put_contents($config, preg_replace("/\n\/\/ Added by `raster upgrade` for Raster 2\.1\.1.*$/s", "\n", file_get_contents($config)));
 	lacks(raster($site, array('doctor'))[1], 'api_open');
+	// a config that ends with a closing tag still gets a working line
+	file_put_contents("$site/application/config/raster-version", "2.1.0\n");
+	file_put_contents("$site/application/models/orders/orders.php", "<?php\nclass orders { function all() { return array(); } }\n");
+	file_put_contents($config, rtrim(file_get_contents($config))."\n?>\n");
+	same(0, raster($site, array('upgrade'))[0]);
+	lacks(file_get_contents($config), '?>');
+	same(0, raster($site, array('render', '/'))[0], 'the page still renders');
+	lacks(raster($site, array('render', '/'))[1], 'Added by `raster upgrade`', 'and prints nothing from the config');
+	file_put_contents($config, preg_replace("/\n\/\/ Added by `raster upgrade` for Raster 2\.1\.1.*$/s", "\n", file_get_contents($config)));
+	file_put_contents("$site/application/models/orders/orders.php", "<?php\nclass orders {\n\tstatic function api() { return array('all' => 'editor'); }\n\tfunction all() { return array(); }\n}\n");
 	// an older site whose models already list theirs needs nothing
 	file_put_contents("$site/application/config/raster-version", "2.1.0\n");
 	lacks(raster($site, array('upgrade'))[1], 'api-open');

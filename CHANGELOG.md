@@ -21,8 +21,9 @@ static function api() {
 
 Anything not listed answers 404. A role the caller lacks answers 401 (not
 logged in) or 403. `lint` checks `api()`, and `vocabulary` shows what each
-model offers. Overrides of bundled models (`the_feed`) are no longer
-reachable unless the model is in `api_system_models`.
+model offers. `/api/the_<model>/…` is 404: an override of a bundled model
+is only ever reached by the name it overrides, and only when that name is
+in `api_system_models`.
 
 **What sites need to do** after `php bin/raster update`:
 

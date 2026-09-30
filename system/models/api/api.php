@@ -32,7 +32,8 @@
 
       $method = util::param($model, false);
       if(!$method || strpos($method, '_') === 0) $this->fail(404, 'unspecified method');
-      if (!preg_match('/^[a-z0-9_]+$/', $model)) $this->fail(404, 'unknown model');
+      // an override (the_feed) is only ever reached by the name it overrides
+      if (!preg_match('/^[a-z0-9_]+$/', $model) || strpos($model, 'the_') === 0) $this->fail(404, 'unknown model');
       // models that must not be reachable over /api (mcp has its own endpoint)
       if (in_array($model, (array)config::get('api_blocked', array('mcp', 'api')))) $this->fail(404, 'unknown model');
 
@@ -72,15 +73,16 @@
     // What a model class offers over /api: array(method => role). An empty
     // array when it lists nothing, and null when the site keeps the open
     // /api of older versions (config api_open) and the model lists nothing.
-    // A method named without a role is for visitors; a role that isn't one
-    // of self::$roles offers nothing (lint reports it).
+    // Every entry is method => role, nothing shorter: an entry without a
+    // role, or a role that isn't one of self::$roles, offers nothing (lint
+    // reports it), so a slip never opens a method by accident.
     static function offered($class) {
       if (!method_exists($class, 'api') || !(new ReflectionMethod($class, 'api'))->isStatic()) {
         return config::get('api_open') ? null : array();
       }
       $offered = array();
-      foreach ((array)call_user_func(array($class, 'api')) as $method => $role) {
-        if (is_int($method)) { $method = $role; $role = 'visitor'; }
+      $listed = call_user_func(array($class, 'api'));
+      foreach (is_array($listed) ? $listed : array() as $method => $role) {
         if (is_string($method) && in_array($role, self::$roles, true)) $offered[$method] = $role;
       }
       return $offered;

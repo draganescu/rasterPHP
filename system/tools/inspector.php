@@ -413,8 +413,9 @@ class raster_inspector {
 				'queries' => $this->model_queries($name),
 				'methods' => $methods,
 			);
-			// what /api/<model>/<method> answers, and for whom
-			if (!$bundled) $models[$name]['api'] = $this->model_api($name);
+			// what /api/<model>/<method> answers, and for whom. A bundled model,
+			// overridden or not, is governed by config api_system_models instead
+			if (!file_exists(BASE.$models_path.'/'.$name.'/'.$name.'.php')) $models[$name]['api'] = $this->model_api($name);
 		}
 		ksort($models);
 		$listeners = array();
@@ -448,7 +449,7 @@ class raster_inspector {
 		} catch (Throwable $e) {
 			return array();
 		}
-		return $offered === null ? 'open' : $offered;
+		return $offered === null ? 'open' : (object)$offered;
 	}
 
 	// the named queries a model can call as methods: its own sql/ folder
@@ -1058,21 +1059,31 @@ class raster_inspector {
 				$declaration = new ReflectionMethod($class, 'api');
 				$at = array('file' => self::short($file), 'line' => $declaration->getStartLine(), 'column' => 1);
 				if (!$declaration->isStatic()) {
-					$problems[] = $at + array('severity' => 'error', 'message' => "$class::api() must be static: as a public method it is itself reachable at /api, and it offers nothing");
+					$problems[] = $at + array('severity' => 'error', 'message' => "$class::api() must be static; as it is, it offers nothing");
 					continue;
 				}
-				$listed = (array)call_user_func(array($class, 'api'));
+				$listed = call_user_func(array($class, 'api'));
+				if (!is_array($listed)) {
+					$problems[] = $at + array('severity' => 'error', 'message' => "$class::api() must return an array of method => role (visitor, member, editor or admin); it offers nothing");
+					continue;
+				}
 			} catch (Throwable $e) {
 				$problems[] = array('file' => self::short($file), 'line' => 1, 'column' => 1, 'severity' => 'error', 'message' => "$class::api(): ".$e->getMessage());
 				continue;
 			}
 			foreach ($listed as $method => $role) {
-				if (is_int($method)) { $method = $role; $role = 'visitor'; }
+				if (is_int($method)) {
+					$problems[] = $at + array('severity' => 'error', 'message' => "$class::api() lists '".(is_scalar($role) ? $role : gettype($role))."' without a role, so it offers nothing: write '".(is_scalar($role) ? $role : 'method')."' => 'visitor' (or member, editor, admin)");
+					continue;
+				}
 				if (!is_string($method) || !method_exists($class, $method)) {
 					$problems[] = $at + array('severity' => 'error', 'message' => "$class::api() offers '$method', but $class has no such method");
 					continue;
 				}
 				$m = new ReflectionMethod($class, $method);
+				if ($m->getName() !== $method) {
+					$problems[] = $at + array('severity' => 'error', 'message' => "$class::api() offers '$method', but the method is spelled '".$m->getName()."', and /api is case sensitive");
+				}
 				if (!$m->isPublic() || $m->isStatic()) {
 					$problems[] = $at + array('severity' => 'error', 'message' => "$class::api() offers '$method', which /api can't call: it must be public and not static");
 				}
@@ -1107,7 +1118,7 @@ class raster_inspector {
 				}
 			}
 			if (method_exists($info['class'], 'check') && !(new ReflectionMethod($info['class'], 'check'))->isStatic()) {
-				$problems[] = $at + array('severity' => 'error', 'message' => "{$info['class']}::check() must be static: a public method is reachable at /api/{$info['model']}/check");
+				$problems[] = $at + array('severity' => 'error', 'message' => "{$info['class']}::check() must be static: a hook is never an ordinary method");
 			}
 			foreach ($info['actions'] as $action => $role) {
 				if (in_array($action, cms_records::$hooks, true)) {
