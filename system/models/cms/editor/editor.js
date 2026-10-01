@@ -265,10 +265,14 @@
 	}
 
 	// ##Styles for the page itself (the glow, the states)
+	var pageStyle;
 	function pageStyles(look) {
-		var style = document.createElement('style');
-		style.id = 'raster-editor-page';
-		style.textContent = [
+		if (!pageStyle) {
+			pageStyle = document.createElement('style');
+			pageStyle.id = 'raster-editor-page';
+			document.head.appendChild(pageStyle);
+		}
+		pageStyle.textContent = [
 			':root{--raster-a:' + look.accent + ';--raster-a-soft:' + look.accentSoft + '}',
 			'html.raster-editing [data-raster-edit]{cursor:text;border-radius:3px;text-decoration-line:underline;text-decoration-style:dotted;text-decoration-thickness:2px;text-underline-offset:.22em;text-decoration-color:color-mix(in srgb,var(--raster-a) 70%,transparent);transition:background-color .25s,box-shadow .25s,text-decoration-color .25s}',
 			'html.raster-editing [data-raster-edit=rich]{text-decoration-line:none;box-shadow:inset 3px 0 0 color-mix(in srgb,var(--raster-a) 55%,transparent)}',
@@ -293,7 +297,6 @@
 			'@keyframes raster-pulse{0%{box-shadow:0 0 0 0 var(--raster-a)}100%{box-shadow:0 0 0 18px transparent}}',
 			'@media (prefers-reduced-motion:reduce){html.raster-glow [data-raster-edit],.raster-arriving,.raster-pulse{animation:none!important}.raster-leaving{transition:none!important}}'
 		].join('\n');
-		document.head.appendChild(style);
 	}
 
 	// ##The editor's own controls, in a shadow root
@@ -329,7 +332,7 @@
 		return el;
 	}
 
-	var host, shadow, ui = {};
+	var host, shadow, chromeStyle, ui = {};
 	function chromeStyles(look) {
 		return [
 			':host{all:initial}',
@@ -438,7 +441,8 @@
 		host.setAttribute('data-raster-host', '');
 		document.body.appendChild(host);
 		shadow = host.attachShadow({ mode: 'open' });
-		shadow.appendChild(h('style', { text: chromeStyles(look) }));
+		chromeStyle = h('style', { text: chromeStyles(look) });
+		shadow.appendChild(chromeStyle);
 		ui.layer = h('div', { class: 'layer' });
 		shadow.appendChild(ui.layer);
 		ui.floats = h('div');
@@ -1447,11 +1451,28 @@
 		} catch (e) {}
 	}
 
+	// a cached editor script can run before the page's stylesheets apply,
+	// and would take the browser's defaults for the site's look: read it
+	// again once each stylesheet, and then the page, has loaded
+	function restyle() {
+		var look = readLook();
+		pageStyles(look);
+		chromeStyle.textContent = chromeStyles(look);
+	}
+	function followStylesheets() {
+		if (document.readyState === 'complete') return;
+		Array.prototype.forEach.call(document.querySelectorAll('link[rel~=stylesheet]'), function (link) {
+			link.addEventListener('load', restyle, { once: true });
+		});
+		window.addEventListener('load', restyle, { once: true });
+	}
+
 	function start() {
 		var look = readLook();
 		pageStyles(look);
 		scan();
 		buildChrome(look);
+		followStylesheets();
 		refreshBadges();
 		if (store('raster-editing')) setEditing(true, true);
 		welcome();
