@@ -464,6 +464,57 @@ test('page cache in production', function () use ($root, $db) {
 	}
 });
 
+test('a site under a path: RASTER_URL with a folder', function () use ($root, $db) {
+	$port = 8965 + getmypid() % 100;
+	$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_URL' => "http://127.0.0.1:$port/preview/abc/", 'PATH' => getenv('PATH')));
+	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
+	try {
+		$base = "http://127.0.0.1:$port/preview/abc";
+		list($status, $body) = http('GET', "$base/about");
+		same(200, $status, 'page under the folder');
+		check(strpos($body, "href=\"$base/about\"") !== false, 'links carry the folder');
+		check(!preg_match('#(href|src|action)=["\'](http://127\.0\.0\.1:'.$port.')?/(?!preview/abc/)#', $body), 'no link escapes the folder');
+		list($status, , $headers) = http('GET', $base.'?x=1');
+		same(301, $status, 'the folder without its slash');
+		check((bool)preg_grep('#^Location: /preview/abc/\?x=1$#i', $headers), 'redirects into the folder');
+		$css = "$base/application/views/default/style.css";
+		list($status, $body, $headers) = http('GET', $css);
+		same(200, $status, 'static file under the folder');
+		check((bool)preg_grep('#^Content-Type: text/css#i', $headers), 'css type');
+		$modified = current(preg_grep('#^Last-Modified:#i', $headers));
+		check((bool)$modified, 'last modified');
+		same(304, http('GET', $css, null, array('If-Modified-Since: '.trim(substr($modified, 14))))[0], 'not modified');
+		list($status, $part, $headers) = http('GET', $css, null, array('Range: bytes=0-9'));
+		same(206, $status, 'range');
+		same(substr($body, 0, 10), $part);
+		check((bool)preg_grep('#^Content-Range: bytes 0-9/'.strlen($body).'$#i', $headers), 'content range');
+		same(403, http('GET', "$base/application/config/the_app.php")[0], 'private paths still refused');
+		same(403, http('GET', "$base/system/boot.php")[0]);
+	} finally {
+		proc_terminate($server);
+	}
+});
+
+test('raster serve passes site_url with a folder to the router', function () use ($root, $db) {
+	$port = 9065 + getmypid() % 100;
+	$config = "$root/application/config/the_app.php";
+	$original = file_get_contents($config);
+	file_put_contents($config, $original."\nconfig::set('site_url')->to('http://127.0.0.1:$port/shop/');\n");
+	$env = array('RASTER_DB' => $db, 'PATH' => getenv('PATH'));
+	$server = proc_open(array(PHP_BINARY, "$root/bin/raster", 'serve', "--host=127.0.0.1", "--port=$port"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, $env);
+	try {
+		for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
+		same(200, http('GET', "http://127.0.0.1:$port/shop/about")[0], 'page under the folder');
+		same(200, http('GET', "http://127.0.0.1:$port/shop/application/views/default/style.css")[0], 'static file under the folder');
+	} finally {
+		file_put_contents($config, $original);
+		// serve starts php -S through a shell, so the server is found by its
+		// address ([-] keeps the pattern from matching pkill's own shell)
+		proc_terminate($server);
+		exec('pkill -f '.escapeshellarg("[-]S 127.0.0.1:$port"));
+	}
+});
+
 // ## Regressions from review
 
 test('forged Host header never gets a reset link', function () use ($base, $maildir) {

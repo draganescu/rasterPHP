@@ -533,7 +533,14 @@ switch ($command) {
 	case 'serve':
 		$port = isset($options['port']) ? (int)$options['port'] : 8000;
 		$host = isset($options['host']) ? $options['host'] : 'localhost';
-		echo "Raster is running at http://$host:$port (Ctrl+C to stop)\n";
+		// the router in index.php runs before any config loads, so a
+		// site_url with a path (https://example.com/shop/) reaches it as
+		// RASTER_URL; the site reads the same address either way
+		$site = getenv('RASTER_URL') ?: config::get('site_url');
+		if ($site && !getenv('RASTER_URL')) putenv('RASTER_URL='.$site);
+		$folder = $site ? '/'.trim((string)parse_url($site, PHP_URL_PATH), '/').'/' : '/';
+		if ($folder === '//') $folder = '/';
+		echo "Raster is running at http://$host:$port$folder (Ctrl+C to stop)\n";
 		passthru(escapeshellarg(PHP_BINARY).' -S '.escapeshellarg("$host:$port").' -t '.escapeshellarg($root).' '.escapeshellarg($root.'/index.php'), $status);
 		exit($status);
 

@@ -3,6 +3,19 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## Unreleased
+
+Nothing for sites to do.
+
+- **A site can live under a path.** When `RASTER_URL` (or `site_url`) has a
+  path, e.g. `https://example.com/shop/`, that path is where the site is:
+  requests under it are routed, and links, the `<base>` and emails carry it.
+  `/shop` without the slash redirects to `/shop/`. This works behind a proxy
+  that forwards `/shop/...` unchanged, and with `raster serve`, static files
+  included. Running `php -S` yourself, set `RASTER_URL`: its router runs
+  before the site's config is read, so it can't see `site_url`. Private
+  paths are refused the same way under the folder.
+
 ## 2.1.1
 
 **Security: `/api` answers only what a model lists.** Until now every public

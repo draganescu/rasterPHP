@@ -12,6 +12,13 @@
 // system/private_paths.php, which .htaccess and `raster deploy` also come from.
 if (PHP_SAPI === 'cli-server') {
 	$path = preg_replace('#/+#', '/', rawurldecode((string)parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH)));
+	// a site whose RASTER_URL has a path (http://localhost:8000/shop/) is
+	// asked for under it; its files are still in this folder
+	$folder = rtrim((string)parse_url((string)getenv('RASTER_URL'), PHP_URL_PATH), '/');
+	$under_folder = $folder !== '' && strpos($path, $folder.'/') === 0;
+	if ($under_folder) {
+		$path = substr($path, strlen($folder));
+	}
 	// the same rules as .htaccess and the configs `raster deploy` prints, from
 	// the one list in system/private_paths.php
 	require_once __DIR__.'/system/private_paths.php';
@@ -20,7 +27,54 @@ if (PHP_SAPI === 'cli-server') {
 		exit('Forbidden');
 	}
 	if ($path !== '/' && is_file(__DIR__.$path) && strpos(realpath(__DIR__.$path), __DIR__.'/') === 0) {
-		return false;
+		if (!$under_folder) return false;
+		// PHP's server would look for the file under the folder, so it is sent
+		// from here, with what browsers need from it: the type, a date to
+		// revalidate against, and byte ranges (video seeking)
+		$file = __DIR__.$path;
+		$types = array('css' => 'text/css; charset=UTF-8', 'js' => 'text/javascript; charset=UTF-8', 'mjs' => 'text/javascript; charset=UTF-8', 'json' => 'application/json', 'svg' => 'image/svg+xml', 'png' => 'image/png', 'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'gif' => 'image/gif', 'webp' => 'image/webp', 'avif' => 'image/avif', 'ico' => 'image/x-icon', 'woff' => 'font/woff', 'woff2' => 'font/woff2', 'ttf' => 'font/ttf', 'otf' => 'font/otf', 'txt' => 'text/plain; charset=UTF-8', 'html' => 'text/html; charset=UTF-8', 'xml' => 'application/xml', 'pdf' => 'application/pdf', 'mp4' => 'video/mp4', 'webm' => 'video/webm', 'mp3' => 'audio/mpeg', 'ogg' => 'audio/ogg', 'wav' => 'audio/wav');
+		$ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+		$type = isset($types[$ext]) ? $types[$ext] : (function_exists('mime_content_type') ? (mime_content_type($file) ?: '') : '');
+		header('Content-Type: '.($type ?: 'application/octet-stream'));
+		$modified = filemtime($file);
+		header('Last-Modified: '.gmdate('D, d M Y H:i:s', $modified).' GMT');
+		header('Accept-Ranges: bytes');
+		if (isset($_SERVER['HTTP_IF_MODIFIED_SINCE']) && strtotime($_SERVER['HTTP_IF_MODIFIED_SINCE']) >= $modified) {
+			http_response_code(304);
+			exit;
+		}
+		$size = filesize($file);
+		$start = 0;
+		$end = $size - 1;
+		if (isset($_SERVER['HTTP_RANGE']) && preg_match('/^bytes=(\d*)-(\d*)$/', trim($_SERVER['HTTP_RANGE']), $range) && ($range[1] !== '' || $range[2] !== '')) {
+			if ($range[1] === '') {
+				// bytes=-500 is the last 500 bytes
+				$start = max(0, $size - (int)$range[2]);
+			} else {
+				$start = (int)$range[1];
+				if ($range[2] !== '') $end = min($end, (int)$range[2]);
+			}
+			if ($start > $end) {
+				http_response_code(416);
+				header('Content-Range: bytes */'.$size);
+				exit;
+			}
+			http_response_code(206);
+			header("Content-Range: bytes $start-$end/$size");
+		}
+		header('Content-Length: '.($end - $start + 1));
+		if ($_SERVER['REQUEST_METHOD'] !== 'HEAD') {
+			$handle = fopen($file, 'rb');
+			fseek($handle, $start);
+			$left = $end - $start + 1;
+			while ($left > 0 && !feof($handle)) {
+				$chunk = fread($handle, min(65536, $left));
+				echo $chunk;
+				$left -= strlen($chunk);
+			}
+			fclose($handle);
+		}
+		exit;
 	}
 }
 

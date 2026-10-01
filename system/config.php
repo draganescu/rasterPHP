@@ -101,7 +101,21 @@ class config {
     	
     	// an attempt to see if the app runs at the root of the domain or in a subfolder
 		$folder_path = str_replace($config->index_file, '', $script_name);
+		// A site's address with a path (RASTER_URL=https://example.com/shop/)
+		// says where it lives, whatever the server reports: behind a proxy
+		// that forwards /shop/... unchanged, and under `php -S`, where
+		// SCRIPT_NAME can't say it.
+		if ($site && !empty($parts['host']) && !empty($parts['path']) && trim($parts['path'], '/') !== '') {
+			$folder_path = '/'.trim($parts['path'], '/').'/';
+		}
 		$config->folder_path = $folder_path;
+		// the folder itself without its slash (/shop) goes to /shop/, so
+		// relative links and the <base> resolve inside it
+		if (PHP_SAPI !== 'cli' && $folder_path != '/' && $request_uri === rtrim($folder_path, '/')) {
+			$query = isset($_SERVER['QUERY_STRING']) && $_SERVER['QUERY_STRING'] !== '' ? '?'.$_SERVER['QUERY_STRING'] : '';
+			header('Location: '.$folder_path.$query, true, 301);
+			exit;
+		}
 		
 	    if($folder_path != '/' && strpos($request_uri, $folder_path) === 0) {
 	  		$request_uri = '/'.substr($request_uri, strlen($folder_path));
