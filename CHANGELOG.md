@@ -15,6 +15,10 @@ Nothing for sites to do.
   included. Running `php -S` yourself, set `RASTER_URL`: its router runs
   before the site's config is read, so it can't see `site_url`. Private
   paths are refused the same way under the folder.
+- **Agents are told: every form that saves data gets a staff page.**
+  `AGENTS.md` (Records) now asks agents that add a form storing records to
+  also add a page, protected for editors, that lists them, so what visitors
+  send is never stored out of sight.
 
 ## 2.1.1
 
