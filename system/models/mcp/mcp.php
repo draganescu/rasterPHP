@@ -106,7 +106,7 @@ class mcp
 					'protocolVersion' => in_array($requested, self::$protocol_versions) ? $requested : self::$protocol_versions[0],
 					'capabilities' => array('tools' => array('listChanged' => false)),
 					'serverInfo' => array('name' => 'raster', 'version' => self::SERVER_VERSION),
-					'instructions' => 'This is a Raster site: views are plain HTML and the dynamic parts are HTML comments. Call describe first — it returns how URLs reach views, the content model the markup declares, every name a template may call, and whether the templates lint clean. Before writing an annotation, check vocabulary (the models and their signatures) and annotations (the grammar); both are read from the code, so neither can be out of date. To change a template use check_view then write_view, which refuses markup that does not lint, and render_url to see the result. Content edits go through get_page/update_page and the item tools: page edits keep revisions, and fields that are not in the templates cannot be written — to add a field, edit the template.',
+					'instructions' => 'This is a Raster site: views are plain HTML and the dynamic parts are HTML comments. Call describe first — it returns how URLs reach views, the content model the markup declares, every name a template may call, and whether the templates lint clean. Before writing an annotation, check vocabulary (the models and their signatures) and annotations (the grammar); both are read from the code, so neither can be out of date. To change a template use check_view then write_view, which refuses markup that does not lint, and render_url to see the result. Content edits go through get_page/update_page and the item tools: page edits keep revisions, and fields that are not in the templates cannot be written — to add a field, edit the template. In production pages are cached for visitors who are not logged in: Raster\'s own tools clear that cache, but views, theme files, models, config or the database changed any other way do not, so call clear_cache after such a change. render_url never reads the cache, so a fresh render_url does not mean visitors see the change.',
 				));
 			case 'ping':
 				return $this->result($id, new stdClass());
@@ -175,6 +175,8 @@ class mcp
 				array('view' => array('type' => 'string', 'description' => 'Path inside the theme folder, e.g. about.html'), 'content' => array('type' => 'string'), 'theme' => array('type' => 'string')), array('view', 'content'), $write),
 			$tool('render_url', 'Renders a URL of this site and returns the status and the HTML, without a web server. The fastest way to see whether a change works. Runs in a separate process, so a page that fails cannot take this server down.',
 				array('url' => array('type' => 'string', 'description' => 'A path on the site, e.g. / or /menu/menu_item/flat-white'), 'limit' => array('type' => 'integer', 'description' => 'Characters of HTML to return, 20000 by default')), array('url'), $read_only),
+			$tool('clear_cache', 'Throws the page cache away. In production, visitors who are not logged in get cached pages until it is cleared. Raster\'s own tools (write_view, update_page, create_item, update_item, delete_item, run_action) already clear it; call this after changing views, theme files, models or config with anything else, or after changing the database directly. render_url never reads the cache.',
+				array(), array(), array('readOnlyHint' => false, 'destructiveHint' => false, 'idempotentHint' => true, 'openWorldHint' => false)),
 		);
 		if (!self::may_write_views()) {
 			$tools = array_values(array_filter($tools, function ($t) { return $t['name'] !== 'write_view'; }));
@@ -502,6 +504,11 @@ class mcp
 			$result['schema'] = array('error' => $e->getMessage());
 		}
 		return $result;
+	}
+
+	protected function tool_clear_cache($arguments) {
+		$cleared = raster_cache::clear();
+		return array('ok' => true, 'page_cache' => raster_cache::enabled()) + $cleared;
 	}
 
 	protected function tool_render_url($arguments) {

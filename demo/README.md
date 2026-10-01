@@ -217,6 +217,7 @@ php tests/demo.php                        # the whole matrix
 | L5 | the protocol is part of the cache key |
 | L6 | `site_url` in config |
 | L7 | `page_cache_skip`, `page_cache_ttl`, `page_cache` off |
+| L8 | `raster cache clear` and MCP `clear_cache` for changes made outside Raster; `describe` says whether the cache is on |
 | M1 | MCP needs its token; GET is refused |
 | M2 | initialize, ping, tools/list, batches, errors |
 | M3 | notifications get 202 |

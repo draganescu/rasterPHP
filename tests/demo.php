@@ -1014,7 +1014,7 @@ test(array('M1', 'M2', 'M3'), 'the MCP endpoint', function () use ($base) {
 	$names = array_map(function ($t) { return $t['name']; }, $tools);
 	foreach (array('site_overview', 'get_page', 'update_page', 'page_history', 'list_items', 'get_item',
 		'create_item', 'update_item', 'delete_item', 'lint_templates', 'schema_status',
-		'describe', 'vocabulary', 'annotations', 'list_views', 'read_view', 'check_view', 'render_url') as $name) {
+		'describe', 'vocabulary', 'annotations', 'list_views', 'read_view', 'check_view', 'render_url', 'clear_cache') as $name) {
 		check(in_array($name, $names), "tools/list lacks $name");
 	}
 	// writing templates stays off over HTTP until the site turns it on
@@ -1829,6 +1829,36 @@ test(array('L7', 'L3'), 'page cache: skipped paths, time to live, turned off', f
 	$off = server(free_port(), array_merge($env, array('CAFE_PAGE_CACHE' => 'off')));
 	http('GET', "$off/faq");
 	same(null, header_value(http('GET', "$off/faq")[2], 'X-Raster-Cache'), 'page_cache off');
+});
+
+test('L8', 'page cache: cleared by hand after editing files directly', function () use ($root, $tmp, $maildir) {
+	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => "$tmp/prod.sqlite", 'RASTER_URL' => 'https://cafe.example/', 'RASTER_MAIL' => "log://$maildir", 'RASTER_MCP_TOKEN' => 'demo-token');
+	$prod = server(free_port(), $env);
+	$faq = "$root/demo/views/cafe/faq.html";
+	with_file($faq, str_replace('</body>', '<p>Edited by hand</p></body>', file_get_contents($faq)), function () use ($prod, $env) {
+		http('GET', "$prod/faq");
+		list(, $body, $headers) = http('GET', "$prod/faq");
+		same('hit', header_value($headers, 'X-Raster-Cache'));
+		lacks($body, 'Edited by hand', 'a view edited outside Raster is not seen until the cache is cleared');
+		list($code, $out) = raster(array('cache', 'clear'), $env);
+		same(0, $code, $out);
+		has($out, 'Page cache cleared');
+		list(, $body, $headers) = http('GET', "$prod/faq");
+		same('miss', header_value($headers, 'X-Raster-Cache'), 'raster cache clear');
+		has($body, 'Edited by hand');
+		same('hit', header_value(http('GET', "$prod/faq")[2], 'X-Raster-Cache'));
+		$cleared = mcp($prod, 'clear_cache');
+		same(true, $cleared['ok']);
+		same(true, $cleared['page_cache']);
+		check($cleared['removed'] >= 1, 'clear_cache deletes the cached pages');
+		same('miss', header_value(http('GET', "$prod/faq")[2], 'X-Raster-Cache'), 'MCP clear_cache');
+		same(true, mcp($prod, 'describe', array('sections' => array('site')))['site']['page_cache'], 'describe says the cache is on');
+	});
+	same(2, raster(array('cache'), $env)[0], 'cache without clear is a usage error');
+	has(raster(array('help'))[1], 'cache clear');
+	$init = json_decode(http('POST', "$prod/mcp", json_encode(array('jsonrpc' => '2.0', 'id' => 1, 'method' => 'initialize')), array('Authorization: Bearer demo-token'))[1], true);
+	has($init['result']['instructions'], 'clear_cache', 'agents are told when to clear the cache');
+	same(false, json_decode(raster(array('describe', '--json', '--sections=site'))[1], true)['site']['page_cache'], 'off in development');
 });
 
 // ## R. Records: types a model declares, stored and shown by the CMS

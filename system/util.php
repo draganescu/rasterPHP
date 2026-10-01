@@ -206,6 +206,18 @@ class raster_cache {
 		@file_put_contents(self::dir().'version', (string)(self::version() + 1), LOCK_EX);
 	}
 
+	// throws every cached page away: for changes Raster can't see, such as
+	// views, models or the database edited directly. Returns the new version
+	// and how many cached pages were deleted.
+	static function clear() {
+		self::bump();
+		$removed = 0;
+		foreach (glob(self::dir().'*') ?: array() as $file) {
+			if (preg_match('/^[0-9a-f]{40}$/', basename($file)) && @unlink($file)) $removed++;
+		}
+		return array('version' => self::version(), 'removed' => $removed);
+	}
+
 	// an item scheduled for later: the cache is thrown away at that time
 	static function schedule($timestamp) {
 		if ($timestamp <= time()) return;

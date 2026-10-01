@@ -80,8 +80,9 @@ In production, whole pages are saved and sent again to the next visitor without 
 - Only pages for visitors **without a session** (not logged in) and **without a query string** are cached. `/api`, `/mcp` and `/login` never are.
 - **Any content change clears the whole cache**: a save in the editor, over MCP or from the command line. When a scheduled item's publish time arrives, the cache is cleared too.
 - If your own model changes data that pages show, call `util::content_changed()` afterwards.
+- **Changes made outside Raster don't clear it**: a view, theme file, model or config edited in a text editor (or by an agent with plain file tools), or the database changed directly. Visitors who aren't logged in keep seeing the old page until the cache is cleared or `page_cache_ttl` runs out. Clear it with `php bin/raster cache clear`, or the MCP tool `clear_cache`. `raster render` and MCP `render_url` never read the cache, so they show the change before visitors do.
 - Responses carry an `X-Raster-Cache: hit` or `miss` header, so you can check what happened.
-- Cached files are in `application/data/cache/`.
+- Cached files are in `application/data/cache/`. `describe` says whether the cache is on (`site.page_cache`).
 
 Settings:
 

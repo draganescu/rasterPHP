@@ -64,7 +64,8 @@ curl -s https://example.com/mcp \
 | `list_views`, `read_view` | list and read templates |
 | `check_view` | lint a template that isn't saved yet; nothing is written |
 | `write_view` | save a template, **only if it lints without errors**; otherwise the file is untouched and the problems come back. The answer says what the change does to the content model. |
-| `render_url` | a page's status and HTML, without a web server. Runs in its own process, so a broken page can't crash the MCP server. |
+| `render_url` | a page's status and HTML, without a web server. Runs in its own process, so a broken page can't crash the MCP server. Never reads the page cache. |
+| `clear_cache` | throws the [page cache](Settings-and-Environments#the-page-cache) away, after views, theme files, models or the database were changed without Raster's own tools. In production, visitors who aren't logged in see cached pages until then. |
 
 ### Working on content
 
