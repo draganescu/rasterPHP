@@ -19,6 +19,11 @@ Nothing for sites to do.
   `AGENTS.md` (Records) now asks agents that add a form storing records to
   also add a page, protected for editors, that lists them, so what visitors
   send is never stored out of sight.
+- **The in-page editor lists admin pages.** Every view `protected` keeps
+  for `editor` or `admin` shows in a new **Admin** menu in the editor's bar,
+  by its `<title>`, for whoever may open it. Staff pages no longer need a
+  hidden menu or a `print.if.is_editor` link. `describe` (and MCP
+  `describe`) has a new `admin_pages` section.
 
 ## 2.1.1
 

@@ -3,7 +3,7 @@
 return array(
 	'hello' => 'Salut, {name}', 'hello_anon' => 'Salut',
 	'welcome' => 'Tot ce strălucește se poate schimba. Apasă E sau Editează ca să începi.',
-	'edit' => 'Editează', 'done' => 'Gata', 'editing' => 'Editezi', 'page' => 'Pagina',
+	'edit' => 'Editează', 'done' => 'Gata', 'editing' => 'Editezi', 'page' => 'Pagina', 'admin' => 'Administrare', 'admin_pages' => 'Pagini de administrare',
 	'saving' => 'Se salvează…', 'saved' => 'Salvat', 'all_saved' => 'Totul e salvat',
 	'changed' => 'Ai schimbat {field}', 'undo' => 'Anulează', 'undone' => 'Anulat', 'nothing_to_undo' => 'Nimic de anulat',
 	'added' => 'Adăugat în {list}', 'deleted' => 'Ai șters {name}', 'hidden_item' => 'Ai ascuns {name}', 'shown_item' => '{name} se vede din nou',
