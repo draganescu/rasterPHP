@@ -234,7 +234,7 @@ test('2.1.1 closes /api, and keeps it open for older sites until they list', fun
 	same(0, $code, $out);
 	has($out, 'api-open');
 	has(file_get_contents("$site/application/config/the_app.php"), "config::set('api_open')->to(true);");
-	same("2.1.1\n", file_get_contents("$site/application/config/raster-version"));
+	same(file_get_contents("$repo/system/VERSION"), file_get_contents("$site/application/config/raster-version"));
 	has(raster($site, array('doctor'))[1], 'api_open keeps every public method');
 	// once the model lists what it offers and the line is gone, doctor is quiet
 	file_put_contents("$site/application/models/orders/orders.php", "<?php\nclass orders {\n\tstatic function api() { return array('all' => 'editor'); }\n\tfunction all() { return array(); }\n}\n");

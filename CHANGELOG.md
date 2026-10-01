@@ -3,7 +3,7 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
-## Unreleased
+## 2.1.2
 
 Nothing for sites to do.
 
