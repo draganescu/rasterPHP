@@ -496,7 +496,7 @@ class reservation {
   editors: `config::set('protected')->to(array('bookings' => 'editor'))`.
   Without it the records are stored and nobody can see them. Staff confirm,
   edit and delete them there with the in-page editor and the type's actions.
-  Link to it only for staff (`print.if.is_editor`).
+  The editor's Admin menu lists it, so it needs no link in the site.
 - **The model's own code** writes with `cms_records::create($type, $values)`,
   `update($type, $id, $values)` and `delete($type, $id)` (these may write
   readonly and hidden fields and `owner`, and still pass `check()`), and reads
@@ -547,7 +547,9 @@ class reservation {
 - Flags: `if.logged_in`, `if.logged_out`, `if.is_member`, `if.is_editor`,
   `if.is_admin`.
 - Roles: `admin`, `editor` (edits content), `member`.
-- Settings: `config::set('protected')->to(array('account' => 'member'))`,
+- Settings: `config::set('protected')->to(array('account' => 'member'))`
+  (a view protected for `editor` or `admin` is an admin page, see
+  **Editors and agents**),
   `registration` (false turns sign-up off), `login_page`, `after_login`,
   `password_min_length` (8).
 - Five wrong passwords lock an account for 15 minutes.
@@ -698,6 +700,15 @@ of lists and filter pages come along; drafts and the editor don't.
   are replaced by choosing or dropping a picture, framed in the browser. The
   Page panel lists fields the page can't show (in `<head>`, in attributes),
   the lists, and the page's history. Nothing is added for visitors.
+- **Admin pages.** Every view that `protected` keeps for `editor` or `admin`
+  (`config::set('protected')->to(array('bookings' => 'editor'))`) is an
+  admin page: the editor's dock has an **Admin** menu listing the ones the
+  person may open, by the view's `<title>`. That's the whole registration, so
+  staff pages need no hidden menus or `print.if.is_editor` links. A prefix
+  covers the views under it (`'staff'` lists `staff.html` and
+  `staff/rota.html`), and the strictest matching pattern decides who sees a
+  page. `_item` views are left out (they need an item). `describe` lists them
+  under `admin_pages`.
   - How it works: while an editor looks at a page the CMS marks what it
     prints (`<!--raster:s 3-->…<!--raster:e 3-->`, details in
     `#raster-editor-config`), and `system/models/cms/editor/editor.js` saves
@@ -719,7 +730,7 @@ of lists and filter pages come along; drafts and the editor don't.
     It's off until that token is set.
 - **Tools for the site itself:**
   - `describe` — how URLs reach views, the pages and collections the markup
-    declares, the vocabulary, the settings that change behaviour, and whether
+    declares, the admin pages, the vocabulary, the settings that change behaviour, and whether
     the templates lint clean. Ask this first. `sections` narrows it.
   - `vocabulary` — every model with its methods and their signatures, the
     named SQL queries, the events and who listens, the names the CMS keeps.

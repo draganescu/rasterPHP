@@ -62,3 +62,4 @@ if ($knob('CAFE_REWRITE') === 'off') config::set('rewrite')->to(false);
 if ($knob('CAFE_API_OPEN') === 'on') config::set('api_open')->to(true);
 if ($knob('CAFE_API_FEED') === 'on') config::set('api_system_models')->to(array('cms', 'feed'));
 if ($knob('CAFE_LOG') === 'on') log::enable();
+if ($knob('CAFE_ADMIN_PAGE')) config::set('protected')->to(config::get('protected') + array($knob('CAFE_ADMIN_PAGE') => 'admin'));

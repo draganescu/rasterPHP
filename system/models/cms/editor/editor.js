@@ -20,7 +20,7 @@
 	var T = {
 		hello: 'Hi {name}', hello_anon: 'Hi there',
 		welcome: 'Anything that glows can be changed. Press E or tap Edit to start.',
-		edit: 'Edit', done: 'Done', editing: 'Editing', page: 'Page',
+		edit: 'Edit', done: 'Done', editing: 'Editing', page: 'Page', admin: 'Admin', admin_pages: 'Admin pages',
 		saving: 'Saving…', saved: 'Saved', all_saved: 'All saved',
 		changed: 'Changed {field}', undo: 'Undo', undone: 'Undone', nothing_to_undo: 'Nothing to undo',
 		added: 'Added to {list}', deleted: 'Deleted {name}', hidden_item: 'Hid {name}', shown_item: '{name} is visible again',
@@ -311,6 +311,7 @@
 		plus: '<path d="M12 5v14M5 12h14"/>',
 		check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
 		x: '<path d="M6 6l12 12M18 6L6 18"/>',
+		grid: '<rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/>',
 		layers: '<path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/>',
 		bold: '<path d="M7 5h6a3.5 3.5 0 0 1 0 7H7zM7 12h7a3.5 3.5 0 0 1 0 7H7z"/>',
 		italic: '<path d="M10 5h8M6 19h8M14 5l-4 14"/>',
@@ -358,6 +359,13 @@
 			'.dot{width:7px;height:7px;border-radius:50%;background:#3aa86b;transition:background .2s}',
 			'.dot.busy{background:' + look.accent + ';animation:blink 1s infinite}',
 			'@keyframes blink{50%{opacity:.3}}',
+			// the admin pages menu, above the dock
+			'.menu{position:absolute;left:50%;bottom:calc(70px + env(safe-area-inset-bottom));transform:translateX(-50%);min-width:240px;max-width:calc(100vw - 32px);max-height:min(60vh,440px);overflow:auto;padding:6px;pointer-events:auto;animation:rise .25s cubic-bezier(.2,.9,.3,1.2) both}',
+			'.menu h3{margin:6px 10px;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:' + look.muted + '}',
+			'.menu a{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:8px 10px;border-radius:8px;color:inherit;text-decoration:none}',
+			'.menu a:hover,.menu a:focus-visible{background:' + look.accentSoft + ';color:' + look.accent + ';outline:none}',
+			'.menu a[aria-current]{font-weight:600}',
+			'.menu a[aria-current]:after{content:"";width:7px;height:7px;border-radius:50%;background:' + look.accent + ';flex:none}',
 			'.bubble{position:absolute;left:50%;bottom:calc(76px + env(safe-area-inset-bottom));transform:translateX(-50%);max-width:min(380px,calc(100vw - 32px));padding:12px 16px;pointer-events:auto;text-align:center;animation:rise .6s cubic-bezier(.2,.9,.3,1.3) both}',
 			'.bubble strong{display:block;font:600 16px/1.3 ' + look.heading + ';margin-bottom:2px}',
 			'.bubble:after{content:"";position:absolute;left:50%;bottom:-7px;width:12px;height:12px;background:inherit;border:inherit;border-top:0;border-left:0;transform:translateX(-50%) rotate(45deg)}',
@@ -454,8 +462,9 @@
 		ui.who = h('span', { class: 'who', title: C.user.name, text: initial });
 		ui.status = h('span', { class: 'status', hidden: true }, [h('span', { class: 'dot' }), h('span', { class: 'label', text: t('all_saved') })]);
 		ui.editButton = h('button', { class: 'pill primary', title: t('keyboard'), onclick: function () { setEditing(!editing); } });
-		ui.pageButton = h('button', { class: 'pill', onclick: togglePanel, html: icon('layers') + '<span>' + t('page') + '</span>' });
-		ui.dock = h('div', { class: 'dock surface hidden', role: 'toolbar', 'aria-label': 'Raster' }, [ui.who, ui.status, ui.pageButton, ui.editButton]);
+		ui.pageButton = h('button', { class: 'pill', onclick: function () { closeAdminMenu(); togglePanel(); }, html: icon('layers') + '<span>' + t('page') + '</span>' });
+		ui.adminButton = (C.admin || []).length ? h('button', { class: 'pill', 'aria-haspopup': 'menu', 'aria-expanded': 'false', onclick: toggleAdminMenu, html: icon('grid') + '<span>' + t('admin') + '</span>' }) : null;
+		ui.dock = h('div', { class: 'dock surface hidden', role: 'toolbar', 'aria-label': 'Raster' }, [ui.who, ui.status, ui.adminButton, ui.pageButton, ui.editButton]);
 		ui.layer.appendChild(ui.dock);
 		setTimeout(function () { ui.dock.classList.remove('hidden'); }, 60);
 		updateDock();
@@ -645,7 +654,7 @@
 		}
 		if (e.metaKey || e.ctrlKey || e.altKey) return;
 		if (e.key === 'e' || e.key === 'E') { e.preventDefault(); setEditing(!editing); }
-		else if (e.key === 'Escape') { if (closeFloating()) return; if (panelOpen()) { togglePanel(); return; } if (editing) setEditing(false); }
+		else if (e.key === 'Escape') { if (closeAdminMenu()) { ui.adminButton.focus(); return; } if (closeFloating()) return; if (panelOpen()) { togglePanel(); return; } if (editing) setEditing(false); }
 	});
 	document.addEventListener('paste', function (e) {
 		var field = fieldFor(e.target);
@@ -1325,6 +1334,33 @@
 			});
 		}, failed);
 	}
+
+	// ##Admin pages: the views 'protected' keeps for staff, listed so they
+	// need no hidden menu in the site
+	var adminMenu = null;
+	function closeAdminMenu() {
+		if (!adminMenu) return false;
+		adminMenu.remove();
+		adminMenu = null;
+		ui.adminButton.setAttribute('aria-expanded', 'false');
+		return true;
+	}
+	function toggleAdminMenu() {
+		if (closeAdminMenu()) return;
+		if (panel) togglePanel();
+		adminMenu = h('nav', { class: 'menu surface', role: 'menu', 'aria-label': t('admin_pages') }, [h('h3', { text: t('admin_pages') })].concat(C.admin.map(function (page) {
+			return h('a', { href: page.url, role: 'menuitem', 'aria-current': page.current ? 'page' : null, text: page.title });
+		})));
+		ui.layer.appendChild(adminMenu);
+		ui.adminButton.setAttribute('aria-expanded', 'true');
+		var first = adminMenu.querySelector('a');
+		if (first) first.focus();
+	}
+	document.addEventListener('click', function (e) {
+		if (!adminMenu) return;
+		var path = e.composedPath ? e.composedPath() : [];
+		if (path.indexOf(adminMenu) < 0 && path.indexOf(ui.adminButton) < 0) closeAdminMenu();
+	});
 
 	// ##The page panel
 	var panel = null;

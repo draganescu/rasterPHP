@@ -22,6 +22,8 @@
 *   config::set('protected')->to(array('account' => 'member', 'members/' => 'member'));
 *   config::set('login_page')->to('login');          // where protected pages send people
 *   config::set('after_login')->to('account');       // where login goes (else ?next= or /)
+* Admin pages are the views 'protected' keeps for editors or admins. The
+* in-page editor lists them, so they need no hidden menu.
 * Emails: views _email/password_reset.html (print.self.reset_url, print.self.name).
 */
 class authentication
@@ -400,5 +402,48 @@ class authentication
 	function me() {
 		$user = self::user();
 		return $user ? array(array('name' => util::e($user['name'] ?: ($user['username'] ?: $user['email'])), 'email' => util::e($user['email']), 'role' => util::e($user['role']))) : array();
+	}
+
+	// ##Admin pages
+	// The views 'protected' keeps for editors or admins, whoever is asking:
+	// url, view, title (the view's <title>) and role, the strictest pattern
+	// that matches the page. Views that need more (_item views) are left out.
+	static function all_admin_pages() {
+		require_once BASE.'tools/inspector.php';
+		$inspector = new raster_inspector();
+		$link = rtrim((string)config::get('link_uri'), '/');
+		$protected = (array)config::get('protected', array());
+		$pages = array();
+		foreach ($inspector->views() as $view) {
+			if (preg_match('#(^|/)_#', $view) || substr($view, -strlen($inspector->ext)) !== $inspector->ext) continue;
+			$name = substr($view, 0, -strlen($inspector->ext));
+			if (preg_match('/_item$/', $name)) continue;
+			$role = null;
+			foreach ($protected as $pattern => $needs) {
+				if ($needs === 'edit') $needs = 'editor';
+				if (!isset(self::$roles[$needs]) || !preg_match('%^/'.ltrim($pattern, '/').'%', '/'.$name)) continue;
+				if ($role === null || self::$roles[$needs] > self::$roles[$role]) $role = $needs;
+			}
+			if ($role === null || self::$roles[$role] < self::$roles['editor']) continue;
+			$pages[] = array(
+				'url' => $name === config::get('default_view', 'index') ? $link.'/' : $link.'/'.$name,
+				'view' => $name,
+				'title' => self::view_title($inspector->theme_dir().'/'.$view, $name),
+				'role' => $role,
+			);
+		}
+		usort($pages, function ($a, $b) { return strcasecmp($a['title'], $b['title']); });
+		return $pages;
+	}
+
+	// the text of a view's <title>, with the mock-up text of any annotation in it
+	protected static function view_title($file, $name) {
+		$html = (string)@file_get_contents($file);
+		$title = '';
+		if (preg_match('#<title[^>]*>(.*?)</title>#is', $html, $m)) {
+			$title = preg_replace('#<!--.*?-->#s', '', $m[1]);
+			$title = trim(preg_replace('/\s+/', ' ', html_entity_decode(strip_tags($title), ENT_QUOTES, 'UTF-8')));
+		}
+		return $title !== '' ? $title : ucfirst(str_replace(array('_', '-', '/'), ' ', $name));
 	}
 }

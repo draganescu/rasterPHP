@@ -32,7 +32,7 @@ class raster_describe
 	);
 
 	static function sections() {
-		return array('site', 'routing', 'pages', 'collections', 'vocabulary', 'settings', 'lint', 'schema', 'views');
+		return array('site', 'routing', 'pages', 'admin_pages', 'collections', 'vocabulary', 'settings', 'lint', 'schema', 'views');
 	}
 
 	// $sections limits the work; the default is everything.
@@ -87,6 +87,14 @@ class raster_describe
 				$pages[] = array('url' => $page['url'], 'view' => $page['view'], 'table' => $page['type'], 'fields' => $fields);
 			}
 			$out['pages'] = $pages;
+		}
+
+		// the views 'protected' keeps for staff: the in-page editor lists them
+		if ($want('admin_pages')) {
+			$out['admin_pages'] = array();
+			foreach (authentication::all_admin_pages() as $page) {
+				$out['admin_pages'][] = array('url' => '/'.($page['view'] === config::get('default_view', 'index') ? '' : $page['view']), 'view' => $page['view'], 'title' => $page['title'], 'role' => $page['role']);
+			}
 		}
 
 		if ($want('collections')) {

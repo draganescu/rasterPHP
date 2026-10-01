@@ -28,10 +28,24 @@ After logging in, every HTML page of the site shows an **Edit** button.
 | work on a list item | use the handle on the item: **Details** (every field, the slug, visibility, publish date), **Duplicate**, **Hide**/**Show**, **Schedule**, **Delete** |
 | add a list item | use the card at the end of each list: it's made from the template's sample item |
 | see fields that aren't visible | open the **Page** panel: fields in `<head>` (like the title and meta description) and in attributes are listed there, with the page's lists |
+| open a staff page | **Admin** menu in the editor's bar: every page protected for editors or admins that you may open (see [Admin pages](#admin-pages)) |
 | go back to an earlier version | **Page** panel → **History** → **Restore**. Restoring adds a new version; nothing is overwritten. |
 | log out | in the editor's menu |
 
 An empty text field shows the template's default text again.
+
+## Admin pages
+
+A page protected for editors or admins is an admin page, and the editor's **Admin** menu lists it:
+
+```php
+config::set('protected')->to(array(
+    'staff'    => 'editor',   // staff.html, and staff/rota.html under it
+    'payments' => 'admin',
+));
+```
+
+Each page shows under its `<title>`. People see the pages they may open, so editors don't see `payments`. Nothing else needs registering, and the site needs no hidden staff menu. The menu only appears when there is at least one admin page. `php bin/raster describe` lists them under `admin_pages`.
 
 ## What it edits
 

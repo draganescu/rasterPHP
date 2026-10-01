@@ -736,6 +736,33 @@ test(array('E17', 'E20', 'E27'), 'the editor: only for editors, marks where the 
 	has(header_value($headers, 'Content-Type'), 'application/javascript');
 	has($js, 'raster-editor-config');
 });
+test(array('E30'), 'the editor lists the admin pages protected lets this person open', function () use ($base, $db, $maildir, $views) {
+	$staff = login($base, 'staff@cafe.test', 'staff password');
+	$config = editor_config(http('GET', "$base/about", null, array("Cookie: $staff"))[1]);
+	same(array(array('url' => "$base/staff", 'title' => 'Staff', 'current' => false)), $config['admin']);
+	$config = editor_config(http('GET', "$base/staff", null, array("Cookie: $staff"))[1]);
+	same(true, $config['admin'][0]['current']);
+	$titles = function ($base, $cookie) {
+		return array_column(editor_config(http('GET', "$base/about", null, array("Cookie: $cookie"))[1])['admin'], 'title');
+	};
+	// a view under a protected prefix is listed by its <title>, mock-up text included
+	@mkdir("$views/staff");
+	try {
+		with_file("$views/staff/rota.html", '<!doctype html><html><head><title><!-- print.cms.rota_title -->Rota<!-- /print.cms.rota_title --> &amp; shifts</title></head><body><p>Rota</p></body></html>', function () use ($base, $db, $maildir, $staff, $titles) {
+			same(array('Rota & shifts', 'Staff'), $titles($base, $staff));
+			// a stricter pattern keeps it to admins
+			raster(array('user', 'boss@cafe.test', '--role=admin', '--password=boss password'));
+			$strict = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'CAFE_ADMIN_PAGE' => 'staff/rota'));
+			same(array('Staff'), $titles($strict, login($strict, 'staff@cafe.test', 'staff password')), 'editors do not see admin pages');
+			same(array('Rota & shifts', 'Staff'), $titles($strict, login($strict, 'boss@cafe.test', 'boss password')));
+			list($code, $out) = raster(array('describe', '--json', '--sections=admin_pages'), array('RASTER_DB' => $db, 'CAFE_ADMIN_PAGE' => 'staff/rota'));
+			same(array('admin_pages' => array(
+				array('url' => '/staff/rota', 'view' => 'staff/rota', 'title' => 'Rota & shifts', 'role' => 'admin'),
+				array('url' => '/staff', 'view' => 'staff', 'title' => 'Staff', 'role' => 'editor'),
+			)), json_decode($out, true));
+		});
+	} finally { @rmdir("$views/staff"); }
+});
 test(array('E18', 'E19', 'E28'), 'the editor saves pages and items, keeps revisions and restores them', function () use ($base) {
 	$staff = login($base, 'staff@cafe.test', 'staff password');
 	$h = array("Cookie: $staff");
@@ -1036,7 +1063,7 @@ test('M6', 'MCP over stdio', function () use ($root) {
 
 test('M10', 'describe: the site in one call', function () use ($base) {
 	$all = mcp($base, 'describe');
-	same(array('site', 'routing', 'pages', 'collections', 'vocabulary', 'settings', 'lint', 'schema', 'views'), array_keys($all));
+	same(array('site', 'routing', 'pages', 'admin_pages', 'collections', 'vocabulary', 'settings', 'lint', 'schema', 'views'), array_keys($all));
 	same('demo', $all['site']['app']);
 	same('cafe', $all['site']['theme']);
 	check(in_array('/menu', array_map(function ($p) { return $p['url']; }, $all['pages'])), 'the pages are there');
@@ -1319,7 +1346,7 @@ test('N13', 'describe on the command line', function () {
 	same(0, $code, $out);
 	$described = json_decode($out, true);
 	same('demo', $described['site']['app']);
-	same(9, count($described));
+	same(10, count($described));
 	list($code, $out) = raster(array('describe', '--sections=site,vocabulary'));
 	same(0, $code, $out);
 	has($out, '## site');

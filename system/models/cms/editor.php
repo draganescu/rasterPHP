@@ -83,6 +83,7 @@ class cms_editor {
 			'page' => array('type' => $page_type, 'slug' => $slug),
 			'user' => array('name' => $user ? ($user['name'] ?: strtok((string)$user['email'], '@')) : '', 'role' => $user ? $user['role'] : ''),
 			'marks' => (object)$template->marks,
+			'admin' => self::admin_pages(),
 			'strings' => self::strings(),
 			'lang' => class_exists('i18n') ? i18n::detect() : '',
 		);
@@ -90,6 +91,17 @@ class cms_editor {
 			.json_encode($config, JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR)
 			.'</script><script src="'.config::get('link_uri').'api/cms/editor_script?v='.urlencode(self::version()).'" defer></script>';
 		$template->output = preg_replace('#</body>#i', $script."\n</body>", $template->output, 1);
+	}
+
+	// the staff pages this person may open, for the editor's Admin menu
+	protected static function admin_pages() {
+		$uri = trim((string)strtok((string)config::get('uri_string'), '?'), '/');
+		$pages = array();
+		foreach (authentication::all_admin_pages() as $page) {
+			if (!authentication::can($page['role'])) continue;
+			$pages[] = array('url' => $page['url'], 'title' => $page['title'], 'current' => $uri === $page['view']);
+		}
+		return $pages;
 	}
 
 	static function version() {

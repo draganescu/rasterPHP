@@ -151,6 +151,7 @@ php tests/demo.php                        # the whole matrix
 | E27 | editor marks: fields, attribute fields, items, lists with their mock-up; fields out of reach (in <head>) listed as hidden |
 | E28 | page history and restoring a revision from the editor |
 | E29 | photos: page and item image fields; an empty value keeps the template's picture |
+| E30 | admin pages: views `protected` keeps for editors or admins are listed in the editor's Admin menu, by title, for whoever may open them; `describe` lists them |
 | F1 | schema status as JSON |
 | F2 | schema --check |
 | F3 | schema --apply in production, including model tables |

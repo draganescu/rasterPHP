@@ -125,6 +125,7 @@ Each key is a path pattern (a regular expression matched from the start of the p
 - Visitors who aren't logged in are sent to the log-in page, with `?next=` so they come back afterwards.
 - Logged-in users without the role get **403**.
 - Protected pages are left out of the sitemap and the static export.
+- Pages protected for `editor` or `admin` are admin pages: the [in-page editor](The-In-Page-Editor#admin-pages) lists them in its **Admin** menu.
 
 ## In your own models
 

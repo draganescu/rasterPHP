@@ -24,6 +24,11 @@ Nothing for sites to do.
   stylesheets applied and take the browser's defaults (serif type, black on
   white, a default blue) for the site's colours and fonts. It now reads the
   look again when the stylesheets and the page have loaded.
+- **The in-page editor lists admin pages.** Every view `protected` keeps
+  for `editor` or `admin` shows in a new **Admin** menu in the editor's bar,
+  by its `<title>`, for whoever may open it. Staff pages no longer need a
+  hidden menu or a `print.if.is_editor` link. `describe` (and MCP
+  `describe`) has a new `admin_pages` section.
 
 ## 2.1.1
 
