@@ -19,6 +19,11 @@ Nothing for sites to do.
   `AGENTS.md` (Records) now asks agents that add a form storing records to
   also add a page, protected for editors, that lists them, so what visitors
   send is never stored out of sight.
+- **The in-page editor keeps the site's look on every page.** Once the
+  browser had cached the editor's script, it could run before the page's
+  stylesheets applied and take the browser's defaults (serif type, black on
+  white, a default blue) for the site's colours and fonts. It now reads the
+  look again when the stylesheets and the page have loaded.
 
 ## 2.1.1
 
