@@ -62,16 +62,24 @@ Pagination can ask one of your models instead. Pass `'model.method'`. Raster cal
 class guestbook {
     function entries($count = false) {
         $perpage = 20;
-        $total = (int)database::instance()->query('SELECT COUNT(*) AS n FROM entry')[0]['n'];
+        $db = database::instance('guestbook');
+        $total = (int)$db->entry_count()[0]['n'];
         if ($count === true) return array('total' => $total, 'perpage' => $perpage);
 
         $page = max(1, (int)util::get('page'));
-        return database::instance()->query(
-            'SELECT name, message FROM entry ORDER BY id DESC LIMIT ? OFFSET ?',
-            array($perpage, ($page - 1) * $perpage)
-        );
+        return $db->entries_page($perpage, ($page - 1) * $perpage);
     }
 }
+```
+
+```sql
+-- models/guestbook/sql/entry_count.sql
+SELECT COUNT(*) AS n FROM entry
+```
+
+```sql
+-- models/guestbook/sql/entries_page.sql
+SELECT name, message FROM entry ORDER BY id DESC LIMIT ? OFFSET ?
 ```
 
 ```html

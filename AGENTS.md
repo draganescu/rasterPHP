@@ -186,7 +186,8 @@ static function schema() {
 
 ### SQL in files
 
-Queries can live outside PHP, and run as methods named after them:
+**A model's SQL goes in files, not in PHP strings.** Each query is a file in
+the model's `sql/` folder, and runs as a method named after it:
 
 ```sql
 -- application/models/products/sql/in_category.sql
@@ -210,6 +211,14 @@ $rows = database::instance('products')->in_category('chairs', 200); // from anyw
   over an entry there with the same name.
 - A name with no query throws `BadMethodCallException`, and `lint` reports
   `database::instance(…)->name(…)` calls that have no query.
+
+Write a query this way rather than with `R::getAll(…)`, `R::exec(…)` or
+`database::instance()->query('SELECT …')`: the model's code then reads as
+what it does (`->in_category($c, $max)`), the SQL can be read and run on its
+own, `vocabulary` lists every query by name, and `lint` checks each call has
+one. Keep RedBean for what it does best, one row as an object
+(`R::dispense`, `R::store`, `R::load`, `R::trash`), and `cms_records` for
+records. An inline `query()` is for SQL the code has to put together.
 
 Text can be replaced in the pages under a path:
 `template::instance()->replace('{{x}}', 'y', 'lab');`.
@@ -297,9 +306,10 @@ that doesn't exist or can't be called, or a role that doesn't exist, and
 config `api_open`, which keeps every public method of models without `api()`
 reachable, as before; `doctor` warns, and 2.2.0 removes it.
 
-The database is RedBeanPHP (`R::find`, `R::dispense`, `R::store`), or
-`database::instance()->query('… WHERE a = ?', array($a))` with bound
-parameters.
+The database is RedBeanPHP (`R::dispense`, `R::store`, `R::load`) for rows
+as objects, and named queries in `sql/` files for everything you would write
+SQL for (see **SQL in files**). Values are always bound parameters, never
+pasted into the SQL.
 
 ## Forms
 

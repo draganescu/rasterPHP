@@ -57,27 +57,7 @@ Freezing production means a typo in a template can't quietly add columns to your
 
 ## Querying with SQL
 
-Get the database object and run a query with **bound parameters**: values are passed separately from the SQL, so they can never change the query (this is what protects you from SQL injection).
-
-```php
-$db = database::instance();
-$rows = $db->query('SELECT name, price FROM product WHERE category = ? AND price <= ?', array('chairs', 200));
-$rows = $db->query('SELECT * FROM product WHERE id = :id', array(':id' => 7));
-```
-
-The result is always a list of rows, each an array keyed by column name, which is exactly what a `render` method returns. So a model method can be this short:
-
-```php
-function cheap_chairs() {
-    return database::instance()->query("SELECT name, price FROM product WHERE category = 'chairs' AND price < 100");
-}
-```
-
-Never paste visitor input into the SQL string yourself; always use `?` or `:name`.
-
-## SQL in files (named queries)
-
-Longer queries can live in `.sql` files next to the model and be called as if they were methods:
+A model's SQL lives in **`.sql` files** next to it, one query per file, and each file becomes a method you call by its name:
 
 ```sql
 -- application/models/products/sql/in_category.sql
@@ -92,7 +72,23 @@ $rows = database::instance()->in_category('chairs', 200);
 $rows = database::instance('products')->in_category('chairs', 200);
 ```
 
-- `?` placeholders are filled from the arguments, in order. For `:name` placeholders pass one array: `->between(array(':low' => 1, ':high' => 5))`.
+The result is always a list of rows, each an array keyed by column name, which is exactly what a `render` method returns. So a model method can be this short:
+
+```php
+function cheap_chairs() {
+    return database::instance()->cheap_chairs();   // sql/cheap_chairs.sql
+}
+```
+
+This is the way to write SQL in Raster, rather than strings in PHP:
+
+- **The model reads as what it does.** `->in_category($category, $max)` says more than a line of SQL in the middle of a method.
+- **The SQL is SQL.** Your editor highlights it, and you can paste it into `sqlite3` to try it.
+- **Raster knows about it.** `php bin/raster vocabulary` lists every query by name, and `lint` reports a call to a query that doesn't exist, before anyone opens the page.
+
+How it works:
+
+- `?` placeholders are filled from the arguments, in order. For `:name` placeholders pass one array: `->between(array(':low' => 1, ':high' => 5))`. Values are bound, never pasted into the SQL, so they can't change the query (this is what protects you from SQL injection).
 - Without a model name, Raster looks in the folder of the model a template is currently calling. A model name you pass is remembered for later calls, so pass it whenever you're not sure.
 - Queries any model may use can go in `application/models/sql.php`:
 
@@ -103,6 +99,18 @@ $rows = database::instance('products')->in_category('chairs', 200);
 
   Values for `'%s'` are quoted safely by the database driver. A `.sql` file with the same name wins over an entry here.
 - Calling a name that has no query throws a `BadMethodCallException`. `lint` finds such calls in your models before you run them.
+
+### Inline queries
+
+When the code has to put the SQL together itself (a column to sort by that the visitor picks from a list, say), run it with `query()` and bound parameters:
+
+```php
+$db = database::instance();
+$rows = $db->query('SELECT name, price FROM product WHERE category = ? ORDER BY '.$column, array($category));
+$rows = $db->query('SELECT * FROM product WHERE id = :id', array(':id' => 7));
+```
+
+Never paste visitor input into the SQL string yourself; always use `?` or `:name`, and only build the SQL from values your code chose (like `$column` above, checked against a list).
 
 ## Working with records: RedBeanPHP
 
