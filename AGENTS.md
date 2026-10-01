@@ -490,6 +490,13 @@ class reservation {
   /api/cms/editor_action`); MCP has `run_action`, trusted like an admin. Name
   a button in the site's words with `application/i18n/<lang>/raster_editor.php`:
   `'action_confirm' => 'Confirm table'`, and a refusal with `'problem_<name>'`.
+- **Every form that saves data gets a staff page.** When a type's records
+  come from a form (`create` is `visitor` or `member`), also make a view that
+  lists them, `render.cms.<type>('order=newest')`, and protect it for
+  editors: `config::set('protected')->to(array('bookings' => 'editor'))`.
+  Without it the records are stored and nobody can see them. Staff confirm,
+  edit and delete them there with the in-page editor and the type's actions.
+  Link to it only for staff (`print.if.is_editor`).
 - **The model's own code** writes with `cms_records::create($type, $values)`,
   `update($type, $id, $values)` and `delete($type, $id)` (these may write
   readonly and hidden fields and `owner`, and still pass `check()`), and reads

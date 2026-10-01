@@ -88,6 +88,8 @@ Records show wherever a template renders them, like any collection:
 
 Visitors see nothing here, not even the example row. Staff see every booking, and in edit mode each one has **Confirm** and **Cancel** buttons. Name and date can be edited in place. Status can't, but it updates when a button changes it. With `'owner' => true`, the same block on `/account` shows a logged in visitor their own bookings.
 
+Every form that saves data needs a page like this one. Without it, what visitors send is stored and nobody sees it. Protect it for editors in the settings, `config::set('protected')->to(array('staff' => 'editor'))`, and link to it only for staff.
+
 Records never appear in feeds, the sitemap or a [static export](Static-Export), unless the type is `public`.
 
 ## The rules hold everywhere
