@@ -62,7 +62,7 @@ Because of that same `<base>` tag, `#section` points at the theme folder. Write 
 
 ## Changes don't show for visitors, but do when I'm logged in
 
-That's the page cache (production only). Content saved through Raster clears it automatically. If your own model writes data, call `util::content_changed()` afterwards. For pages that must always be fresh, add them to `page_cache_skip`. Check the `X-Raster-Cache` response header.
+That's the page cache (production only). Content saved through Raster clears it automatically. If your own model writes data, call `util::content_changed()` afterwards. After editing views, models or the database by hand, run `php bin/raster cache clear`. For pages that must always be fresh, add them to `page_cache_skip`. Check the `X-Raster-Cache` response header.
 
 ## A new item or post doesn't appear
 

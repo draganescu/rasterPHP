@@ -105,6 +105,7 @@ Prints the web-server configuration that keeps private files private. See [Deplo
 | `php bin/raster vocabulary [--json]` | every model with its methods and their parameters, named SQL queries, events and listeners, reserved names |
 | `php bin/raster annotations [--json]` | the annotation grammar, as data |
 | `php bin/raster mcp` | runs the MCP server over standard input/output |
+| `php bin/raster cache clear` | throws the [page cache](Settings-and-Environments#the-page-cache) away, after editing views, models or the database by hand |
 
 These are also useful to humans: `vocabulary` is the quickest way to see what a template can call. See [Working with AI agents](Working-with-AI-Agents).
 

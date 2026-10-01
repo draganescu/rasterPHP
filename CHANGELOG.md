@@ -3,6 +3,19 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## Unreleased
+
+Nothing for sites to do.
+
+- **Clearing the page cache by hand.** In production, changes Raster doesn't
+  make itself (a view, theme file, model or config edited with ordinary file
+  tools, or the database changed directly) were invisible to visitors until
+  `page_cache_ttl` ran out, while `raster render` and MCP `render_url`,
+  which never read the cache, already showed them. `php bin/raster cache
+  clear` and the MCP tool `clear_cache` throw the cache away. The MCP
+  server's instructions tell agents when to call it, and `describe` says
+  whether the cache is on (`site.page_cache`).
+
 ## 2.1.2
 
 Nothing for sites to do.

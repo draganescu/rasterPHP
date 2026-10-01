@@ -8,6 +8,7 @@
 //   php bin/raster mcp
 //   php bin/raster serve [--port=8000]
 //   php bin/raster render <url>
+//   php bin/raster cache clear
 //   php bin/raster export <folder> [--url=…] [--skip=…] [--clean]
 //   php bin/raster new <folder>
 //   php bin/raster update [latest|<version>|<branch>|<folder>|<file.tar.gz>] [--dry-run] [--force]
@@ -525,6 +526,17 @@ switch ($command) {
 		foreach ($made['next'] as $step) echo "  - $step\n";
 		exit(0);
 
+	case 'cache':
+		// files and the database edited directly don't clear the page cache
+		if ((isset($positional[0]) ? $positional[0] : null) !== 'clear') {
+			fwrite(STDERR, "Usage: php bin/raster cache clear\n");
+			exit(2);
+		}
+		$cleared = raster_cache::clear();
+		echo 'Page cache cleared ('.$cleared['removed'].' '.($cleared['removed'] === 1 ? 'page' : 'pages').').';
+		echo raster_cache::enabled() ? "\n" : ' It is off in this environment ('.config::get('environment').").\n";
+		exit(0);
+
 	case 'mcp':
 		controller::load_model('mcp');
 		controller::get_object('mcp')->stdio();
@@ -594,7 +606,9 @@ Raster command line
   php bin/raster send <url> [--to=email] [--dry-run] [--again]
                                          email a page to newsletter subscribers
   php bin/raster mcp                     MCP server over stdio for local agents
-  php bin/raster render <url>            print the HTML of a URL
+  php bin/raster render <url>            print the HTML of a URL (never from the page cache)
+  php bin/raster cache clear             throw the page cache away, after editing views,
+                                         models or the database by hand
   php bin/raster export <folder> [--url=https://example.com/] [--skip=/path] [--clean]
                                          the site as static files for any static host
   php bin/raster doctor [--json]         check the project: PHP, versions, edited framework

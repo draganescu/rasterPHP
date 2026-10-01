@@ -21,6 +21,7 @@ php bin/raster lint               # after every template edit; exit 1 on errors
 php bin/raster lint --fix         # repair what is mechanical, report the rest
 php bin/raster schema             # what the CMS will store, compared with the database
 php bin/raster render /about      # print a page without a server (exit 1 on 4xx/5xx)
+php bin/raster cache clear        # after editing files or the database by hand, in production
 php bin/raster doctor             # is this site healthy, up to date, ready for production?
 ```
 
@@ -666,7 +667,16 @@ use `'model.method'`: `method(true)` returns
   - Any content change throws the cache away (`util::content_changed()` in
     your own models), and so does the moment a scheduled item is published.
   - Settings: `page_cache_ttl` (3600 seconds) and `page_cache_skip` (path
-    patterns). Responses carry `X-Raster-Cache: hit|miss`.
+    patterns). Responses carry `X-Raster-Cache: hit|miss`. `describe` says
+    whether the cache is on (`site.page_cache`).
+  - **Changes Raster doesn't make itself don't clear it.** Raster's own
+    writes do (`write_view`, `update_page`, the item tools, the editor,
+    forms). A view, theme file, model or config edited with ordinary file
+    tools, or the database changed directly, is not seen by visitors who
+    aren't logged in until the cache is cleared or `page_cache_ttl` runs
+    out: run `php bin/raster cache clear`, or MCP `clear_cache`.
+    `render` and `render_url` never read the cache, so a fresh render does
+    not mean visitors see the change.
 
 ## Static export
 
@@ -753,7 +763,11 @@ of lists and filter pages come along; drafts and the editor don't.
     left alone and the problems come back. The answer says what the change
     does to the content model.
   - `render_url` — the page's status and HTML, no web server. It runs in its
-    own process, so a page that dies can't take the server down.
+    own process, so a page that dies can't take the server down. It never
+    reads the page cache.
+  - `clear_cache` — throws the page cache away. Call it after changing
+    views, theme files, models or config any way but `write_view`, or the
+    database directly; Raster's own tools already clear it.
 - **Tools for content:** `site_overview`, `get_page`, `update_page`,
   `page_history`, `list_items`, `get_item`, `create_item`, `update_item`,
   `delete_item`, `run_action` (records), `lint_templates`, `schema_status`.

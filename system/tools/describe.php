@@ -49,6 +49,7 @@ class raster_describe
 				'app' => boot::$appname,
 				'raster' => trim(@file_get_contents(BASE.'VERSION')) ?: 'unknown',
 				'environment' => config::get('environment'),
+				'page_cache' => raster_cache::enabled(),
 				'theme' => $inspector->theme,
 				'base_url' => config::get('base_uri'),
 				'views' => config::get('views_path', 'views').'/'.$inspector->theme.'/',
