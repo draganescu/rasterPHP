@@ -3,6 +3,42 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.1.4
+
+Run `php bin/raster cache clear` on production sites after updating, so no
+page cached before the update is served at an address that is now refused.
+
+- **Security: attributes set inside render rows could be broken out of.**
+  A value printed with `print.@attr.key` or `print.+attr.key` inside a
+  render block could close the attribute and add its own (an `onmouseover`,
+  say) with a backslash sequence. Links built from the request path, such
+  as the language switcher and pagination on filter pages, made this
+  reachable from a crafted URL, and so did a visitor-written field of a
+  public record type. Row attributes are now set the same way as
+  top-level `print.@attr`, where the value is only ever text.
+  (GHSA-v6gr-g4cg-vjcr)
+- **Security: protected pages could be reached without logging in.**
+  Behind nginx, Apache or Caddy, `/./staff`, `/%2E/staff`, or `/Staff` on a
+  disk that ignores case, rendered a page `protected` keeps for staff.
+  Now `a//b` is `a/b`, any path with a segment starting with a dot is a
+  404, and each `protected` pattern matches the start of the URL and of
+  the view it renders, ignoring case. (GHSA-52xw-67m4-c6xw)
+- **`print.@src` in a render row leaves `srcset` alone.** The attribute is
+  matched by its whole name, on the tag the annotation wraps only, so
+  `srcset`, `data-src` and attributes of nested tags are no longer
+  overwritten.
+- **Every error gets the plain error page in production.** Only template
+  errors did; an `InvalidArgumentException` or a named query that doesn't
+  exist ended as a raw PHP fatal. Now anything thrown while rendering shows
+  the plain page and is written to the error log with where it happened.
+- **Warnings and errors always reach the PHP error log.** `log::warning`
+  and `log::error` did nothing unless `log::enable()` was called, so a
+  password reset email that failed to send left no trace. `log::enable()`
+  still controls the browser console.
+- **Page requests do less.** The lint, schema and describe tools load only
+  when MCP answers, and the framework no longer asks the autoloader for
+  `the_config` and the other core overrides on every `config::get`.
+
 ## 2.1.3
 
 Nothing for sites to do.
