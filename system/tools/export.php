@@ -140,6 +140,8 @@ class raster_export {
 		$databases = glob(APPBASE.'data/*.sqlite*') ?: array();
 		if (getenv('RASTER_DB')) $databases = array_merge($databases, glob(getenv('RASTER_DB').'*') ?: array());
 		foreach (array_unique($databases) as $file) {
+			// the -shm index changes when the database is only read (WAL)
+			if (substr($file, -4) === '-shm') continue;
 			clearstatcache(true, $file);
 			$parts[] = $file.'|'.filemtime($file).'|'.filesize($file);
 		}

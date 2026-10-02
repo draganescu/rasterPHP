@@ -90,9 +90,22 @@ class cms_store {
 		}
 	}
 
+	// A frozen schema (production) can't change during a request, so its
+	// tables and columns are read once and kept. `raster schema --apply` and
+	// each MCP tool call start over with forget().
+	static $tables = null;
+	static $columns = array();
+
+	static function forget() {
+		self::$tables = null;
+		self::$columns = array();
+	}
+
 	static function table_exists($type) {
 		try {
-			return in_array($type, R::inspect());
+			if (!R::getRedBean()->isFrozen()) return in_array($type, R::inspect());
+			if (self::$tables === null) self::$tables = R::inspect();
+			return in_array($type, self::$tables);
 		} catch (Exception $e) {
 			return false;
 		}
@@ -101,7 +114,9 @@ class cms_store {
 	static function columns($type) {
 		if (!self::table_exists($type)) return array();
 		try {
-			return R::inspect($type);
+			if (!R::getRedBean()->isFrozen()) return R::inspect($type);
+			if (!isset(self::$columns[$type])) self::$columns[$type] = R::inspect($type);
+			return self::$columns[$type];
 		} catch (Exception $e) {
 			return array();
 		}

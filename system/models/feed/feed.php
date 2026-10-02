@@ -32,7 +32,8 @@ class feed
 		$sql .= ' ORDER BY '.cms_store::order_sql('newest', $columns).' LIMIT '.max(1, $limit);
 		$rows = array();
 		$record = cms_records::info($collection);
-		foreach (R::exportAll(R::find($type, $sql, $bindings)) as $item) {
+		foreach (R::find($type, $sql, $bindings) as $bean) {
+			$item = cms_store::export_item($bean);
 			// a public record type: lists decoded, hidden fields out, what visitors typed as text
 			if ($record) $item = cms_records::for_template($record, cms_records::shown($record, cms_records::decode($record, $item)));
 			$date = !empty($item['published_at']) ? $item['published_at'] : (!empty($item['updated_at']) ? $item['updated_at'] : 'now');

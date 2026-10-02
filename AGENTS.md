@@ -646,7 +646,8 @@ use `'model.method'`: `method(true)` returns
   folder still answer (`/about` as well as `/shop/about`); a server or proxy
   in front that only passes `/shop/` keeps the site to one address.
 - **Database file:** `RASTER_DB=/path.sqlite` points at another database
-  file.
+  file. SQLite runs in WAL mode, so `-wal` and `-shm` files sit beside it;
+  copy all three together, or back up with `sqlite3 <file> .backup`.
 - **What the server must never serve.** A Raster site is one folder, and most
   of it is private: the framework, the app's code and config, the SQLite file,
   the view files themselves. The rules are in one list,
