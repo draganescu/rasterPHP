@@ -3,6 +3,27 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.1.5
+
+Nothing for sites to do. Back up an SQLite database by copying the file
+together with its `-wal` and `-shm` files, or with `sqlite3 <file> .backup`.
+
+- **Fewer database queries per page in production.** With the schema
+  frozen, the CMS reads the list of tables and their columns once per
+  request instead of several times per field, turns list rows into arrays
+  without checking every table's columns, reads a page's row once for all
+  its fields, and no longer counts a list's rows before showing it. Demo
+  pages went from 22–74 queries to 3–9.
+- **SQLite runs in WAL mode.** Readers no longer wait for a write to
+  commit, and writes cost less. Each connection also sets
+  `synchronous=NORMAL` and waits at most 5 seconds for a locked database,
+  not PDO's 60. Existing databases switch on their next connection. The
+  `-wal` and `-shm` files are never served, and `raster export` ignores
+  the `-shm` file when deciding whether anything changed.
+- **Item ids in lists and feeds are numbers.** `render.cms.<name>` and
+  `feed.items` now give `id` as an integer, as MCP and the editor already
+  did. Pages print the same.
+
 ## 2.1.4
 
 Run `php bin/raster cache clear` on production sites after updating, so no
