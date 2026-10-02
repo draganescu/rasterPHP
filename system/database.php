@@ -17,7 +17,7 @@ class database {
     public static function instance( $model = false )
     {  
         $cls = __CLASS__;
-        if( class_exists('the_' . $cls) ) $cls = 'the_' . $cls;
+        if( class_exists('the_' . $cls, false) ) $cls = 'the_' . $cls;
         if (!isset(self::$instances[$cls])) {
             self::$instances[$cls] = new $cls;
         }

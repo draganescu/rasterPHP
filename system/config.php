@@ -224,7 +224,8 @@ class config {
 		}
 		// the query string is not part of the route
 		$uri = strtok($uri, '?');
-		$uri = '/' . ltrim(rawurldecode($uri), '/');
+		// a//b is a/b, so the path matches the patterns in 'protected' and the routes
+		$uri = '/' . ltrim(preg_replace('#/{2,}#', '/', rawurldecode($uri)), '/');
 		
 		return $uri;
 	}
@@ -259,7 +260,7 @@ class config {
     public static function instance()
     {
         $cls = __CLASS__;
-        if( class_exists('the_' . $cls) ) $cls = 'the_' . $cls;
+        if( class_exists('the_' . $cls, false) ) $cls = 'the_' . $cls;
         if (!isset(self::$instances[$cls])) {
             self::$instances[$cls] = new $cls;
         }

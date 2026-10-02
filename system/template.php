@@ -87,6 +87,14 @@ class template {
     return substr_replace($html, $changed, $tag[0][1], strlen($open));
   }
 
+  // removes an attribute (with or without a value) from the first tag in $html
+  static function remove_attribute($html, $attribute) {
+    if (!preg_match('/<[a-zA-Z][^>]*>/s', $html, $tag, PREG_OFFSET_CAPTURE)) return $html;
+    $open = $tag[0][0];
+    $changed = preg_replace('/\s'.preg_quote($attribute, '/').'(\s*=\s*(?:"[^"]*"|\'[^\']*\'|[^\s>]+))?(?=[\s>\/])/i', '', $open, 1);
+    return substr_replace($html, $changed, $tag[0][1], strlen($open));
+  }
+
   // the value of an attribute of the first tag in $html, or ''
   static function get_attribute($html, $attribute) {
     if (!preg_match('/<[a-zA-Z][^>]*>/s', $html, $tag)) return '';
@@ -100,7 +108,7 @@ class template {
   // Replaces the template singleton, used to render a second view (an email)
   // in the middle of a request. Returns the previous instance.
   static function swap($instance = null) {
-  	$cls = class_exists('the_template') ? 'the_template' : 'template';
+  	$cls = class_exists('the_template', false) ? 'the_template' : 'template';
   	$previous = isset(self::$instances[$cls]) ? self::$instances[$cls] : null;
   	if ($instance === null) unset(self::$instances[$cls]);
   	else self::$instances[$cls] = $instance;
@@ -590,7 +598,7 @@ class template {
 			return preg_match('/\s'.$name.'\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))/i', $tag, $m) ? html_entity_decode($m[1] !== '' ? $m[1] : (isset($m[2]) && $m[2] !== '' ? $m[2] : (isset($m[3]) ? $m[3] : '')), ENT_QUOTES) : null;
 		};
 		$without = function ($tag, $name) {
-			return preg_replace('/\s'.$name.'(\s*=\s*(?:"[^"]*"|\'[^\']*\'|[^\s>]+))?(?=[\s>\/])/i', '', $tag);
+			return self::remove_attribute($tag, $name);
 		};
 		$lookup = function ($name) use ($data, &$used) {
 			$key = preg_replace('/\[\]$/', '', (string)$name);
@@ -654,59 +662,6 @@ class template {
 		return $block;
 	}
 	
-	function get_parsed_items($data, $bit)
-	{
-		$ret = '';
-		foreach($data as $item)
-		{
-			$html = $bit;
-			foreach ($item as $key => $value) {
-				$is_append = false;
-
-				// simple replacement
-				$start = "<!-- print.$key -->";
-				$end = "<!-- /print.$key -->";
-				
-				$occurences = substr_count($html, $start);// echo $start."|".$occurences;
-				for ($i=0; $i < $occurences; $i++) { 
-					$pos1 = strpos($html, $start);
-					$pos2 = strpos($html, $end) - $pos1 + strlen($end);
-					$html = substr_replace($html, $value, $pos1, $pos2);
-				}
-				
-				// attr substitution
-				$res = preg_match_all('/<!-- print\.([@\+,a-z,A-Z,_,\-,\.]*)\.'.$key.' -->/', $html, $datastarts);
-				foreach ($datastarts[0] as $key => $v) {
-					if(strpos($datastarts[1][$key], '@') !== false)
-		            {
-		               
-		               $is_append = false;
-		               $pointers = explode('.', str_replace('@','',$datastarts[1][$key]));
-		               $datakey = $pointers[1];
-		               $dataattr = $pointers[0];
-		            }
-		            elseif(strpos($datastarts[1][$key], '+') !== false)
-		            {
-		               $is_append = true;
-		               $pointers = explode('.', str_replace('+','',$datastarts[1][$key]));
-		               $datakey = $pointers[1];
-		               $dataattr = $pointers[0];
-		            }
-
-		            if($is_append)
-	                	$html = preg_replace("% ".$dataattr."(.*?)=(.*?)('|\")(.*?)('|\")%", " ".$dataattr.'="$4 '.$value.'"', $html);
-                	else
-	                	$html = preg_replace("% ".$dataattr."(.*?)=(.*?)('|\")(.*?)('|\")%", " ".$dataattr.'="'.$value.'"', $html);
-	                $html = str_replace($v, '', $html);
-	                $html = str_replace(str_replace('<!-- ', '<!-- /', $v), '', $html);
-				}
-			}
-			$ret .= $html;
-		}
-
-		return $ret;
-	}
-    
    public function _render($data_arr, $model, $method) {
     
     extract($this->current_params);
@@ -840,18 +795,13 @@ class template {
 		                {
 		                	// a link a visitor typed into a record can't run script
 		                	if (isset($data['raster_escape']) && is_array($data['raster_escape']) && in_array($datakey, $data['raster_escape'], true) && preg_match('/^\s*(javascript|data|vbscript):/i', (string)$data[$datakey])) $data[$datakey] = false;
-		                	if (is_string($data[$datakey])) $data[$datakey] = htmlspecialchars($data[$datakey], ENT_QUOTES, 'UTF-8', false);
 			                // an empty value keeps the mock-up's attribute (a new image field, say)
 			                if($data[$datakey] === null || $data[$datakey] === '')
 								$attrchange = $current_item;
 			                elseif($data[$datakey] === false)
-								$attrchange = preg_replace("% ".$dataattr."(.*?)=(.*?)('|\")(.*?)('|\")%", ' ', $current_item);			                	
-			                else {
-			                	if($is_append)
-				                	$attrchange = preg_replace("% ".$dataattr."(.*?)=(.*?)('|\")(.*?)('|\")%", " ".$dataattr.'="$4 '.str_replace('$', '\$', $data[$datakey]).'"', $current_item);
-			                	else
-				                	$attrchange = preg_replace("% ".$dataattr."(.*?)=(.*?)('|\")(.*?)('|\")%", " ".$dataattr.'="'.str_replace('$', '\$', $data[$datakey]).'"', $current_item);
-			                }
+								$attrchange = self::remove_attribute($current_item, $dataattr);
+			                else
+								$attrchange = self::set_attribute($current_item, $dataattr, $data[$datakey], $is_append);
 
 			                if ($item_mark !== null && strpos($datakey, 'raster_') !== 0 && !($record && in_array($datakey, $locked))) {
 			                	$attrchange = '<!--raster:a '.$this->mark(array('kind' => 'item_attr', 'item' => $item_mark, 'field' => $datakey, 'attr' => $dataattr)).'-->'.$attrchange;
@@ -1031,7 +981,7 @@ class template {
     public static function instance()
     {
         $cls = __CLASS__;
-        if( class_exists('the_' . $cls) ) $cls = 'the_' . $cls;
+        if( class_exists('the_' . $cls, false) ) $cls = 'the_' . $cls;
         if (!isset(self::$instances[$cls])) {
             self::$instances[$cls] = new $cls;
         }

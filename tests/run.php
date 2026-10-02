@@ -125,6 +125,34 @@ test('lint: dry sources must exist', function () {
 	check(has_problem(lint_html('<!-- dry._layout.nothing /-->'), 'has no <!-- res.nothing -->'));
 	same(array(), lint_html('<!-- dry._layout.head /-->'));
 });
+class test_rows {
+	function rows() {
+		return array(array('photo' => 'new.jpg', 'link' => 'x\3 onmouseover=alert(1) x=\3', 'gone' => false, 'more' => 'b$1'));
+	}
+}
+test('attributes in render rows change only the wrapped tag, and only that attribute', function () {
+	$file = sys_get_temp_dir().'/raster-rows-'.getmypid().'.html';
+	file_put_contents($file, '<!-- render.test_rows.rows -->'
+		.'<!-- print.@src.photo --><img srcset="a.jpg 2x" data-src="a.jpg" src="a.jpg"><!-- /print.@src.photo -->'
+		.'<!-- print.@href.link --><a href="#"><img src="keep.jpg"></a><!-- /print.@href.link -->'
+		.'<!-- print.@title.gone --><b title="x" id="g">g</b><!-- /print.@title.gone -->'
+		.'<!-- print.+class.more --><i class="a">i</i><!-- /print.+class.more -->'
+		.'<!-- /render.test_rows.rows -->');
+	controller::instance()->objects['test_rows'] = new test_rows();
+	try {
+		$html = controller::render_view($file);
+	} finally {
+		unset(controller::instance()->objects['test_rows']);
+		unlink($file);
+	}
+	check(strpos($html, 'srcset="a.jpg 2x"') !== false, "srcset kept: $html");
+	check(preg_match('/data-src="[^"]*a\.jpg"/', $html) && preg_match('/ src="[^"]*new\.jpg"/', $html), "only src set: $html");
+	check(strpos($html, 'keep.jpg') !== false, "nested tag left alone: $html");
+	// a backslash in the value is text, not a backreference that closes the attribute
+	check(preg_match('#<a href="[^"]*x\\\\3 onmouseover=alert\(1\) x=\\\\3">#', $html), "attribute breakout: $html");
+	check(strpos($html, '<b id="g">') !== false, "false removes the attribute: $html");
+	check(strpos($html, 'class="a b$1"') !== false, "append: $html");
+});
 test('lint: demo theme is clean', function () {
 	$inspector = new raster_inspector();
 	same(array(), $inspector->lint());
@@ -139,6 +167,21 @@ test('content model from the demo theme', function () {
 	same(array('headline', 'date', 'summary', 'body'), array_keys($model['collections']['news']['fields']));
 	foreach ($model['pages'] as $page) if ($page['url'] === '/') same('Write HTML. Get a CMS.', $page['fields']['headline']['default']);
 	same(array('site_name', 'site_footer'), $pages['site']);
+});
+
+test('a page request loads no command line tools and looks up no core overrides', function () use ($root) {
+	$dir = sys_get_temp_dir().'/raster-loads-'.getmypid();
+	@mkdir($dir);
+	file_put_contents("$dir/prepend.php", '<?php $GLOBALS["looked_up"] = array(); spl_autoload_register(function ($c) { $GLOBALS["looked_up"][] = $c; }, true, true);'
+		.' register_shutdown_function(function () { file_put_contents('.var_export("$dir/out.json", true).', json_encode(array("looked_up" => array_values(array_unique($GLOBALS["looked_up"])), "included" => get_included_files()))); });');
+	$env = 'RASTER_ENV=production RASTER_DB='.escapeshellarg("$dir/db.sqlite");
+	shell_exec("$env ".escapeshellarg(PHP_BINARY).' -d auto_prepend_file='.escapeshellarg("$dir/prepend.php").' '.escapeshellarg("$root/bin/raster").' render /about 2>&1');
+	$out = json_decode((string)@file_get_contents("$dir/out.json"), true);
+	array_map('unlink', glob("$dir/*") ?: array());
+	@rmdir($dir);
+	check(is_array($out), 'no report from the render');
+	same(array(), array_values(array_filter($out['included'], function ($f) { return strpos($f, '/system/tools/') !== false; })), 'tools loaded');
+	same(array(), array_values(array_intersect($out['looked_up'], array('the_config', 'the_log', 'the_template', 'the_controller', 'the_database'))), 'autoloader asked');
 });
 
 // ## Integration tests

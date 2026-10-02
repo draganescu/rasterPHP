@@ -1,9 +1,6 @@
 <?php
 
 require_once BASE.'models/cms/cms.php';
-require_once BASE.'tools/inspector.php';
-require_once BASE.'tools/schema.php';
-require_once BASE.'tools/describe.php';
 
 /**
 * MCP server
@@ -26,9 +23,9 @@ class mcp
 	// ##HTTP transport, bound to the finding_route event
 	public function http()
 	{
-		self::$transport = 'http';
 		$segments = (array)config::get('uri_segments');
 		if ($segments[0] !== 'mcp' || count(array_filter($segments)) > 1) return false;
+		self::$transport = 'http';
 
 		$token = mcp::token();
 		if ($token === '') {
@@ -74,6 +71,14 @@ class mcp
 		return is_string($token) ? trim($token) : '';
 	}
 
+	// the lint, schema and describe tools, loaded only when MCP answers: this
+	// model listens on every request
+	static function load_tools() {
+		require_once BASE.'tools/inspector.php';
+		require_once BASE.'tools/schema.php';
+		require_once BASE.'tools/describe.php';
+	}
+
 	// ##stdio transport: one JSON-RPC message per line
 	public function stdio($in = STDIN, $out = STDOUT) {
 		self::$transport = 'stdio';
@@ -91,6 +96,7 @@ class mcp
 
 	// ##JSON-RPC
 	public function handle($message) {
+		mcp::load_tools();
 		$id = array_key_exists('id', $message) ? $message['id'] : null;
 		$method = isset($message['method']) ? $message['method'] : null;
 		$params = isset($message['params']) && is_array($message['params']) ? $message['params'] : array();
@@ -196,6 +202,7 @@ class mcp
 	}
 
 	public function call_tool($name, $arguments) {
+		mcp::load_tools();
 		try {
 			if (!in_array($name, array_map(function ($t) { return $t['name']; }, $this->tools()))) {
 				throw new InvalidArgumentException("Unknown tool '$name'");

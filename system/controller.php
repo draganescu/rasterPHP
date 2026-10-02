@@ -19,6 +19,8 @@ class controller {
     public $forced_route = array();
     // Whatever the controller matched
     public $current_route = '';
+    // the view the route resolved to, without the extension (staff/rota), '' for a 404
+    public $current_view = '';
     // Manual routes holder uset by controller::route('a')->to('b');
     public $current_config_route = '';
     // Memory property to keep track in case themes are changed in a 
@@ -36,7 +38,7 @@ class controller {
     public static function instance()
     {
         $cls = __CLASS__;
-        if( class_exists('the_' . $cls) ) $cls = 'the_' . $cls;
+        if( class_exists('the_' . $cls, false) ) $cls = 'the_' . $cls;
         if (!isset(self::$instances[$cls])) {
             self::$instances[$cls] = new $cls;
         }
@@ -121,15 +123,20 @@ class controller {
 		// set the route to the default; views can't be requested with
 		// relative paths, and partials (files or folders starting with _,
 		// like _layout.html or _email/) are never pages
-		$is_safe = $default_view !== '' && strpos($default_view, '..') === false
+		// /./staff, /../x or /.env: no page has a segment starting with a dot,
+		// so these are 404s, whatever the routes say
+		$dotted = (bool)preg_match('#(^|/)\.#', implode('/', $segments));
+		$is_safe = $default_view !== '' && !$dotted
 			&& !preg_match('#(^|/)_#', $default_view);
+		$view = '';
 		if($is_safe && file_exists($default_file)) {
 			$route = $default_file;
+			$view = $default_view;
 		}
 		
 		// then we look up routes to see if the author specifically requested
 		// a different view trough controller::route( 'url/param' )->to( 'view' );
-		foreach ($this->routes as $url=>$file)
+		foreach ($dotted ? array() : $this->routes as $url=>$file)
 		{
 			// the $forced_route is when we want to emulate a different url
 			// than the one found by the controller in $_SERVER
@@ -153,12 +160,15 @@ class controller {
 		}
 		
 		// the route is the filesystem address to the view
-		if($template != '') 
+		if($template != '') {
 			$route = controller::build_view_path($template);
+			$view = $template;
+		}
 
 		// index route
 		if (implode('/', config::get('uri_segments')) == '') {
 			$route = controller::build_view_path(config::get('default_view'));
+			$view = config::get('default_view');
 		}
 
 
@@ -167,10 +177,12 @@ class controller {
 		if($template == '' && $route == '') {
 			event::dispatch('route_not_found');
 			$route = controller::error('404');
+			$view = '';
 		}
 
 		// obvious right?
 		$this->current_route = $route;
+		$this->current_view = $view;
 		// print.if.live shows what needs PHP behind it (forms), print.if.static
 		// what a static export shows instead
 		$static = (bool)getenv('RASTER_EXPORT');
@@ -333,10 +345,11 @@ class controller {
 		
 		try {
 			$this->render($template, $data);
-		} catch (RuntimeException $e) {
+		} catch (Throwable $e) {
 			if (!$strict) {
-				// production: log it and show a plain error, never the details
-				error_log('Raster template error: '.$e->getMessage());
+				// production: log it and show a plain error, never the details,
+				// whatever was thrown (a missing named query is a LogicException)
+				error_log('Raster error: '.get_class($e).': '.$e->getMessage().' in '.$e->getFile().':'.$e->getLine());
 				if (!headers_sent()) {
 					http_response_code(500);
 					header('Content-Type: text/html; charset=utf-8');
@@ -344,6 +357,8 @@ class controller {
 				echo "<!doctype html><meta charset='utf-8'><title>Error</title><p>This page could not be shown.</p>";
 				exit;
 			}
+			// development: PHP's own error, with the trace, for anything but a template error
+			if (!($e instanceof RuntimeException)) throw $e;
 			controller::template_error(array(array('file' => $template->view_file, 'line' => 0, 'column' => 0, 'severity' => 'error', 'message' => $e->getMessage())));
 		}
 

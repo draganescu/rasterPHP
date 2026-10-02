@@ -68,7 +68,8 @@ media/                        uploads from the CMS
   print values as they are.
 - Files and folders starting with `_` are never pages: `_layout.html` for
   partials, `_email/` for emails.
-- Unknown URLs return 404. View files themselves (`.html`, `.rss`, `.xml`,
+- Unknown URLs return 404, and so does any path with a segment starting
+  with a dot (`/./about`, `/.env`); `a//b` is `a/b`. View files themselves (`.html`, `.rss`, `.xml`,
   `.json`, `.txt` under `application/views/`) are never served raw (403); other
   theme assets are. Links like `href="news.rss"` are rewritten to `/news.rss`.
 - In `.json` views, the rows of a render block are separated by commas, so a
@@ -559,8 +560,9 @@ class reservation {
   `if.is_admin`.
 - Roles: `admin`, `editor` (edits content), `member`.
 - Settings: `config::set('protected')->to(array('account' => 'member'))`
-  (a view protected for `editor` or `admin` is an admin page, see
-  **Editors and agents**),
+  (each pattern matches the start of the URL and of the view it renders,
+  ignoring case; a view protected for `editor` or `admin` is an admin page,
+  see **Editors and agents**),
   `registration` (false turns sign-up off), `login_page`, `after_login`,
   `password_min_length` (8).
 - Five wrong passwords lock an account for 15 minutes.

@@ -97,6 +97,7 @@ php tests/demo.php                        # the whole matrix
 | C46 | lint checks how many arguments a method takes, and names the nearest real method |
 | C47 | a relative link inside a `print.validation.alert()` block goes to the route, not the view file |
 | C48 | /api answers only what a model lists in `api()`, for the roles it names; overrides are never addressed as `the_<model>`; `api_open` keeps the old open /api; lint checks `api()` |
+| C49 | in production (strict templates off) any exception (a missing named query too) shows the plain error page and goes to the error log; `log::warning` and `log::error` always reach the error log |
 | D1 | raster_form and honeypot on every post form |
 | D2 | the session token on forms for logged in users |
 | D3 | posts from other sites refused (Origin, Sec-Fetch-Site, Referer, /api too) |

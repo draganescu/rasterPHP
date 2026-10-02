@@ -220,8 +220,12 @@ class authentication
 			template::set($flag)->to($value);
 		}
 		$uri = '/'.ltrim((string)config::get('uri_string'), '/');
+		// a pattern protects the URLs and the views it matches, in any case:
+		// /Staff on a disk that ignores case still renders staff.html
+		$view = '/'.controller::instance()->current_view;
 		foreach ((array)config::get('protected', array()) as $pattern => $role) {
-			if (!preg_match('%^/'.ltrim($pattern, '/').'%', $uri)) continue;
+			$match = '%^/'.ltrim($pattern, '/').'%i';
+			if (!preg_match($match, $uri) && ($view === '/' || !preg_match($match, $view))) continue;
 			if (self::can($role)) continue;
 			if ($user) {
 				http_response_code(403);
