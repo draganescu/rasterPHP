@@ -490,15 +490,15 @@ class cms
 			$rpos1 = strpos($rendered_tpl, $start);
 		}
 
-		if (strpos($value, '@') !== false || strpos($value, '+') !== false) {
-			$dataattr = str_replace(array('@', '+'), '', $parts[0]);
-			preg_match("% ".preg_quote($dataattr, '%')."(.*?)=(.*?)('|\")(.*?)('|\")%", $rendered_tpl, $attribute_value);
-			$content = isset($attribute_value[4]) ? $attribute_value[4] : '';
-		} elseif ($rpos1 === false || $start === $end) {
+		if ($rpos1 === false || $start === $end) {
 			$content = '';
 		} else {
 			$endpos = strpos($rendered_tpl, $end, $rpos1);
 			$content = $endpos === false ? '' : substr($rendered_tpl, $rpos1 + strlen($start), $endpos - $rpos1 - strlen($start));
+		}
+		// print.@src.photo: the mock-up's value is the attribute of the tag it wraps
+		if (strpos($value, '@') !== false || strpos($value, '+') !== false) {
+			$content = template::get_attribute($content, str_replace(array('@', '+'), '', $parts[0]));
 		}
 		$property = $parts[count($parts) -1];
 		return array($property, $content);

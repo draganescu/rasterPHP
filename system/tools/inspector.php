@@ -1295,12 +1295,7 @@ class raster_inspector {
 				if ($child['keyword'] === 'print') {
 					$key = raster_inspector::data_key($child['ref']);
 					if (!$key['builtin'] && strpos($key['key'], '.') === false && !isset($collection['fields'][$key['key']])) {
-						if ($key['attribute'] !== null) {
-							preg_match('/\s'.preg_quote($key['attribute'], '/').'\s*=\s*([\'"])(.*?)\1/is', $child['inner'], $m);
-							$default = isset($m[2]) ? $m[2] : '';
-						} else {
-							$default = trim($child['inner']);
-						}
+						$default = $key['attribute'] !== null ? template::get_attribute($child['inner'], $key['attribute']) : trim($child['inner']);
 						$collection['fields'][$key['key']] = array('default' => $default);
 					}
 				}

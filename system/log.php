@@ -13,7 +13,7 @@ class log {
     public static function instance()
     {
         $cls = __CLASS__;
-        if( class_exists('the_' . $cls) ) $cls = 'the_' . $cls;
+        if( class_exists('the_' . $cls, false) ) $cls = 'the_' . $cls;
         if (!isset(self::$instances[$cls])) {
             self::$instances[$cls] = new $cls;
         }
@@ -56,7 +56,11 @@ class log {
 
     
 
+    // warnings and errors always reach PHP's error log: code that swallows a
+    // failure (a mail that wasn't sent) reports it here. log::enable() adds
+    // the browser console.
     public static function warning($message) {
+    	error_log('Raster warning: '.$message);
     	$log = log::instance();
     	if ($log->enabled) {
             $entry = $log->create_entry('warning', $message);
@@ -64,6 +68,7 @@ class log {
     }
 
     public static function error($message) {
+    	error_log('Raster error: '.$message);
     	$log = log::instance();
     	if ($log->enabled) {
             $entry = $log->create_entry('error', $message);

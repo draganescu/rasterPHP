@@ -580,6 +580,27 @@ test(array('G18', 'G6'), 'no cookies for visitors; protected pages send them to 
 	same(303, $status);
 	same("$base/login?next=%2Fmembers", header_value($headers, 'Location'));
 });
+test('G6', 'protected pages: dot segments, double slashes and case', function () use ($root, $db, $tmp) {
+	// nginx, Apache and Caddy pass the raw path to PHP; this front controller
+	// does too, without the checks the router in index.php makes for php -S
+	@mkdir("$tmp/front");
+	file_put_contents("$tmp/front/index.php", '<?php chdir('.var_export($root, true).'); require "system/boot.php"; boot::$appname = "demo"; boot::up();');
+	$port = free_port();
+	$front = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$tmp/front/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, "$tmp/front", array('RASTER_DB' => $db, 'PATH' => getenv('PATH')));
+	for ($i = 0; $i < 100 && !@fsockopen('127.0.0.1', $port); $i++) usleep(50000);
+	try {
+		$front_base = "http://127.0.0.1:$port";
+		same(303, http('GET', "$front_base/staff")[0], '/staff');
+		same(303, http('GET', "$front_base//staff")[0], '//staff');
+		same(404, http('GET', "$front_base/./staff")[0], '/./staff');
+		same(404, http('GET', "$front_base/%2E/staff")[0], '/%2E/staff');
+		check(http('GET', "$front_base/staff/.")[0] !== 200, '/staff/.');
+		// a disk that ignores case renders members.html for /MEMBERS; elsewhere it is a 404
+		check(in_array(http('GET', "$front_base/MEMBERS")[0], array(303, 404)), '/MEMBERS');
+	} finally {
+		proc_terminate($front);
+	}
+});
 test(array('G1', 'G2', 'G3', 'G9', 'D15'), 'sign up', function () use ($base) {
 	list(, $body) = http('POST', "$base/register", array('raster_form' => 'authentication.register', 'email' => 'maria@example.com', 'password' => 'short', 'password_again' => 'other'));
 	has($body, 'Use at least 8 characters.');
@@ -1515,7 +1536,7 @@ test(array('C27', 'C28', 'C29', 'C30', 'C31', 'C32', 'C33'), 'scripts, dry place
 	has(between($lab, 'events'), '<p class="secret">the secret is safe</p>');
 	lacks($lab, 'the secret leaked');
 });
-test(array('C36', 'C37'), 'the log console, and strict templates off', function () use ($base, $db, $maildir, $views) {
+test(array('C36', 'C37', 'C49'), 'the log console, and strict templates off', function () use ($base, $db, $maildir, $views, $root, $tmp) {
 	$loud = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'CAFE_LOG' => 'on', 'CAFE_STRICT' => 'off'));
 	has(http('GET', "$loud/about")[1], 'console.log("info: Event: route_found");');
 	lacks(http('GET', "$base/about")[1], 'console.log', 'only when enabled');
@@ -1534,6 +1555,21 @@ test(array('C36', 'C37'), 'the log console, and strict templates off', function 
 		has($body, 'This page could not be shown.');
 		lacks($body, 'render.cafe.hours', 'no details for visitors');
 	});
+	// any exception, not only template errors: a named query that doesn't exist
+	@mkdir("$root/demo/models/zzquery");
+	try {
+		with_file("$root/demo/models/zzquery/zzquery.php", '<?php class zzquery { function rows() { return database::instance("zzquery")->no_such_query(); } }', function () use ($loud, $views, $tmp) {
+			with_file("$views/zz-query.html", '<p><!-- render.zzquery.rows -->row<!-- /render.zzquery.rows --></p>', function () use ($loud, $tmp) {
+				list($status, $body) = http('GET', "$loud/zz-query");
+				same(500, $status);
+				has($body, 'This page could not be shown.');
+				lacks($body, 'no_such_query', 'no details for visitors');
+				has(file_get_contents("$tmp/php-errors.log"), 'Raster error: BadMethodCallException', 'logged');
+			});
+		});
+	} finally {
+		@rmdir("$root/demo/models/zzquery");
+	}
 });
 test(array('E23', 'B8'), 'raster_page_size for collections without their own, feed_limit', function () use ($base) {
 	for ($i = 1; $i <= 5; $i++) mcp($base, 'create_item', array('collection' => 'journal', 'fields' => array('title' => "Note $i", 'author' => 'Dan')));
@@ -1806,6 +1842,7 @@ test(array('F3', 'F6', 'I5', 'L3', 'L4', 'L5', 'E13', 'J6'), 'production: frozen
 	$before = count(mails());
 	same(303, http('POST', "$bare/forgot", array('raster_form' => 'authentication.forgot', 'email' => 'boss@cafe.example'))[0]);
 	same($before, count(mails()), 'no reset link without RASTER_URL');
+	has(file_get_contents("$tmp/php-errors.log"), 'Raster error: Password reset email failed', 'the failure is in the error log without log::enable()');
 	same(404, http('POST', "$bare/mcp", '{}', array('Authorization: Bearer x'))[0], 'MCP is off without a token');
 	// the protocol is part of the cache key
 	$key = function ($https) use ($root) {
