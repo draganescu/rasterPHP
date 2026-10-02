@@ -891,6 +891,11 @@ only when asked, or with `--all` before a release or after a wide rewrite
 of the framework. Commits that change a mutation's `search` text leave that
 entry stale; fixing the entry can wait for the next sweep.
 
+Read `STYLEGUIDE.md` before writing framework code. The short of it: new
+code looks like the code around it. Lowercase snake_case names, `array()`,
+tabs, no namespaces, type declarations, interfaces or docblock tags, no new
+dependencies. Don't reformat lines you aren't changing.
+
 A new feature gets an ID in `demo/README.md`, a use in the demo and a test.
 A change that sites must follow gets an upgrade step, and anything it
 replaces an entry in `system/tools/deprecations.php` (kept working until the
