@@ -42,7 +42,7 @@ class newsletter
 	}
 
 	static function table_ready() {
-		try { return in_array('subscriber', R::inspect()); } catch (Exception $e) { return false; }
+		return cms_store::table_exists('subscriber');
 	}
 
 	static function page_url($setting, $default, $token = null) {

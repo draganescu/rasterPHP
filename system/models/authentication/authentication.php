@@ -40,7 +40,7 @@ class authentication
 	}
 
 	static function table_ready() {
-		try { return in_array('user', R::inspect()); } catch (Exception $e) { return false; }
+		return cms_store::table_exists('user');
 	}
 
 	// accounts from the first agent-friendly version lived in usersdata
@@ -48,9 +48,10 @@ class authentication
 		static $done = false;
 		if ($done) return;
 		$done = true;
+		if (database::$frozen) return;
 		try {
 			$tables = R::inspect();
-			if (!in_array('usersdata', $tables) || (in_array('user', $tables) && R::count('user') > 0) || database::$frozen) return;
+			if (!in_array('usersdata', $tables) || (in_array('user', $tables) && R::count('user') > 0)) return;
 			foreach (R::findAll('usersdata') as $old) {
 				if (empty($old->username)) continue;
 				$user = R::dispense('user');

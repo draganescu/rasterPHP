@@ -203,6 +203,8 @@ class mcp
 
 	public function call_tool($name, $arguments) {
 		mcp::load_tools();
+		// the stdio process outlives a `schema --apply` run beside it
+		cms_store::forget();
 		try {
 			if (!in_array($name, array_map(function ($t) { return $t['name']; }, $this->tools()))) {
 				throw new InvalidArgumentException("Unknown tool '$name'");

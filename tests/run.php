@@ -191,7 +191,7 @@ $base = "http://127.0.0.1:$port";
 $server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_MCP_TOKEN' => 'test-token', 'RASTER_MAIL' => "log://$maildir", 'PATH' => getenv('PATH')));
 register_shutdown_function(function () use ($server, $db, $maildir) {
 	proc_terminate($server);
-	@unlink($db);
+	array_map('unlink', glob("$db*") ?: array());
 	array_map('unlink', glob("$maildir/*") ?: array());
 	@rmdir($maildir);
 });
@@ -507,6 +507,31 @@ test('page cache in production', function () use ($root, $db) {
 	}
 });
 
+test('a production page reads the schema and each page row once, and counts nothing', function () use ($root, $db) {
+	$dir = sys_get_temp_dir().'/raster-queries-'.getmypid();
+	@mkdir($dir);
+	// logging starts when the CMS starts the page (cms_editor), once the
+	// database is set up and before any query
+	file_put_contents("$dir/prepend.php", '<?php spl_autoload_register(function ($c) { if ($c === "cms_editor" && class_exists("R", false)) R::startLogging(); }, true, true);'
+		.' register_shutdown_function(function () { file_put_contents('.var_export("$dir/out.json", true).', json_encode(class_exists("R", false) ? R::getLogs() : array())); });');
+	$env = 'RASTER_ENV=production RASTER_DB='.escapeshellarg($db);
+	shell_exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' schema --apply');
+	foreach (glob(APPBASE.'data/cache/*') ?: array() as $f) unlink($f);
+	$html = shell_exec("$env ".escapeshellarg(PHP_BINARY).' -d auto_prepend_file='.escapeshellarg("$dir/prepend.php").' '.escapeshellarg("$root/bin/raster").' render /');
+	$logs = json_decode((string)@file_get_contents("$dir/out.json"), true);
+	array_map('unlink', glob("$dir/*") ?: array());
+	@rmdir($dir);
+	foreach (glob(APPBASE.'data/cache/*') ?: array() as $f) unlink($f);
+	check(strpos((string)$html, '</html>') !== false, 'the page did not render');
+	check(is_array($logs) && $logs, 'no queries logged');
+	$queries = array_values(array_filter($logs, function ($l) { return is_string($l) && preg_match('/^\s*(SELECT|PRAGMA|INSERT|UPDATE|DELETE)/i', $l); }));
+	$repeated = array_keys(array_filter(array_count_values(preg_grep('/sqlite_master|PRAGMA/i', $queries)), function ($n) { return $n > 1; }));
+	same(array(), $repeated, 'schema read twice');
+	same(array(), array_values(preg_grep('/count\(/i', $queries)), 'lists counted');
+	same(array(), array_keys(array_filter(array_count_values(preg_grep('/FROM `?[a-z0-9]+page`?/i', $queries)), function ($n) { return $n > 1; })), 'a page row read twice');
+	$pdo = new PDO("sqlite:$db");
+	same('wal', $pdo->query('PRAGMA journal_mode')->fetchColumn());
+});
 test('a site under a path: RASTER_URL with a folder', function () use ($root, $db) {
 	$port = 8965 + getmypid() % 100;
 	$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_URL' => "http://127.0.0.1:$port/preview/abc/", 'PATH' => getenv('PATH')));
@@ -615,7 +640,7 @@ test('frozen database: accounts and newsletter after schema --apply', function (
 		exec("$env $raster schema --check 2>&1", $out, $code);
 		same(0, $code, 'drift after apply');
 	} finally {
-		@unlink($db);
+		array_map('unlink', glob("$db*") ?: array());
 	}
 });
 

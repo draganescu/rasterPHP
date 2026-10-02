@@ -28,6 +28,9 @@ class cms
 
 	private $data_name = NULL;
 
+	// page rows by type, read once per request and shared by their fields
+	private $pages = array();
+
 	// ##Naming
 	// Bean types must be lowercase letters and digits only.
 
@@ -142,11 +145,11 @@ class cms
 
 		try {
 			// the page's row is created by its first print.cms field
-			$this->page = cms_store::latest($page_name);
+			$this->pages[$page_name] = cms_store::latest($page_name);
 		} catch (Exception $e) {
 			// a frozen schema without this page: templates show their defaults
 			log::warning('CMS: '.$e->getMessage());
-			$this->page = null;
+			$this->pages[$page_name] = null;
 		}
 	}
 
@@ -180,16 +183,18 @@ class cms
 		if (cms::reserved($name, 'field')) return false;
 		$this->page_variables[] = $name;
 		$type = cms::field_type($name, $this->page_name);
-		$page = cms_store::latest($type);
+		if (!array_key_exists($type, $this->pages)) $this->pages[$type] = cms_store::latest($type);
+		$page = $this->pages[$type];
 		if (!$page && !database::$frozen) {
 			$page = R::dispense($type);
 			$page->slug = $type === 'sitepage' ? 'site' : $this->slug;
 			$page->updated_at = R::isoDateTime();
 			R::store($page);
+			$this->pages[$type] = $page;
 		}
 		if (!$page) return false;
-		$fields = cms_store::columns($type);
-		if (!array_key_exists($name, $fields)) {
+		// a stored row carries every column of its table
+		if (!array_key_exists($name, $page->getProperties())) {
 			if (database::$frozen) return false;
 			$page->$name = trim(template::get('current_block'));
 			R::store($page);
@@ -277,8 +282,11 @@ class cms
 		$exists = cms_store::table_exists($this->data_name);
 		if ($record) {
 			// nothing to seed or add: the model declares the fields
+		} elseif (database::$frozen) {
+			// production seeds nothing, and a list with no table keeps the
+			// mock-up (an empty table too, checked once the list is read)
+			if (!$exists) return false;
 		} elseif (!$exists || R::count($this->data_name) == 0) {
-			if (database::$frozen) return false;
 			// the first item is the placeholder content from the template
 			$item = R::dispense($this->data_name);
 			require_once BASE.'tools/inspector.php';
@@ -292,7 +300,7 @@ class cms
 			$item->published_at = '';
 			$item->slug = cms_store::unique_slug($this->data_name, cms_store::slug_source($seed), 0);
 			R::store($item);
-		} elseif (!database::$frozen) {
+		} else {
 			// new fields in the template become new columns
 			$fields = cms_store::columns($this->data_name);
 			$latest = cms_store::latest($this->data_name);
@@ -342,7 +350,8 @@ class cms
 			$bindings[':'.$key] = $value;
 		}
 		$sql .= ' ORDER BY '.cms_store::order_sql(isset($options['order']) ? $options['order'] : '', $fields).' LIMIT '.(int)$page_size.' OFFSET '.(int)$roffset;
-		$data = R::exportAll(R::find($this->data_name, $sql, $bindings));
+		$data = array_values(array_map(array('cms_store', 'export_item'), R::find($this->data_name, $sql, $bindings)));
+		if (!$data && !$record && database::$frozen && R::count($this->data_name) == 0) return false;
 		if ($record) {
 			foreach ($data as $key => $row) $data[$key] = cms_records::for_template($record, cms_records::decode($record, $row));
 		}

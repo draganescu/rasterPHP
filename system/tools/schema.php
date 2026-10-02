@@ -214,6 +214,7 @@ class raster_schema {
 			}
 		} finally {
 			R::freeze($was_frozen);
+			cms_store::forget();
 		}
 		return $changes;
 	}

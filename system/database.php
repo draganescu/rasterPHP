@@ -123,6 +123,7 @@ class database {
     	if( count( $db_config_files ) == 0 ) return false;
 
     	$frozen_connections = array(  );
+    	$dsns = array(  );
     	foreach ($db_config_files as $file) {
     		// each file is read in isolation so settings don't leak between files
     		$settings = (function ($__file) {
@@ -142,6 +143,7 @@ class database {
     		}
     		$active_connections[  ] = $key;
     		$frozen_connections[ $key ] = (bool)$settings['frozen'];
+    		$dsns[ $key ] = $settings['dsn'];
     	}
 
         // Raster supports seamless deployement on multiple
@@ -155,6 +157,23 @@ class database {
         // a new connection to the DB
 		R::selectDatabase($env);
 		R::freeze($frozen_connections[$env]);
+		// SQLite in WAL mode: readers don't wait for a write to commit and
+		// writes cost less. The mode is kept in the file; synchronous and
+		// the wait for a locked database (5 s, not PDO's 60) are set on each
+		// connection, when RedBean first opens it.
+		if (strpos($dsns[$env], 'sqlite:') === 0) {
+			$connection = R::getDatabaseAdapter()->getDatabase();
+			$connection->setInitCode(function () use ($connection) {
+				try {
+					$pdo = $connection->getPDO();
+					$pdo->exec('PRAGMA busy_timeout = 5000');
+					$pdo->query('PRAGMA journal_mode = WAL')->closeCursor();
+					$pdo->exec('PRAGMA synchronous = NORMAL');
+				} catch (Exception $e) {
+					log::warning('database: '.$e->getMessage());
+				}
+			});
+		}
 		self::$connected = true;
 		self::$connection = $env;
 		self::$frozen = $frozen_connections[$env];
