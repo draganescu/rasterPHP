@@ -2119,7 +2119,7 @@ test(array('R16', 'N14', 'M17'), 'staff add bookings on the lists a new one show
 	same(0, $code, $out);
 	has($out, 'class="booking"');
 	has($out, "reservation('status=new&date>=today&seating=?seating&date=?day&order=date,name') with a card for a new item");
-	check(strpos($out, 'Ida Inside') === false, 'the query string reached the page');
+	check(strpos(staff_section($out, 'To confirm'), 'Ida Inside') === false, 'the query string reached the page');
 	list($code, $out) = raster(array('render', '/account', '--as=maria@example.com'));
 	same(0, $code, $out);
 	has($out, 'In-page editor: not on this page', 'a member gets no editor');
@@ -2130,10 +2130,57 @@ test(array('R16', 'N14', 'M17'), 'staff add bookings on the lists a new one show
 
 	$answers = mcp_stdio(array(array('render_url', array('url' => '/staff?seating=window', 'as' => 'editor', 'limit' => 200)), array('render_url', array('url' => '/staff', 'limit' => 200))));
 	same('editor', $answers[0]['editor']['role']);
-	same(4, count($answers[0]['editor']['lists']));
+	$from = array_count_values(array_map(function ($l) { return $l['from']; }, $answers[0]['editor']['lists']));
+	same(4, $from['cms.reservation'], 'four render.cms lists');
+	check($from['reservation.agenda'] >= 1, 'and the evenings of the agenda');
 	same(true, $answers[0]['editor']['lists'][0]['new_card']);
 	same(null, $answers[0]['errors'], 'the summary is not an error');
 	check(!isset($answers[1]['editor']), 'no editor summary for visitors');
+});
+test(array('R18', 'R19'), 'a model view of records stays editable: listed() rows, nested, with computed values', function () use ($base) {
+	$staff = login($base, 'staff@cafe.test', 'staff password');
+	$tomorrow = date('Y-m-d', strtotime('+1 day'));
+	cms_records::create('reservation', array('name' => 'Tom Tomorrow', 'date' => $tomorrow, 'seating' => 'inside', 'guests' => 1));
+	$page = http('GET', "$base/staff", null, array("Cookie: $staff"))[1];
+	$config = editor_config($page);
+	$evenings = array();
+	foreach ($config['marks'] as $id => $mark) if ($mark['kind'] === 'collection' && isset($mark['from'])) $evenings[$id] = $mark;
+	check(count($evenings) >= 2, 'each evening of the agenda is a list the editor marks');
+	$first = reset($evenings);
+	same('reservation.agenda', $first['from']);
+	same(true, $first['addable'], 'a card for a booking on that evening');
+	same($tomorrow, $first['filters']['date'], 'which starts with the evening\'s date');
+	$tom = array_values(array_filter($config['marks'], function ($m) { return $m['kind'] === 'item' && isset($m['values']['name']) && $m['values']['name'] === 'Tom Tomorrow'; }));
+	same(2, count($tom), 'Tom is an item in To confirm and in the agenda');
+	same(array('confirm', 'cancel'), $tom[1]['actions'], 'with the type\'s actions');
+	check(in_array('weekday', $tom[1]['readonly'], true), 'the computed weekday is not editable');
+	has($page, 'class="agenda-booking"');
+	cms_records::create('reservation', array('name' => 'Bea <b>Bold</b>', 'date' => $tomorrow, 'guests' => 1));
+	$agenda = substr(http('GET', "$base/staff", null, array("Cookie: $staff"))[1], 0);
+	$agenda = substr($agenda, strpos($agenda, '<h3>By evening</h3>'));
+	has($agenda, 'Bea &lt;b&gt;Bold&lt;/b&gt;', 'listed rows print what visitors typed as text');
+	has(substr($page, strpos($page, '<h3>By evening</h3>')), date('l', strtotime('+1 day')), 'computed values print in listed rows');
+	has(http('GET', "$base/reservation", null, array("Cookie: $staff"))[1], '<span class="weekday"><!--raster:s', 'and in render.cms lists');
+
+	// what listed() hands the template, and to whom
+	$rows = cms_records::find('reservation', array('name' => 'Abe Window'));
+	same(array('raster_list'), array_keys(cms_records::listed('reservation', $rows)), 'visitors get none of the private bookings');
+	$info = cms_records::info('reservation');
+	same('stored', cms_records::computed($info, array('date' => '2026-10-10', 'weekday' => 'stored'))['weekday'], 'a computed value never replaces a stored one');
+	same('Saturday', cms_records::computed($info, array('date' => '2026-10-10'))['weekday']);
+});
+test('R20', 'a record\'s own page is where editors edit what a model view links to', function () {
+	database::instance('cms');
+	$abe = R::findOne('reservationdata', ' name = ? ', array('Abe Window'));
+	list($code, $out) = raster(array('render', '/reservation/reservation_item/'.$abe->slug, '--as=editor'));
+	same(0, $code, $out);
+	has($out, 'Abe Window');
+	has($out, '1 items in 1 lists');
+	lacks($out, 'with a card for a new item', 'no card on an item\'s page');
+	list($code, $out) = raster(array('render', '/reservation/reservation_item/'.$abe->slug));
+	same(1, $code, 'visitors get a 404');
+	has($out, 'HTTP 404');
+	lacks($out, 'Abe Window');
 });
 test('R17', 'lint: records nobody lists, and staff pages listing what a model reads', function () {
 	$inspector = new raster_inspector();
@@ -2141,10 +2188,12 @@ test('R17', 'lint: records nobody lists, and staff pages listing what a model re
 	$models = APPBASE.'models';
 	@mkdir("$models/bookrows");
 	try {
-		with_file("$models/bookrows/bookrows.php", "<?php\nclass bookrows {\n\tfunction rows() {\n\t\treturn cms_records::find('reservation', array(), 'date');\n\t}\n\tfunction counts() { return array(); }\n}\n", function () use ($inspector, $views) {
+		with_file("$models/bookrows/bookrows.php", "<?php\nclass bookrows {\n\tfunction rows() {\n\t\treturn cms_records::find('reservation', array(), 'date');\n\t}\n\tfunction counts() { return array(); }\n\tfunction agenda() {\n\t\treturn cms_records::listed('reservation', cms_records::find('reservation'));\n\t}\n}\n", function () use ($inspector, $views) {
 			$problems = $inspector->lint_source('<!-- render.bookrows.rows --><p><!-- print.name -->x<!-- /print.name --></p><!-- /render.bookrows.rows --><!-- render.bookrows.counts --><p>y</p><!-- /render.bookrows.counts -->', 'staff.html');
-			check(has_message($problems, "lists reservation records the bookrows model reads itself"), 'an admin page listing model rows');
+			check(has_message($problems, "shows reservation records the bookrows model reads itself without cms_records::listed()"), 'an admin page listing model rows');
 			same(1, count($problems), 'only the method that reads records');
+			$problems = $inspector->lint_source('<!-- render.bookrows.agenda --><p><!-- print.name -->x<!-- /print.name --></p><!-- /render.bookrows.agenda -->', 'staff.html');
+			same(array(), $problems, 'records handed back through cms_records::listed are fine');
 			same(array(), $inspector->lint_source('<!-- render.bookrows.rows --><p><!-- print.name -->x<!-- /print.name --></p><!-- /render.bookrows.rows -->', 'thanks.html'), 'pages for visitors may');
 		});
 	} finally { @rmdir("$models/bookrows"); }

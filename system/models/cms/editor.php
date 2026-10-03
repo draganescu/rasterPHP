@@ -110,9 +110,11 @@ class cms_editor {
 				array_unshift($summary['lists'], array(
 					'collection' => $mark['collection'],
 					'list' => isset($mark['list']) ? $mark['list'] : '',
+					// records a model listed (cms_records::listed): its render block
+					'from' => isset($mark['from']) ? $mark['from'] : 'cms.'.$mark['collection'],
 					'filters' => (object)$mark['filters'],
 					// the card for a new item at the end of the list
-					'new_card' => empty($mark['record']) || !empty($mark['addable']),
+					'new_card' => !empty($mark['addable']),
 				));
 			}
 		}
@@ -123,7 +125,10 @@ class cms_editor {
 	static function summary_line($summary) {
 		if (!$summary) return 'In-page editor: not on this page (log in as an editor or admin to get it)';
 		$lists = array();
-		foreach ($summary['lists'] as $list) $lists[] = $list['collection'].($list['list'] !== '' ? "('{$list['list']}')" : '').($list['new_card'] ? ' with a card for a new item' : '');
+		foreach ($summary['lists'] as $list) {
+			$name = $list['from'] === 'cms.'.$list['collection'] ? $list['collection'].($list['list'] !== '' ? "('{$list['list']}')" : '') : $list['collection'].' records listed by '.$list['from'];
+			$lists[] = $name.($list['new_card'] ? ' with a card for a new item' : '');
+		}
 		return 'In-page editor as '.$summary['role'].': '.$summary['fields'].' editable fields'
 			.($summary['fields_in_page_panel'] ? ' and '.$summary['fields_in_page_panel'].' in the Page panel' : '')
 			.', '.$summary['items'].' items in '.count($lists).' lists'.($lists ? ":\n  ".implode("\n  ", $lists) : '');

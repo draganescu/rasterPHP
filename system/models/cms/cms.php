@@ -372,7 +372,7 @@ class cms
 		$data = array_values(array_map(array('cms_store', 'export_item'), R::find($this->data_name, $sql, $bindings)));
 		if (!$data && !$record && database::$frozen && R::count($this->data_name) == 0) return false;
 		if ($record) {
-			foreach ($data as $key => $row) $data[$key] = cms_records::for_template($record, cms_records::decode($record, $row));
+			foreach ($data as $key => $row) $data[$key] = cms_records::for_template($record, cms_records::computed($record, cms_records::decode($record, $row)));
 		}
 
 		// items made before slugs existed get one (development only)

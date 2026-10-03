@@ -28,6 +28,15 @@
       <tr class="booking"><td><!-- print.name -->Ana<!-- /print.name --></td><td><!-- print.@href.raster_filter@date --><a href="reservation/reservation_items/date/2026-10-01"><!-- print.date -->2026-10-01<!-- /print.date --></a><!-- /print.@href.raster_filter@date --></td><td><!-- print.guests -->2<!-- /print.guests --> guests</td><td><!-- print.notes -->Window seat<!-- /print.notes --></td><td class="status"><!-- print.status -->new<!-- /print.status --></td></tr>
       <!-- /render.cms.reservation('status=confirmed&date>=today&seating=?seating&date=?day&order=date,name') -->
     </tbody></table>
+    <h3>By evening</h3>
+    <!-- render.reservation.agenda -->
+    <section class="evening">
+      <h4><!-- print.date -->2026-10-01<!-- /print.date -->, <!-- print.seats_left -->12<!-- /print.seats_left --> seats left</h4>
+      <table class="list"><tbody>
+        <!-- print.bookings --><tr class="agenda-booking"><td><!-- print.name -->Ana<!-- /print.name --></td><td><!-- print.weekday -->Thursday<!-- /print.weekday --></td><td><!-- print.guests -->2<!-- /print.guests --> guests</td><td class="status"><!-- print.status -->new<!-- /print.status --></td><td><!-- print.@href.raster_detail_link --><a href="reservation/reservation_item/1">Open</a><!-- /print.@href.raster_detail_link --></td></tr><!-- /print.bookings -->
+      </tbody></table>
+    </section>
+    <!-- /render.reservation.agenda -->
     <h3>Past evenings</h3>
     <table class="list"><tbody>
       <!-- render.cms.reservation('status!=cancelled&date<today&seating=?seating&date=?day&order=-date,name&limit=20') -->

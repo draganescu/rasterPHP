@@ -456,6 +456,9 @@ class reservation {
         if ($after && $after['guests'] > 8) $problems[] = 'too_many';
         return $problems;                              // names of alerts, or nothing
     }
+    static function computed($type, $booking) {        // shown, not stored: print.ends_at
+        return array('ends_at' => date('H:i', strtotime($booking['time']) + 7200));
+    }
     static function confirm($item, $input) {           // an action
         return cms_records::update('reservation', $item['id'], array('status' => 'confirmed'));
     }
@@ -479,9 +482,9 @@ class reservation {
   `cms_records::refuse('name')` stops a write from anywhere in the same way.
   Write problems as `$problems[] = 'name'` or `refuse('name')` so `lint`
   knows the alerts are raised.
-- **Hooks are static** — `types()`, `check()`, actions — so
-  `/api/<model>/<method>` can never call them. `lint` reports a `check()` that
-  is not static and an action without its method. (Event listeners named in
+- **Hooks are static** — `types()`, `check()`, `computed()`, actions — so
+  `/api/<model>/<method>` can never call them. `lint` reports a `check()` or
+  `computed()` that is not static and an action without its method. (Event listeners named in
   `listens()` are ordinary public methods; /api reaches them only if the
   model lists them in `api()`, which it shouldn't.)
 - **Privacy.** A type is private unless it says `'public' => true`: visitors
@@ -535,11 +538,13 @@ class reservation {
   Staff confirm, edit and delete them there with the in-page editor and the
   type's actions. The editor's Admin menu lists it, so it needs no link in
   the site.
-- **Staff pages stay on `render.cms.<type>`.** Only rows the CMS lists carry
-  the in-page editor's marks: rows a model builds (`render.booking.rows`
-  returning `cms_records::find(…)`) show the same text, but staff can't edit
-  them, run actions on them or add one, and `lint` warns about it on admin
-  pages. Filters, tabs and sorting are list options, not model code:
+- **Staff pages keep the in-page editor working.** Only rows that are
+  records the editor knows carry its marks: a `render.cms.<type>` list, or
+  records a model hands back through `cms_records::listed()`. Rows a model
+  builds from `cms_records::find(…)` and returns as they are show the same
+  text, but staff can't edit them, run actions on them or add one, and
+  `lint` warns about it on admin pages. Start with the list options:
+  filters, tabs and sorting need no model code:
 
   ```html
   <form method="get">
@@ -560,12 +565,61 @@ class reservation {
   stale the next day), and don't filter in the browser by hiding rows.
   Check the page with `php bin/raster render /bookings --as=editor` (MCP
   `render_url` with `as`), which says how many fields, items and lists the
-  editor marks. If a staff page really needs something the list options
-  can't say, ask before giving up the in-page editor.
+  editor marks.
+- **Values a row shows but doesn't store** (a booking's end time, the
+  stylist's photo from another type) come from the model's
+  `static function computed($type, $record)`, which returns them by name.
+  They print in any list of that type (`print.ends_at`), as text unless the
+  type lists them in `html`; the editor shows them and doesn't edit them,
+  and they never replace a stored field. Don't leave `render.cms` to show
+  one.
+- **Views the list options can't say** (totals, an agenda grouped by day, a
+  week grid, records of several types on one list) are a model's render
+  method, and stay editable when the records in its rows go through
+  `cms_records::listed($type, $rows, $defaults)`:
+
+  ```php
+  function agenda() {                           // render.booking.agenda
+      $days = array();
+      foreach (cms_records::find('booking', array(), 'date,time') as $b) $days[$b['date']][] = $b;
+      $rows = array();
+      foreach ($days as $day => $bookings) {
+          $rows[] = array('day' => $day, 'count' => (string)count($bookings),
+              'bookings' => cms_records::listed('booking', $bookings, array('date' => $day)));
+      }
+      return $rows;
+  }
+  ```
+
+  ```html
+  <!-- render.booking.agenda -->
+  <h3><!-- print.day -->2026-10-01<!-- /print.day --></h3>
+  <ul><!-- print.bookings --><li><!-- print.time -->10:00<!-- /print.time --> <!-- print.name -->Ana<!-- /print.name --></li><!-- /print.bookings --></ul>
+  <!-- /render.booking.agenda -->
+  ```
+
+  `listed()` keeps only the records the person may read (as
+  `render.cms.<type>` does), adds the computed values, prints them as text
+  and tells the editor which record each row is: staff edit them in place,
+  run their actions, and get the card for a new one where the type allows
+  (`staff_add`), starting with `$defaults` (that day). It works for the
+  rows a render method returns and for lists inside them (a day's
+  bookings). Call it last, on what the template gets: the list it returns
+  carries a key of its own. Each row also gets `raster_detail_link`.
+- **Anything else** a model view shows links each record to its own page,
+  `<!-- print.@href.raster_detail_link -->` (`/booking/booking_item/<slug or
+  id>`), which needs a view rendering `render.cms.booking` (`booking.html` or
+  `booking_item.html`, protected like the staff pages). Editors edit the
+  record there; for a private type visitors get a 404.
+- **In that order:** list options first; then a model view with
+  `cms_records::listed()`, or links to each record's page; ask only when
+  none of these can show what is needed.
 - **The model's own code** writes with `cms_records::create($type, $values)`,
   `update($type, $id, $values)` and `delete($type, $id)` (these may write
   readonly and hidden fields and `owner`, and still pass `check()`), and reads
-  with `get($type, $id)` and `find($type, array('field' => 'value'), $order)`.
+  with `get($type, $id)` and `find($type, array('field' => 'value'), $order)`
+  (`$order` as in list options: `'date,-time'`). What it reads for a
+  template goes through `listed($type, $rows)` (see staff pages above).
   A field whose default is `array()` is a list (line items), stored as JSON
   and handed back as a list; inside `render.cms.<type>` its rows repeat like
   any nested rows.

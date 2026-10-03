@@ -696,7 +696,7 @@ class raster_inspector {
 		if ($block['keyword'] === 'render' && $ref['model'] !== 'cms' && stripos($block['inner'], '<form') === false && $this->admin_view($this->linting)) {
 			$type = $this->record_rows($info['file'], $method);
 			if ($type !== null) {
-				$problems[] = self::problem('warning', $block, "{$block['raw']} lists $type records the {$ref['model']} model reads itself, so the in-page editor can't edit them or add one. List them with <!-- render.cms.$type('…') -->: filters from the URL (field=?param), dates (date>=today) and order=a,b cover most staff pages.");
+				$problems[] = self::problem('warning', $block, "{$block['raw']} shows $type records the {$ref['model']} model reads itself without cms_records::listed(), so the in-page editor can't edit them or add one. Return cms_records::listed('$type', \$rows) (inside each row too, for nested lists), or list them with <!-- render.cms.$type('…') -->: filters from the URL (field=?param), dates (date>=today) and order=a,b cover most staff pages.");
 			}
 		}
 	}
@@ -712,14 +712,16 @@ class raster_inspector {
 		return false;
 	}
 
-	// the record type a model method reads with cms_records::find(), or null
+	// the record type a model method reads with cms_records::find() or get()
+	// and hands to the template without cms_records::listed(), or null
 	function record_rows($file, $method) {
 		$source = @file_get_contents($file);
 		if ($source === false || !preg_match('/function\s+'.preg_quote($method, '/').'\s*\(/', $source, $m, PREG_OFFSET_CAPTURE)) return null;
 		$body = substr($source, $m[0][1]);
 		// up to the next method
 		if (preg_match('/\n\s*(?:(?:public|protected|private|static|final)\s+)*function\s/', $body, $next, PREG_OFFSET_CAPTURE, 1)) $body = substr($body, 0, $next[0][1]);
-		if (!preg_match_all('/cms_records::find\(\s*[\'"]([a-z][a-z0-9]*)[\'"]/', $body, $found)) return null;
+		if (strpos($body, 'cms_records::listed(') !== false) return null;
+		if (!preg_match_all('/cms_records::(?:find|get)\(\s*[\'"]([a-z][a-z0-9]*)[\'"]/', $body, $found)) return null;
 		foreach ($found[1] as $type) {
 			if (cms_records::info($type)) return $type;
 		}
@@ -1158,8 +1160,10 @@ class raster_inspector {
 			if ($info['create'] !== 'editor' && !$this->listed($name)) {
 				$problems[] = $at + array('severity' => 'warning', 'message' => "Visitors make '$name' records with a form, but no view lists them with render.cms.$name, so staff can't see or edit them in the page. Add a staff page: <!-- render.cms.$name('order=newest') --> in a view protected for editors (config 'protected').");
 			}
-			if (method_exists($info['class'], 'check') && !(new ReflectionMethod($info['class'], 'check'))->isStatic()) {
-				$problems[] = $at + array('severity' => 'error', 'message' => "{$info['class']}::check() must be static: a hook is never an ordinary method");
+			foreach (array('check', 'computed') as $hook) {
+				if (method_exists($info['class'], $hook) && !(new ReflectionMethod($info['class'], $hook))->isStatic()) {
+					$problems[] = $at + array('severity' => 'error', 'message' => "{$info['class']}::$hook() must be static: a hook is never an ordinary method");
+				}
 			}
 			foreach ($info['actions'] as $action => $role) {
 				if (in_array($action, cms_records::$hooks, true)) {

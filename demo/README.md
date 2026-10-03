@@ -270,3 +270,6 @@ php tests/demo.php                        # the whole matrix
 | R15 | list options: filters from the URL (`seating=?seating`), dates (`date>=today`, `date<today`), `!=`, and `order=date,name`; pagination keeps the query |
 | R16 | `staff_add`: staff add records a form makes, on the lists a new one would show in; a new item starts with the list's filters |
 | R17 | lint warns about records a form makes that no view lists, and about admin pages listing records a model reads itself |
+| R18 | `cms_records::listed()`: a model's agenda of bookings by evening, nested in its rows, is edited in place like a render.cms list, with actions and a card for each evening; only what the person may read |
+| R19 | `computed()`: values a booking shows but doesn't store, in render.cms and listed rows, never editable |
+| R20 | a record's own page (`/reservation/reservation_item/<slug>`) is where editors edit a record a model view links to; visitors get a 404 |

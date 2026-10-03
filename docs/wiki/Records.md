@@ -114,6 +114,47 @@ Keep staff pages on `render.cms.<type>`. Only the rows the CMS lists can be edit
 
 With `'staff_add' => true`, each list a new booking would show in ends with a card for adding one; a list of `status=confirmed` bookings has none, when `status` is readonly and starts as `new`.
 
+### Values a row shows but doesn't store
+
+A booking's end time, or the stylist's photo from another type, come from a static hook on the model:
+
+```php
+static function computed($type, $booking) {
+    return array('ends_at' => date('H:i', strtotime($booking['time']) + 7200));
+}
+```
+
+`<!-- print.ends_at -->` then works in any list of bookings. The editor shows it and doesn't edit it, and a computed value never replaces a stored field.
+
+### Views a model builds
+
+Totals, an agenda grouped by day, a week grid, or records of several types on one list are more than list options say. Build them in a model, and hand the records back through `cms_records::listed()`, so staff still edit them in the page:
+
+```php
+function agenda() {                           // render.booking.agenda
+    $days = array();
+    foreach (cms_records::find('booking', array(), 'date,time') as $b) $days[$b['date']][] = $b;
+    $rows = array();
+    foreach ($days as $day => $bookings) {
+        $rows[] = array('day' => $day, 'bookings' => cms_records::listed('booking', $bookings, array('date' => $day)));
+    }
+    return $rows;
+}
+```
+
+```html
+<!-- render.booking.agenda -->
+<h3><!-- print.day -->2026-10-01<!-- /print.day --></h3>
+<ul><!-- print.bookings --><li><!-- print.time -->10:00<!-- /print.time --> <!-- print.name -->Ana<!-- /print.name --></li><!-- /print.bookings --></ul>
+<!-- /render.booking.agenda -->
+```
+
+`listed()` keeps only what the person may read, adds computed values, prints what visitors typed as text, and tells the in-page editor which record each row is. Staff edit the bookings in place, press their buttons, and each day ends with a card for a new booking on that day (with `staff_add`). Call it last, on what the template gets: the list carries a key of its own. Without it, `raster lint` warns on admin pages.
+
+When even that doesn't fit, link each record to its own page with `<!-- print.@href.raster_detail_link -->` (`/booking/booking_item/<slug or id>`, shown by a view that renders `render.cms.booking`). Editors edit it there; visitors get a 404 for a private type.
+
+So: list options first, then a model view with `listed()` or links to each record's page.
+
 Records never appear in feeds, the sitemap or a [static export](Static-Export), unless the type is `public`.
 
 ## The rules hold everywhere

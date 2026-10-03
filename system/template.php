@@ -63,6 +63,9 @@ class template {
   public $marks = null;
   // the attribute a print sets: print.@src.cms.photo
   public $current_attr = null;
+  // the render block being rendered (model.method)
+  public $rendering = null;
+
   // a mark the model asked for, for the attribute print being processed
   public $pending_mark = null;
 
@@ -533,67 +536,6 @@ class template {
 			return $this->render_results[$model][$method][$index];
 	}
 	
-	function _loop($html, $data, $name)
-	{
-
-		$this->current_action = 'loop';
-
-		$lstart = $name;
-		$lend = str_replace("<!-- ", "<!-- /", $name);
-		$lpos1 = strpos($html, $lstart) + strlen($lstart);
-		$lpos2 = strpos($html, $lend) - $lpos1;
-		$tloop = substr($html, $lpos1, $lpos2);
-
-		$res = preg_match_all('/<!-- print\.([@\+,a-z,A-Z,_,-,\.]*) (\/?)-->/', $html, $datastarts);
-
-		$datastarts = util::unique_matches($datastarts);
-		$return = '';
-		foreach($data as $item)
-		{
-			$res = '';
-			foreach ($datastarts[0] as $key => $value) {					
-
-				if($res == '')
-					$loop = $tloop;
-				else
-					$loop = $res;
-
-				if(!array_key_exists($datastarts[1][$key], $item)) continue;
-
-				$start = $value;
-				if($datastarts[2][$key] == '/')
-					$end = $value;
-				else
-					$end = str_replace("<!-- ", "<!-- /", $value);
-				$pos1 = strpos($loop, $start);
-				if ($pos1 === false) continue;
-				$pos2 = strpos($loop, $end, $pos1) - $pos1 + strlen($end);
-
-				event::dispatch('loop');
-				
-				$current_item = substr($loop, $pos1 + strlen($start), $pos2 - 2*strlen($end) + 1);
-				$content = is_scalar($item[$datastarts[1][$key]]) ? $this->escape($item[$datastarts[1][$key]]) : '';
-
-				$res = substr_replace($loop, $content, $pos1, $pos2);				
-				$occurences = substr_count($res, $value);
-				
-				if($occurences > 1)
-				{
-					for ($i=0; $i < $occurences; $i++) { 
-						$start = $value;
-						$end = str_replace("<!-- ", "<!-- /", $value);
-						$rpos1 = strpos($res, $start);
-						$rpos2 = strpos($res, $end) - $rpos1 + strlen($end);
-						$res = substr_replace($res, $content, $rpos1, $rpos2);
-					}
-				}
-			}
-			$return .= $res;
-		}
-
-		return $return;
-	}
-	
 	// Fills the form in the current block with $data (or the posted values):
 	// value for inputs, checked for checkboxes and radios, selected for
 	// options, the text of textareas. Passwords are never filled in.
@@ -699,19 +641,44 @@ class template {
 
 		if(!is_array($data_arr)) return false;
 
-		// editor marks for CMS collections
-		$marking = $this->marks !== null && $model === 'cms' && !array_key_exists('__', $data_arr);
-		$record = null;
-		if ($marking) {
+		// rows a model passed through cms_records::listed() are records
+		$listed = isset($data_arr['raster_list']) && is_array($data_arr['raster_list']) ? $data_arr['raster_list'] : null;
+		unset($data_arr['raster_list']);
+
+		// editor marks: for render.cms lists, and for records a model listed
+		$marking = $this->marks !== null && !array_key_exists('__', $data_arr);
+		$list = null;
+		if ($marking && $model === 'cms') {
 			$call = self::parse_call($method);
-			$collection = $call ? $call[0] : $method;
-			// a type a model declares: its readonly and hidden fields are not
-			// editable, and its actions become buttons
-			$record = cms_records::info($collection);
-			$locked = $record ? array_merge($record['readonly'], $record['hidden'], array('owner', 'created_at')) : array();
+			$argument = $call && isset($call[1][0]) && is_string($call[1][0]) ? $call[1][0] : '';
+			// a new item starts with the values the list asks for (stylist=?stylist
+			// as the URL has it, nothing from date>=today)
+			$list = array('collection' => $call ? $call[0] : $method, 'argument' => $argument, 'filters' => cms_store::list_equals($argument));
+		} elseif ($marking && $listed) {
+			$list = self::listed_list($listed);
 		}
-		
-		foreach($data_arr as $data)
+		// lists a model listed say where they come from (the editor summary)
+		$this->rendering = "$model.$method";
+
+		$rendered_data = $this->render_rows($render_template, $data_arr, $list, $marking);
+		$this->render_results[$model][$method][] = $rendered_data;
+		if ($list) $rendered_data = $this->list_mark($render_template, $rendered_data, $list);
+
+		if(!array_key_exists("__", $data_arr))
+			$this->output = substr_replace($this->output, $rendered_data, $pos1, $pos2);
+		else
+			$this->output = substr_replace($this->output, "", $pos1, $pos2);
+    }
+    
+    
+    // Renders $rows through a block's template. $list is the list the editor
+    // marks (a render.cms list or records a model listed), or null; rows that
+    // say which record they are (raster_record) are marked either way.
+    // $nested: a list inside a row, whose rows are joined as they are.
+    function render_rows($render_template, $rows, $list = null, $marking = false, $nested = false) {
+		preg_match_all('/<!-- print\.([@\+,a-z,A-Z,_,-,\.,0-9]*) (\/?)-->/', $render_template, $datastarts);
+		$rendered_data = '';
+		foreach($rows as $data)
 		{
 			if(is_object($data))
 				$data = (array) $data;
@@ -719,8 +686,12 @@ class template {
 			if(!is_array($data))
 				continue;
 
+			// which collection the row belongs to: the list's, or the record
+			// type a model's row says it is (cms_records::listed)
+			$collection = isset($data['raster_record']) && is_string($data['raster_record']) ? $data['raster_record'] : ($list ? $list['collection'] : null);
+			$record = $collection !== null ? cms_records::info($collection) : null;
 			$item_mark = null;
-			if ($marking && isset($data['id'])) {
+			if ($marking && $collection !== null && isset($data['id'])) {
 				$values = array_filter($data, function ($v, $k) { return is_scalar($v) && strpos($k, 'raster_') !== 0; }, ARRAY_FILTER_USE_BOTH);
 				$details = array(
 					'kind' => 'item', 'collection' => $collection, 'id' => (int)$data['id'],
@@ -729,12 +700,27 @@ class template {
 				);
 				if ($record) {
 					foreach ($record['hidden'] as $hidden) unset($values[$hidden]);
-					$details += array('record' => true, 'readonly' => array_values(array_intersect(array_keys($values), $locked)), 'actions' => cms_records::allowed_actions($record));
+					$details += array('record' => true, 'readonly' => array_values(array_filter(array_keys($values), function ($k) use ($record) { return cms_records::locked($record, $k); })), 'actions' => cms_records::allowed_actions($record));
 				}
 				$item_mark = $this->mark($details + array('values' => $values));
 			}
 
 			$rendered_tpl = $render_template;
+			// a list inside the row (a day's bookings) renders its block once per
+			// row of the list, through this same function, marks included
+			foreach ($data as $nested_key => $nested_rows) {
+				if (!is_array($nested_rows) || !preg_match('/^[A-Za-z0-9_\-]+$/', (string)$nested_key)) continue;
+				$open = "<!-- print.$nested_key -->";
+				$close = "<!-- /print.$nested_key -->";
+				$nested_list = $marking && isset($nested_rows['raster_list']) && is_array($nested_rows['raster_list']) ? self::listed_list($nested_rows['raster_list']) : null;
+				unset($nested_rows['raster_list']);
+				while (($at = strpos($rendered_tpl, $open)) !== false && ($to = strpos($rendered_tpl, $close, $at)) !== false) {
+					$inner = substr($rendered_tpl, $at + strlen($open), $to - $at - strlen($open));
+					$out = $this->render_rows($inner, $nested_rows, $nested_list, $marking, true);
+					if ($nested_list) $out = $this->list_mark($inner, $out, $nested_list);
+					$rendered_tpl = substr_replace($rendered_tpl, $out, $at, $to + strlen($close) - $at);
+				}
+			}
 			foreach ($datastarts[0] as $key => $value) {
 
 				//not very elegant but it is a special case that has to be out of the loop
@@ -777,27 +763,9 @@ class template {
 		            
 		            $current_item = ($start === $end) ? '' : substr($rendered_tpl, $rpos1 + strlen($start), $rpos2 - 2*strlen($end)+1);
 
-		            if(array_key_exists($datakey, $data) && is_array($data[$datakey]))
-		            {
-		            	$loop = $this->_loop($render_template, $data[$datakey], $datastarts[0][$key]);
-		            	$rendered_tpl = substr_replace($rendered_tpl, $loop, $rpos1, $rpos2);
-		            	$occurences = substr_count($rendered_tpl, $datastarts[0][$key]);
-									if($occurences > 0)
-									{
-										for ($i=0; $i < $occurences; $i++) { 
-											$value = $datastarts[0][$key];
-											$start = $value;
-											$end = str_replace("<!-- ", "<!-- /", $value);
-											$rpos1 = strpos($rendered_tpl, $start);
-											$rpos2 = strpos($rendered_tpl, $end) - $rpos1 + strlen($end);
+		            // lists inside the row were rendered above
+		            if(array_key_exists($datakey, $data) && is_array($data[$datakey])) continue;
 
-											$loop = $this->_loop($rendered_tpl, $data[$datakey], $datastarts[0][$key]);
-							        $rendered_tpl = substr_replace($rendered_tpl, $loop, $rpos1, $rpos2);
-										}
-									}
-		            	continue;
-		            }
-		            
 		            if(!array_key_exists($datakey, $data)) {	
 		            	continue;
 		              // $rendered_tpl = substr_replace($rendered_tpl, "missing_".$datakey, $rpos1, $rpos2);
@@ -820,7 +788,7 @@ class template {
 			                else
 								$attrchange = self::set_attribute($current_item, $dataattr, $data[$datakey], $is_append);
 
-			                if ($item_mark !== null && strpos($datakey, 'raster_') !== 0 && !($record && in_array($datakey, $locked))) {
+			                if ($item_mark !== null && strpos($datakey, 'raster_') !== 0 && !cms_records::locked($record, $datakey)) {
 			                	$attrchange = '<!--raster:a '.$this->mark(array('kind' => 'item_attr', 'item' => $item_mark, 'field' => $datakey, 'attr' => $dataattr)).'-->'.$attrchange;
 			                }
 			                $rendered_tpl = substr_replace($rendered_tpl, $attrchange, $rpos1, $rpos2);
@@ -836,7 +804,7 @@ class template {
 		                	if ($item_mark !== null && is_scalar($data[$datakey]) && strpos($datakey, 'raster_') !== 0 && !($record && in_array($datakey, $record['hidden']))) {
 		                		// a record's readonly fields are marked so the editor can show
 		                		// what an action changed, but not made editable
-		                		$field_mark = $this->mark(array('kind' => 'item_field', 'item' => $item_mark, 'field' => $datakey) + ($record && in_array($datakey, $locked) ? array('readonly' => true) : array()));
+		                		$field_mark = $this->mark(array('kind' => 'item_field', 'item' => $item_mark, 'field' => $datakey) + (cms_records::locked($record, $datakey) ? array('readonly' => true) : array()));
 		                		$printed = '<!--raster:s '.$field_mark.'-->'.$printed.'<!--raster:e '.$field_mark.'-->';
 		                	}
 		                	$rendered_tpl = substr_replace($rendered_tpl, $printed, $rpos1, $rpos2);
@@ -869,33 +837,40 @@ class template {
 				return $m[2] === '' ? $m[0] : '';
 			}, $rendered_tpl);
 			if ($item_mark !== null) $rendered_tpl = '<!--raster:s '.$item_mark.'-->'.$rendered_tpl.'<!--raster:e '.$item_mark.'-->';
+			if ($nested) {
+				event::dispatch('loop');
+				$rendered_data .= $rendered_tpl;
+				continue;
+			}
 			// rows of a text view are lines; rows of a JSON view are list items
 			if ($this->format === 'txt') $rendered_tpl = trim($rendered_tpl, "\r\n");
 			$rendered_data .= ($this->format === 'json' && $rendered_data !== '' ? ',' : '')."\n".$rendered_tpl;
 		}
 
-		$this->render_results[$model][$method][] = $rendered_data;
-
-		if ($marking) {
-			// the whole list, with the template's mock-up item for new ones; a
-			// new item starts with the values the list asks for (stylist=?stylist
-			// as the URL has it, nothing from date>=today)
-			$argument = $call && isset($call[1][0]) && is_string($call[1][0]) ? $call[1][0] : '';
-			$filters = cms_store::list_equals($argument);
-			$mockup = $this->mockup($render_template);
-			$list = array('kind' => 'collection', 'collection' => $collection, 'list' => $argument, 'filters' => $filters, 'fields' => $mockup['fields']);
-			if ($record) $list += array('record' => true, 'readonly' => $locked, 'lists' => $record['lists'], 'create' => $record['create'], 'staff_add' => $record['staff_add'], 'addable' => cms_records::addable($record, $argument));
-			$list_mark = $this->mark($list);
-			$rendered_data = '<!--raster:s '.$list_mark.'-->'.$rendered_data.'<template data-raster-mockup="'.$list_mark.'">'.$mockup['html'].'</template><!--raster:e '.$list_mark.'-->';
-		}
-
-		if(!array_key_exists("__", $data_arr))
-			$this->output = substr_replace($this->output, $rendered_data, $pos1, $pos2);
-		else
-			$this->output = substr_replace($this->output, "", $pos1, $pos2);
+		return $rendered_data;
     }
-    
-    
+
+    // the list a model's listed records make (cms_records::listed)
+    static function listed_list($listed) {
+		return array('collection' => (string)$listed['type'], 'argument' => '', 'filters' => isset($listed['filters']) ? (array)$listed['filters'] : array(), 'listed' => true);
+    }
+
+    // the whole list, marked, with the template's mock-up item for new ones
+    function list_mark($render_template, $rendered_data, $list) {
+		$record = cms_records::info($list['collection']);
+		$mockup = $this->mockup($render_template);
+		$mark = array('kind' => 'collection', 'collection' => $list['collection'], 'list' => $list['argument'], 'filters' => $list['filters'], 'fields' => $mockup['fields']);
+		if (!empty($list['listed'])) $mark['from'] = $this->rendering;
+		// the card for a new item: never on an item's own page
+		$mark['addable'] = !preg_match('#_item(/|$)#', (string)config::get('uri_string'));
+		if ($record) {
+			$locked = array_merge($record['readonly'], $record['hidden'], array('owner', 'created_at'));
+			$mark = array_merge($mark, array('record' => true, 'readonly' => $locked, 'lists' => $record['lists'], 'create' => $record['create'], 'staff_add' => $record['staff_add'], 'addable' => $mark['addable'] && cms_records::addable($record, $list['argument'], $list['filters'])));
+		}
+		$id = $this->mark($mark);
+		return '<!--raster:s '.$id.'-->'.$rendered_data.'<template data-raster-mockup="'.$id.'">'.$mockup['html'].'</template><!--raster:e '.$id.'-->';
+    }
+
     // A collection's template turned into the editor's model for new items:
     // fields become <!--raster:m name-->default<!--raster:/m-->, and
     // attribute fields <!--raster:ma name attr--> before their tag.

@@ -75,7 +75,7 @@ return array(
 		'reserved_fields' => array('slug', 'id', 'updated_at', 'enabled', 'published_at'),
 		'reserved_collections' => array('users', 'raster'),
 		'reserved_note' => 'A page field may not be named after a method of the cms model either; lint reports it.',
-		'cms_list_options' => "render.cms.<name>('…') and pagination.links('cms.<name>', '…') take key=value pairs joined by &: order=newest|oldest|<field>|-<field>, several with commas (order=date,-time); limit=<n>; <field>=<value> filters; <field>=?<param> takes ?<param>= from the URL and is left out when the URL has none (<field>=? reads ?<field>=); >, >=, <, <= and != compare (date>=today); today, today+7, today-30 and now are the date and time the page is shown. Keep lists staff edit on render.cms: rows a model builds can't be edited in the page.",
+		'cms_list_options' => "render.cms.<name>('…') and pagination.links('cms.<name>', '…') take key=value pairs joined by &: order=newest|oldest|<field>|-<field>, several with commas (order=date,-time); limit=<n>; <field>=<value> filters; <field>=?<param> takes ?<param>= from the URL and is left out when the URL has none (<field>=? reads ?<field>=); >, >=, <, <= and != compare (date>=today); today, today+7, today-30 and now are the date and time the page is shown. Keep lists staff edit on render.cms, or have the model return its records through cms_records::listed(): other rows a model builds can't be edited in the page.",
 	),
 
 	// ##Nesting and order

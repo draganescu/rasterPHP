@@ -5,10 +5,11 @@ file changes for you; `php bin/raster doctor` shows what is left.
 
 ## 2.1.6
 
-Nothing for sites to do. Staff pages that list records with a model's own
+Nothing for sites to do. Staff pages that show records with a model's own
 rows (`render.booking.rows` returning `cms_records::find(…)`) now get a
-`lint` warning: move them to `render.cms.<type>` with the options below so
-staff can edit them in the page again.
+`lint` warning: move them to `render.cms.<type>` with the options below, or
+return the rows through `cms_records::listed()`, so staff can edit them in
+the page again.
 
 - **Lists filter from the URL, by date, and sort by several fields.**
   `render.cms.booking('stylist=?stylist&date>=today&order=date,time')`:
@@ -33,9 +34,21 @@ staff can edit them in the page again.
   items, and each list with whether it gets a card for a new item. MCP
   `render_url` takes `as` and answers with the same as `editor`.
   `raster render` also passes a URL's query string to the page.
+- **Views a model builds stay editable.** A render method that returns
+  records through `cms_records::listed($type, $rows, $defaults)` gets the
+  in-page editor's marks as a `render.cms` list does, also for lists inside
+  its rows: an agenda grouped by day is edited in place, with the record's
+  actions and a card for a new record that starts with `$defaults`.
+  `listed()` keeps only what the person may read and prints what visitors
+  typed as text. Lists inside rows render through the same code as a
+  render block, so their attributes (`print.@href`) work too.
+- **Values a record shows but doesn't store:** a type's model may have
+  `static function computed($type, $record)`, whose values print in every
+  list of that type and are never editable.
 - **`lint` warns about records staff can't reach:** a type a form makes
-  that no view lists with `render.cms.<type>`, and an admin page listing
-  records a model reads itself, which the in-page editor can't edit.
+  that no view lists with `render.cms.<type>`, and an admin page showing
+  records a model reads itself without `cms_records::listed()`, which the
+  in-page editor can't edit.
 - **MCP over stdio answers a call that ends the server.** When a listener
   or the site's code calls `exit()` during a tool call, the call gets an
   error naming the tool, the listener that was running and what it
