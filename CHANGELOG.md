@@ -32,7 +32,9 @@ the page again.
   (an account's email or username, or a role) renders the page as that
   person and prints what the in-page editor can do there: editable fields,
   items, and each list with whether it gets a card for a new item. MCP
-  `render_url` takes `as` and answers with the same as `editor`.
+  `render_url` takes `as` and answers with the same as `editor`. Both
+  refuse in production, where they would show any account's pages
+  without a password.
   `raster render` also passes a URL's query string to the page.
 - **Views a model builds stay editable.** A render method that returns
   records through `cms_records::listed($type, $rows, $defaults)` gets the

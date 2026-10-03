@@ -197,8 +197,13 @@ class authentication
 	// `raster render --as=…` (and MCP render_url's "as"): the page as that
 	// person sees it, without a session. An account by email or username,
 	// or a role (editor, admin, member) for someone with that role.
-	// Command line only: the constant is never set for a web request.
+	// Command line only: the constant is never set for a web request. Never
+	// in production, where it would show anyone's account without a password.
 	protected static function render_as($who) {
+		if (config::get('environment') === 'production') {
+			fwrite(STDERR, "--as only works outside production: render as staff on a development copy of the site.\n");
+			exit(2);
+		}
 		try {
 			self::connect();
 			$bean = self::find($who);

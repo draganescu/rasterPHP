@@ -21,7 +21,7 @@ php bin/raster lint               # after every template edit; exit 1 on errors
 php bin/raster lint --fix         # repair what is mechanical, report the rest
 php bin/raster schema             # what the CMS will store, compared with the database
 php bin/raster render /about      # print a page without a server (exit 1 on 4xx/5xx)
-php bin/raster render /staff --as=editor   # as staff see it; says what the in-page editor can edit
+php bin/raster render /staff --as=editor   # as staff see it, says what the editor can edit (not in production)
 php bin/raster cache clear        # after editing files or the database by hand, in production
 php bin/raster doctor             # is this site healthy, up to date, ready for production?
 ```
@@ -879,7 +879,7 @@ of lists and filter pages come along; drafts and the editor don't.
     does to the content model.
   - `render_url` — the page's status and HTML, no web server. With `as`
     (`editor`, `admin`, `member`, or an account's email) it renders the page
-    as that person, and for staff also says what the in-page editor marks:
+    as that person, outside production only, and for staff also says what the in-page editor marks:
     editable fields, items, and each list with whether it gets a card for a
     new item. It runs in its own process, so a page that dies can't take the
     server down. It never reads the page cache.

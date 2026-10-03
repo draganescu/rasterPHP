@@ -230,7 +230,7 @@ class mcp
 			$tool('render_url', 'Renders a URL of this site and returns the status and the HTML, without a web server. The fastest way to see whether a change works. Runs in a separate process, so a page that fails cannot take this server down. Pass as="editor" to see the page as staff do: the answer then says what the in-page editor can do there (editable fields, the lists it marks, which lists get a card for a new item). Check it after changing a page staff edit: a list built by a model instead of render.cms.<name> is invisible to the editor.',
 				array(
 					'url' => array('type' => 'string', 'description' => 'A path on the site, with a query string if the page reads one, e.g. / or /menu/menu_item/flat-white or /bookings?stylist=ana'),
-					'as' => array('type' => 'string', 'description' => 'Render as this person: an account\'s email or username, or a role (editor, admin, member) for someone with that role. Leave out to render as a visitor.'),
+					'as' => array('type' => 'string', 'description' => 'Render as this person: an account\'s email or username, or a role (editor, admin, member) for someone with that role. Leave out to render as a visitor. Not in production.'),
 					'limit' => array('type' => 'integer', 'description' => 'Characters of HTML to return, 20000 by default'),
 				), array('url'), $read_only),
 			$tool('clear_cache', 'Throws the page cache away. In production, visitors who are not logged in get cached pages until it is cleared. Raster\'s own tools (write_view, update_page, create_item, update_item, delete_item, run_action) already clear it; call this after changing views, theme files, models or config with anything else, or after changing the database directly. render_url never reads the cache.',
@@ -604,6 +604,9 @@ class mcp
 		}
 		$command = array(PHP_BINARY, "$root/bin/raster", 'render', $url);
 		$as = (string)$this->arg($arguments, 'as', '');
+		if ($as !== '' && config::get('environment') === 'production') {
+			throw new InvalidArgumentException("'as' only works outside production: render as staff on a development copy of the site");
+		}
 		if ($as !== '') $command[] = '--as='.$as;
 		$process = proc_open($command, array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, $env);
 		if (!is_resource($process)) throw new RuntimeException('Could not start a process to render '.$url);

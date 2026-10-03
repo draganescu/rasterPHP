@@ -624,7 +624,8 @@ Raster command line
   php bin/raster mcp                     MCP server over stdio for local agents
   php bin/raster render <url>            print the HTML of a URL (never from the page cache)
         --as=<email|username|role>       as that person sees it: --as=editor shows the
-                                         in-page editor's marks (a summary goes to stderr)
+                                         in-page editor's marks (a summary goes to stderr);
+                                         not in production
   php bin/raster cache clear             throw the page cache away, after editing views,
                                          models or the database by hand
   php bin/raster export <folder> [--url=https://example.com/] [--skip=/path] [--clean]

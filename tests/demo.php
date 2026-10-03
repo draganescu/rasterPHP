@@ -2127,6 +2127,10 @@ test(array('R16', 'N14', 'M17'), 'staff add bookings on the lists a new one show
 	lacks($out, 'class="booking"', 'visitors see no bookings');
 	lacks($out, 'In-page editor', 'no summary without --as');
 	same(2, raster(array('render', '/staff', '--as=nobody@example.com'))[0], 'an unknown account');
+	list($code, $out) = raster(array('render', '/staff', '--as=editor'), array('RASTER_ENV' => 'production', 'RASTER_URL' => 'https://cafe.example/'));
+	same(2, $code, 'never in production');
+	has($out, '--as only works outside production');
+	lacks($out, 'class="booking"');
 
 	$answers = mcp_stdio(array(array('render_url', array('url' => '/staff?seating=window', 'as' => 'editor', 'limit' => 200)), array('render_url', array('url' => '/staff', 'limit' => 200))));
 	same('editor', $answers[0]['editor']['role']);
