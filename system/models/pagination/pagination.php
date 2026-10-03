@@ -41,19 +41,19 @@ class pagination
 				}
 			}
 			// the same filters as the list: pagination.links('cms.news', 'featured=1')
-			foreach (explode('&', (string)$filter) as $pair) {
-				$parts = explode('=', $pair, 2);
-				if ($parts[0] !== '' && !in_array($parts[0], array('order', 'limit'))) $filters[$parts[0]] = isset($parts[1]) ? $parts[1] : '';
-			}
-			$total = cms_store::table_exists($type) ? cms_store::count_published($type, $filters) : 0;
+			$conditions = cms_store::list_options($filter)['conditions'];
+			$total = cms_store::table_exists($type) ? cms_store::count_published($type, $filters, $conditions) : 0;
 			$perpage = (int)config::get($name.'_page_size') ?: ((int)config::get('raster_page_size') ?: 10);
 			$current = max(1, (int)util::param($name.'_page', 1));
 			$uri = (string)config::get('uri_string');
 			$base = preg_replace('#/'.preg_quote($name, '#').'_page/\d+/?$#', '', rtrim($uri, '/'));
 			if ($base === '') $base = '/';
 			$link = rtrim(config::get('link_uri'), '/');
-			$url = function ($n) use ($link, $base, $name) {
-				return $n <= 1 ? $link.($base === '/' ? '/' : $base) : $link.rtrim($base, '/').'/'.$name.'_page/'.$n;
+			// a list filtered from the URL (stylist=?stylist) keeps its query
+			$query = http_build_query(array_diff_key($_GET, array('done' => 1)));
+			$query = $query === '' ? '' : '?'.$query;
+			$url = function ($n) use ($link, $base, $name, $query) {
+				return ($n <= 1 ? $link.($base === '/' ? '/' : $base) : $link.rtrim($base, '/').'/'.$name.'_page/'.$n).$query;
 			};
 		} else {
 			controller::load_model($model);

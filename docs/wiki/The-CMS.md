@@ -72,19 +72,39 @@ Pass options as one string, in the style of a URL query:
 ```html
 <!-- render.cms.news('order=newest&limit=3') -->
 <!-- render.cms.products('featured=1&order=name') -->
-<!-- render.cms.events('order=-date') -->
+<!-- render.cms.events('date>=today&order=date,time') -->
+<!-- render.cms.products('category=?category&order=-price') -->
 ```
 
 | Option | Meaning |
 |---|---|
 | `order=newest` | newest first (by publish date, falling back to last update) |
-| `order=oldest` | in the order they were added (the default) |
+| `order=oldest` | in the order they were added (the default), not by any date field |
 | `order=<field>` | by that field, A to Z |
 | `order=-<field>` | by that field, Z to A |
+| `order=date,time` | by several fields, each may have its `-` |
 | `limit=<n>` | at most n items (otherwise the page size, see below) |
 | `<field>=<value>` | only items whose field equals the value |
+| `<field>=?<name>` | equals the URL's `?<name>=`; left out when the URL has none or it is empty. `<field>=?` reads `?<field>=` |
+| `<field>>=<value>` | also `>`, `<`, `<=`, and `!=` (which keeps items where the field is empty) |
+
+`today`, `today+7`, `today-30` and `now` are dates when the page is shown: `date>=today` is what's coming, `date<today` what's past. Dates compare as text, so keep them as `2026-10-03` (what `<input type="date">` sends).
 
 A filter on a field that doesn't exist yet **adds that field**. So `render.cms.products('featured=1')` gives products a `featured` field, which editors set to `1` on the items to show.
+
+#### Filtering from a form
+
+`field=?name` makes a plain search or filter form work with no model code:
+
+```html
+<form method="get">
+  <select name="category"><option value="">All</option><option>Mugs</option><option>Bowls</option></select>
+  <button>Show</button>
+</form>
+<!-- render.cms.products('category=?category&order=name') --> … <!-- /render.cms.products('category=?category&order=name') -->
+```
+
+`/shop?category=Mugs` shows the mugs, and the form shows Mugs chosen: forms with `method="get"` keep what the URL asked. A new item an editor adds to the filtered list starts as a mug. Pages with a query string are never cached.
 
 Remember: the closing tag repeats the options exactly, `<!-- /render.cms.news('order=newest&limit=3') -->`.
 

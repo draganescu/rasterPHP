@@ -2029,19 +2029,28 @@ test(array('R6', 'R8'), 'readonly fields and actions: buttons for the roles allo
 	same(404, http('GET', "$base/api/reservation/check")[0]);
 });
 
+function staff_section($page, $title) {
+	$from = strpos($page, "<h3>$title</h3>");
+	$to = strpos($page, '<h3>', $from + 1);
+	return substr($page, $from, $to === false ? strlen($page) - $from : $to - $from);
+}
+function booking_names($html) {
+	preg_match_all('#<tr class="booking"><td>(?:<!--raster:s \d+-->)?([^<]*)#', preg_replace('#<template data-raster-mockup.*?</template>#s', '', $html), $m);
+	return $m[1];
+}
 function booking_rows($html) { return substr_count(preg_replace('#<template data-raster-mockup.*?</template>#s', '', $html), 'class="booking"'); }
 test('R14', 'staff see bookings grouped by status, and one evening at a time', function () use ($base) {
 	$staff = login($base, 'staff@cafe.test', 'staff password');
 	$h = array("Cookie: $staff");
 	database::instance('cms');
-	$new = R::findOne('reservationdata', ' status = ? ', array('new'));
+	$new = R::findOne('reservationdata', ' status = ? AND date >= ? ', array('new', date('Y-m-d')));
 	$cancelled = R::findOne('reservationdata', ' status = ? ', array('cancelled'));
 	check($new && $cancelled, 'bookings in both states');
 	$page = http('GET', "$base/staff", null, $h)[1];
-	$confirm = substr($page, strpos($page, '<h3>To confirm</h3>'), strpos($page, '<h3>Confirmed</h3>') - strpos($page, '<h3>To confirm</h3>'));
-	$gone = substr($page, strpos($page, '<h3>Cancelled lately</h3>'));
+	$confirm = staff_section($page, 'To confirm');
+	$gone = staff_section($page, 'Cancelled lately');
 	has($confirm, util::e($new->name), 'a new booking is to confirm');
-	same((int)R::count('reservationdata', ' status = ? ', array('new')), booking_rows($confirm), 'only new ones are to confirm');
+	same((int)R::count('reservationdata', ' status = ? AND date >= ? ', array('new', date('Y-m-d'))), booking_rows($confirm), 'only new ones to come are to confirm');
 	has($gone, util::e($cancelled->name), 'it is with the cancelled');
 	has($page, 'href="'.$base.'/reservation/reservation_items/date/'.$new->date.'/"', 'each date links to its evening');
 	$evening = http('GET', "$base/reservation/reservation_items/date/{$new->date}/", null, $h)[1];
@@ -2052,6 +2061,188 @@ test('R14', 'staff see bookings grouped by status, and one evening at a time', f
 	same((int)R::count('reservationdata', ' status = ? ', array('new')), booking_rows($open), 'only what is to confirm');
 	check(booking_rows($open) < (int)R::count('reservationdata'), 'which is not all of them');
 	same((int)R::count('reservationdata'), booking_rows(http('GET', "$base/reservation", null, $h)[1]), 'every booking on /reservation');
+});
+
+test(array('R15', 'D26'), 'list options: filters from the URL, dates, several orders; get forms keep what was asked', function () use ($base) {
+	$staff = login($base, 'staff@cafe.test', 'staff password');
+	$h = array("Cookie: $staff");
+	$day = function ($n) { return date('Y-m-d', strtotime("$n days")); };
+	cms_records::create('reservation', array('name' => 'Past Pia', 'date' => $day(-3), 'seating' => 'window', 'guests' => 1));
+	cms_records::create('reservation', array('name' => 'Gone Gus', 'date' => $day(-3), 'seating' => 'window', 'guests' => 1, 'status' => 'cancelled'));
+	cms_records::create('reservation', array('name' => 'Zed Window', 'date' => $day(40), 'seating' => 'window', 'guests' => 1));
+	cms_records::create('reservation', array('name' => 'Abe Window', 'date' => $day(40), 'seating' => 'window', 'guests' => 1));
+	cms_records::create('reservation', array('name' => 'Ida Inside', 'date' => $day(40), 'seating' => 'inside', 'guests' => 1));
+	cms_records::create('reservation', array('name' => 'Early Window', 'date' => $day(39), 'seating' => 'window', 'guests' => 1));
+
+	$page = http('GET', "$base/staff", null, $h)[1];
+	$names = booking_names(staff_section($page, 'To confirm'));
+	check(!in_array('Past Pia', $names), 'past bookings are not to confirm: '.implode(', ', $names));
+	same(array('Early Window', 'Abe Window', 'Ida Inside', 'Zed Window'), array_values(array_intersect($names, array('Early Window', 'Abe Window', 'Ida Inside', 'Zed Window'))), 'order=date,name');
+	$past = booking_names(staff_section($page, 'Past evenings'));
+	check(in_array('Past Pia', $past), 'date<today lists the past');
+	check(!in_array('Gone Gus', $past), 'status!=cancelled leaves cancelled out');
+	foreach ($past as $name) check(!in_array($name, $names), "$name is not both past and to come");
+
+	$window = http('GET', "$base/staff?seating=window", null, $h)[1];
+	$names = booking_names(staff_section($window, 'To confirm'));
+	check(in_array('Abe Window', $names) && !in_array('Ida Inside', $names), 'seating=?seating filters by the URL');
+	has($window, '<option value="window" selected>', 'the get form keeps the choice');
+	same(array('Early Window'), booking_names(staff_section(http('GET', "$base/staff?seating=window&day=".$day(39), null, $h)[1], 'To confirm')), 'two filters from the URL');
+	has(http('GET', "$base/staff?day=".$day(39), null, $h)[1], 'name="day" value="'.$day(39).'"');
+	same(booking_names(staff_section($page, 'To confirm')), booking_names(staff_section(http('GET', "$base/staff?seating=", null, $h)[1], 'To confirm')), 'an empty parameter filters nothing');
+
+	// the same in code
+	$list = cms_store::list_options('status!=cancelled&date<today+1&guests>=2&seating=?&order=-date,name&limit=5');
+	same(array(array('status', '!=', 'cancelled'), array('date', '<', $day(1)), array('guests', '>=', '2')), $list['conditions'], 'no ?seating in the URL here');
+	same(array('order' => '-date,name', 'limit' => '5'), $list['options']);
+	same('date DESC, name ASC, id ASC', cms_store::order_sql('-date,name', array('date' => 1, 'name' => 1)));
+	same('id ASC', cms_store::order_sql('nope,-nope', array('date' => 1)));
+	// pages of a list filtered from the URL keep the query
+	has(http('GET', "$base/menu?category=cakes")[1], 'menu_page/2?category=cakes', 'pagination keeps the query');
+});
+test(array('R16', 'N14', 'M17'), 'staff add bookings on the lists a new one shows in, and agents render as staff', function () use ($base) {
+	$staff = login($base, 'staff@cafe.test', 'staff password');
+	$config = editor_config(http('GET', "$base/staff?seating=window", null, array("Cookie: $staff"))[1]);
+	$lists = array();
+	foreach ($config['marks'] as $mark) if ($mark['kind'] === 'collection') $lists[$mark['list']] = $mark;
+	$upcoming = $lists['status=new&date>=today&seating=?seating&date=?day&order=date,name'];
+	same(true, $upcoming['addable'], 'staff_add: a card on the new bookings');
+	same(array('status' => 'new', 'seating' => 'window'), $upcoming['filters'], 'a new booking starts with the filters the URL gave');
+	same(false, $lists['status=confirmed&date>=today&seating=?seating&date=?day&order=date,name']['addable'], 'none where a new booking would not show');
+	same(false, $lists['status=cancelled&order=newest&limit=10']['addable']);
+	same(false, cms_records::addable(cms_records::info('reservation'), 'owner=me'), 'nor on someone\'s own list');
+	$info = cms_records::info('reservation');
+	$info['staff_add'] = false;
+	same(false, cms_records::addable($info, 'status=new'), 'without staff_add, bookings come from the form only');
+
+	list($code, $out) = raster(array('render', '/staff?seating=window', '--as=editor'));
+	same(0, $code, $out);
+	has($out, 'class="booking"');
+	has($out, "reservation('status=new&date>=today&seating=?seating&date=?day&order=date,name') with a card for a new item");
+	check(strpos(staff_section($out, 'To confirm'), 'Ida Inside') === false, 'the query string reached the page');
+	list($code, $out) = raster(array('render', '/account', '--as=maria@example.com'));
+	same(0, $code, $out);
+	has($out, 'In-page editor: not on this page', 'a member gets no editor');
+	list($code, $out) = raster(array('render', '/staff'));
+	lacks($out, 'class="booking"', 'visitors see no bookings');
+	lacks($out, 'In-page editor', 'no summary without --as');
+	same(2, raster(array('render', '/staff', '--as=nobody@example.com'))[0], 'an unknown account');
+	list($code, $out) = raster(array('render', '/staff', '--as=editor'), array('RASTER_ENV' => 'production', 'RASTER_URL' => 'https://cafe.example/'));
+	same(2, $code, 'never in production');
+	has($out, '--as only works outside production');
+	lacks($out, 'class="booking"');
+
+	$answers = mcp_stdio(array(array('render_url', array('url' => '/staff?seating=window', 'as' => 'editor', 'limit' => 200)), array('render_url', array('url' => '/staff', 'limit' => 200))));
+	same('editor', $answers[0]['editor']['role']);
+	$from = array_count_values(array_map(function ($l) { return $l['from']; }, $answers[0]['editor']['lists']));
+	same(4, $from['cms.reservation'], 'four render.cms lists');
+	check($from['reservation.agenda'] >= 1, 'and the evenings of the agenda');
+	same(true, $answers[0]['editor']['lists'][0]['new_card']);
+	same(null, $answers[0]['errors'], 'the summary is not an error');
+	check(!isset($answers[1]['editor']), 'no editor summary for visitors');
+});
+test(array('R18', 'R19'), 'a model view of records stays editable: listed() rows, nested, with computed values', function () use ($base) {
+	$staff = login($base, 'staff@cafe.test', 'staff password');
+	$tomorrow = date('Y-m-d', strtotime('+1 day'));
+	cms_records::create('reservation', array('name' => 'Tom Tomorrow', 'date' => $tomorrow, 'seating' => 'inside', 'guests' => 1));
+	$page = http('GET', "$base/staff", null, array("Cookie: $staff"))[1];
+	$config = editor_config($page);
+	$evenings = array();
+	foreach ($config['marks'] as $id => $mark) if ($mark['kind'] === 'collection' && isset($mark['from'])) $evenings[$id] = $mark;
+	check(count($evenings) >= 2, 'each evening of the agenda is a list the editor marks');
+	$first = reset($evenings);
+	same('reservation.agenda', $first['from']);
+	same(true, $first['addable'], 'a card for a booking on that evening');
+	same($tomorrow, $first['filters']['date'], 'which starts with the evening\'s date');
+	$tom = array_values(array_filter($config['marks'], function ($m) { return $m['kind'] === 'item' && isset($m['values']['name']) && $m['values']['name'] === 'Tom Tomorrow'; }));
+	same(2, count($tom), 'Tom is an item in To confirm and in the agenda');
+	same(array('confirm', 'cancel'), $tom[1]['actions'], 'with the type\'s actions');
+	check(in_array('weekday', $tom[1]['readonly'], true), 'the computed weekday is not editable');
+	has($page, 'class="agenda-booking"');
+	cms_records::create('reservation', array('name' => 'Bea <b>Bold</b>', 'date' => $tomorrow, 'guests' => 1));
+	$agenda = substr(http('GET', "$base/staff", null, array("Cookie: $staff"))[1], 0);
+	$agenda = substr($agenda, strpos($agenda, '<h3>By evening</h3>'));
+	has($agenda, 'Bea &lt;b&gt;Bold&lt;/b&gt;', 'listed rows print what visitors typed as text');
+	has(substr($page, strpos($page, '<h3>By evening</h3>')), date('l', strtotime('+1 day')), 'computed values print in listed rows');
+	has(http('GET', "$base/reservation", null, array("Cookie: $staff"))[1], '<span class="weekday"><!--raster:s', 'and in render.cms lists');
+
+	// what listed() hands the template, and to whom
+	$rows = cms_records::find('reservation', array('name' => 'Abe Window'));
+	same(array('raster_list'), array_keys(cms_records::listed('reservation', $rows)), 'visitors get none of the private bookings');
+	$info = cms_records::info('reservation');
+	same('stored', cms_records::computed($info, array('date' => '2026-10-10', 'weekday' => 'stored'))['weekday'], 'a computed value never replaces a stored one');
+	same('Saturday', cms_records::computed($info, array('date' => '2026-10-10'))['weekday']);
+});
+test('R20', 'a record\'s own page is where editors edit what a model view links to', function () {
+	database::instance('cms');
+	$abe = R::findOne('reservationdata', ' name = ? ', array('Abe Window'));
+	list($code, $out) = raster(array('render', '/reservation/reservation_item/'.$abe->slug, '--as=editor'));
+	same(0, $code, $out);
+	has($out, 'Abe Window');
+	has($out, '1 items in 1 lists');
+	lacks($out, 'with a card for a new item', 'no card on an item\'s page');
+	list($code, $out) = raster(array('render', '/reservation/reservation_item/'.$abe->slug));
+	same(1, $code, 'visitors get a 404');
+	has($out, 'HTTP 404');
+	lacks($out, 'Abe Window');
+});
+test('R17', 'lint: records nobody lists, and staff pages listing what a model reads', function () {
+	$inspector = new raster_inspector();
+	$views = $inspector->theme_dir();
+	$models = APPBASE.'models';
+	@mkdir("$models/bookrows");
+	try {
+		with_file("$models/bookrows/bookrows.php", "<?php\nclass bookrows {\n\tfunction rows() {\n\t\treturn cms_records::find('reservation', array(), 'date');\n\t}\n\tfunction counts() { return array(); }\n\tfunction agenda() {\n\t\treturn cms_records::listed('reservation', cms_records::find('reservation'));\n\t}\n}\n", function () use ($inspector, $views) {
+			$problems = $inspector->lint_source('<!-- render.bookrows.rows --><p><!-- print.name -->x<!-- /print.name --></p><!-- /render.bookrows.rows --><!-- render.bookrows.counts --><p>y</p><!-- /render.bookrows.counts -->', 'staff.html');
+			check(has_message($problems, "shows reservation records the bookrows model reads itself without cms_records::listed()"), 'an admin page listing model rows');
+			same(1, count($problems), 'only the method that reads records');
+			$problems = $inspector->lint_source('<!-- render.bookrows.agenda --><p><!-- print.name -->x<!-- /print.name --></p><!-- /render.bookrows.agenda -->', 'staff.html');
+			same(array(), $problems, 'records handed back through cms_records::listed are fine');
+			same(array(), $inspector->lint_source('<!-- render.bookrows.rows --><p><!-- print.name -->x<!-- /print.name --></p><!-- /render.bookrows.rows -->', 'thanks.html'), 'pages for visitors may');
+		});
+	} finally { @rmdir("$models/bookrows"); }
+	$listed = function () use ($inspector) { return has_message($inspector->lint_types(), "Visitors make 'reservation' records with a form, but no view lists them"); };
+	check(!$listed(), 'the café lists its bookings');
+	$originals = array();
+	foreach (array('staff.html', 'reservation.html', 'account.html') as $view) $originals[$view] = file_get_contents("$views/$view");
+	try {
+		foreach ($originals as $view => $html) file_put_contents("$views/$view", str_replace('render.cms.reservation(', 'render.cms.elsewhere(', $html));
+		check($listed(), 'a form type no view lists');
+	} finally {
+		foreach ($originals as $view => $html) file_put_contents("$views/$view", $html);
+	}
+});
+test('M18', 'MCP over stdio: a call that ends the server is answered, a PHP error answers the call', function () {
+	$models = APPBASE.'models';
+	@mkdir("$models/stopper");
+	try {
+		with_file("$models/stopper/stopper.php", "<?php\nclass stopper {\n\tstatic function listens() { return array('cms.item_saved' => 'stop', 'cms.item_deleted' => 'broken'); }\n\tfunction stop(\$saved) { if (\$saved['collection'] === 'journal') { echo '<p>Forbidden</p>'; exit; } }\n\tfunction broken(\$deleted) { return no_such_function(); }\n}\n", function () {
+			$item = mcp_stdio(array(array('create_item', array('collection' => 'menu', 'fields' => array('name' => 'Stopper test', 'price' => '1'))), array('delete_item', array('collection' => 'menu', 'id' => 0))));
+			check(isset($item[0]['id']), 'other calls work');
+			$id = $item[0]['id'];
+			$answers = mcp_stdio(array(array('delete_item', array('collection' => 'menu', 'id' => $id)), array('clear_cache')));
+			has($answers[0]['error'], 'Error: Call to undefined function no_such_function()');
+			has($answers[0]['error'], 'stopper.php:5');
+			check(isset($answers[1]['ok']), 'and the server goes on');
+
+			global $root;
+			$process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, getenv());
+			fwrite($pipes[0], json_encode(array('jsonrpc' => '2.0', 'id' => 7, 'method' => 'tools/call', 'params' => array('name' => 'create_item', 'arguments' => array('collection' => 'journal', 'fields' => array('title' => 'Stops')))))."\n");
+			fwrite($pipes[0], json_encode(array('jsonrpc' => '2.0', 'id' => 8, 'method' => 'tools/call', 'params' => array('name' => 'clear_cache', 'arguments' => array())))."\n");
+			fclose($pipes[0]);
+			$lines = array_values(array_filter(explode("\n", stream_get_contents($pipes[1]))));
+			stream_get_contents($pipes[2]);
+			proc_close($process);
+			same(1, count($lines), 'the process ended in the first call');
+			$answer = json_decode($lines[0], true);
+			same(7, $answer['id']);
+			same(-32603, $answer['error']['code']);
+			has($answer['error']['message'], "something called exit() or die(), while stopper.stop listened to 'cms.item_saved'. It printed: Forbidden");
+			same('stopper.stop', $answer['error']['data']['listener']);
+		});
+	} finally { @rmdir("$models/stopper"); }
+	database::instance('cms');
+	R::exec("DELETE FROM journaldata WHERE title = 'Stops'");
 });
 
 // A second model, only while these tests run, for what the café's

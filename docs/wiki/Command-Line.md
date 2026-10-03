@@ -40,9 +40,12 @@ application/views/default/team.html:11:20: error: Model 'office' has no public m
 
 ```sh
 php bin/raster render /about
+php bin/raster render '/bookings?stylist=Ana' --as=editor
 ```
 
-Prints the HTML of a URL without a web server. Exits with 1 when the page answers with an error (404, 500), which makes it handy in tests.
+Prints the HTML of a URL without a web server. Exits with 1 when the page answers with an error (404, 500), which makes it handy in tests. A query string fills `?…` as a browser's would.
+
+`--as` renders the page as someone: an account's email or username, or a role (`editor`, `admin`, `member`) for a stand-in with that role. As staff, it also prints on stderr what the [in-page editor](The-In-Page-Editor) can do on the page: how many fields it can edit, the items, and each list with whether it gets a card for a new item. Use it after changing a page staff edit, to see that editing still works there. It refuses to run in production, where it would show any account's pages without a password: check on a development copy.
 
 ### schema
 

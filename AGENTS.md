@@ -21,6 +21,7 @@ php bin/raster lint               # after every template edit; exit 1 on errors
 php bin/raster lint --fix         # repair what is mechanical, report the rest
 php bin/raster schema             # what the CMS will store, compared with the database
 php bin/raster render /about      # print a page without a server (exit 1 on 4xx/5xx)
+php bin/raster render /staff --as=editor   # as staff see it, says what the editor can edit (not in production)
 php bin/raster cache clear        # after editing files or the database by hand, in production
 php bin/raster doctor             # is this site healthy, up to date, ready for production?
 ```
@@ -362,6 +363,9 @@ class contact {
   honeypot field, and the session token for logged in users.
 - **Refused automatically:** posts from other sites, and bots that fill the
   honeypot. The bots get a fake success.
+- **Forms that ask with the URL** (`<form method="get">`, a filter or a
+  search) show what the URL asked: `/bookings?stylist=Ana` keeps Ana chosen.
+  Nothing else happens to them; see `field=?name` in the CMS options.
 
 ## The CMS: the markup is the schema
 
@@ -389,9 +393,25 @@ item of a collection is the mock-up content.
   - `/news/news_page/2` is page 2. The page size comes from `news_page_size` or
     `raster_page_size` (10).
   - `/news/news_items/tag/php` lists the items where `tag` is `php`.
-- **Options:** `render.cms.news('featured=1&order=newest&limit=3')`. `order`
-  is `newest`, `oldest`, `<field>` or `-<field>` (descending). Any other
-  `key=value` is a filter, and adds that field if it's new.
+- **Options:** `render.cms.news('featured=1&order=newest&limit=3')`, pairs
+  joined by `&`. They work the same in `pagination.links('cms.news', '…')`.
+  - `order` is `newest`, `oldest`, `<field>` or `-<field>` (descending), or
+    several separated by commas: `order=date,time`, `order=-date,-time`.
+    `oldest` is the order items were added, not a date: to sort by a date
+    field, name it.
+  - `limit=3` shows at most 3.
+  - `field=value` is a filter, and adds that field if it's new.
+  - `field=?name` takes the value from the URL's `?name=`; when the URL has
+    none, or it is empty, that filter is left out. `field=?` reads a
+    parameter named like the field. So a plain `<form method="get">` filters
+    a list with no model code, and the form keeps what was chosen.
+  - `field>=value`, also `>`, `<`, `<=` and `!=` (which keeps empty fields).
+    The values `today`, `today+7`, `today-30` (days) and `now` are the
+    date (`2026-10-03`) and time (`2026-10-03 18:30:00`) when the page is
+    shown, so `date>=today` lists what is coming and `date<today` what is
+    past. Dates compare as text: store them as `YYYY-MM-DD`.
+  - A new item added to the list in the page starts with the values its
+    `=` filters ask for, as the URL gives them.
 - **Items** get a `slug` made from their title, headline or name. They also
   have `enabled` (`0` makes a draft) and `published_at` (a future date
   schedules the item). Visitors don't see drafts or scheduled items; editors
@@ -422,6 +442,7 @@ class reservation {
         return array('reservation' => array(
             'fields'   => array('name' => '', 'date' => '', 'guests' => 0, 'status' => 'new', 'lines' => array()),
             'create'   => 'visitor',           // who may send the form: visitor, member, editor (default)
+            'staff_add' => true,               // staff also add them in the page (phone bookings)
             'owner'    => true,                // remember who made it; they may read their own
             'public'   => false,               // the default: only editors (and owners) see records
             'readonly' => array('status'),     // shown to editors, written only by the model
@@ -434,6 +455,9 @@ class reservation {
         $problems = array();
         if ($after && $after['guests'] > 8) $problems[] = 'too_many';
         return $problems;                              // names of alerts, or nothing
+    }
+    static function computed($type, $booking) {        // shown, not stored: print.ends_at
+        return array('ends_at' => date('H:i', strtotime($booking['time']) + 7200));
     }
     static function confirm($item, $input) {           // an action
         return cms_records::update('reservation', $item['id'], array('status' => 'confirmed'));
@@ -458,9 +482,9 @@ class reservation {
   `cms_records::refuse('name')` stops a write from anywhere in the same way.
   Write problems as `$problems[] = 'name'` or `refuse('name')` so `lint`
   knows the alerts are raised.
-- **Hooks are static** — `types()`, `check()`, actions — so
-  `/api/<model>/<method>` can never call them. `lint` reports a `check()` that
-  is not static and an action without its method. (Event listeners named in
+- **Hooks are static** — `types()`, `check()`, `computed()`, actions — so
+  `/api/<model>/<method>` can never call them. `lint` reports a `check()` or
+  `computed()` that is not static and an action without its method. (Event listeners named in
   `listens()` are ordinary public methods; /api reaches them only if the
   model lists them in `api()`, which it shouldn't.)
 - **Privacy.** A type is private unless it says `'public' => true`: visitors
@@ -487,8 +511,12 @@ class reservation {
   fields are shown and not editable, hidden fields never reach them, and the
   item's handle has the type's actions instead of Duplicate and Schedule.
   Deleting a record has no undo. The card for a new item at the end of a
-  list only appears for types staff make themselves (`create` is `editor`,
-  the default): bookings and orders come from their forms. A refused write answers 422 with
+  list appears for types staff make themselves (`create` is `editor`, the
+  default), and for types that say `'staff_add' => true`: a salon takes
+  bookings from its form and over the phone. Orders, which come with a
+  payment, leave it out. The card only shows on lists a new record would
+  show in: a list of `status=confirmed` bookings gets none when `status`
+  is readonly and starts as `new`. A refused write answers 422 with
   `problems`; MCP returns an error naming them.
 - **Actions** are what staff do to a record beyond changing a field. The type
   maps each to the least role that may run it (`editor` or `admin`);
@@ -506,13 +534,92 @@ class reservation {
   come from a form (`create` is `visitor` or `member`), also make a view that
   lists them, `render.cms.<type>('order=newest')`, and protect it for
   editors: `config::set('protected')->to(array('bookings' => 'editor'))`.
-  Without it the records are stored and nobody can see them. Staff confirm,
-  edit and delete them there with the in-page editor and the type's actions.
-  The editor's Admin menu lists it, so it needs no link in the site.
+  Without it the records are stored and nobody can see them (`lint` warns).
+  Staff confirm, edit and delete them there with the in-page editor and the
+  type's actions. The editor's Admin menu lists it, so it needs no link in
+  the site.
+- **Staff pages keep the in-page editor working.** Only rows that are
+  records the editor knows carry its marks: a `render.cms.<type>` list, or
+  records a model hands back through `cms_records::listed()`. Rows a model
+  builds from `cms_records::find(…)` and returns as they are show the same
+  text, but staff can't edit them, run actions on them or add one, and
+  `lint` warns about it on admin pages. Start with the list options:
+  filters, tabs and sorting need no model code:
+
+  ```html
+  <form method="get">
+    <select name="stylist"><option value="">Anyone</option><option>Ana</option><option>Ioana</option></select>
+    <input type="date" name="day">
+    <button>Show</button> <a href="bookings.html">Show all</a>
+  </form>
+  <h2>Upcoming</h2>
+  <!-- render.cms.booking('date>=today&stylist=?stylist&date=?day&order=date,time') -->…<!-- /render.cms.booking('date>=today&stylist=?stylist&date=?day&order=date,time') -->
+  <h2>Past</h2>
+  <!-- render.cms.booking('date<today&stylist=?stylist&date=?day&order=-date,-time&limit=50') -->…<!-- /render.cms.booking('date<today&stylist=?stylist&date=?day&order=-date,-time&limit=50') -->
+  ```
+
+  For tabs, make one page each (`bookings.html`, `bookings/past.html`,
+  both protected by the prefix `bookings`) and link them; the filter form
+  can be a partial both include. Don't store what can be worked out when
+  the page is shown (an `upcoming`/`past` field set by a render block goes
+  stale the next day), and don't filter in the browser by hiding rows.
+  Check the page with `php bin/raster render /bookings --as=editor` (MCP
+  `render_url` with `as`), which says how many fields, items and lists the
+  editor marks.
+- **Values a row shows but doesn't store** (a booking's end time, the
+  stylist's photo from another type) come from the model's
+  `static function computed($type, $record)`, which returns them by name.
+  They print in any list of that type (`print.ends_at`), as text unless the
+  type lists them in `html`; the editor shows them and doesn't edit them,
+  and they never replace a stored field. Don't leave `render.cms` to show
+  one.
+- **Views the list options can't say** (totals, an agenda grouped by day, a
+  week grid, records of several types on one list) are a model's render
+  method, and stay editable when the records in its rows go through
+  `cms_records::listed($type, $rows, $defaults)`:
+
+  ```php
+  function agenda() {                           // render.booking.agenda
+      $days = array();
+      foreach (cms_records::find('booking', array(), 'date,time') as $b) $days[$b['date']][] = $b;
+      $rows = array();
+      foreach ($days as $day => $bookings) {
+          $rows[] = array('day' => $day, 'count' => (string)count($bookings),
+              'bookings' => cms_records::listed('booking', $bookings, array('date' => $day)));
+      }
+      return $rows;
+  }
+  ```
+
+  ```html
+  <!-- render.booking.agenda -->
+  <h3><!-- print.day -->2026-10-01<!-- /print.day --></h3>
+  <ul><!-- print.bookings --><li><!-- print.time -->10:00<!-- /print.time --> <!-- print.name -->Ana<!-- /print.name --></li><!-- /print.bookings --></ul>
+  <!-- /render.booking.agenda -->
+  ```
+
+  `listed()` keeps only the records the person may read (as
+  `render.cms.<type>` does), adds the computed values, prints them as text
+  and tells the editor which record each row is: staff edit them in place,
+  run their actions, and get the card for a new one where the type allows
+  (`staff_add`), starting with `$defaults` (that day). It works for the
+  rows a render method returns and for lists inside them (a day's
+  bookings). Call it last, on what the template gets: the list it returns
+  carries a key of its own. Each row also gets `raster_detail_link`.
+- **Anything else** a model view shows links each record to its own page,
+  `<!-- print.@href.raster_detail_link -->` (`/booking/booking_item/<slug or
+  id>`), which needs a view rendering `render.cms.booking` (`booking.html` or
+  `booking_item.html`, protected like the staff pages). Editors edit the
+  record there; for a private type visitors get a 404.
+- **In that order:** list options first; then a model view with
+  `cms_records::listed()`, or links to each record's page; ask only when
+  none of these can show what is needed.
 - **The model's own code** writes with `cms_records::create($type, $values)`,
   `update($type, $id, $values)` and `delete($type, $id)` (these may write
   readonly and hidden fields and `owner`, and still pass `check()`), and reads
-  with `get($type, $id)` and `find($type, array('field' => 'value'), $order)`.
+  with `get($type, $id)` and `find($type, array('field' => 'value'), $order)`
+  (`$order` as in list options: `'date,-time'`). What it reads for a
+  template goes through `listed($type, $rows)` (see staff pages above).
   A field whose default is `array()` is a list (line items), stored as JSON
   and handed back as a list; inside `render.cms.<type>` its rows repeat like
   any nested rows.
@@ -748,7 +855,12 @@ of lists and filter pages come along; drafts and the editor don't.
     translates them (Romanian is included), and
     `application/i18n/<lang>/raster_editor.php` overrides any of them.
 - **MCP** is available in two ways:
-  - over stdio: `php bin/raster mcp`, already set up in `.mcp.json`;
+  - over stdio: `php bin/raster mcp`, already set up in `.mcp.json`. If a
+    call ends the process (an event listener or the site's code calls
+    `exit()`), that call still gets an error naming the tool, the listener
+    that was running and what it printed; start the server again. A PHP
+    error in the site's code answers the call with its file and line
+    instead of ending the server;
   - over HTTP: POST to `/mcp` with `Authorization: Bearer $RASTER_MCP_TOKEN`.
     It's off until that token is set.
 - **Tools for the site itself:**
@@ -765,9 +877,12 @@ of lists and filter pages come along; drafts and the editor don't.
   - `write_view` — write a view, but only if it lints: on an error the file is
     left alone and the problems come back. The answer says what the change
     does to the content model.
-  - `render_url` — the page's status and HTML, no web server. It runs in its
-    own process, so a page that dies can't take the server down. It never
-    reads the page cache.
+  - `render_url` — the page's status and HTML, no web server. With `as`
+    (`editor`, `admin`, `member`, or an account's email) it renders the page
+    as that person, outside production only, and for staff also says what the in-page editor marks:
+    editable fields, items, and each list with whether it gets a card for a
+    new item. It runs in its own process, so a page that dies can't take the
+    server down. It never reads the page cache.
   - `clear_cache` — throws the page cache away. Call it after changing
     views, theme files, models or config any way but `write_view`, or the
     database directly; Raster's own tools already clear it.
@@ -848,7 +963,9 @@ command-line output). They win over the settings above.
    point to forms nobody handles, alerts nobody raises, and missing email
    views.
 3. `php bin/raster schema` shows the content model you meant to create.
-4. `php bin/raster render /the-url`, or `serve`, and check the HTML.
+4. `php bin/raster render /the-url`, or `serve`, and check the HTML. For a
+   page staff edit, also `render /the-url --as=editor`: it says what the
+   in-page editor can still edit there.
 5. Don't edit `system/`, `bin/raster`, `index.php`, `.htaccess` or this
    file in a site: `raster update` replaces them. Use the ways in
    Extending instead.

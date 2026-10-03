@@ -20,6 +20,8 @@ class reservation
 			// anyone can book; staff see every booking, and a guest who was
 			// logged in sees their own on /account
 			'create' => 'visitor',
+			// staff add the bookings they take over the phone on /staff
+			'staff_add' => true,
 			'owner' => true,
 			// the status changes through the actions, not by typing
 			'readonly' => array('status'),
@@ -38,6 +40,35 @@ class reservation
 		}
 		if ($taken + (int)$after['guests'] > self::SEATS) $problems[] = 'fully_booked';
 		return $problems;
+	}
+
+	// what a booking shows that isn't stored: print.weekday in any list of
+	// bookings. Staff see it, and it isn't editable.
+	static function computed($type, $booking) {
+		$time = strtotime((string)$booking['date']);
+		return array('weekday' => $time ? date('l', $time) : '');
+	}
+
+	// staff.html, By evening: the coming evenings, each with its bookings
+	// and the seats left. The bookings go through cms_records::listed, so
+	// staff edit them here as in any render.cms list, and an evening's card
+	// adds a booking for that evening.
+	function agenda() {
+		$evenings = array();
+		foreach (cms_records::find('reservation', array(), 'date,name') as $booking) {
+			if ($booking['status'] === 'cancelled' || $booking['date'] < date('Y-m-d')) continue;
+			$evenings[$booking['date']][] = $booking;
+		}
+		$rows = array();
+		foreach (array_slice($evenings, 0, 7, true) as $date => $bookings) {
+			$guests = array_sum(array_map(function ($b) { return (int)$b['guests']; }, $bookings));
+			$rows[] = array(
+				'date' => $date,
+				'seats_left' => (string)max(0, self::SEATS - $guests),
+				'bookings' => cms_records::listed('reservation', $bookings, array('date' => $date)),
+			);
+		}
+		return $rows;
 	}
 
 	// read again with the write, so a booking cancelled a moment ago is not

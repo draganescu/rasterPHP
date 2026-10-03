@@ -61,26 +61,116 @@ class cms_store {
 		return array($sql, $bindings);
 	}
 
-	static function count_published($type, $filters = array()) {
+	static function count_published($type, $filters = array(), $conditions = array()) {
 		$columns = self::columns($type);
 		list($sql, $bindings) = self::published_sql($columns);
-		foreach ($filters as $key => $value) {
-			if (!array_key_exists($key, $columns) || !preg_match('/^[a-z0-9_]+$/', $key)) continue;
-			$sql .= ' AND '.$key.' = :f_'.$key.' ';
-			$bindings[':f_'.$key] = $value;
-		}
-		return (int)R::count($type, $sql, $bindings);
+		foreach ($filters as $key => $value) $conditions[] = array($key, '=', $value);
+		list($more, $more_bindings) = self::conditions_sql($conditions, $columns, 'f');
+		return (int)R::count($type, $sql.$more, $bindings + $more_bindings);
 	}
 
-	// order=newest|oldest|<field>|-<field> (minus means descending)
+	// ##List options
+	//
+	// What render.cms.<name>('…') and pagination.links('cms.<name>', '…')
+	// take, as key=value pairs joined by &:
+	//
+	//   featured=1            the field equals the value
+	//   stylist=?stylist      the value of ?stylist in the URL; left out when
+	//                         the URL has none or it is empty (stylist=? for
+	//                         a parameter named like the field)
+	//   date>=today           also >, <, <= and != ; today, today+7, today-30
+	//                         and now are dates (2026-10-03, 2026-10-03 18:30:00)
+	//   order=date,-time      newest, oldest, a field, -field for descending,
+	//                         several separated by commas
+	//   limit=3
+	//
+	// conditions: list of (field, operator, value), the values resolved;
+	// options: order and limit; fields: what a field the list mentions starts
+	// as when the list adds it (the value of featured=1, empty for the rest).
+	static function list_options($argument) {
+		$out = array('conditions' => array(), 'options' => array(), 'fields' => array());
+		foreach (explode('&', (string)$argument) as $chunk) {
+			if (trim($chunk) === '') continue;
+			if (!preg_match('/^([^=<>!]*?)\s*(>=|<=|!=|<>|=|>|<)\s*(.*)$/s', $chunk, $m)) $m = array($chunk, trim($chunk), '=', '');
+			list(, $field, $operator, $value) = $m;
+			$field = trim($field);
+			if ($field === '') continue;
+			// order and limit shape the list, they are not fields
+			if (in_array($field, array('order', 'limit')) && $operator === '=') {
+				$out['options'][$field] = $value;
+				continue;
+			}
+			if ($operator === '<>') $operator = '!=';
+			$dynamic = $value !== '' && ($value[0] === '?' || preg_match('/^(today([+-]\d+)?|now)$/', $value));
+			if (!isset($out['fields'][$field])) $out['fields'][$field] = $operator === '=' && !$dynamic ? $value : '';
+			$value = self::list_value($value, $field);
+			if ($value === null) continue;
+			$out['conditions'][] = array($field, $operator, $value);
+		}
+		return $out;
+	}
+
+	// a value as the list compares it; null leaves the condition out
+	static function list_value($value, $field) {
+		$value = (string)$value;
+		if ($value !== '' && $value[0] === '?') {
+			$name = substr($value, 1) !== '' ? substr($value, 1) : $field;
+			$asked = isset($_GET[$name]) && is_string($_GET[$name]) ? trim($_GET[$name]) : '';
+			return $asked === '' ? null : $asked;
+		}
+		if ($value === 'now') return date('Y-m-d H:i:s');
+		if (preg_match('/^today(?:([+-])(\d+))?$/', $value, $m)) {
+			return date('Y-m-d', isset($m[1]) ? strtotime($m[1].(int)$m[2].' days') : time());
+		}
+		return $value;
+	}
+
+	// the fields a list asks to be equal to a value: what a new item added to
+	// that list starts with
+	static function list_equals($argument) {
+		$equals = array();
+		foreach (self::list_options($argument)['conditions'] as $condition) {
+			if ($condition[1] === '=') $equals[$condition[0]] = $condition[2];
+		}
+		return $equals;
+	}
+
+	// SQL for conditions on columns the table has; others are left out
+	static function conditions_sql($conditions, $columns, $prefix = 'c') {
+		$sql = '';
+		$bindings = array();
+		foreach (array_values($conditions) as $i => $condition) {
+			list($field, $operator, $value) = $condition;
+			if (!preg_match('/^[a-z0-9_]+$/', $field) || !array_key_exists($field, $columns)) continue;
+			if (!in_array($operator, array('=', '!=', '<', '<=', '>', '>='), true)) continue;
+			$name = ':'.$prefix.$i.'_'.$field;
+			// a field nobody filled is not equal to anything
+			$sql .= $operator === '!=' ? " AND ($field IS NULL OR $field != $name) " : " AND $field $operator $name ";
+			$bindings[$name] = $value;
+		}
+		return array($sql, $bindings);
+	}
+
+	// order=newest|oldest|<field>|-<field> (minus means descending), or
+	// several separated by commas: order=date,time or order=-date,-time
 	static function order_sql($order, $columns) {
-		$order = trim((string)$order);
-		if ($order === 'newest') return array_key_exists('published_at', $columns) ? "CASE WHEN published_at IS NULL OR published_at = '' THEN updated_at ELSE published_at END DESC, id DESC" : 'id DESC';
-		if ($order === 'oldest' || $order === '') return 'id ASC';
-		$desc = $order[0] === '-';
-		$field = ltrim($order, '-');
-		if (!preg_match('/^[a-z0-9_]+$/', $field) || !array_key_exists($field, $columns)) return 'id ASC';
-		return $field.($desc ? ' DESC' : ' ASC').', id ASC';
+		$parts = array();
+		foreach (explode(',', (string)$order) as $part) {
+			$part = trim($part);
+			if ($part === 'newest') {
+				$parts[] = array_key_exists('published_at', $columns) ? "CASE WHEN published_at IS NULL OR published_at = '' THEN updated_at ELSE published_at END DESC, id DESC" : 'id DESC';
+				continue;
+			}
+			if ($part === 'oldest') { $parts[] = 'id ASC'; continue; }
+			if ($part === '') continue;
+			$desc = $part[0] === '-';
+			$field = ltrim($part, '-');
+			if (!preg_match('/^[a-z0-9_]+$/', $field) || !array_key_exists($field, $columns)) continue;
+			$parts[] = $field.($desc ? ' DESC' : ' ASC');
+		}
+		if (!$parts) return 'id ASC';
+		$sql = implode(', ', $parts);
+		return preg_match('/\bid (ASC|DESC)$/', $sql) ? $sql : $sql.', id ASC';
 	}
 
 	static function connect() {

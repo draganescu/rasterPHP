@@ -575,8 +575,12 @@ class raster_inspector {
 	// Lints a view that is not on disk yet, so a draft can be checked before
 	// anything is written. `dry` references resolve against the theme, as they
 	// will once the file is there.
+	// the view being linted, for checks that depend on who sees it
+	protected $linting = '';
+
 	function lint_source($html, $name = 'view', $theme = null) {
 		$theme = $theme ?: $this->theme;
+		$this->linting = $name;
 		list($blocks, $problems) = self::blocks($html);
 		$this->lint_blocks($blocks, $problems, null, $theme);
 		$this->lint_forms($html, $problems, $theme);
@@ -687,6 +691,41 @@ class raster_inspector {
 		if ($block['keyword'] === 'render' && $block['type'] === 'open' && trim($block['inner']) !== '' && trim(strip_tags($block['inner'])) === '' && strpos($block['inner'], '<!--') === false && strpos($block['inner'], '<') === false) {
 			$problems[] = self::problem('warning', $block, "{$block['raw']} is empty; render repeats its inner HTML once per item");
 		}
+		// records listed by a model's own rows are invisible to the in-page
+		// editor: staff can't edit them in the page or add one
+		if ($block['keyword'] === 'render' && $ref['model'] !== 'cms' && stripos($block['inner'], '<form') === false && $this->admin_view($this->linting)) {
+			$type = $this->record_rows($info['file'], $method);
+			if ($type !== null) {
+				$problems[] = self::problem('warning', $block, "{$block['raw']} shows $type records the {$ref['model']} model reads itself without cms_records::listed(), so the in-page editor can't edit them or add one. Return cms_records::listed('$type', \$rows) (inside each row too, for nested lists), or list them with <!-- render.cms.$type('…') -->: filters from the URL (field=?param), dates (date>=today) and order=a,b cover most staff pages.");
+			}
+		}
+	}
+
+	// whether config 'protected' keeps a view (staff.html, or a path ending
+	// in views/<theme>/staff.html) for editors or admins: an admin page
+	function admin_view($view) {
+		$name = preg_replace('#^.*/views/[^/]+/#', '', (string)$view);
+		$name = preg_replace('/\.[a-z]+$/', '', $name);
+		foreach ((array)config::get('protected', array()) as $pattern => $role) {
+			if (in_array($role, array('editor', 'edit', 'admin'), true) && preg_match('%^/'.ltrim($pattern, '/').'%i', '/'.$name)) return true;
+		}
+		return false;
+	}
+
+	// the record type a model method reads with cms_records::find() or get()
+	// and hands to the template without cms_records::listed(), or null
+	function record_rows($file, $method) {
+		$source = @file_get_contents($file);
+		if ($source === false || !preg_match('/function\s+'.preg_quote($method, '/').'\s*\(/', $source, $m, PREG_OFFSET_CAPTURE)) return null;
+		$body = substr($source, $m[0][1]);
+		// up to the next method
+		if (preg_match('/\n\s*(?:(?:public|protected|private|static|final)\s+)*function\s/', $body, $next, PREG_OFFSET_CAPTURE, 1)) $body = substr($body, 0, $next[0][1]);
+		if (strpos($body, 'cms_records::listed(') !== false) return null;
+		if (!preg_match_all('/cms_records::(?:find|get)\(\s*[\'"]([a-z][a-z0-9]*)[\'"]/', $body, $found)) return null;
+		foreach ($found[1] as $type) {
+			if (cms_records::info($type)) return $type;
+		}
+		return null;
 	}
 
 	protected function lint_data_key($block, &$problems, $render) {
@@ -1117,8 +1156,14 @@ class raster_inspector {
 					$problems[] = $at + array('severity' => 'error', 'message' => "The type '$name' has '$field' and '{$field}_id': the database reads '{$field}_id' as a link to a '$field' record and never stores '$field'. Rename one of them.");
 				}
 			}
-			if (method_exists($info['class'], 'check') && !(new ReflectionMethod($info['class'], 'check'))->isStatic()) {
-				$problems[] = $at + array('severity' => 'error', 'message' => "{$info['class']}::check() must be static: a hook is never an ordinary method");
+			// records a form makes and no page lists: stored, and nobody sees them
+			if ($info['create'] !== 'editor' && !$this->listed($name)) {
+				$problems[] = $at + array('severity' => 'warning', 'message' => "Visitors make '$name' records with a form, but no view lists them with render.cms.$name, so staff can't see or edit them in the page. Add a staff page: <!-- render.cms.$name('order=newest') --> in a view protected for editors (config 'protected').");
+			}
+			foreach (array('check', 'computed') as $hook) {
+				if (method_exists($info['class'], $hook) && !(new ReflectionMethod($info['class'], $hook))->isStatic()) {
+					$problems[] = $at + array('severity' => 'error', 'message' => "{$info['class']}::$hook() must be static: a hook is never an ordinary method");
+				}
 			}
 			foreach ($info['actions'] as $action => $role) {
 				if (in_array($action, cms_records::$hooks, true)) {
@@ -1173,6 +1218,16 @@ class raster_inspector {
 	// Describes the CMS content of the theme: page fields per view and
 	// collections with their fields. Defaults are the placeholder content
 	// in the markup, which is what the CMS stores on first render.
+	// whether a view of any theme renders render.cms.<name> (partials too)
+	function listed($name) {
+		foreach (glob($this->views_dir.'/*', GLOB_ONLYDIR) ?: array() as $dir) {
+			foreach ($this->views(basename($dir)) as $view) {
+				if (preg_match('/<!-- render\.cms\.'.preg_quote($name, '/').'(\(| -->)/', file_get_contents("$dir/$view"))) return true;
+			}
+		}
+		return false;
+	}
+
 	function content_model($theme = null) {
 		require_once BASE.'models/cms/cms.php';
 		$theme = $theme ?: $this->theme;
@@ -1223,7 +1278,7 @@ class raster_inspector {
 			foreach ($info['fields'] as $field => $default) $fields[$field] = array('default' => is_array($default) ? '[]' : (string)$default);
 			$collections[$name] = array(
 				'name' => $name, 'type' => $info['type'], 'fields' => $fields, 'views' => $views,
-				'model' => $info['model'], 'public' => $info['public'], 'owner' => $info['owner'], 'create' => $info['create'],
+				'model' => $info['model'], 'public' => $info['public'], 'owner' => $info['owner'], 'create' => $info['create'], 'staff_add' => $info['staff_add'],
 				'readonly' => $info['readonly'], 'hidden' => $info['hidden'], 'actions' => $info['actions'],
 			);
 		}
@@ -1304,13 +1359,11 @@ class raster_inspector {
 			}
 		};
 		$walk($block['children']);
-		// filters passed as arguments become fields too: render.cms.news('featured=1')
+		// filters passed as arguments become fields too: render.cms.news('featured=1'),
+		// render.cms.booking('stylist=?stylist&date>=today')
 		if (!empty($arguments) && is_string($arguments[0])) {
-			foreach (explode('&', $arguments[0]) as $pair) {
-				$parts = explode('=', $pair, 2);
-				if ($parts[0] !== '' && !in_array($parts[0], array('order', 'limit')) && !isset($collection['fields'][$parts[0]])) {
-					$collection['fields'][$parts[0]] = array('default' => isset($parts[1]) ? $parts[1] : '');
-				}
+			foreach (cms_store::list_options($arguments[0])['fields'] as $field => $default) {
+				if (!isset($collection['fields'][$field])) $collection['fields'][$field] = array('default' => $default);
 			}
 		}
 		unset($collection);

@@ -7,7 +7,7 @@
 //   php bin/raster user <username> [--password=secret]
 //   php bin/raster mcp
 //   php bin/raster serve [--port=8000]
-//   php bin/raster render <url>
+//   php bin/raster render <url> [--as=<email|username|role>]
 //   php bin/raster cache clear
 //   php bin/raster export <folder> [--url=…] [--skip=…] [--clean]
 //   php bin/raster new <folder>
@@ -566,9 +566,25 @@ switch ($command) {
 		$_SERVER['SCRIPT_NAME'] = $prefix.'/index.php';
 		$_SERVER['REQUEST_URI'] = $prefix.'/'.ltrim($uri, '/');
 		$_SERVER['REQUEST_METHOD'] = 'GET';
+		// /bookings?stylist=ana fills $_GET, as a web server would
+		$query = (string)parse_url('http://x/'.ltrim($uri, '/'), PHP_URL_QUERY);
+		$_SERVER['QUERY_STRING'] = $query;
+		parse_str($query, $_GET);
+		// --as=<email|username|role>: the page as that person sees it, the
+		// in-page editor's marks included for editors and admins
+		if (isset($options['as']) && is_string($options['as']) && $options['as'] !== '') define('RASTER_RENDER_AS', $options['as']);
 		chdir($root);
 		// exit status 1 for 4xx/5xx responses (missing page, template errors)
+		if (defined('RASTER_RENDER_AS')) ob_start();
 		register_shutdown_function(function () {
+			// what the editor can do on the page, on stderr so the HTML stays clean
+			if (defined('RASTER_RENDER_AS')) {
+				$parts = array();
+				while (ob_get_level() > 0) array_unshift($parts, ob_get_clean());
+				$html = implode('', $parts);
+				echo $html;
+				if ($html !== '' && class_exists('cms_editor')) fwrite(STDERR, cms_editor::summary_line(cms_editor::summary($html))."\n");
+			}
 			$status = http_response_code();
 			if ($status && $status >= 400) {
 				fwrite(STDERR, "HTTP $status\n");
@@ -607,6 +623,9 @@ Raster command line
                                          email a page to newsletter subscribers
   php bin/raster mcp                     MCP server over stdio for local agents
   php bin/raster render <url>            print the HTML of a URL (never from the page cache)
+        --as=<email|username|role>       as that person sees it: --as=editor shows the
+                                         in-page editor's marks (a summary goes to stderr);
+                                         not in production
   php bin/raster cache clear             throw the page cache away, after editing views,
                                          models or the database by hand
   php bin/raster export <folder> [--url=https://example.com/] [--skip=/path] [--clean]

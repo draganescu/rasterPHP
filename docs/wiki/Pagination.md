@@ -52,7 +52,7 @@ If the list uses filters, give pagination the same filters as a second argument 
 <!-- render.pagination.links('cms.news', 'featured=1') --> … <!-- /render.pagination.links('cms.news', 'featured=1') -->
 ```
 
-Filters from the URL (`/news/news_items/tag/php`) are picked up automatically.
+Filters from the URL (`/news/news_items/tag/php`) are picked up automatically, and so is a filter that reads the query string: with `category=?category` in both, the page links keep `?category=…`.
 
 ## For your own model
 

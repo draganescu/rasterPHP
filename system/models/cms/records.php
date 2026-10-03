@@ -28,9 +28,9 @@ class cms_records {
 
 	static $cache = null;
 	// names a type declaration understands
-	static $keys = array('fields', 'public', 'owner', 'create', 'readonly', 'hidden', 'actions', 'html');
+	static $keys = array('fields', 'public', 'owner', 'create', 'staff_add', 'readonly', 'hidden', 'actions', 'html');
 	// the model methods with a meaning of their own, never actions
-	static $hooks = array('types', 'check', 'schema', 'listens', 'api');
+	static $hooks = array('types', 'check', 'computed', 'schema', 'listens', 'api');
 	// events held back until the transaction they happened in commits
 	static $depth = 0;
 	static $queued = array();
@@ -97,6 +97,9 @@ class cms_records {
 			'public' => !empty($d['public']),
 			'owner' => $owner,
 			'create' => isset($d['create']) && in_array($d['create'], array('visitor', 'member', 'editor'), true) ? $d['create'] : 'editor',
+			// staff add these in the page too (a booking taken over the phone),
+			// though visitors make them with a form
+			'staff_add' => !empty($d['staff_add']),
 			'readonly' => array_values(array_intersect((array)(isset($d['readonly']) ? $d['readonly'] : array()), array_keys($fields))),
 			'hidden' => array_values(array_intersect((array)(isset($d['hidden']) ? $d['hidden'] : array()), array_keys($fields))),
 			'actions' => $actions,
@@ -192,6 +195,75 @@ class cms_records {
 			elseif (is_array($inner)) $value[$key] = self::escape_list($inner);
 		}
 		return $value;
+	}
+
+	// Values a row shows that aren't stored, from the model's
+	//   static function computed($type, $record) { return array('ends_at' => …); }
+	// worked out for every row a template prints (render.cms.<type> and
+	// cms_records::listed). They never replace a stored field, and the editor
+	// shows them without making them editable.
+	static function computed($info, $row) {
+		$class = $info['class'];
+		if (!method_exists($class, 'computed') || !(new ReflectionMethod($class, 'computed'))->isStatic()) return $row;
+		$more = call_user_func(array($class, 'computed'), $info['name'], $row);
+		if (is_array($more)) {
+			foreach ($more as $field => $value) {
+				if (is_string($field) && !array_key_exists($field, $row)) $row[$field] = $value;
+			}
+		}
+		return $row;
+	}
+
+	// whether the editor leaves a field of a record's row alone: readonly,
+	// hidden, Raster's own, or not stored at all (a computed value)
+	static function locked($info, $field) {
+		if (!$info) return false;
+		if (in_array($field, array_merge($info['readonly'], $info['hidden'], array('owner', 'created_at')), true)) return true;
+		return !array_key_exists($field, $info['fields']) && !in_array($field, array('slug', 'enabled', 'published_at'), true);
+	}
+
+	// Records a model read itself (find, get), ready for its template, so a
+	// view the model builds (an agenda by day, a week grid, records of several
+	// types) stays editable in the page:
+	//
+	//   function agenda() {
+	//       $days = array();
+	//       foreach (cms_records::find('booking', array(), 'date,time') as $b) $days[$b['date']][] = $b;
+	//       $rows = array();
+	//       foreach ($days as $day => $bookings) {
+	//           $rows[] = array('day' => $day, 'bookings' => cms_records::listed('booking', $bookings, array('date' => $day)));
+	//       }
+	//       return $rows;
+	//   }
+	//
+	// Each row keeps only what the person may read (as render.cms.<type>
+	// does), gets its computed values, prints as text, and tells the editor
+	// which record it is: staff edit it, run its actions, and get the card for
+	// a new one where the type allows, starting with $defaults. Call it last,
+	// on what the template gets: the list carries a key of its own.
+	static function listed($collection, $rows, $defaults = array()) {
+		$info = self::required($collection);
+		$listed = array();
+		$base = config::get('link_uri');
+		foreach ((array)$rows as $row) {
+			if (!is_array($row) || !isset($row['id']) || !self::may_read($info, $row)) continue;
+			$row = self::for_template($info, self::computed($info, self::decode($info, $row)));
+			$row['raster_record'] = $info['name'];
+			$row['raster_detail_link'] = $base.$info['name'].'/'.$info['name'].'_item/'.(!empty($row['slug']) ? rawurlencode($row['slug']) : $row['id']);
+			$listed[] = $row;
+		}
+		$listed['raster_list'] = array('type' => $info['name'], 'filters' => array_map('strval', array_filter((array)$defaults, 'is_scalar')));
+		return $listed;
+	}
+
+	// whether the person asking may read a record, as render.cms.<type> decides
+	static function may_read($info, $row) {
+		if (cms::loggedin()) return true;
+		if (isset($row['enabled']) && (string)$row['enabled'] === '0') return false;
+		if (!empty($row['published_at']) && (string)$row['published_at'] > date('Y-m-d H:i:s')) return false;
+		if ($info['public']) return true;
+		$user = $info['owner'] ? authentication::user() : null;
+		return $user && $user['id'] && isset($row['owner']) && (int)$row['owner'] === (int)$user['id'];
 	}
 
 	// what editors and agents see: without hidden fields
@@ -350,6 +422,27 @@ class cms_records {
 		if ($done === false) return $item;
 		util::done($done === null ? $info['name'] : $done);
 		return false;
+	}
+
+	// whether the in-page editor offers a card for a new record at the end
+	// of a list: for types staff make (create is editor) or also add
+	// (staff_add), and only on lists a new record would show in. A field
+	// only the model writes starts as its default, so a list of confirmed
+	// bookings gets no card when bookings start as new.
+	static function addable($info, $argument, $equals = array()) {
+		if ($info['create'] !== 'editor' && !$info['staff_add']) return false;
+		$defaults = array('owner' => 0) + $info['fields'];
+		$conditions = cms_store::list_options($argument)['conditions'];
+		foreach ($equals as $field => $value) $conditions[] = array($field, '=', (string)$value);
+		foreach ($conditions as $condition) {
+			list($field, $operator, $value) = $condition;
+			if ($field === 'owner' || !in_array($field, array_merge($info['readonly'], $info['hidden']), true)) continue;
+			$default = is_array($defaults[$field]) ? '[]' : (string)$defaults[$field];
+			$holds = array('=' => $default === $value, '!=' => $default !== $value, '<' => $default < $value, '<=' => $default <= $value, '>' => $default > $value, '>=' => $default >= $value);
+			if (!$holds[$operator]) return false;
+		}
+		// owner=me: a record staff add belongs to nobody
+		return !array_key_exists('owner', cms_store::list_equals($argument) + $equals);
 	}
 
 	static function may_create($info) {

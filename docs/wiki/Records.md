@@ -46,6 +46,7 @@ What each part of the type means:
 |---|---|
 | `fields` | What a record holds, with defaults. A default of `array()` makes a list (the lines of an order). |
 | `create` | Who may send the form: `visitor`, `member` or `editor` (the default). |
+| `staff_add` | `true` lets staff add records in the page too, though visitors make them with a form: a booking taken over the phone. |
 | `owner` | `true` remembers the account that made each record, and lets that person read their own. |
 | `public` | `true` shows records to everyone. By default only staff (and owners) see them. |
 | `readonly` | Fields staff can see but not change. Only the model writes them. |
@@ -88,7 +89,71 @@ Records show wherever a template renders them, like any collection:
 
 Visitors see nothing here, not even the example row. Staff see every booking, and in edit mode each one has **Confirm** and **Cancel** buttons. Name and date can be edited in place. Status can't, but it updates when a button changes it. With `'owner' => true`, the same block on `/account` shows a logged in visitor their own bookings.
 
-Every form that saves data needs a page like this one. Without it, what visitors send is stored and nobody sees it. Protect it for editors in the settings, `config::set('protected')->to(array('staff' => 'editor'))`. Staff find it in the in-page editor's **Admin** menu, so the site needs no link to it.
+Every form that saves data needs a page like this one. Without it, what visitors send is stored and nobody sees it (`raster lint` warns). Protect it for editors in the settings, `config::set('protected')->to(array('staff' => 'editor'))`. Staff find it in the in-page editor's **Admin** menu, so the site needs no link to it.
+
+### Staff pages: filters, upcoming and past
+
+Keep staff pages on `render.cms.<type>`. Only the rows the CMS lists can be edited in the page: rows a model builds itself (with `cms_records::find`) look the same, but staff can't edit them, press their buttons or add one, and `raster lint` warns when an admin page does that. What staff pages usually need is in the list options:
+
+```html
+<form method="get">
+  <select name="stylist"><option value="">Anyone</option><option>Ana</option><option>Ioana</option></select>
+  <input type="date" name="day">
+  <button>Show</button> <a href="bookings.html">Show all</a>
+</form>
+<h2>Upcoming</h2>
+<!-- render.cms.booking('date>=today&stylist=?stylist&date=?day&order=date,time') --> … <!-- /render.cms.booking('date>=today&stylist=?stylist&date=?day&order=date,time') -->
+<h2>Past</h2>
+<!-- render.cms.booking('date<today&stylist=?stylist&date=?day&order=-date,-time&limit=50') --> … <!-- /render.cms.booking('date<today&stylist=?stylist&date=?day&order=-date,-time&limit=50') -->
+```
+
+- `stylist=?stylist` filters by the form's choice, and shows everyone when nothing is chosen. The form keeps the choice.
+- `date>=today` and `date<today` split upcoming from past when the page is shown. Don't store a field like `period` for this: it is wrong the next day.
+- For tabs, make a page for each (`bookings.html` and `bookings/past.html`, both protected by the prefix `bookings`).
+- `php bin/raster render /bookings --as=editor` shows the page as staff see it and says what the in-page editor can edit there.
+
+With `'staff_add' => true`, each list a new booking would show in ends with a card for adding one; a list of `status=confirmed` bookings has none, when `status` is readonly and starts as `new`.
+
+### Values a row shows but doesn't store
+
+A booking's end time, or the stylist's photo from another type, come from a static hook on the model:
+
+```php
+static function computed($type, $booking) {
+    return array('ends_at' => date('H:i', strtotime($booking['time']) + 7200));
+}
+```
+
+`<!-- print.ends_at -->` then works in any list of bookings. The editor shows it and doesn't edit it, and a computed value never replaces a stored field.
+
+### Views a model builds
+
+Totals, an agenda grouped by day, a week grid, or records of several types on one list are more than list options say. Build them in a model, and hand the records back through `cms_records::listed()`, so staff still edit them in the page:
+
+```php
+function agenda() {                           // render.booking.agenda
+    $days = array();
+    foreach (cms_records::find('booking', array(), 'date,time') as $b) $days[$b['date']][] = $b;
+    $rows = array();
+    foreach ($days as $day => $bookings) {
+        $rows[] = array('day' => $day, 'bookings' => cms_records::listed('booking', $bookings, array('date' => $day)));
+    }
+    return $rows;
+}
+```
+
+```html
+<!-- render.booking.agenda -->
+<h3><!-- print.day -->2026-10-01<!-- /print.day --></h3>
+<ul><!-- print.bookings --><li><!-- print.time -->10:00<!-- /print.time --> <!-- print.name -->Ana<!-- /print.name --></li><!-- /print.bookings --></ul>
+<!-- /render.booking.agenda -->
+```
+
+`listed()` keeps only what the person may read, adds computed values, prints what visitors typed as text, and tells the in-page editor which record each row is. Staff edit the bookings in place, press their buttons, and each day ends with a card for a new booking on that day (with `staff_add`). Call it last, on what the template gets: the list carries a key of its own. Without it, `raster lint` warns on admin pages.
+
+When even that doesn't fit, link each record to its own page with `<!-- print.@href.raster_detail_link -->` (`/booking/booking_item/<slug or id>`, shown by a view that renders `render.cms.booking`). Editors edit it there; visitors get a 404 for a private type.
+
+So: list options first, then a model view with `listed()` or links to each record's page.
 
 Records never appear in feeds, the sitemap or a [static export](Static-Export), unless the type is `public`.
 

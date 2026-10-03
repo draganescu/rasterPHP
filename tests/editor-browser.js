@@ -118,7 +118,42 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 		await inShadow(page, h => [...h.shadowRoot.querySelectorAll('.handle button')].find(b => b.textContent === 'Confirm').click());
 		await page.waitForTimeout(900);
 		check((await booking.locator('td.status').innerText()).trim() === 'confirmed', 'the action\'s result shows in the page');
-		check(await page.locator('.raster-ghost').count() === 0, 'no card for a new booking: guests book with the form');
+		// staff_add: a booking taken over the phone, from the card at the end of
+		// the lists a new booking shows in (to confirm, past), not the others
+		const cards = async title => page.locator('h3:has-text("' + title + '") + table .raster-ghost').count();
+		check(await cards('To confirm') === 1 && await cards('Past evenings') === 1 && await cards('Confirmed') === 0 && await cards('Cancelled lately') === 0, 'a card for a new booking on the lists it would show in');
+		const phone = page.locator('.raster-ghost').first();
+		await phone.click();
+		await page.waitForTimeout(200);
+		await page.keyboard.type('Phone Pat');
+		// a field of the new card selects its example text when it gets focus
+		await phone.locator('[data-raster-name=date]').click();
+		await page.keyboard.type('2026-12-24');
+		await inShadow(page, h => [...h.shadowRoot.querySelectorAll('.handle button')].find(b => b.textContent === 'Add').click());
+		await page.waitForTimeout(900);
+		const added = (await (await fetch(base + '/api/reservation/day/2026-12-24', { headers: { cookie: (await page.context().cookies()).map(c => c.name + '=' + c.value).join('; ') } })).json());
+		check(Array.isArray(added) && added.some(b => b.name === 'Phone Pat' && b.status === 'new'), 'the phone booking is stored, as new: ' + JSON.stringify(added));
+		check(await page.locator('h3:has-text("To confirm") + table .raster-ghost').count() === 1 && await page.locator('h3:has-text("Past evenings") + table .raster-ghost').count() === 1, 'each list keeps its own card after an add');
+
+		// a model's agenda (cms_records::listed): its bookings are edited in place
+		await page.goto(base + '/staff');
+		await page.waitForTimeout(500);
+		const inAgenda = page.locator('tr.agenda-booking[data-raster-item]', { hasText: 'Ilinca' }).first();
+		check(await inAgenda.count() === 1, 'the agenda\'s booking is an item the editor knows');
+		check(await inAgenda.locator('td').nth(1).evaluate(el => !el.isContentEditable && !el.querySelector('[contenteditable]')), 'its computed weekday is not editable');
+		await inAgenda.locator('td').first().click();
+		// the caret at the end of the name
+		await inAgenda.locator('td').first().evaluate(td => {
+			const el = td.isContentEditable ? td : td.querySelector('[contenteditable]');
+			const range = document.createRange(); range.selectNodeContents(el); range.collapse(false);
+			const sel = getSelection(); sel.removeAllRanges(); sel.addRange(range);
+		});
+		await page.keyboard.type(' Pop');
+		await page.mouse.click(5, 5);
+		await page.waitForTimeout(1200);
+		const day = await (await fetch(base + '/api/reservation/day/2026-10-14', { headers: { cookie: (await page.context().cookies()).map(c => c.name + '=' + c.value).join('; ') } })).json();
+		check(day.some(b => b.name === 'Ilinca Pop'), 'an edit in the agenda is saved: ' + JSON.stringify(day.map(b => b.name)));
+		check(await page.locator('section.evening .raster-ghost').count() >= 2, 'each evening has a card for a new booking');
 		check((await (await fetch(base + '/api/reservation/confirm')).status) === 404, 'actions are not reachable over /api');
 		await page.screenshot({ path: path.join(screens, 'records.png') });
 
