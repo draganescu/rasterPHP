@@ -178,6 +178,7 @@ class authentication
 	// the logged in user as an array, or null
 	static function user() {
 		if (self::$user !== false) return self::$user;
+		if (PHP_SAPI === 'cli' && defined('RASTER_RENDER_AS')) return self::$user = self::render_as(RASTER_RENDER_AS);
 		util::session();
 		self::$user = null;
 		if (empty($_SESSION['uid'])) return null;
@@ -191,6 +192,27 @@ class authentication
 			log::warning('authentication: '.$e->getMessage());
 		}
 		return self::$user;
+	}
+
+	// `raster render --as=…` (and MCP render_url's "as"): the page as that
+	// person sees it, without a session. An account by email or username,
+	// or a role (editor, admin, member) for someone with that role.
+	// Command line only: the constant is never set for a web request.
+	protected static function render_as($who) {
+		try {
+			self::connect();
+			$bean = self::find($who);
+		} catch (Exception $e) {
+			$bean = null;
+		}
+		if ($bean && $bean->id) {
+			return array('id' => (int)$bean->id, 'name' => (string)$bean->name, 'email' => (string)$bean->email, 'username' => (string)$bean->username, 'role' => (string)$bean->role ?: 'member');
+		}
+		if (isset(self::$roles[$who])) {
+			return array('id' => 0, 'name' => ucfirst($who), 'email' => '', 'username' => '', 'role' => $who);
+		}
+		fwrite(STDERR, "No account or role '$who'. Use an email or username (php bin/raster users), or editor, admin or member.\n");
+		exit(2);
 	}
 
 	// can('member'), can('editor') (or 'edit'), can('admin')

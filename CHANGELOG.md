@@ -3,6 +3,53 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.1.6
+
+Nothing for sites to do. Staff pages that list records with a model's own
+rows (`render.booking.rows` returning `cms_records::find(…)`) now get a
+`lint` warning: move them to `render.cms.<type>` with the options below so
+staff can edit them in the page again.
+
+- **Lists filter from the URL, by date, and sort by several fields.**
+  `render.cms.booking('stylist=?stylist&date>=today&order=date,time')`:
+  `field=?name` takes `?name=` from the URL and is left out when the URL
+  has none, so a plain `<form method="get">` filters a staff page with no
+  model code. `>`, `>=`, `<`, `<=` and `!=` compare, and `today`,
+  `today+7` and `now` are the date and time the page is shown, so upcoming
+  and past bookings are two lists, not a stored field that goes stale.
+  `order` takes several fields. Pagination takes the same options and its
+  links keep the query string.
+- **Get forms keep what was asked.** `/bookings?stylist=Ana` shows Ana
+  chosen in a `<form method="get">`.
+- **Staff can add records a form makes.** A type with
+  `'staff_add' => true` gets the in-page editor's card for a new item (a
+  booking taken over the phone). The card only shows on lists a new
+  record would show in, for every type: none on a list of confirmed
+  bookings when status starts as new. A new item starts with the values
+  the list's filters ask for, as the URL gives them.
+- **Render a page as staff.** `php bin/raster render /bookings --as=editor`
+  (an account's email or username, or a role) renders the page as that
+  person and prints what the in-page editor can do there: editable fields,
+  items, and each list with whether it gets a card for a new item. MCP
+  `render_url` takes `as` and answers with the same as `editor`.
+  `raster render` also passes a URL's query string to the page.
+- **`lint` warns about records staff can't reach:** a type a form makes
+  that no view lists with `render.cms.<type>`, and an admin page listing
+  records a model reads itself, which the in-page editor can't edit.
+- **MCP over stdio answers a call that ends the server.** When a listener
+  or the site's code calls `exit()` during a tool call, the call gets an
+  error naming the tool, the listener that was running and what it
+  printed, instead of the process ending without a word. A PHP error
+  (a typo in a listener, say) answers the call with its file and line,
+  and the server goes on. Output a tool's code prints no longer reaches
+  the protocol stream.
+- **The in-page editor keeps several lists of one collection apart.** An
+  item added from a list's card was counted in every list of that
+  collection on the page, so the next card of another list showed up
+  under the first one.
+- AGENTS.md: staff pages stay on `render.cms.<type>`, with the recipe for
+  filters and upcoming and past bookings.
+
 ## 2.1.5
 
 Nothing for sites to do. Back up an SQLite database by copying the file

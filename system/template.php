@@ -352,6 +352,17 @@ class template {
   	$html = $this->output;
   	if (stripos($html, '<form') === false) return;
 
+  	// a form that asks with the URL (a filter: <form method="get">) shows
+  	// what was asked, so /bookings?stylist=ana keeps Ana chosen
+  	if ($_GET && !$this->is_email && preg_match_all('/<form\b[^>]*>/i', $html, $opens, PREG_OFFSET_CAPTURE)) {
+  		foreach (array_reverse($opens[0]) as $open) {
+  			if (preg_match('/\bmethod\s*=\s*["\']?post/i', $open[0])) continue;
+  			$close = stripos($html, '</form>', $open[1]);
+  			$end = $close === false ? strlen($html) : $close;
+  			$html = substr($html, 0, $open[1]).$this->fill_form(substr($html, $open[1], $end - $open[1]), $_GET).substr($html, $end);
+  		}
+  	}
+
   	// render blocks with their ranges
   	preg_match_all('/<!-- (\/?)render\.([a-z0-9_\-]+\.[^ ]*(?:\([^)]*\))?) -->/', $html, $tags, PREG_OFFSET_CAPTURE | PREG_SET_ORDER);
   	$blocks = array(); $stack = array();
@@ -590,7 +601,14 @@ class template {
 	public function form_state($data = null)
 	{
 		$explicit = $data !== null;
-		if (!$explicit) $data = $_POST;
+		$this->current_block = $this->fill_form($this->current_block, $explicit ? $data : $_POST, $explicit);
+		return $this->current_block;
+	}
+
+	// the inputs, selects and textareas of $block with the values in $data;
+	// with $keep_rest, values no field took become hidden inputs
+	function fill_form($block, $data, $keep_rest = false)
+	{
 		$data = (array)$data;
 		foreach (array('raster_form', 'raster_hp', 'csrf') as $internal) unset($data[$internal]);
 		$used = array();
@@ -625,7 +643,7 @@ class template {
 			if (is_array($value)) return $tag;
 			$tag = $without($tag, 'value');
 			return preg_replace('/\s*\/?>$/', ' value="'.$e($value).'"$0', $tag);
-		}, $this->current_block);
+		}, $block);
 
 		$block = preg_replace_callback('/(<textarea\b[^>]*>)(.*?)(<\/textarea>)/is', function ($m) use ($attr, $lookup, $e) {
 			list($found, $value) = $lookup($attr($m[1], 'name'));
@@ -649,7 +667,7 @@ class template {
 			}
 		}
 
-		if ($explicit) {
+		if ($keep_rest) {
 			$hidden = '';
 			foreach ($data as $key => $value) {
 				if (isset($used[$key]) || !is_scalar($value)) continue;
@@ -658,7 +676,6 @@ class template {
 			if ($hidden !== '') $block = preg_replace('/<form\b[^>]*>/i', "$0\n".$hidden, $block, 1);
 		}
 
-		$this->current_block = $block;
 		return $block;
 	}
 	
@@ -860,17 +877,14 @@ class template {
 		$this->render_results[$model][$method][] = $rendered_data;
 
 		if ($marking) {
-			// the whole list, with the template's mock-up item for new ones
-			$filters = array();
-			if ($call && isset($call[1][0]) && is_string($call[1][0])) {
-				foreach (explode('&', $call[1][0]) as $pair) {
-					$pair = explode('=', $pair, 2);
-					if ($pair[0] !== '' && !in_array($pair[0], array('order', 'limit'))) $filters[$pair[0]] = isset($pair[1]) ? $pair[1] : '';
-				}
-			}
+			// the whole list, with the template's mock-up item for new ones; a
+			// new item starts with the values the list asks for (stylist=?stylist
+			// as the URL has it, nothing from date>=today)
+			$argument = $call && isset($call[1][0]) && is_string($call[1][0]) ? $call[1][0] : '';
+			$filters = cms_store::list_equals($argument);
 			$mockup = $this->mockup($render_template);
-			$list = array('kind' => 'collection', 'collection' => $collection, 'filters' => $filters, 'fields' => $mockup['fields']);
-			if ($record) $list += array('record' => true, 'readonly' => $locked, 'lists' => $record['lists'], 'create' => $record['create']);
+			$list = array('kind' => 'collection', 'collection' => $collection, 'list' => $argument, 'filters' => $filters, 'fields' => $mockup['fields']);
+			if ($record) $list += array('record' => true, 'readonly' => $locked, 'lists' => $record['lists'], 'create' => $record['create'], 'staff_add' => $record['staff_add'], 'addable' => cms_records::addable($record, $argument));
 			$list_mark = $this->mark($list);
 			$rendered_data = '<!--raster:s '.$list_mark.'-->'.$rendered_data.'<template data-raster-mockup="'.$list_mark.'">'.$mockup['html'].'</template><!--raster:e '.$list_mark.'-->';
 		}

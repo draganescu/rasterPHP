@@ -28,7 +28,7 @@ class cms_records {
 
 	static $cache = null;
 	// names a type declaration understands
-	static $keys = array('fields', 'public', 'owner', 'create', 'readonly', 'hidden', 'actions', 'html');
+	static $keys = array('fields', 'public', 'owner', 'create', 'staff_add', 'readonly', 'hidden', 'actions', 'html');
 	// the model methods with a meaning of their own, never actions
 	static $hooks = array('types', 'check', 'schema', 'listens', 'api');
 	// events held back until the transaction they happened in commits
@@ -97,6 +97,9 @@ class cms_records {
 			'public' => !empty($d['public']),
 			'owner' => $owner,
 			'create' => isset($d['create']) && in_array($d['create'], array('visitor', 'member', 'editor'), true) ? $d['create'] : 'editor',
+			// staff add these in the page too (a booking taken over the phone),
+			// though visitors make them with a form
+			'staff_add' => !empty($d['staff_add']),
 			'readonly' => array_values(array_intersect((array)(isset($d['readonly']) ? $d['readonly'] : array()), array_keys($fields))),
 			'hidden' => array_values(array_intersect((array)(isset($d['hidden']) ? $d['hidden'] : array()), array_keys($fields))),
 			'actions' => $actions,
@@ -350,6 +353,25 @@ class cms_records {
 		if ($done === false) return $item;
 		util::done($done === null ? $info['name'] : $done);
 		return false;
+	}
+
+	// whether the in-page editor offers a card for a new record at the end
+	// of a list: for types staff make (create is editor) or also add
+	// (staff_add), and only on lists a new record would show in. A field
+	// only the model writes starts as its default, so a list of confirmed
+	// bookings gets no card when bookings start as new.
+	static function addable($info, $argument) {
+		if ($info['create'] !== 'editor' && !$info['staff_add']) return false;
+		$defaults = array('owner' => 0) + $info['fields'];
+		foreach (cms_store::list_options($argument)['conditions'] as $condition) {
+			list($field, $operator, $value) = $condition;
+			if ($field === 'owner' || !in_array($field, array_merge($info['readonly'], $info['hidden']), true)) continue;
+			$default = is_array($defaults[$field]) ? '[]' : (string)$defaults[$field];
+			$holds = array('=' => $default === $value, '!=' => $default !== $value, '<' => $default < $value, '<=' => $default <= $value, '>' => $default > $value, '>=' => $default >= $value);
+			if (!$holds[$operator]) return false;
+		}
+		// owner=me: a record staff add belongs to nobody
+		return !array_key_exists('owner', cms_store::list_equals($argument));
 	}
 
 	static function may_create($info) {

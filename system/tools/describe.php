@@ -115,7 +115,7 @@ class raster_describe
 				);
 				// a type a model declares: who may see, create and act on its records
 				if (isset($collection['model'])) {
-					$collections[count($collections) - 1] += array('declared_by' => $collection['model'], 'public' => $collection['public'], 'owner' => $collection['owner'], 'create' => $collection['create'], 'readonly' => $collection['readonly'], 'hidden' => $collection['hidden'], 'actions' => $collection['actions']);
+					$collections[count($collections) - 1] += array('declared_by' => $collection['model'], 'public' => $collection['public'], 'owner' => $collection['owner'], 'create' => $collection['create'], 'staff_add' => $collection['staff_add'], 'readonly' => $collection['readonly'], 'hidden' => $collection['hidden'], 'actions' => $collection['actions']);
 				}
 			}
 			$out['collections'] = $collections;

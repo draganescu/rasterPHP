@@ -20,6 +20,8 @@ class reservation
 			// anyone can book; staff see every booking, and a guest who was
 			// logged in sees their own on /account
 			'create' => 'visitor',
+			// staff add the bookings they take over the phone on /staff
+			'staff_add' => true,
 			'owner' => true,
 			// the status changes through the actions, not by typing
 			'readonly' => array('status'),

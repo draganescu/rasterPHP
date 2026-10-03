@@ -261,10 +261,23 @@ class cms
 		}
 		unset($filters[$name.'_page']);
 
-		// param filters: render.cms.news('featured=1&order=newest&limit=3')
+		// param filters: render.cms.news('featured=1&order=newest&limit=3'),
+		// render.cms.booking('stylist=?stylist&date>=today&order=date,time')
+		// (see cms_store::list_options)
 		$options = array();
+		$compare = array();
 		if (!empty($arguments) && is_string($arguments[0])) {
-			$filters = $this->make_filters($arguments[0], $expected_properties, $filters, $options);
+			$list = cms_store::list_options($arguments[0]);
+			$options = $list['options'];
+			// fields a list mentions become fields of the collection, starting
+			// with the value a list asks for (featured=1)
+			foreach ($list['fields'] as $field => $value) {
+				if ($value !== '' || !isset($expected_properties[$field])) $expected_properties[$field] = $value;
+			}
+			foreach ($list['conditions'] as $condition) {
+				if ($condition[1] === '=') $filters[$condition[0]] = $condition[2];
+				else $compare[] = $condition;
+			}
 		}
 		if (isset($options['limit']) && (int)$options['limit'] > 0) {
 			$page_size = (int)$options['limit'];
@@ -333,13 +346,15 @@ class cms
 		// (their /account shows what they made, not everyone's)
 		if ($record && isset($filters['owner']) && $filters['owner'] === 'me') {
 			$user = authentication::user();
-			if (!$user || !$record['owner']) return array();
+			if (!$user || !$record['owner'] || !$user['id']) return array();
 			$filters['owner'] = (string)$user['id'];
 		}
 		// a record's hidden fields are no filter for visitors (no asking
 		// "did this email book?")
 		if ($record && !cms::loggedin()) {
-			foreach (array_merge($record['hidden'], array('owner')) as $hidden) unset($filters[$hidden]);
+			$secret = array_merge($record['hidden'], array('owner'));
+			foreach ($secret as $hidden) unset($filters[$hidden]);
+			$compare = array_filter($compare, function ($c) use ($secret) { return !in_array($c[0], $secret, true); });
 		}
 		foreach ($filters as $key => $value) {
 			if (!array_key_exists($key, $fields) || !preg_match('/^[a-z0-9_]+$/', $key)) {
@@ -349,6 +364,10 @@ class cms
 			$sql .= ' AND '.$key.' = :'.$key.' ';
 			$bindings[':'.$key] = $value;
 		}
+		// date>=today, guests>4
+		list($more, $more_bindings) = cms_store::conditions_sql($compare, $fields);
+		$sql .= $more;
+		$bindings += $more_bindings;
 		$sql .= ' ORDER BY '.cms_store::order_sql(isset($options['order']) ? $options['order'] : '', $fields).' LIMIT '.(int)$page_size.' OFFSET '.(int)$roffset;
 		$data = array_values(array_map(array('cms_store', 'export_item'), R::find($this->data_name, $sql, $bindings)));
 		if (!$data && !$record && database::$frozen && R::count($this->data_name) == 0) return false;
@@ -385,22 +404,6 @@ class cms
 		}
 
 		return $data;
-	}
-
-	// parses the filters and adds new fields if any
-	protected function make_filters($filters, &$expected_properties, &$data_filter, &$options = array()) {
-		foreach (explode('&', $filters) as $chunk) {
-			$pair = explode("=", $chunk, 2);
-			if ($pair[0] === '') continue;
-			// order and limit shape the list, they are not fields
-			if (in_array($pair[0], array('order', 'limit'))) {
-				$options[$pair[0]] = isset($pair[1]) ? $pair[1] : '';
-				continue;
-			}
-			$data_filter[$pair[0]] = isset($pair[1]) ? $pair[1] : '';
-			$expected_properties[$pair[0]] = $data_filter[$pair[0]];
-		}
-		return $data_filter;
 	}
 
 	// types posted by the editor must be tables the CMS owns

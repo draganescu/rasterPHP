@@ -82,16 +82,64 @@ class mcp
 	// ##stdio transport: one JSON-RPC message per line
 	public function stdio($in = STDIN, $out = STDOUT) {
 		self::$transport = 'stdio';
+		// a call that ends the process (exit() in a listener or the site's
+		// code, a fatal error) still gets an answer, saying where
+		$self = $this;
+		register_shutdown_function(function () use ($self, $out) {
+			$answer = $self->ended();
+			if ($answer === null) return;
+			fwrite($out, json_encode($answer, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR)."\n");
+			fflush($out);
+		});
 		while (($line = fgets($in)) !== false) {
 			$line = trim($line);
 			if ($line === '') continue;
 			$message = json_decode($line, true);
+			self::$calling = is_array($message) && array_key_exists('id', $message) ? array('id' => $message['id'], 'method' => isset($message['method']) ? (string)$message['method'] : '', 'tool' => isset($message['params']['name']) ? (string)$message['params']['name'] : '') : null;
 			$response = is_array($message) ? $this->handle($message) : $this->error(null, -32700, 'Parse error');
+			self::$calling = null;
 			if ($response !== null) {
 				fwrite($out, json_encode($response, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)."\n");
 				fflush($out);
 			}
 		}
+	}
+
+	// the message being answered over stdio
+	static $calling = null;
+
+	// The answer for a call the process ended in the middle of, or null.
+	// exit() leaves no trace of where it was called, so this names what was
+	// running: the tool, the event listener, a fatal error's file and line,
+	// and what was printed (exit('Forbidden') prints its message).
+	public function ended() {
+		if (self::$calling === null) return null;
+		$printed = array();
+		while (ob_get_level() > 0) array_unshift($printed, ob_get_clean());
+		$printed = trim(strip_tags(implode('', $printed)));
+		$what = self::$calling['tool'] !== '' ? 'the tool '.self::$calling['tool'] : self::$calling['method'];
+		$data = array('tool' => self::$calling['tool']);
+		$error = error_get_last();
+		if ($error && in_array($error['type'], array(E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR), true)) {
+			$message = "The server stopped during $what: {$error['message']} in {$error['file']}:{$error['line']}";
+			$data += array('file' => $error['file'], 'line' => $error['line']);
+		} else {
+			$message = "The server stopped during $what: something called exit() or die()";
+		}
+		if (event::$running) {
+			list($event, $model, $method) = event::$running;
+			$message .= ", while $model.$method listened to '$event'";
+			$data += array('event' => $event, 'listener' => $model.'.'.$method);
+		}
+		if ($printed !== '') {
+			$message .= '. It printed: '.substr($printed, 0, 300);
+			$data['printed'] = substr($printed, 0, 2000);
+		}
+		$message .= '. Start the server again (php bin/raster mcp).';
+		$answer = $this->error(self::$calling['id'], -32603, $message);
+		$answer['error']['data'] = $data;
+		self::$calling = null;
+		return $answer;
 	}
 
 	// ##JSON-RPC
@@ -112,7 +160,7 @@ class mcp
 					'protocolVersion' => in_array($requested, self::$protocol_versions) ? $requested : self::$protocol_versions[0],
 					'capabilities' => array('tools' => array('listChanged' => false)),
 					'serverInfo' => array('name' => 'raster', 'version' => self::SERVER_VERSION),
-					'instructions' => 'This is a Raster site: views are plain HTML and the dynamic parts are HTML comments. Call describe first — it returns how URLs reach views, the content model the markup declares, every name a template may call, and whether the templates lint clean. Before writing an annotation, check vocabulary (the models and their signatures) and annotations (the grammar); both are read from the code, so neither can be out of date. To change a template use check_view then write_view, which refuses markup that does not lint, and render_url to see the result. Content edits go through get_page/update_page and the item tools: page edits keep revisions, and fields that are not in the templates cannot be written — to add a field, edit the template. In production pages are cached for visitors who are not logged in: Raster\'s own tools clear that cache, but views, theme files, models, config or the database changed any other way do not, so call clear_cache after such a change. render_url never reads the cache, so a fresh render_url does not mean visitors see the change.',
+					'instructions' => 'This is a Raster site: views are plain HTML and the dynamic parts are HTML comments. Call describe first — it returns how URLs reach views, the content model the markup declares, every name a template may call, and whether the templates lint clean. Before writing an annotation, check vocabulary (the models and their signatures) and annotations (the grammar); both are read from the code, so neither can be out of date. To change a template use check_view then write_view, which refuses markup that does not lint, and render_url to see the result. Content edits go through get_page/update_page and the item tools: page edits keep revisions, and fields that are not in the templates cannot be written — to add a field, edit the template. In production pages are cached for visitors who are not logged in: Raster\'s own tools clear that cache, but views, theme files, models, config or the database changed any other way do not, so call clear_cache after such a change. render_url never reads the cache, so a fresh render_url does not mean visitors see the change. The in-page editor only marks what the CMS prints: keep lists staff edit on render.cms.<name>, using its options for filters from the URL (field=?param), dates (date>=today) and sorting (order=date,time), not rows a model builds; after changing such a page, call render_url with as="editor" to see that editing still works.',
 				));
 			case 'ping':
 				return $this->result($id, new stdClass());
@@ -179,8 +227,12 @@ class mcp
 				array('content' => array('type' => 'string', 'description' => 'The markup to check'), 'view' => array('type' => 'string', 'description' => 'The name it would be saved as, for the messages'), 'theme' => array('type' => 'string')), array('content'), $read_only),
 			$tool('write_view', 'Writes a view, but only if it lints clean: the file is left untouched when there are errors, and the problems come back instead. Warnings do not stop the write. Also reports what the change does to the content model.',
 				array('view' => array('type' => 'string', 'description' => 'Path inside the theme folder, e.g. about.html'), 'content' => array('type' => 'string'), 'theme' => array('type' => 'string')), array('view', 'content'), $write),
-			$tool('render_url', 'Renders a URL of this site and returns the status and the HTML, without a web server. The fastest way to see whether a change works. Runs in a separate process, so a page that fails cannot take this server down.',
-				array('url' => array('type' => 'string', 'description' => 'A path on the site, e.g. / or /menu/menu_item/flat-white'), 'limit' => array('type' => 'integer', 'description' => 'Characters of HTML to return, 20000 by default')), array('url'), $read_only),
+			$tool('render_url', 'Renders a URL of this site and returns the status and the HTML, without a web server. The fastest way to see whether a change works. Runs in a separate process, so a page that fails cannot take this server down. Pass as="editor" to see the page as staff do: the answer then says what the in-page editor can do there (editable fields, the lists it marks, which lists get a card for a new item). Check it after changing a page staff edit: a list built by a model instead of render.cms.<name> is invisible to the editor.',
+				array(
+					'url' => array('type' => 'string', 'description' => 'A path on the site, with a query string if the page reads one, e.g. / or /menu/menu_item/flat-white or /bookings?stylist=ana'),
+					'as' => array('type' => 'string', 'description' => 'Render as this person: an account\'s email or username, or a role (editor, admin, member) for someone with that role. Leave out to render as a visitor.'),
+					'limit' => array('type' => 'integer', 'description' => 'Characters of HTML to return, 20000 by default'),
+				), array('url'), $read_only),
 			$tool('clear_cache', 'Throws the page cache away. In production, visitors who are not logged in get cached pages until it is cleared. Raster\'s own tools (write_view, update_page, create_item, update_item, delete_item, run_action) already clear it; call this after changing views, theme files, models or config with anything else, or after changing the database directly. render_url never reads the cache.',
 				array(), array(), array('readOnlyHint' => false, 'destructiveHint' => false, 'idempotentHint' => true, 'openWorldHint' => false)),
 		);
@@ -205,6 +257,20 @@ class mcp
 		mcp::load_tools();
 		// the stdio process outlives a `schema --apply` run beside it
 		cms_store::forget();
+		// what a tool's code prints would break the answer over stdio
+		$level = ob_get_level();
+		ob_start();
+		try {
+			return $this->run_tool($name, $arguments);
+		} finally {
+			while (ob_get_level() > $level) {
+				$printed = ob_get_clean();
+				if (trim((string)$printed) !== '') log::warning("MCP $name printed: ".substr(trim($printed), 0, 500));
+			}
+		}
+	}
+
+	protected function run_tool($name, $arguments) {
 		try {
 			if (!in_array($name, array_map(function ($t) { return $t['name']; }, $this->tools()))) {
 				throw new InvalidArgumentException("Unknown tool '$name'");
@@ -223,6 +289,10 @@ class mcp
 					: 'Database error: '.$message;
 			}
 			return array('content' => array(array('type' => 'text', 'text' => $message)), 'isError' => true);
+		} catch (Error $e) {
+			// a mistake in PHP code (the site's or Raster's) answers this call
+			// instead of ending the server
+			return array('content' => array(array('type' => 'text', 'text' => get_class($e).': '.$e->getMessage().' in '.$e->getFile().':'.$e->getLine())), 'isError' => true);
 		}
 	}
 
@@ -532,14 +602,23 @@ class mcp
 			$value = getenv($name);
 			if ($value !== false) $env[$name] = $value;
 		}
-		$process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'render', $url), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, $env);
+		$command = array(PHP_BINARY, "$root/bin/raster", 'render', $url);
+		$as = (string)$this->arg($arguments, 'as', '');
+		if ($as !== '') $command[] = '--as='.$as;
+		$process = proc_open($command, array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, $env);
 		if (!is_resource($process)) throw new RuntimeException('Could not start a process to render '.$url);
 		$html = stream_get_contents($pipes[1]);
 		$errors = trim(stream_get_contents($pipes[2]));
 		$exit = proc_close($process);
 		$status = preg_match('/HTTP (\d{3})/', $errors, $m) ? (int)$m[1] : ($exit === 0 ? 200 : null);
-		return array(
-			'url' => $url, 'ok' => $exit === 0, 'status' => $status, 'bytes' => strlen($html),
+		$answer = array('url' => $url, 'ok' => $exit === 0, 'status' => $status);
+		if ($as !== '') {
+			// the summary line is ours, not an error
+			$errors = trim(preg_replace('/^In-page editor.*?(?=^\S|\z)/ms', '', $errors));
+			$answer['editor'] = cms_editor::summary($html);
+		}
+		return $answer + array(
+			'bytes' => strlen($html),
 			'truncated' => strlen($html) > $limit, 'html' => substr($html, 0, $limit),
 			'errors' => $errors === '' ? null : $errors,
 		);
