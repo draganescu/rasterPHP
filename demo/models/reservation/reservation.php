@@ -42,17 +42,9 @@ class reservation
 		return $problems;
 	}
 
-	// what a booking shows that isn't stored: print.weekday in any list of
-	// bookings. Staff see it, and it isn't editable.
-	static function computed($type, $booking) {
-		$time = strtotime((string)$booking['date']);
-		return array('weekday' => $time ? date('l', $time) : '');
-	}
-
 	// staff.html, By evening: the coming evenings, each with its bookings
 	// and the seats left. The bookings go through cms_records::listed, so
-	// staff edit them here as in any render.cms list, and an evening's card
-	// adds a booking for that evening.
+	// staff edit them here as in any render.cms list.
 	function agenda() {
 		$evenings = array();
 		foreach (cms_records::find('reservation', array(), 'date,name') as $booking) {
@@ -65,7 +57,7 @@ class reservation
 			$rows[] = array(
 				'date' => $date,
 				'seats_left' => (string)max(0, self::SEATS - $guests),
-				'bookings' => cms_records::listed('reservation', $bookings, array('date' => $date)),
+				'bookings' => cms_records::listed('reservation', $bookings),
 			);
 		}
 		return $rows;

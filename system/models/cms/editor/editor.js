@@ -1068,14 +1068,10 @@
 	var ghosts = [];
 	function addGhosts() {
 		removeGhosts();
-		if (/_item\//.test(location.pathname)) return;
 		lists.forEach(function (list) {
-			if (!list.template) return;
-			// records visitors send (bookings, orders) come from their forms; the
-			// card for a new one is for records staff make themselves or also add
-			// (staff_add: a booking taken over the phone), and only on lists a
-			// new one would show in (the server says: addable)
-			if (list.info.record && !list.info.addable) return;
+			// the server says where a card goes: not on an item's own page, and
+			// for records only when staff make them or also add them (staff_add)
+			if (!list.template || !list.info.addable) return;
 			var box = document.createElement('div');
 			box.appendChild(list.template.content.cloneNode(true));
 			var el = Array.prototype.filter.call(box.childNodes, function (n) { return n.nodeType === 1; })[0];

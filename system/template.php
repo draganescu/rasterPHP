@@ -63,9 +63,6 @@ class template {
   public $marks = null;
   // the attribute a print sets: print.@src.cms.photo
   public $current_attr = null;
-  // the render block being rendered (model.method)
-  public $rendering = null;
-
   // a mark the model asked for, for the attribute print being processed
   public $pending_mark = null;
 
@@ -641,11 +638,8 @@ class template {
 
 		if(!is_array($data_arr)) return false;
 
-		// rows a model passed through cms_records::listed() are records
-		$listed = isset($data_arr['raster_list']) && is_array($data_arr['raster_list']) ? $data_arr['raster_list'] : null;
-		unset($data_arr['raster_list']);
-
-		// editor marks: for render.cms lists, and for records a model listed
+		// editor marks: render.cms lists, and rows that are records
+		// (cms_records::listed) wherever they are
 		$marking = $this->marks !== null && !array_key_exists('__', $data_arr);
 		$list = null;
 		if ($marking && $model === 'cms') {
@@ -654,11 +648,7 @@ class template {
 			// a new item starts with the values the list asks for (stylist=?stylist
 			// as the URL has it, nothing from date>=today)
 			$list = array('collection' => $call ? $call[0] : $method, 'argument' => $argument, 'filters' => cms_store::list_equals($argument));
-		} elseif ($marking && $listed) {
-			$list = self::listed_list($listed);
 		}
-		// lists a model listed say where they come from (the editor summary)
-		$this->rendering = "$model.$method";
 
 		$rendered_data = $this->render_rows($render_template, $data_arr, $list, $marking);
 		$this->render_results[$model][$method][] = $rendered_data;
@@ -671,9 +661,9 @@ class template {
     }
     
     
-    // Renders $rows through a block's template. $list is the list the editor
-    // marks (a render.cms list or records a model listed), or null; rows that
-    // say which record they are (raster_record) are marked either way.
+    // Renders $rows through a block's template. $list is the render.cms list
+    // the editor marks, or null; rows that say which record they are
+    // (raster_record, from cms_records::listed) are marked either way.
     // $nested: a list inside a row, whose rows are joined as they are.
     function render_rows($render_template, $rows, $list = null, $marking = false, $nested = false) {
 		preg_match_all('/<!-- print\.([@\+,a-z,A-Z,_,-,\.,0-9]*) (\/?)-->/', $render_template, $datastarts);
@@ -712,12 +702,9 @@ class template {
 				if (!is_array($nested_rows) || !preg_match('/^[A-Za-z0-9_\-]+$/', (string)$nested_key)) continue;
 				$open = "<!-- print.$nested_key -->";
 				$close = "<!-- /print.$nested_key -->";
-				$nested_list = $marking && isset($nested_rows['raster_list']) && is_array($nested_rows['raster_list']) ? self::listed_list($nested_rows['raster_list']) : null;
-				unset($nested_rows['raster_list']);
 				while (($at = strpos($rendered_tpl, $open)) !== false && ($to = strpos($rendered_tpl, $close, $at)) !== false) {
 					$inner = substr($rendered_tpl, $at + strlen($open), $to - $at - strlen($open));
-					$out = $this->render_rows($inner, $nested_rows, $nested_list, $marking, true);
-					if ($nested_list) $out = $this->list_mark($inner, $out, $nested_list);
+					$out = $this->render_rows($inner, $nested_rows, null, $marking, true);
 					$rendered_tpl = substr_replace($rendered_tpl, $out, $at, $to + strlen($close) - $at);
 				}
 			}
@@ -850,22 +837,16 @@ class template {
 		return $rendered_data;
     }
 
-    // the list a model's listed records make (cms_records::listed)
-    static function listed_list($listed) {
-		return array('collection' => (string)$listed['type'], 'argument' => '', 'filters' => isset($listed['filters']) ? (array)$listed['filters'] : array(), 'listed' => true);
-    }
-
     // the whole list, marked, with the template's mock-up item for new ones
     function list_mark($render_template, $rendered_data, $list) {
 		$record = cms_records::info($list['collection']);
 		$mockup = $this->mockup($render_template);
 		$mark = array('kind' => 'collection', 'collection' => $list['collection'], 'list' => $list['argument'], 'filters' => $list['filters'], 'fields' => $mockup['fields']);
-		if (!empty($list['listed'])) $mark['from'] = $this->rendering;
 		// the card for a new item: never on an item's own page
 		$mark['addable'] = !preg_match('#_item(/|$)#', (string)config::get('uri_string'));
 		if ($record) {
 			$locked = array_merge($record['readonly'], $record['hidden'], array('owner', 'created_at'));
-			$mark = array_merge($mark, array('record' => true, 'readonly' => $locked, 'lists' => $record['lists'], 'create' => $record['create'], 'staff_add' => $record['staff_add'], 'addable' => $mark['addable'] && cms_records::addable($record, $list['argument'], $list['filters'])));
+			$mark = array_merge($mark, array('record' => true, 'readonly' => $locked, 'lists' => $record['lists'], 'addable' => $mark['addable'] && cms_records::addable($record)));
 		}
 		$id = $this->mark($mark);
 		return '<!--raster:s '.$id.'-->'.$rendered_data.'<template data-raster-mockup="'.$id.'">'.$mockup['html'].'</template><!--raster:e '.$id.'-->';

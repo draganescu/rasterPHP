@@ -94,44 +94,22 @@ class cms_editor {
 	}
 
 	// What the in-page editor can do on a rendered page, read back from its
-	// config: for `raster render --as=editor` and MCP render_url, so an agent
-	// sees when a change takes editing away. null when the page has no editor.
+	// config, for `raster render --as=editor` and MCP render_url: the role,
+	// how many fields and items it can edit, and each list (+ new when it
+	// ends with a card for a new item). null when the page has no editor.
 	static function summary($html) {
 		if (!preg_match('#<script id="raster-editor-config" type="application/json">(.*?)</script>#s', (string)$html, $m)) return null;
 		$config = json_decode($m[1], true);
 		if (!is_array($config)) return null;
-		$summary = array('role' => isset($config['user']['role']) ? $config['user']['role'] : '', 'fields' => 0, 'fields_in_page_panel' => 0, 'lists' => array(), 'items' => 0);
+		$summary = array('role' => isset($config['user']['role']) ? $config['user']['role'] : '', 'fields' => 0, 'items' => 0, 'lists' => array());
 		foreach ((array)$config['marks'] as $mark) {
 			$kind = isset($mark['kind']) ? $mark['kind'] : '';
-			if ($kind === 'field') $summary[empty($mark['hidden']) ? 'fields' : 'fields_in_page_panel']++;
+			if ($kind === 'field' && empty($mark['hidden'])) $summary['fields']++;
 			if ($kind === 'item') $summary['items']++;
-			if ($kind === 'collection') {
-				// lists render from the last in the page to the first
-				array_unshift($summary['lists'], array(
-					'collection' => $mark['collection'],
-					'list' => isset($mark['list']) ? $mark['list'] : '',
-					// records a model listed (cms_records::listed): its render block
-					'from' => isset($mark['from']) ? $mark['from'] : 'cms.'.$mark['collection'],
-					'filters' => (object)$mark['filters'],
-					// the card for a new item at the end of the list
-					'new_card' => !empty($mark['addable']),
-				));
-			}
+			// lists render from the last in the page to the first
+			if ($kind === 'collection') array_unshift($summary['lists'], $mark['collection'].($mark['list'] !== '' ? "('{$mark['list']}')" : '').(!empty($mark['addable']) ? ' + new' : ''));
 		}
 		return $summary;
-	}
-
-	// one line of it, for the command line
-	static function summary_line($summary) {
-		if (!$summary) return 'In-page editor: not on this page (log in as an editor or admin to get it)';
-		$lists = array();
-		foreach ($summary['lists'] as $list) {
-			$name = $list['from'] === 'cms.'.$list['collection'] ? $list['collection'].($list['list'] !== '' ? "('{$list['list']}')" : '') : $list['collection'].' records listed by '.$list['from'];
-			$lists[] = $name.($list['new_card'] ? ' with a card for a new item' : '');
-		}
-		return 'In-page editor as '.$summary['role'].': '.$summary['fields'].' editable fields'
-			.($summary['fields_in_page_panel'] ? ' and '.$summary['fields_in_page_panel'].' in the Page panel' : '')
-			.', '.$summary['items'].' items in '.count($lists).' lists'.($lists ? ":\n  ".implode("\n  ", $lists) : '');
 	}
 
 	// the staff pages this person may open, for the editor's Admin menu

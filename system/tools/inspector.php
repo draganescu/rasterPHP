@@ -696,7 +696,7 @@ class raster_inspector {
 		if ($block['keyword'] === 'render' && $ref['model'] !== 'cms' && stripos($block['inner'], '<form') === false && $this->admin_view($this->linting)) {
 			$type = $this->record_rows($info['file'], $method);
 			if ($type !== null) {
-				$problems[] = self::problem('warning', $block, "{$block['raw']} shows $type records the {$ref['model']} model reads itself without cms_records::listed(), so the in-page editor can't edit them or add one. Return cms_records::listed('$type', \$rows) (inside each row too, for nested lists), or list them with <!-- render.cms.$type('…') -->: filters from the URL (field=?param), dates (date>=today) and order=a,b cover most staff pages.");
+				$problems[] = self::problem('warning', $block, "{$block['raw']} shows $type records the {$ref['model']} model reads itself without cms_records::listed(), so the in-page editor can't edit them or add one. Return cms_records::listed('$type', \$rows) (for a list inside a row too), or list them with <!-- render.cms.$type('…') -->: filters from the URL (field=?param), dates (date>=today) and order=a,b cover most staff pages.");
 			}
 		}
 	}
@@ -1160,10 +1160,8 @@ class raster_inspector {
 			if ($info['create'] !== 'editor' && !$this->listed($name)) {
 				$problems[] = $at + array('severity' => 'warning', 'message' => "Visitors make '$name' records with a form, but no view lists them with render.cms.$name, so staff can't see or edit them in the page. Add a staff page: <!-- render.cms.$name('order=newest') --> in a view protected for editors (config 'protected').");
 			}
-			foreach (array('check', 'computed') as $hook) {
-				if (method_exists($info['class'], $hook) && !(new ReflectionMethod($info['class'], $hook))->isStatic()) {
-					$problems[] = $at + array('severity' => 'error', 'message' => "{$info['class']}::$hook() must be static: a hook is never an ordinary method");
-				}
+			if (method_exists($info['class'], 'check') && !(new ReflectionMethod($info['class'], 'check'))->isStatic()) {
+				$problems[] = $at + array('severity' => 'error', 'message' => "{$info['class']}::check() must be static: a hook is never an ordinary method");
 			}
 			foreach ($info['actions'] as $action => $role) {
 				if (in_array($action, cms_records::$hooks, true)) {

@@ -85,10 +85,10 @@ Pass options as one string, in the style of a URL query:
 | `order=date,time` | by several fields, each may have its `-` |
 | `limit=<n>` | at most n items (otherwise the page size, see below) |
 | `<field>=<value>` | only items whose field equals the value |
-| `<field>=?<name>` | equals the URL's `?<name>=`; left out when the URL has none or it is empty. `<field>=?` reads `?<field>=` |
+| `<field>=?<name>` | equals the URL's `?<name>=`; left out when the URL has none or it is empty |
 | `<field>>=<value>` | also `>`, `<`, `<=`, and `!=` (which keeps items where the field is empty) |
 
-`today`, `today+7`, `today-30` and `now` are dates when the page is shown: `date>=today` is what's coming, `date<today` what's past. Dates compare as text, so keep them as `2026-10-03` (what `<input type="date">` sends).
+`today` is the date the page is shown: `date>=today` is what's coming, `date<today` what's past. Dates compare as text, so keep them as `2026-10-03` (what `<input type="date">` sends).
 
 A filter on a field that doesn't exist yet **adds that field**. So `render.cms.products('featured=1')` gives products a `featured` field, which editors set to `1` on the items to show.
 

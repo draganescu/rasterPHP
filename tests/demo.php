@@ -2006,7 +2006,7 @@ test(array('R6', 'R8'), 'readonly fields and actions: buttons for the roles allo
 	same(array('confirm', 'cancel'), $mark['actions']);
 	check(in_array('status', $mark['readonly']), 'status is shown, not edited');
 	list(, $list) = mark_of($config, 'collection', function ($m) { return $m['collection'] === 'reservation'; });
-	same('visitor', $list['create'], 'no card for a new booking: guests book with the form');
+	same(true, $list['addable'], 'staff_add: a card for a booking taken over the phone');
 	list(, $field) = mark_of($config, 'item_field', function ($m) use ($id) { return $m['item'] === (int)$id && $m['field'] === 'status'; });
 	same(true, $field['readonly'], 'the status is marked readonly: shown, updated by actions, never editable');
 	$token = token_in($page);
@@ -2048,10 +2048,9 @@ test('R14', 'staff see bookings grouped by status, and one evening at a time', f
 	check($new && $cancelled, 'bookings in both states');
 	$page = http('GET', "$base/staff", null, $h)[1];
 	$confirm = staff_section($page, 'To confirm');
-	$gone = staff_section($page, 'Cancelled lately');
 	has($confirm, util::e($new->name), 'a new booking is to confirm');
 	same((int)R::count('reservationdata', ' status = ? AND date >= ? ', array('new', date('Y-m-d'))), booking_rows($confirm), 'only new ones to come are to confirm');
-	has($gone, util::e($cancelled->name), 'it is with the cancelled');
+	lacks($confirm, util::e($cancelled->name), 'not the cancelled ones');
 	has($page, 'href="'.$base.'/reservation/reservation_items/date/'.$new->date.'/"', 'each date links to its evening');
 	$evening = http('GET', "$base/reservation/reservation_items/date/{$new->date}/", null, $h)[1];
 	has($evening, util::e($new->name));
@@ -2092,8 +2091,8 @@ test(array('R15', 'D26'), 'list options: filters from the URL, dates, several or
 	same(booking_names(staff_section($page, 'To confirm')), booking_names(staff_section(http('GET', "$base/staff?seating=", null, $h)[1], 'To confirm')), 'an empty parameter filters nothing');
 
 	// the same in code
-	$list = cms_store::list_options('status!=cancelled&date<today+1&guests>=2&seating=?&order=-date,name&limit=5');
-	same(array(array('status', '!=', 'cancelled'), array('date', '<', $day(1)), array('guests', '>=', '2')), $list['conditions'], 'no ?seating in the URL here');
+	$list = cms_store::list_options('status!=cancelled&date<today&guests>=2&seating=?seating&order=-date,name&limit=5');
+	same(array(array('status', '!=', 'cancelled'), array('date', '<', $day(0)), array('guests', '>=', '2')), $list['conditions'], 'no ?seating in the URL here');
 	same(array('order' => '-date,name', 'limit' => '5'), $list['options']);
 	same('date DESC, name ASC, id ASC', cms_store::order_sql('-date,name', array('date' => 1, 'name' => 1)));
 	same('id ASC', cms_store::order_sql('nope,-nope', array('date' => 1)));
@@ -2106,19 +2105,16 @@ test(array('R16', 'N14', 'M17'), 'staff add bookings on the lists a new one show
 	$lists = array();
 	foreach ($config['marks'] as $mark) if ($mark['kind'] === 'collection') $lists[$mark['list']] = $mark;
 	$upcoming = $lists['status=new&date>=today&seating=?seating&date=?day&order=date,name'];
-	same(true, $upcoming['addable'], 'staff_add: a card on the new bookings');
-	same(array('status' => 'new', 'seating' => 'window'), $upcoming['filters'], 'a new booking starts with the filters the URL gave');
-	same(false, $lists['status=confirmed&date>=today&seating=?seating&date=?day&order=date,name']['addable'], 'none where a new booking would not show');
-	same(false, $lists['status=cancelled&order=newest&limit=10']['addable']);
-	same(false, cms_records::addable(cms_records::info('reservation'), 'owner=me'), 'nor on someone\'s own list');
+	same(true, $upcoming['addable'], 'staff_add: a card for a new booking');
+	same(array('status' => 'new', 'seating' => 'window'), $upcoming['filters'], 'which starts with the filters the URL gave');
 	$info = cms_records::info('reservation');
 	$info['staff_add'] = false;
-	same(false, cms_records::addable($info, 'status=new'), 'without staff_add, bookings come from the form only');
+	same(false, cms_records::addable($info), 'without staff_add, bookings come from the form only');
 
 	list($code, $out) = raster(array('render', '/staff?seating=window', '--as=editor'));
 	same(0, $code, $out);
 	has($out, 'class="booking"');
-	has($out, "reservation('status=new&date>=today&seating=?seating&date=?day&order=date,name') with a card for a new item");
+	has($out, "reservation('status=new&date>=today&seating=?seating&date=?day&order=date,name') + new");
 	check(strpos(staff_section($out, 'To confirm'), 'Ida Inside') === false, 'the query string reached the page');
 	list($code, $out) = raster(array('render', '/account', '--as=maria@example.com'));
 	same(0, $code, $out);
@@ -2134,53 +2130,43 @@ test(array('R16', 'N14', 'M17'), 'staff add bookings on the lists a new one show
 
 	$answers = mcp_stdio(array(array('render_url', array('url' => '/staff?seating=window', 'as' => 'editor', 'limit' => 200)), array('render_url', array('url' => '/staff', 'limit' => 200))));
 	same('editor', $answers[0]['editor']['role']);
-	$from = array_count_values(array_map(function ($l) { return $l['from']; }, $answers[0]['editor']['lists']));
-	same(4, $from['cms.reservation'], 'four render.cms lists');
-	check($from['reservation.agenda'] >= 1, 'and the evenings of the agenda');
-	same(true, $answers[0]['editor']['lists'][0]['new_card']);
+	same(array("reservation('status=new&date>=today&seating=?seating&date=?day&order=date,name') + new", "reservation('status!=cancelled&date<today&seating=?seating&date=?day&order=-date,name&limit=20') + new"), $answers[0]['editor']['lists']);
+	check($answers[0]['editor']['items'] > 0, 'the agenda\'s bookings are items too');
 	same(null, $answers[0]['errors'], 'the summary is not an error');
 	check(!isset($answers[1]['editor']), 'no editor summary for visitors');
 });
-test(array('R18', 'R19'), 'a model view of records stays editable: listed() rows, nested, with computed values', function () use ($base) {
+test('R18', 'a model view of records stays editable: listed() rows, nested in the model\'s rows', function () use ($base) {
 	$staff = login($base, 'staff@cafe.test', 'staff password');
 	$tomorrow = date('Y-m-d', strtotime('+1 day'));
 	cms_records::create('reservation', array('name' => 'Tom Tomorrow', 'date' => $tomorrow, 'seating' => 'inside', 'guests' => 1));
+	cms_records::create('reservation', array('name' => 'Bea <b>Bold</b>', 'date' => $tomorrow, 'guests' => 1));
 	$page = http('GET', "$base/staff", null, array("Cookie: $staff"))[1];
 	$config = editor_config($page);
-	$evenings = array();
-	foreach ($config['marks'] as $id => $mark) if ($mark['kind'] === 'collection' && isset($mark['from'])) $evenings[$id] = $mark;
-	check(count($evenings) >= 2, 'each evening of the agenda is a list the editor marks');
-	$first = reset($evenings);
-	same('reservation.agenda', $first['from']);
-	same(true, $first['addable'], 'a card for a booking on that evening');
-	same($tomorrow, $first['filters']['date'], 'which starts with the evening\'s date');
 	$tom = array_values(array_filter($config['marks'], function ($m) { return $m['kind'] === 'item' && isset($m['values']['name']) && $m['values']['name'] === 'Tom Tomorrow'; }));
 	same(2, count($tom), 'Tom is an item in To confirm and in the agenda');
+	same('reservation', $tom[1]['collection']);
 	same(array('confirm', 'cancel'), $tom[1]['actions'], 'with the type\'s actions');
-	check(in_array('weekday', $tom[1]['readonly'], true), 'the computed weekday is not editable');
-	has($page, 'class="agenda-booking"');
-	cms_records::create('reservation', array('name' => 'Bea <b>Bold</b>', 'date' => $tomorrow, 'guests' => 1));
-	$agenda = substr(http('GET', "$base/staff", null, array("Cookie: $staff"))[1], 0);
-	$agenda = substr($agenda, strpos($agenda, '<h3>By evening</h3>'));
+	check(in_array('status', $tom[1]['readonly'], true) && !in_array('name', $tom[1]['readonly'], true), 'readonly as in a render.cms list');
+	check(in_array('raster_detail_link', array_keys(cms_records::listed('reservation', cms_records::find('reservation', array('name' => 'Tom Tomorrow')))[0])), 'each row links to its own page');
+	$lists = array_filter($config['marks'], function ($m) { return $m['kind'] === 'collection'; });
+	same(2, count($lists), 'the agenda adds no lists of its own: new bookings come from render.cms lists');
+	$agenda = substr($page, strpos($page, '<h3>By evening</h3>'));
+	has($agenda, 'class="agenda-booking"');
 	has($agenda, 'Bea &lt;b&gt;Bold&lt;/b&gt;', 'listed rows print what visitors typed as text');
-	has(substr($page, strpos($page, '<h3>By evening</h3>')), date('l', strtotime('+1 day')), 'computed values print in listed rows');
-	has(http('GET', "$base/reservation", null, array("Cookie: $staff"))[1], '<span class="weekday"><!--raster:s', 'and in render.cms lists');
 
-	// what listed() hands the template, and to whom
-	$rows = cms_records::find('reservation', array('name' => 'Abe Window'));
-	same(array('raster_list'), array_keys(cms_records::listed('reservation', $rows)), 'visitors get none of the private bookings');
+	// a value the model adds to a row prints, and is not editable
 	$info = cms_records::info('reservation');
-	same('stored', cms_records::computed($info, array('date' => '2026-10-10', 'weekday' => 'stored'))['weekday'], 'a computed value never replaces a stored one');
-	same('Saturday', cms_records::computed($info, array('date' => '2026-10-10'))['weekday']);
+	check(cms_records::locked($info, 'seats_left') && !cms_records::locked($info, 'name'), 'fields the type does not store are read-only');
+	same(array(), array_diff(array_keys(cms_records::listed('reservation', array(array('id' => 1, 'name' => 'x')))), array(0)), 'listed() returns the rows and nothing else');
 });
-test('R20', 'a record\'s own page is where editors edit what a model view links to', function () {
+test('R19', 'a record\'s own page is where editors edit what a model view links to', function () {
 	database::instance('cms');
 	$abe = R::findOne('reservationdata', ' name = ? ', array('Abe Window'));
 	list($code, $out) = raster(array('render', '/reservation/reservation_item/'.$abe->slug, '--as=editor'));
 	same(0, $code, $out);
 	has($out, 'Abe Window');
-	has($out, '1 items in 1 lists');
-	lacks($out, 'with a card for a new item', 'no card on an item\'s page');
+	has($out, '1 items, lists:');
+	lacks($out, '+ new', 'no card on an item\'s page');
 	list($code, $out) = raster(array('render', '/reservation/reservation_item/'.$abe->slug));
 	same(1, $code, 'visitors get a 404');
 	has($out, 'HTTP 404');
@@ -2212,37 +2198,19 @@ test('R17', 'lint: records nobody lists, and staff pages listing what a model re
 		foreach ($originals as $view => $html) file_put_contents("$views/$view", $html);
 	}
 });
-test('M18', 'MCP over stdio: a call that ends the server is answered, a PHP error answers the call', function () {
+test('M18', 'MCP over stdio: a PHP error in site code answers the call', function () {
 	$models = APPBASE.'models';
 	@mkdir("$models/stopper");
 	try {
-		with_file("$models/stopper/stopper.php", "<?php\nclass stopper {\n\tstatic function listens() { return array('cms.item_saved' => 'stop', 'cms.item_deleted' => 'broken'); }\n\tfunction stop(\$saved) { if (\$saved['collection'] === 'journal') { echo '<p>Forbidden</p>'; exit; } }\n\tfunction broken(\$deleted) { return no_such_function(); }\n}\n", function () {
-			$item = mcp_stdio(array(array('create_item', array('collection' => 'menu', 'fields' => array('name' => 'Stopper test', 'price' => '1'))), array('delete_item', array('collection' => 'menu', 'id' => 0))));
+		with_file("$models/stopper/stopper.php", "<?php\nclass stopper {\n\tstatic function listens() { return array('cms.item_deleted' => 'broken'); }\n\tfunction broken(\$deleted) { echo 'stray output'; return no_such_function(); }\n}\n", function () {
+			$item = mcp_stdio(array(array('create_item', array('collection' => 'menu', 'fields' => array('name' => 'Stopper test', 'price' => '1')))));
 			check(isset($item[0]['id']), 'other calls work');
-			$id = $item[0]['id'];
-			$answers = mcp_stdio(array(array('delete_item', array('collection' => 'menu', 'id' => $id)), array('clear_cache')));
+			$answers = mcp_stdio(array(array('delete_item', array('collection' => 'menu', 'id' => $item[0]['id'])), array('clear_cache')));
 			has($answers[0]['error'], 'Error: Call to undefined function no_such_function()');
-			has($answers[0]['error'], 'stopper.php:5');
-			check(isset($answers[1]['ok']), 'and the server goes on');
-
-			global $root;
-			$process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, getenv());
-			fwrite($pipes[0], json_encode(array('jsonrpc' => '2.0', 'id' => 7, 'method' => 'tools/call', 'params' => array('name' => 'create_item', 'arguments' => array('collection' => 'journal', 'fields' => array('title' => 'Stops')))))."\n");
-			fwrite($pipes[0], json_encode(array('jsonrpc' => '2.0', 'id' => 8, 'method' => 'tools/call', 'params' => array('name' => 'clear_cache', 'arguments' => array())))."\n");
-			fclose($pipes[0]);
-			$lines = array_values(array_filter(explode("\n", stream_get_contents($pipes[1]))));
-			stream_get_contents($pipes[2]);
-			proc_close($process);
-			same(1, count($lines), 'the process ended in the first call');
-			$answer = json_decode($lines[0], true);
-			same(7, $answer['id']);
-			same(-32603, $answer['error']['code']);
-			has($answer['error']['message'], "something called exit() or die(), while stopper.stop listened to 'cms.item_saved'. It printed: Forbidden");
-			same('stopper.stop', $answer['error']['data']['listener']);
+			has($answers[0]['error'], 'stopper.php:4');
+			check(isset($answers[1]['ok']), 'the server goes on, and what the code printed did not break the answers');
 		});
 	} finally { @rmdir("$models/stopper"); }
-	database::instance('cms');
-	R::exec("DELETE FROM journaldata WHERE title = 'Stops'");
 });
 
 // A second model, only while these tests run, for what the café's

@@ -119,9 +119,9 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 		await page.waitForTimeout(900);
 		check((await booking.locator('td.status').innerText()).trim() === 'confirmed', 'the action\'s result shows in the page');
 		// staff_add: a booking taken over the phone, from the card at the end of
-		// the lists a new booking shows in (to confirm, past), not the others
+		// each render.cms list of bookings
 		const cards = async title => page.locator('h3:has-text("' + title + '") + table .raster-ghost').count();
-		check(await cards('To confirm') === 1 && await cards('Past evenings') === 1 && await cards('Confirmed') === 0 && await cards('Cancelled lately') === 0, 'a card for a new booking on the lists it would show in');
+		check(await cards('To confirm') === 1 && await cards('Past evenings') === 1, 'a card for a new booking at the end of each list');
 		const phone = page.locator('.raster-ghost').first();
 		await phone.click();
 		await page.waitForTimeout(200);
@@ -140,7 +140,7 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 		await page.waitForTimeout(500);
 		const inAgenda = page.locator('tr.agenda-booking[data-raster-item]', { hasText: 'Ilinca' }).first();
 		check(await inAgenda.count() === 1, 'the agenda\'s booking is an item the editor knows');
-		check(await inAgenda.locator('td').nth(1).evaluate(el => !el.isContentEditable && !el.querySelector('[contenteditable]')), 'its computed weekday is not editable');
+		check(await inAgenda.locator('td.status').evaluate(el => !el.isContentEditable && !el.querySelector('[contenteditable]')), 'its status is not editable');
 		await inAgenda.locator('td').first().click();
 		// the caret at the end of the name
 		await inAgenda.locator('td').first().evaluate(td => {
@@ -153,7 +153,7 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 		await page.waitForTimeout(1200);
 		const day = await (await fetch(base + '/api/reservation/day/2026-10-14', { headers: { cookie: (await page.context().cookies()).map(c => c.name + '=' + c.value).join('; ') } })).json();
 		check(day.some(b => b.name === 'Ilinca Pop'), 'an edit in the agenda is saved: ' + JSON.stringify(day.map(b => b.name)));
-		check(await page.locator('section.evening .raster-ghost').count() >= 2, 'each evening has a card for a new booking');
+		check(await page.locator('section.evening .raster-ghost').count() === 0, 'the agenda adds no cards: new bookings come from the lists');
 		check((await (await fetch(base + '/api/reservation/confirm')).status) === 404, 'actions are not reachable over /api');
 		await page.screenshot({ path: path.join(screens, 'records.png') });
 

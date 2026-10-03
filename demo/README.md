@@ -237,7 +237,7 @@ php tests/demo.php                        # the whole matrix
 | M15 | `write_view` refuses markup that does not lint, writes markup that does, and is off over HTTP |
 | M16 | `render_url` renders a page without a web server, in its own process |
 | M17 | `render_url` with `as`: the page as an editor, with what the in-page editor marks |
-| M18 | a call that ends the stdio server (`exit()` in a listener) still gets an answer naming the listener; a PHP error answers the call |
+| M18 | a PHP error in site code answers the MCP call over stdio with its file and line, and the server goes on |
 | N1 | raster help and unknown commands |
 | N2 | raster lint and --json, --all-themes |
 | N3 | raster render and its exit codes |
@@ -268,8 +268,7 @@ php tests/demo.php                        # the whole matrix
 | R13 | `raster make model <name> --from=<view>`: a model for the records a form sends |
 | R14 | a staff page lists records by status (`status=new&order=date`), and filter addresses (`/reservation/reservation_items/date/…`) show one evening, for staff only |
 | R15 | list options: filters from the URL (`seating=?seating`), dates (`date>=today`, `date<today`), `!=`, and `order=date,name`; pagination keeps the query |
-| R16 | `staff_add`: staff add records a form makes, on the lists a new one would show in; a new item starts with the list's filters |
+| R16 | `staff_add`: staff add bookings from the card at the end of a list; a new item starts with the list's filters; no card on an item's page |
 | R17 | lint warns about records a form makes that no view lists, and about admin pages listing records a model reads itself |
-| R18 | `cms_records::listed()`: a model's agenda of bookings by evening, nested in its rows, is edited in place like a render.cms list, with actions and a card for each evening; only what the person may read |
-| R19 | `computed()`: values a booking shows but doesn't store, in render.cms and listed rows, never editable |
-| R20 | a record's own page (`/reservation/reservation_item/<slug>`) is where editors edit a record a model view links to; visitors get a 404 |
+| R18 | `cms_records::listed()`: a model's agenda of bookings by evening, nested in its rows, is edited in place with the record's actions; values the model adds are not editable |
+| R19 | a record's own page (`/reservation/reservation_item/<slug>`) is where editors edit a record a model view links to; visitors get a 404 |

@@ -137,18 +137,12 @@ class event {
 
 	// Runs every listener of an event with the payload. Returns false when
 	// any listener returned false.
-	// the listener running now (event, model, method), so MCP can say where
-	// a process ended when a listener calls exit()
-	static $running = null;
-
 	public static function dispatch($the_event, $payload = array()) {
 		log::info('Event: '.$the_event);
 		$event = event::instance();
 		$result = true;
-		$outer = self::$running;
 		foreach (self::ordered($event->listeners_of($the_event)) as $bind) {
 			list($model, $method, $is_core) = $bind;
-			self::$running = array($the_event, $model, $method);
 			$event->current_event = $the_event;
 			$event->current_model = $model;
 			$event->current_method = $method;
@@ -167,7 +161,6 @@ class event {
 			$event->event_data[$the_event][$model.'.'.$method] = $value;
 			if ($value === false) $result = false;
 		}
-		self::$running = $outer;
 		return $result;
 	}
 

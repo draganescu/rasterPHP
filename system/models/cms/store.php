@@ -76,10 +76,9 @@ class cms_store {
 	//
 	//   featured=1            the field equals the value
 	//   stylist=?stylist      the value of ?stylist in the URL; left out when
-	//                         the URL has none or it is empty (stylist=? for
-	//                         a parameter named like the field)
-	//   date>=today           also >, <, <= and != ; today, today+7, today-30
-	//                         and now are dates (2026-10-03, 2026-10-03 18:30:00)
+	//                         the URL has none or it is empty
+	//   date>=today           also >, <, <= and != ; today is the date the
+	//                         page is shown (2026-10-03)
 	//   order=date,-time      newest, oldest, a field, -field for descending,
 	//                         several separated by commas
 	//   limit=3
@@ -91,7 +90,7 @@ class cms_store {
 		$out = array('conditions' => array(), 'options' => array(), 'fields' => array());
 		foreach (explode('&', (string)$argument) as $chunk) {
 			if (trim($chunk) === '') continue;
-			if (!preg_match('/^([^=<>!]*?)\s*(>=|<=|!=|<>|=|>|<)\s*(.*)$/s', $chunk, $m)) $m = array($chunk, trim($chunk), '=', '');
+			if (!preg_match('/^([^=<>!]*?)\s*(>=|<=|!=|=|>|<)\s*(.*)$/s', $chunk, $m)) $m = array($chunk, trim($chunk), '=', '');
 			list(, $field, $operator, $value) = $m;
 			$field = trim($field);
 			if ($field === '') continue;
@@ -100,10 +99,9 @@ class cms_store {
 				$out['options'][$field] = $value;
 				continue;
 			}
-			if ($operator === '<>') $operator = '!=';
-			$dynamic = $value !== '' && ($value[0] === '?' || preg_match('/^(today([+-]\d+)?|now)$/', $value));
+			$dynamic = $value === 'today' || ($value !== '' && $value[0] === '?');
 			if (!isset($out['fields'][$field])) $out['fields'][$field] = $operator === '=' && !$dynamic ? $value : '';
-			$value = self::list_value($value, $field);
+			$value = self::list_value($value);
 			if ($value === null) continue;
 			$out['conditions'][] = array($field, $operator, $value);
 		}
@@ -111,18 +109,14 @@ class cms_store {
 	}
 
 	// a value as the list compares it; null leaves the condition out
-	static function list_value($value, $field) {
+	static function list_value($value) {
 		$value = (string)$value;
 		if ($value !== '' && $value[0] === '?') {
-			$name = substr($value, 1) !== '' ? substr($value, 1) : $field;
+			$name = substr($value, 1);
 			$asked = isset($_GET[$name]) && is_string($_GET[$name]) ? trim($_GET[$name]) : '';
 			return $asked === '' ? null : $asked;
 		}
-		if ($value === 'now') return date('Y-m-d H:i:s');
-		if (preg_match('/^today(?:([+-])(\d+))?$/', $value, $m)) {
-			return date('Y-m-d', isset($m[1]) ? strtotime($m[1].(int)$m[2].' days') : time());
-		}
-		return $value;
+		return $value === 'today' ? date('Y-m-d') : $value;
 	}
 
 	// the fields a list asks to be equal to a value: what a new item added to

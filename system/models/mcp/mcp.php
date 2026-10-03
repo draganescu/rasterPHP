@@ -82,64 +82,16 @@ class mcp
 	// ##stdio transport: one JSON-RPC message per line
 	public function stdio($in = STDIN, $out = STDOUT) {
 		self::$transport = 'stdio';
-		// a call that ends the process (exit() in a listener or the site's
-		// code, a fatal error) still gets an answer, saying where
-		$self = $this;
-		register_shutdown_function(function () use ($self, $out) {
-			$answer = $self->ended();
-			if ($answer === null) return;
-			fwrite($out, json_encode($answer, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR)."\n");
-			fflush($out);
-		});
 		while (($line = fgets($in)) !== false) {
 			$line = trim($line);
 			if ($line === '') continue;
 			$message = json_decode($line, true);
-			self::$calling = is_array($message) && array_key_exists('id', $message) ? array('id' => $message['id'], 'method' => isset($message['method']) ? (string)$message['method'] : '', 'tool' => isset($message['params']['name']) ? (string)$message['params']['name'] : '') : null;
 			$response = is_array($message) ? $this->handle($message) : $this->error(null, -32700, 'Parse error');
-			self::$calling = null;
 			if ($response !== null) {
 				fwrite($out, json_encode($response, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)."\n");
 				fflush($out);
 			}
 		}
-	}
-
-	// the message being answered over stdio
-	static $calling = null;
-
-	// The answer for a call the process ended in the middle of, or null.
-	// exit() leaves no trace of where it was called, so this names what was
-	// running: the tool, the event listener, a fatal error's file and line,
-	// and what was printed (exit('Forbidden') prints its message).
-	public function ended() {
-		if (self::$calling === null) return null;
-		$printed = array();
-		while (ob_get_level() > 0) array_unshift($printed, ob_get_clean());
-		$printed = trim(strip_tags(implode('', $printed)));
-		$what = self::$calling['tool'] !== '' ? 'the tool '.self::$calling['tool'] : self::$calling['method'];
-		$data = array('tool' => self::$calling['tool']);
-		$error = error_get_last();
-		if ($error && in_array($error['type'], array(E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR), true)) {
-			$message = "The server stopped during $what: {$error['message']} in {$error['file']}:{$error['line']}";
-			$data += array('file' => $error['file'], 'line' => $error['line']);
-		} else {
-			$message = "The server stopped during $what: something called exit() or die()";
-		}
-		if (event::$running) {
-			list($event, $model, $method) = event::$running;
-			$message .= ", while $model.$method listened to '$event'";
-			$data += array('event' => $event, 'listener' => $model.'.'.$method);
-		}
-		if ($printed !== '') {
-			$message .= '. It printed: '.substr($printed, 0, 300);
-			$data['printed'] = substr($printed, 0, 2000);
-		}
-		$message .= '. Start the server again (php bin/raster mcp).';
-		$answer = $this->error(self::$calling['id'], -32603, $message);
-		$answer['error']['data'] = $data;
-		self::$calling = null;
-		return $answer;
 	}
 
 	// ##JSON-RPC
