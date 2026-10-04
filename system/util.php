@@ -287,6 +287,22 @@ class raster_cache {
 		exit;
 	}
 
+	// Is the view file spelled as the request found it? Each name under the
+	// views folder is looked up in its folder's listing, so it is asked only
+	// when a page is about to be stored.
+	static function spelled_as_on_disk($file) {
+		foreach (array(APPBASE.config::get('views_path').DIRECTORY_SEPARATOR, BASE.'views/') as $root) {
+			if (strpos((string)$file, $root) !== 0) continue;
+			$folder = $root;
+			foreach (explode('/', str_replace(DIRECTORY_SEPARATOR, '/', substr($file, strlen($root)))) as $name) {
+				if (!in_array($name, @scandir($folder) ?: array(), true)) return false;
+				$folder .= $name.'/';
+			}
+			return true;
+		}
+		return true;
+	}
+
 	static function store($output) {
 		if (!self::cacheable() || http_response_code() !== 200 || session_status() === PHP_SESSION_ACTIVE) return;
 		// content changed while the page was made: it may show the old content
@@ -296,6 +312,9 @@ class raster_cache {
 			if (stripos($header, 'Set-Cookie:') === 0) return;
 			if (stripos($header, 'Content-Type:') === 0) $type = trim(substr($header, 13));
 		}
+		// /ABOUT finds about.html on a disk that ignores case: it answers,
+		// but every spelling would be a copy of its own
+		if (!self::spelled_as_on_disk(controller::instance()->current_route)) return;
 		$meta = json_encode(array('v' => self::$version, 't' => time(), 'type' => $type));
 		self::write(self::dir().self::key(), $meta."\n".$output);
 		if (!headers_sent()) header('X-Raster-Cache: miss');
