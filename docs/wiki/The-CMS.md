@@ -176,6 +176,7 @@ Visitors don't see drafts or scheduled items, on lists, detail pages, feeds or s
 - Field and collection names: lowercase letters, digits and `_`, starting with a letter.
 - Reserved field names: `slug`, `id`, `updated_at`, `enabled`, `published_at`, and the names of the `cms` model's own methods (`style`, `login`, `logout`, `route`, `setup`, and others).
 - Reserved collection names: `users`, `raster`.
+- Words SQL keeps for itself (`when`, `from`, `group`, `order`) are fine as field names: lists sort and filter by them like any other field.
 
 `lint` reports a reserved or invalid name with its file and line.
 
