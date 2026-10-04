@@ -176,7 +176,9 @@ class cms_types {
 			case 'int':
 				if (is_int($value)) return $value;
 				if (is_float($value) && floor($value) == $value && abs($value) < 1e18) return (int)$value;
-				if (is_string($value) && preg_match('/^[+-]?\d{1,18}$/', $value)) return (int)$value;
+				// not 01234: a leading zero says it is a code (a postcode, a
+				// phone number), and as an int it would quietly lose it
+				if (is_string($value) && preg_match('/^[+-]?(0|[1-9]\d{0,17})$/', $value)) return (int)$value;
 				break;
 			case 'number':
 				if (is_string($value) && is_numeric($value)) $value = (float)$value;

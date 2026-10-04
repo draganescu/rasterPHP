@@ -878,8 +878,9 @@ test('values are stored as their type, or refused naming the field', function ()
 	same(date('Y-m-d'), cms_types::clean('date', 'today', 'date'), 'date>=today');
 	same('12:00', cms_types::clean('time', 'noon', 'time'));
 	// PHP reads a lone letter as a time zone and moves 31 Feb into March; a
-	// date is not a time of day; 1e19 is past an int, 1e999 is INF
-	foreach (array(array('int', '2.5'), array('int', 'many'), array('int', 1e19), array('number', '4,50'), array('number', '1e999'), array('bool', 'maybe'),
+	// date is not a time of day; 1e19 is past an int, 1e999 is INF; 01234
+	// would lose its zero
+	foreach (array(array('int', '2.5'), array('int', 'many'), array('int', 1e19), array('int', '01234'), array('number', '4,50'), array('number', '1e999'), array('bool', 'maybe'),
 		array('date', '2026-02-30'), array('date', '31 Feb 2026'), array('date', '20261005'), array('date', 'a'), array('date', 'x'), array('datetime', 'eat'),
 		array('time', '25:00'), array('time', 'a'), array('time', '2026-10-05')) as $bad) {
 		try {
