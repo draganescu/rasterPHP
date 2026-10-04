@@ -1403,6 +1403,85 @@ test('a database that can\'t be reached answers 503 outside development, logged,
 	}
 });
 
+test('the editor\'s endpoints refuse a list where they take one value, and change nothing (#139)', function () use ($base, $root, $db) {
+	// the editor 'editor login and csrf' made
+	list($status, , $headers) = http('POST', "$base/login", 'login=editor&password=correct+horse', array('Content-Type: application/x-www-form-urlencoded'));
+	same(303, $status, 'logged in');
+	$cookie = preg_replace('/^Set-Cookie:\s*([^;]+).*$/i', '$1', current(preg_grep('/^Set-Cookie/i', $headers)));
+	check(preg_match('/"csrf":"([a-f0-9]+)"/', http('GET', "$base/about", null, array("Cookie: $cookie"))[1], $m), 'editor missing');
+	$form = array('Content-Type: application/x-www-form-urlencoded', "Cookie: $cookie");
+	$post = function ($endpoint, $body) use ($base, $form, $m) {
+		list($status, $text) = http('POST', "$base/api/cms/$endpoint", $body.'&csrf='.$m[1], $form);
+		check(strpos($text, 'Warning') === false && strpos($text, 'Array to string') === false, "$endpoint: $text");
+		return array($status, json_decode($text, true), $text);
+	};
+	$refused = function ($endpoint, $body) use ($post) {
+		list($status, $json, $text) = $post($endpoint, $body);
+		same(400, $status, "$endpoint $body: $text");
+		check(isset($json['error']), $text);
+	};
+	$saved = function ($endpoint, $body) use ($post) {
+		list($status, $json, $text) = $post($endpoint, $body);
+		same(200, $status, "$endpoint $body: $text");
+		return $json;
+	};
+	// what the server stored, asked over MCP
+	$revisions = function () { return count(mcp_call('page_history', array('page' => '/about', 'limit' => 100))['structuredContent']['revisions']); };
+	$total = function ($collection) { return mcp_call('list_items', array('collection' => $collection))['structuredContent']['total']; };
+	$item = function ($collection, $id) { return mcp_call('get_item', array('collection' => $collection, 'id' => $id))['structuredContent']; };
+	// a page field
+	$before = $revisions();
+	$refused('editor_save_field', 'type=aboutpage&slug=/about&field=heading&value[]=x');
+	$refused('editor_save_field', 'type[]=aboutpage&slug=/about&field=heading&value=x');
+	$refused('editor_save_field', 'type=aboutpage&slug=/about&field[]=heading&value=x');
+	$refused('editor_save_field', 'type=aboutpage&slug[]=/about&field=heading&value=x');
+	$refused('editor_save_field', 'type=aboutpage&slug=/about&field=heading&value=x&example[]=1');
+	$refused('editor_history', 'type[]=aboutpage');
+	$refused('editor_restore', 'type=aboutpage&slug=/about&revision[]=1');
+	same($before, $revisions(), 'no revision was added');
+	// items: id[]=<the second> must not reach item 1
+	$first = $saved('editor_save_item', 'collection=news&id=0&fields[headline]=Array+first')['id'];
+	$second = $saved('editor_save_item', 'collection=news&id=0&fields[headline]=Array+second')['id'];
+	$items = $total('news');
+	$refused('editor_delete_item', 'collection=news&id[]='.$second);
+	$refused('editor_delete_item', 'collection[]=news&id='.$second);
+	same($items, $total('news'), 'nothing deleted');
+	$refused('editor_save_item', 'collection=news&id='.$first.'&fields[slug][]=x');
+	$refused('editor_save_item', 'collection=news&id='.$first.'&fields[headline][]=x');
+	$refused('editor_save_item', 'collection=news&id[]='.$second.'&fields[headline]=x');
+	$refused('editor_save_item', 'collection[]=news&id='.$first.'&fields[headline]=x');
+	$news = array($item('news', $first), $item('news', $second));
+	same(array('Array first', 'Array second'), array_column($news, 'headline'));
+	same(array('array-first', 'array-second'), array_column($news, 'slug'));
+	same($items, $total('news'), 'nothing added');
+	// one value still saves
+	same('Array saved', $saved('editor_save_item', 'collection=news&id='.$second.'&fields[headline]=Array+saved')['headline']);
+	// a record type's list field takes a list; its actions take input[...]
+	$dir = "$root/application/models/zzlist";
+	@mkdir($dir);
+	file_put_contents("$dir/zzlist.php", "<?php\nclass zzlist {\n"
+		."\tstatic function types() { return array('zzlist' => array('fields' => array('name' => '', 'lines' => array()), 'actions' => array('mark' => 'editor'))); }\n"
+		."\tstatic function mark(\$item, \$input) { return cms_records::update('zzlist', \$item['id'], array('name' => 'marked '.(isset(\$input['note']) ? \$input['note'] : ''))); }\n"
+		."}\n");
+	try {
+		$one = $saved('editor_save_item', 'collection=zzlist&id=0&fields[name]=one&fields[lines][0][sku]=a&fields[lines][1][sku]=b')['id'];
+		$two = $saved('editor_save_item', 'collection=zzlist&id=0&fields[name]=two')['id'];
+		$refused('editor_save_item', 'collection=zzlist&id='.$one.'&fields[name][]=x');
+		$refused('editor_action', 'collection=zzlist&id[]='.$two.'&action=mark');
+		$refused('editor_action', 'collection=zzlist&id='.$two.'&action[]=mark');
+		$refused('editor_action', 'collection[]=zzlist&id='.$two.'&action=mark');
+		$refused('editor_delete_item', 'collection=zzlist&id[]='.$two);
+		same(2, $total('zzlist'));
+		same('two', $item('zzlist', $two)['name']);
+		same(array('name' => 'one', 'lines' => array(array('sku' => 'a'), array('sku' => 'b'))), array_intersect_key($item('zzlist', $one), array('name' => 1, 'lines' => 1)));
+		same('marked ok', $saved('editor_action', 'collection=zzlist&id='.$two.'&action=mark&input[note]=ok')['name']);
+	} finally {
+		@unlink("$dir/zzlist.php");
+		@rmdir($dir);
+		exec('RASTER_DB='.escapeshellarg($db).' '.escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' schema --drop=zzlistdata --force');
+	}
+});
+
 // ## 2.1.8 batch C: list SQL
 
 // the adapter throws on bad SQL, where a fluid R::find returns nothing

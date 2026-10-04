@@ -349,7 +349,8 @@ class cms_store {
 		}
 		// slug, enabled (0 = draft) and published_at can always be set, except by visitors
 		if ($who !== 'visitor') $allowed = array_merge($allowed, array('slug', 'enabled', 'published_at'));
-		if (isset($values['slug'])) $values['slug'] = self::unique_slug($type, $values['slug'] ?: 'item', (int)$id);
+		// one value, like every other field: slug[]=x is refused, not 'array'
+		if (isset($values['slug'])) $values['slug'] = self::unique_slug($type, cms_types::clean('text', $values['slug'], 'slug') ?: 'item', (int)$id);
 		$types = cms_types::of_table($type);
 		foreach ($values as $field => $value) {
 			if (!in_array($field, $allowed, true)) {
