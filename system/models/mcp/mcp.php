@@ -519,7 +519,7 @@ class mcp
 		if (!is_dir($parent)) throw new InvalidArgumentException('There is no folder '.raster_inspector::short($parent).' to put it in');
 		// the one check that matters: it has to land inside this theme
 		if (!$this->in_theme($inspector, $path)) {
-			throw new InvalidArgumentException("'$view' is outside the theme folder");
+			throw new InvalidArgumentException("'$view' is outside the theme folder, or links out of it");
 		}
 		return $path;
 	}
@@ -539,7 +539,7 @@ class mcp
 		$name = (string)$this->arg($arguments, 'view', 'draft'.$inspector->ext);
 		$path = $inspector->theme_dir().'/'.ltrim(str_replace('\\', '/', $name), '/');
 		if (strpos($name, "\0") === false && is_dir(dirname($path)) && !$this->in_theme($inspector, $path)) {
-			throw new InvalidArgumentException("'$name' is outside the theme folder");
+			throw new InvalidArgumentException("'$name' is outside the theme folder, or links out of it");
 		}
 		$problems = $inspector->lint_source($content, $name, $inspector->theme);
 		$errors = count(array_filter($problems, function ($p) { return $p['severity'] === 'error'; }));
