@@ -169,7 +169,7 @@ class cms_editor {
 
 	// Each name the editor posts holds one value (lists come only under
 	// fields, examples and input): id[]=99 would be read as item 1, and
-	// value[]=x stored as 'Array'. Every endpoint refuses that first.
+	// value[]=x stored as 'Array'. Every endpoint that reads one of these refuses that first.
 	protected static function one_value() {
 		foreach (array('type', 'slug', 'field', 'value', 'example', 'collection', 'id', 'action', 'revision') as $name) {
 			if (is_array(util::post($name))) return self::fail("'$name' takes one value");
