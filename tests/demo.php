@@ -2640,6 +2640,24 @@ test(array('L9', 'L10'), 'page cache: made-up list URLs are not kept, a change d
 		same('200 not kept', $cache($path), $path);
 	}
 	same(1, $pages(), 'only the date as the site prints it is cached');
+	// a number is spelled with its mock-up's decimals (3.50, not 3.5), also when
+	// another list on the page doesn't print it
+	mcp($prod, 'create_item', array('collection' => 'menu', 'fields' => array('name' => 'Pi tart', 'price' => 3.5, 'category' => 'cake')));
+	$menu = "$root/demo/views/cafe/menu.html";
+	$view = file_get_contents($menu);
+	try {
+		file_put_contents($menu, str_replace("<!-- render.cms.menu('order=name') -->", "<!-- render.cms.menu('limit=1') --><i><!-- print.name -->Dish<!-- /print.name --></i><!-- /render.cms.menu('limit=1') -->\n<!-- render.cms.menu('order=name') -->", $view));
+		raster(array('cache', 'clear'), $env);
+		same('200 miss', $cache('/menu/menu_items/price/3.50'));
+		same('200 hit', $cache('/menu/menu_items/price/3.50'));
+		foreach (array('/menu/menu_items/price/3.5', '/menu/menu_items/price/3.500', '/menu/menu_items/price/+3.50', '/menu/menu_items/price/03.50') as $path) {
+			has(http('GET', "$prod$path")[1], 'Pi tart', $path);
+			same('200 not kept', $cache($path), $path);
+		}
+		same(1, $pages(), 'only the price as the site prints it is cached');
+	} finally {
+		file_put_contents($menu, $view);
+	}
 	raster(array('cache', 'clear'), $env);
 	$cache('/journal/journal_items/author/Mara');
 	// L10: links with only tracking parameters are the same page

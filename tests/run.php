@@ -1138,6 +1138,27 @@ test('in production, made-up URLs of a list with no items are not cached', funct
 	}
 });
 
+test('in production, made-up URLs of a list with no table yet are not cached', function () use ($db) {
+	cache_empty();
+	$bare = sys_get_temp_dir().'/raster-test-bare-'.getmypid().'.sqlite';
+	copy($db, $bare);
+	$pdo = new PDO("sqlite:$bare");
+	$pdo->exec('DROP TABLE newsdata');
+	$pdo = null;
+	try {
+		cache_server($bare, function ($get) {
+			// before schema --apply the list keeps its mock-up
+			foreach (array('/news/news_items/headline/r1', '/news/news_items/nonsense/x', '/news/news_page/7') as $path) {
+				same('200 not cached', $get($path)[0], $path);
+				same('200 not cached', $get($path)[0], $path);
+			}
+			same(0, count(glob(APPBASE.'data/cache/*') ?: array()), 'cache files');
+		});
+	} finally {
+		array_map('unlink', glob("$bare*") ?: array());
+	}
+});
+
 test('a content change deletes temporary cache files left long ago', function () {
 	cache_empty();
 	$dir = APPBASE.'data/cache/';

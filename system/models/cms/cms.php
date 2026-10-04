@@ -126,6 +126,18 @@ class cms
 		return cms_types::show(cms_types::read($type, $clean), $example) === (string)$value;
 	}
 
+	// A field's mock-up in the collection's own view, for a list that doesn't
+	// print it (a sidebar of names): the site's links spell 14.50 from there.
+	static function collection_example($name, $field) {
+		static $defaults = array();
+		if (!isset($defaults[$name])) {
+			require_once BASE.'tools/inspector.php';
+			$inspector = new raster_inspector();
+			$defaults[$name] = (array)$inspector->collection_defaults($name);
+		}
+		return isset($defaults[$name][$field]) ? $defaults[$name][$field] : null;
+	}
+
 	// custom cms routes for admin panels and collection URLs
 	public function route() {
 		include 'routes.php';
@@ -353,8 +365,12 @@ class cms
 			// nothing to seed or add: the model declares the fields
 		} elseif (database::$frozen) {
 			// production seeds nothing, and a list with no table keeps the
-			// mock-up (an empty table too, checked once the list is read)
-			if (!$exists) return false;
+			// mock-up (an empty table too, checked once the list is read);
+			// until schema --apply, its filter and page URLs are not kept
+			if (!$exists) {
+				if ($uri_filters || $page > 1) raster_cache::skip();
+				return false;
+			}
 		} elseif (!$exists || R::count($this->data_name) == 0) {
 			// the first item is the placeholder content from the template
 			require_once BASE.'tools/inspector.php';
@@ -425,7 +441,7 @@ class cms
 			// /menu/menu_items/price/14.500 and /events/events_items/date/10 Oct 2026
 			// find what the site's own links (14.50, 2026-10-10) find; they
 			// answer, but there is no end to the spellings
-			if (array_key_exists($key, $uri_filters) && !cms::canonical_value($fields[$key], $value, isset($expected_properties[$key]) ? $expected_properties[$key] : null)) raster_cache::skip();
+			if (array_key_exists($key, $uri_filters) && !cms::canonical_value($fields[$key], $value, isset($expected_properties[$key]) ? $expected_properties[$key] : cms::collection_example($name, $key))) raster_cache::skip();
 			$compare[] = array($key, '=', $value);
 		}
 		// featured=1, date>=today, guests>4, each as its field's type
