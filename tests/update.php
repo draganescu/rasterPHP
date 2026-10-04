@@ -322,6 +322,48 @@ test('a hand-made second app is taken as current, not as 1.x (#75)', function ()
 	has(raster($site, array('upgrade', '--dry-run'), $blog)[1], '2.0.0 private-folders');
 });
 
+test('upgrade refuses an app folder that is missing or not an app', function () use ($repo, $tmp) {
+	$site = "$tmp/site-noapp";
+	same(0, raster($repo, array('new', $site))[0]);
+	// a misspelled RASTER_APP, a folder that is not an app (no config/), and
+	// the framework's own folder, which has a config/ but is no app
+	foreach (array('nope', 'media', 'system', 'application/../system') as $app) {
+		foreach (array(array('upgrade'), array('upgrade', '--dry-run')) as $args) {
+			list($code, $out) = raster($site, $args, array('RASTER_APP' => $app));
+			check($code !== 0, implode(' ', $args)." with $app/ exits non-zero: $out");
+			has($out, "$app/ is not a Raster app folder");
+			lacks($out, 'taken as', 'no success line');
+			lacks($out, 'Warning', 'no PHP warning');
+		}
+	}
+	check(!file_exists("$site/nope"), 'nothing is created');
+	check(!file_exists("$site/media/config"), 'nothing is written into media/');
+	check(!file_exists("$site/system/config/raster-version"), 'nothing is written into system/');
+	list($code, $out) = raster($site, array('doctor'));
+	lacks($out, 'raster-version', 'doctor finds no framework file added');
+	// an app whose version file can't be written says so, and not that it was
+	// taken as current
+	unlink("$site/application/config/raster-version");
+	chmod("$site/application/config", 0555);
+	list($code, $out) = raster($site, array('upgrade'));
+	chmod("$site/application/config", 0775);
+	check($code !== 0, "exits non-zero: $out");
+	has($out, "Could not write application/config/raster-version");
+	lacks($out, 'taken as', 'no success line');
+	lacks($out, 'Warning', 'no PHP warning');
+	// when steps ran before the write failed, the error names them
+	file_put_contents("$site/application/config/raster-version", "1.0.0\n");
+	@unlink("$site/CLAUDE.md");
+	chmod("$site/application/config/raster-version", 0444);
+	list($code, $out) = raster($site, array('upgrade'));
+	chmod("$site/application/config/raster-version", 0664);
+	check($code !== 0, "exits non-zero: $out");
+	has($out, "Could not write application/config/raster-version");
+	has($out, '2.0.0 agent-files');
+	has($out, 'upgrade checks them again next time');
+	lacks($out, 'the steps above ran', 'no steps are printed above');
+});
+
 test('new sites get no old .htaccess below the root (#76)', function () use ($repo, $tmp) {
 	check(!file_exists("$repo/application/.htaccess"), 'application/.htaccess is not in the repository');
 	check(!file_exists("$repo/system/.htaccess"), 'system/.htaccess is not in the repository');
