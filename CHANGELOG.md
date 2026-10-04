@@ -3,12 +3,12 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
-## Unreleased: field types
+## 2.1.7
 
 Existing databases are not converted for you. `php bin/raster schema`
 shows each field's type and the columns that differ, and
-`schema --apply` converts them where every value fits. Raster's own
-columns (`enabled`, `published_at`) stay as they were made.
+`schema --apply` converts them, Raster's own (`enabled`,
+`published_at`) included, where every value fits.
 
 - **Fields have types.** A field is text, `int`, `number`, `bool`,
   `date`, `datetime` or `time`. A template field's mock-up says which
@@ -19,7 +19,7 @@ columns (`enabled`, `published_at`) stay as they were made.
 - **Values are stored as their type,** whoever writes them: `5 Oct 2026`
   becomes `2026-10-05`, `8pm` becomes `20:00`, `yes` becomes 1. A value
   that can't be (`many` guests, `2026-02-30`, `31 Feb`, a stray letter
-  in a date) is refused with the field and an example. A form value the
+  in a date, `01234` as a whole number) is refused with the field and an example. A form value the
   HTML let through raises `<field>_invalid`; a ticked checkbox is yes
   whatever its `value`.
 - **Lists compare and sort by type:** `order=-price` puts 100 above 18
