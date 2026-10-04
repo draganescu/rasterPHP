@@ -877,6 +877,10 @@ of lists and filter pages come along; drafts and the editor don't.
   - `write_view` — write a view, but only if it lints: on an error the file is
     left alone and the problems come back. The answer says what the change
     does to the content model.
+  - The four view tools take an optional `theme`: the name of a folder
+    directly under `views/` (letters, digits, `_` and `-`), the site's theme
+    when left out. A path, or a folder that links out of `views/`, is
+    refused.
   - `render_url` — the page's status and HTML, no web server. With `as`
     (`editor`, `admin`, `member`, or an account's email) it renders the page
     as that person, outside production only, and for staff also says what the in-page editor marks:

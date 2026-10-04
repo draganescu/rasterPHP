@@ -2626,7 +2626,47 @@ test('T6', 'schema --apply converts a column whose type changed when every value
 // (batch F adds its tests here)
 
 // ## 2.1.8 batch G: MCP themes
-// (batch G adds its tests here)
+
+test('M19', 'the MCP view tools take a theme only as a folder directly under views/', function () use ($base, $root, $views) {
+	$themes = dirname($views);
+	$outside = sys_get_temp_dir().'/raster-demo-theme-'.getmypid();
+	@mkdir($outside);
+	file_put_contents("$outside/secret.json", '{"secret":"sk-live-123"}');
+	symlink($outside, "$themes/zzlinked");
+	try {
+		// over HTTP with the content token, the site's .mcp.json and files
+		// outside the site stay out of reach
+		foreach (array(
+			array('read_view', array('view' => '.mcp.json', 'theme' => '../..')),
+			array('read_view', array('view' => 'secret.json', 'theme' => 'zzlinked')),
+			array('read_view', array('view' => 'secret.json', 'theme' => $outside)),
+			array('list_views', array('theme' => '../../..')),
+			array('list_views', array('theme' => 'cafe/docs')),
+			array('check_view', array('content' => '<!-- dry._layout.head /-->', 'theme' => '../views/cafe')),
+		) as $call) {
+			$error = null;
+			try { mcp($base, $call[0], $call[1]); } catch (Exception $e) { $error = $e->getMessage(); }
+			check($error !== null, "{$call[0]} accepted theme '{$call[1]['theme']}'");
+			has($error, 'theme', 'a clear error');
+			lacks($error, 'sk-live-123');
+		}
+		// the site's other theme is still there to read
+		same('print', mcp($base, 'read_view', array('view' => mcp($base, 'list_views', array('theme' => 'print'))['views'][0], 'theme' => 'print'))['theme']);
+		// over stdio, write_view writes nowhere but a theme
+		$answers = mcp_stdio(array(
+			array('write_view', array('view' => 'zz-pwned.html', 'content' => '<p>x</p>', 'theme' => '../../media')),
+			array('write_view', array('view' => 'zz-pwned.html', 'content' => '<p>x</p>', 'theme' => 'zzlinked')),
+		));
+		check(isset($answers[0]['error']) && isset($answers[1]['error']), 'write_view is refused');
+		check(!file_exists("$root/media/zz-pwned.html"), 'nothing in media/');
+		check(!file_exists("$outside/zz-pwned.html"), 'nothing through the link');
+	} finally {
+		@unlink("$themes/zzlinked");
+		@unlink("$root/media/zz-pwned.html");
+		foreach (glob("$outside/*") as $file) unlink($file);
+		@rmdir($outside);
+	}
+});
 
 // ## 2.1.8 batch H: row loop
 // (batch H adds its tests here)

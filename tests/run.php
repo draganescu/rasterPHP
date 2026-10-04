@@ -942,7 +942,76 @@ test('the ORM does not need pdo_mysql for an SQLite site', function () {
 // (batch F adds its tests here)
 
 // ## 2.1.8 batch G: MCP themes
-// (batch G adds its tests here)
+
+// MCP view tools take a theme only as a folder directly under views/ (#72)
+function mcp_stdio_calls($calls) {
+	global $root, $db;
+	$process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'PATH' => getenv('PATH')));
+	foreach ($calls as $i => $call) {
+		fwrite($pipes[0], json_encode(array('jsonrpc' => '2.0', 'id' => 100 + $i, 'method' => 'tools/call', 'params' => array('name' => $call[0], 'arguments' => $call[1])))."\n");
+	}
+	fclose($pipes[0]);
+	$out = stream_get_contents($pipes[1]);
+	stream_get_contents($pipes[2]);
+	proc_close($process);
+	$answers = array();
+	foreach (array_filter(explode("\n", $out)) as $line) {
+		$message = json_decode($line, true);
+		if (isset($message['id']) && $message['id'] >= 100) $answers[$message['id'] - 100] = $message['result'];
+	}
+	return $answers;
+}
+test('mcp view tools refuse a theme outside the views folder', function () use ($root) {
+	$outside = sys_get_temp_dir().'/raster-theme-'.getmypid();
+	@mkdir($outside);
+	file_put_contents("$outside/secret.json", '{"secret":"sk-live-123"}');
+	file_put_contents("$outside/index.html", '<p>sk-live-123</p>');
+	$link = "$root/application/views/zzlink";
+	symlink($outside, $link);
+	try {
+		// over HTTP with the content token: nothing read or listed outside views/
+		foreach (array('..', '../..', '../../media', 'default/../test', 'default/_email', '/tmp', $outside, 'nope', 'zzlink', '.', 'default ', "default\0") as $theme) {
+			foreach (array(
+				array('read_view', array('view' => '.mcp.json', 'theme' => $theme)),
+				array('read_view', array('view' => 'secret.json', 'theme' => $theme)),
+				array('read_view', array('view' => 'index.html', 'theme' => $theme)),
+				array('list_views', array('theme' => $theme)),
+				array('check_view', array('content' => '<p>x</p>', 'theme' => $theme)),
+			) as $call) {
+				$result = mcp_call($call[0], $call[1]);
+				check(!empty($result['isError']), "{$call[0]} accepted theme ".json_encode($theme));
+				check(strpos(json_encode($result), 'sk-live-123') === false, 'nothing from outside');
+			}
+		}
+		$refused = mcp_call('read_view', array('view' => 'index.html', 'theme' => '../..'));
+		check(strpos($refused['content'][0]['text'], 'theme') !== false, 'the error names the theme: '.$refused['content'][0]['text']);
+		// a real second theme still works, and so does the site's own
+		$other = mcp_call('read_view', array('view' => 'index.html', 'theme' => 'test'));
+		check(empty($other['isError']), 'another theme: '.json_encode($other));
+		same('test', $other['structuredContent']['theme']);
+		check(in_array('index.html', mcp_call('list_views', array('theme' => 'test'))['structuredContent']['views']), 'list_views in another theme');
+		same('default', mcp_call('list_views')['structuredContent']['theme']);
+		same('default', mcp_call('list_views', array('theme' => ''))['structuredContent']['theme'], 'an empty theme is the site\'s');
+		// over stdio, write_view can't write outside views/ either
+		$good = '<p>pwned</p>';
+		$answers = mcp_stdio_calls(array(
+			array('write_view', array('view' => 'zz-pwned.html', 'content' => $good, 'theme' => '../../media')),
+			array('write_view', array('view' => 'zz-pwned.html', 'content' => $good, 'theme' => '..')),
+			array('write_view', array('view' => 'zz-pwned.html', 'content' => $good, 'theme' => 'zzlink')),
+			array('write_view', array('view' => 'zz-pwned.html', 'content' => $good, 'theme' => 'default/_email')),
+		));
+		foreach (array(0, 1, 2, 3) as $i) check(!empty($answers[$i]['isError']), "write_view $i was not refused: ".json_encode(isset($answers[$i]) ? $answers[$i] : null));
+		check(!file_exists("$root/media/zz-pwned.html"), 'nothing written into media/');
+		check(!file_exists("$root/application/zz-pwned.html"), 'nothing written above views/');
+		check(!file_exists("$outside/zz-pwned.html"), 'nothing written through a link');
+		check(!file_exists("$root/application/views/default/_email/zz-pwned.html"), 'nor in a folder inside a theme');
+	} finally {
+		@unlink($link);
+		foreach (array('media', 'application', 'application/views/default/_email') as $folder) @unlink("$root/$folder/zz-pwned.html");
+		foreach (glob("$outside/*") as $file) unlink($file);
+		@rmdir($outside);
+	}
+});
 
 // ## 2.1.8 batch H: row loop
 // (batch H adds its tests here)

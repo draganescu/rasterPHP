@@ -142,6 +142,7 @@ class mcp
 		$collection = array('type' => 'string', 'description' => 'Collection name as used in the templates, e.g. news for render.cms.news');
 		$fields = array('type' => 'object', 'description' => 'Field names and their new values, as their types (site_overview lists the fields that aren\'t text): int 4, number 4.5, bool true, date 2026-10-05, datetime 2026-10-05 19:30, time 19:30; text may be HTML. Empty clears a field.', 'additionalProperties' => array('type' => array('string', 'number', 'boolean', 'null')));
 		$id = array('type' => 'integer', 'description' => 'Item id');
+		$theme = array('type' => 'string', 'description' => 'The name of a folder directly under views/. Defaults to the site\'s theme');
 		$read_only = array('readOnlyHint' => true, 'openWorldHint' => false);
 		$write = array('readOnlyHint' => false, 'destructiveHint' => false, 'openWorldHint' => false);
 		$tool = function ($name, $description, $properties, $required, $annotations) {
@@ -173,12 +174,12 @@ class mcp
 				array(), array(), $read_only),
 			$tool('annotations', 'The annotation grammar as data: the exact spelling of each directive, what each keyword does, how arguments and attributes work, and how blocks nest. lint checks against this same description.',
 				array(), array(), $read_only),
-			$tool('list_views', 'The view files of a theme, as paths relative to the theme folder.', array('theme' => array('type' => 'string', 'description' => 'Defaults to the site\'s theme')), array(), $read_only),
-			$tool('read_view', 'The source of one view.', array('view' => array('type' => 'string', 'description' => 'Path inside the theme folder, e.g. about.html or docs/setup.html'), 'theme' => array('type' => 'string')), array('view'), $read_only),
+			$tool('list_views', 'The view files of a theme, as paths relative to the theme folder.', array('theme' => $theme), array(), $read_only),
+			$tool('read_view', 'The source of one view.', array('view' => array('type' => 'string', 'description' => 'Path inside the theme folder, e.g. about.html or docs/setup.html'), 'theme' => $theme), array('view'), $read_only),
 			$tool('check_view', 'Lints a view that is not written yet: pass the markup and get back the problems, with line and column. Nothing is written. Use it on a draft before write_view.',
-				array('content' => array('type' => 'string', 'description' => 'The markup to check'), 'view' => array('type' => 'string', 'description' => 'The name it would be saved as, for the messages'), 'theme' => array('type' => 'string')), array('content'), $read_only),
+				array('content' => array('type' => 'string', 'description' => 'The markup to check'), 'view' => array('type' => 'string', 'description' => 'The name it would be saved as, for the messages'), 'theme' => $theme), array('content'), $read_only),
 			$tool('write_view', 'Writes a view, but only if it lints clean: the file is left untouched when there are errors, and the problems come back instead. Warnings do not stop the write. Also reports what the change does to the content model.',
-				array('view' => array('type' => 'string', 'description' => 'Path inside the theme folder, e.g. about.html'), 'content' => array('type' => 'string'), 'theme' => array('type' => 'string')), array('view', 'content'), $write),
+				array('view' => array('type' => 'string', 'description' => 'Path inside the theme folder, e.g. about.html'), 'content' => array('type' => 'string'), 'theme' => $theme), array('view', 'content'), $write),
 			$tool('render_url', 'Renders a URL of this site and returns the status and the HTML, without a web server. The fastest way to see whether a change works. Runs in a separate process, so a page that fails cannot take this server down. Pass as="editor" to see the page as staff do: the answer then says what the in-page editor can do there (editable fields, the lists it marks, which lists get a card for a new item). Check it after changing a page staff edit: a list built by a model instead of render.cms.<name> is invisible to the editor.',
 				array(
 					'url' => array('type' => 'string', 'description' => 'A path on the site, with a query string if the page reads one, e.g. / or /menu/menu_item/flat-white or /bookings?stylist=ana'),
@@ -457,9 +458,27 @@ class mcp
 		return raster_inspector::grammar();
 	}
 
+	// The theme an agent names is a folder directly under views/, never a
+	// path: '../..' or a theme folder linked to somewhere else would let the
+	// view tools read and write files outside the site's views.
 	protected function inspector_for($arguments) {
 		$theme = $this->arg($arguments, 'theme', null);
-		return new raster_inspector(null, is_string($theme) && $theme !== '' ? $theme : null);
+		if ($theme === null || $theme === '') return new raster_inspector();
+		$inspector = new raster_inspector();
+		// compared with the real views folder, wherever links lead
+		$views = realpath($inspector->views_dir);
+		$is_theme = function ($name) use ($views) {
+			if ($views === false || !is_string($name) || !preg_match('/^[A-Za-z0-9_-]+$/D', $name)) return false;
+			$dir = realpath("$views/$name");
+			return $dir !== false && is_dir($dir) && dirname($dir) === $views;
+		};
+		if (!$is_theme($theme)) {
+			$themes = $views === false ? array() : array_values(array_filter(scandir($views), $is_theme));
+			$shown = is_string($theme) ? $theme : json_encode($theme);
+			throw new InvalidArgumentException("'$shown' is not a theme: a theme is the name of a folder directly under views/ (".implode(', ', $themes).')');
+		}
+		$inspector->theme = $theme;
+		return $inspector;
 	}
 
 	protected function tool_list_views($arguments) {
