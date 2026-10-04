@@ -41,6 +41,7 @@ php tests/demo.php                        # the whole matrix
 | A14 | a route to a view in another theme (`->from('print')`) |
 | A15 | `rewrite` off: every link goes through index.php |
 | A16 | the private extensions are 403, `composer.phar` too (system/private_paths.php) |
+| A17 | theme files of every kind (svg, webp, woff2, ico, pdf) are served; the root `.htaccess` is the only one |
 | B1 | RSS: content type, well-formed, escaped |
 | B2 | Atom |
 | B3 | JSON views: rows become a list |
@@ -252,6 +253,7 @@ php tests/demo.php                        # the whole matrix
 | N12 | raster vocabulary, and --json |
 | N13 | raster describe, and --sections |
 | N14 | `raster render <url> --as=<account or role>`, and a query string in the URL |
+| N15 | `raster upgrade` takes an app with no `config/raster-version` as current: writes the version, runs no old steps |
 | O1 | the sitemap skips private pages and lists items |
 | R1 | a model declares a type (`types()`): a collection with the model's fields and no mock-up row, in site_overview, describe and schema |
 | R2 | `cms_records::submit`: a form stores a record with only the fields people may write; what visitors typed prints as text |

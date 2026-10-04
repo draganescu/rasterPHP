@@ -60,7 +60,8 @@ function raster_project_command($command, $root, $positional, $options, $paint) 
 	case 'version':
 		echo 'Raster '.raster_project::version($root)."\n";
 		foreach (raster_project::apps($root) as $app) {
-			echo "  $app/ is at ".raster_project::app_version("$root/$app")."\n";
+			$app_version = raster_project::app_version("$root/$app");
+			echo "  $app/ ".($app_version === null ? 'has no config/raster-version' : "is at $app_version")."\n";
 		}
 		return 0;
 
@@ -438,14 +439,19 @@ switch ($command) {
 		$app = boot::$appname;
 		$pending = raster_project::pending($root, $app);
 		$to = raster_project::version($root);
+		// an app with no version file is taken as current, never as 1.x
+		$unversioned = raster_project::app_version("$root/$app") === null;
+		$hint = 'for an app from Raster 1.x, write 1.0.0 in that file and run upgrade again';
 		if (isset($options['dry-run'])) {
-			if (!$pending) echo "$app/ needs no upgrade steps\n";
+			if ($unversioned) echo "$app/ has no config/raster-version: upgrade takes it as Raster $to and runs no steps ($hint)\n";
+			elseif (!$pending) echo "$app/ needs no upgrade steps\n";
 			foreach ($pending as $step) echo "  {$step['version']} {$step['id']}: {$step['description']}\n";
 			exit(0);
 		}
 		$done = raster_project::upgrade($root, $app);
 		foreach ($done as $step) echo "  ✓ {$step['version']} {$step['id']}: {$step['description']}".($step['result'] !== '' ? " ({$step['result']})" : '')."\n";
-		echo "$app/ is at Raster $to".($done ? '' : ', nothing to change')."\n";
+		if ($unversioned) echo "$app/ had no config/raster-version: taken as Raster $to, no upgrade steps run ($hint)\n";
+		else echo "$app/ is at Raster $to".($done ? '' : ', nothing to change')."\n";
 		exit(0);
 
 	case 'doctor':

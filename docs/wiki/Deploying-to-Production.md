@@ -45,6 +45,8 @@ Put the project folder on the server, for example `/var/www/site`, with git or r
 php bin/raster deploy --config=apache > .htaccess
 ```
 
+The one in the site's root folder is the only `.htaccess` a Raster site needs. Sites made before 2.1.8 also got an `application/.htaccess` and a `system/.htaccess`, written for Apache 2.2: the first lets only png, jpg, gif, js and css out of the app folder, so a theme's SVG logo, WebP photos, web fonts, `favicon.ico` or PDFs answer 403, and on an Apache without `mod_access_compat` every theme file answers 500. `raster update` removes `system/.htaccess`; delete `application/.htaccess` (and any copy in your other app folders) yourself. The root rules already refuse `config/`, `data/`, `models/` and `system/`.
+
 **nginx.**
 
 ```sh
