@@ -58,18 +58,21 @@
       // (the_cms) adds to what the bundled model lists, it never drops it
       $offered = array_merge(self::offered($model), self::offered(get_class($obj)));
       if (!isset($offered[$method])) $this->fail(404, 'unknown method');
+      // a database that can't be reached is an outage, not an empty table:
+      // a webhook told "no such order" would never be sent again. Checked
+      // before the role, since who is asking can't be known without it.
+      if (database::configured() && ($down = cms_store::unreachable()) !== null) {
+        log::error('the database can\'t be reached: '.$down.', at '.$this->request());
+        $answer = array('error' => 'database unavailable');
+        if (config::get('environment') === 'development') $answer['exception'] = $down;
+        $this->fail(503, $answer);
+      }
       if (!self::may($offered[$method])) {
         $this->fail(authentication::user() ? 403 : 401, 'not allowed');
       }
 
       $arguments = array_slice($segments, 3);
       if (count($arguments) < $reflection->getNumberOfRequiredParameters()) $this->fail(400, 'missing arguments');
-      // a database that can't be reached is an outage, not an empty table:
-      // a webhook told "no such order" would never be sent again
-      if (database::configured() && ($down = cms_store::unreachable()) !== null) {
-        log::error('the database can\'t be reached: '.$down.', at '.$this->request());
-        $this->fail(503, 'database unavailable');
-      }
       // what the method printed before it threw is thrown away with it
       ob_start();
       try {

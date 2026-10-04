@@ -2392,7 +2392,9 @@ test('C48', '/api answers only what a model lists, for the roles it names', func
 	$vocabulary = json_decode(raster(array('vocabulary', '--json'))[1], true);
 	same(array('day' => 'editor'), $vocabulary['models']['reservation']['api']);
 	same(array(), $vocabulary['models']['secret']['api'], 'a model that lists nothing offers nothing');
-	check(!isset($vocabulary['models']['cms']['api']) && !isset($vocabulary['models']['feed']['api']), 'the vocabulary lists what the app\'s models offer');
+	same('visitor', $vocabulary['models']['cms']['api']['editor_save_field'], 'the vocabulary lists what cms offers');
+	check(!isset($vocabulary['models']['cms']['api']['setup']), 'and nothing it doesn\'t list');
+	check(!isset($vocabulary['models']['feed']['api']), 'bundled models /api doesn\'t reach list nothing');
 	has(raster(array('vocabulary'))[1], '/api: day (editor)');
 	// a model that lists nothing offers nothing
 	$dir = "$root/demo/models/zzopen";

@@ -96,7 +96,7 @@ php tests/demo.php                        # the whole matrix
 | C45 | a short closing tag (`<!-- /render -->`) is a lint error that names the full closing tag |
 | C46 | lint checks how many arguments a method takes, and names the nearest real method |
 | C47 | a relative link inside a `print.validation.alert()` block goes to the route, not the view file |
-| C48 | /api answers only what a model lists in `api()`, for the roles it names; a model that lists nothing offers nothing; overrides are never addressed as `the_<model>`; lint checks `api()` |
+| C48 | /api answers only what a model lists in `api()`, for the roles it names; a model that lists nothing offers nothing; the vocabulary shows each list, cms's included; overrides are never addressed as `the_<model>`; lint checks `api()` |
 | C49 | in production (strict templates off) any exception (a missing named query too) shows the plain error page and goes to the error log; `log::warning` and `log::error` always reach the error log |
 | C50 | an /api method that throws answers JSON: 500 `{"error":"server error"}` logged with the URL (a bad query too), 503 when the database is down, 400 for missing arguments; development adds the trace |
 | C51 | `cms` offers over /api only what its `api()` lists (the editor endpoints, `style`, `logout`); a public method of a `the_cms` override answers 404 unless listed |

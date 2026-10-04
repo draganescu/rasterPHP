@@ -950,7 +950,7 @@ function b_with_boom($fn) {
 	$dir = "$root/application/models/zzboom";
 	@mkdir($dir);
 	file_put_contents("$dir/zzboom.php", "<?php\nclass zzboom {\n"
-		."\tstatic function api() { return array('boom' => 'visitor', 'needs' => 'visitor', 'inner' => 'visitor', 'down' => 'visitor', 'echoes' => 'visitor', 'sql' => 'visitor'); }\n"
+		."\tstatic function api() { return array('boom' => 'visitor', 'needs' => 'visitor', 'inner' => 'visitor', 'down' => 'visitor', 'echoes' => 'visitor', 'sql' => 'visitor', 'mine' => 'member'); }\n"
 		."\tstatic function listens() { return array('route_set' => 'trip'); }\n"
 		."\tfunction boom() { throw new RuntimeException('boom secret'); }\n"
 		."\tfunction needs(\$a, \$b) { return \$a.\$b; }\n"
@@ -958,6 +958,7 @@ function b_with_boom($fn) {
 		."\tfunction down() { throw new PDOException('the database secret is unreachable'); }\n"
 		."\tfunction echoes() { echo 'partial secret'; throw new RuntimeException('after output'); }\n"
 		."\tfunction sql() { database::instance(); return R::getAll('SELECT * FROM no_such_table_zz'); }\n"
+		."\tfunction mine() { return 'mine'; }\n"
 		."\tfunction trip() { if (isset(\$_GET['trip'])) throw new RuntimeException('listener secret'); }\n"
 		."}\n");
 	try { $fn(); } finally { @unlink("$dir/zzboom.php"); @rmdir($dir); }
@@ -1088,6 +1089,9 @@ test('a database that can\'t be reached answers 503 outside development, logged,
 			list($status, $body) = http('GET', "$prod/api/zzboom/needs/x/y");
 			same(503, $status, $body);
 			same(array('error' => 'database unavailable'), json_decode($body, true), $body);
+			// who is asking can't be known either: an outage, not "log in"
+			list($status, $body) = http('GET', "$prod/api/zzboom/mine", null, array('Cookie: PHPSESSID=abcdefabcdefabcdefabcdefab'));
+			same(503, $status, $body);
 		});
 		check(strpos((string)@file_get_contents($log), 'database') !== false, 'logged');
 		// back up: the real page, at once
@@ -1120,6 +1124,12 @@ test('a database that can\'t be reached answers 503 outside development, logged,
 		list($status, $body) = http('GET', "$dev/about");
 		same(500, $status);
 		check(strpos($body, 'database') !== false, $body);
+		b_with_boom(function () use ($dev) {
+			list($status, $body) = http('GET', "$dev/api/zzboom/needs/x/y");
+			same(503, $status, $body);
+			$json = json_decode($body, true);
+			check(isset($json['exception']) && strpos($json['exception'], 'not a database') !== false, $body);
+		});
 	} finally {
 		array_map('unlink', glob("$bad*") ?: array());
 	}
