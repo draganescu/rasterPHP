@@ -923,6 +923,30 @@ test('the ORM does not need pdo_mysql for an SQLite site', function () {
 	check(in_array('sqlite', PDO::getAvailableDrivers()), 'and SQLite is enough to get here');
 });
 
+// ## 2.1.8 batch A: page cache
+// (batch A adds its tests here)
+
+// ## 2.1.8 batch B: errors and /api
+// (batch B adds its tests here)
+
+// ## 2.1.8 batch C: list SQL
+// (batch C adds its tests here)
+
+// ## 2.1.8 batch D: accounts
+// (batch D adds its tests here)
+
+// ## 2.1.8 batch E: template output
+// (batch E adds its tests here)
+
+// ## 2.1.8 batch F: upgrade tooling
+// (batch F adds its tests here)
+
+// ## 2.1.8 batch G: MCP themes
+// (batch G adds its tests here)
+
+// ## 2.1.8 batch H: row loop
+// (batch H adds its tests here)
+
 echo "\n\n$passed passed, ".count($failed)." failed\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";
 exit($failed ? 1 : 0);

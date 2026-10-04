@@ -586,6 +586,30 @@ test('the shop\'s code, config, data and seed script are never served', function
 	same(200, http('GET', "$base/shop/views/kiln/style.css")[0], 'theme files are');
 });
 
+// ## 2.1.8 batch A: page cache
+// (batch A adds its tests here)
+
+// ## 2.1.8 batch B: errors and /api
+// (batch B adds its tests here)
+
+// ## 2.1.8 batch C: list SQL
+// (batch C adds its tests here)
+
+// ## 2.1.8 batch D: accounts
+// (batch D adds its tests here)
+
+// ## 2.1.8 batch E: template output
+// (batch E adds its tests here)
+
+// ## 2.1.8 batch F: upgrade tooling
+// (batch F adds its tests here)
+
+// ## 2.1.8 batch G: MCP themes
+// (batch G adds its tests here)
+
+// ## 2.1.8 batch H: row loop
+// (batch H adds its tests here)
+
 test('lint is clean and there were no PHP warnings', function () use ($root, $tmp) {
 	$out = shell_exec('RASTER_APP=shop '.escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' lint 2>&1');
 	has($out, 'No errors, 0 warning(s)');

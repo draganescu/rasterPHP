@@ -2607,6 +2607,30 @@ test('T6', 'schema --apply converts a column whose type changed when every value
 	raster(array('schema', '--drop=zzretypedata', '--force'));
 });
 
+// ## 2.1.8 batch A: page cache
+// (batch A adds its tests here)
+
+// ## 2.1.8 batch B: errors and /api
+// (batch B adds its tests here)
+
+// ## 2.1.8 batch C: list SQL
+// (batch C adds its tests here)
+
+// ## 2.1.8 batch D: accounts
+// (batch D adds its tests here)
+
+// ## 2.1.8 batch E: template output
+// (batch E adds its tests here)
+
+// ## 2.1.8 batch F: upgrade tooling
+// (batch F adds its tests here)
+
+// ## 2.1.8 batch G: MCP themes
+// (batch G adds its tests here)
+
+// ## 2.1.8 batch H: row loop
+// (batch H adds its tests here)
+
 // ## No PHP warnings, notices or deprecations on any request
 
 $log = is_file("$tmp/php-errors.log") ? file_get_contents("$tmp/php-errors.log") : '';
