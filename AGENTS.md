@@ -299,15 +299,26 @@ Anything not listed answers 404, public or not: the methods templates call,
 form handlers, listeners. A model without `api()` offers nothing. A role the
 caller lacks answers 401 (not logged in) or 403. Static methods are never
 reachable, even listed. Of the system models, only `cms` is reachable, and
-an override (`the_feed`) only by the name it overrides. Posts
+only for what its own `api()` lists: the in-page editor's endpoints, `style`
+and `logout`, which check the caller themselves. An override (`the_feed`)
+is reached only by the name it overrides, and a public method it adds
+answers 404 unless its `api()` lists it; that list adds to the bundled
+model's, so the editor's endpoints stay. Posts
 there pass the same site check as forms, but they are not form submissions:
 `validation::get()->submitted()` is false, so form models do nothing over
 `/api`. A method listed for visitors can be called by anyone: if it changes
 data, it checks what it is given. `lint` reports an `api()` naming a method
 that doesn't exist or can't be called, or a role that doesn't exist, and
-`vocabulary` shows what each model offers. Sites made before 2.1.1 may have
-config `api_open`, which keeps every public method of models without `api()`
-reachable, as before; `doctor` warns, and 2.2.0 removes it.
+`vocabulary` shows what each model offers.
+
+A method that throws answers `{"error":"server error"}` with status 500,
+and the error goes to the log with the URL, so a payment provider sees a
+failure and tries again. Output the method printed before it threw is
+dropped. A database that can't be reached answers 503 before the method
+runs, so a webhook is never told "no such order" during an outage; a bad
+query on a database that is there is a 500 like any other error. A call
+with too few arguments answers 400 (`/api/reservation/day` for
+`day($date)`). In development the answer also has `exception` and `trace`.
 
 The database is RedBeanPHP (`R::dispense`, `R::store`, `R::load`) for rows
 as objects, and named queries in `sql/` files for everything you would write
@@ -750,6 +761,17 @@ use `'model.method'`: `method(true)` returns
 - **Production** is frozen: the schema only changes through
   `schema --apply`, which also creates the tables the bundled models use
   (accounts, subscribers). Missing columns show the template default.
+- **Errors.** Outside development PHP's own messages go to the error log,
+  never to visitors: Raster turns `display_errors` off and `log_errors` on
+  for every request, whatever php.ini says (the command line keeps them).
+  `doctor` warns in production when php.ini has `display_errors` on, since
+  an error before Raster starts would still show.
+- **A database that can't be reached** (MySQL down, an SQLite file the web
+  server can't read) is not a missing table: outside development every page
+  answers 503 (`/api` too, as JSON), as the view `error_document_503` when the site sets one, or a
+  plain line. The error is logged and nothing is cached, so the real pages
+  show as soon as the database is back. Development shows the error
+  instead.
 - **The site's address:** set `RASTER_URL=https://example.com/` (or
   `config::set('site_url')`). Links in pages and emails then never depend on
   the visitor's `Host` header. In production, emails with links (password
@@ -941,6 +963,10 @@ of lists and filter pages come along; drafts and the editor don't.
 - **A route to another theme:** `controller::route('print/menu')->to('menu')->from('print')`.
 - **A 404 page:** `config::set('error_document_404')->to('404')` renders
   `404.html` with status 404.
+- **A page for a database outage:** `config::set('error_document_503')->to('503')`
+  renders `503.html` with status 503 when the database can't be reached
+  (see **Environments and cache**). Keep it to models that don't need the
+  database: the `cms` fields show their defaults there.
 
 ## Settings
 
@@ -954,6 +980,7 @@ Set in `config/the_app.php` with `config::set('name')->to(value)`.
 | `rewrite` | true | false puts `index.php/` in every link, for servers without rewrites |
 | `strict_templates` | true in development | template errors stop the page with a list (500) |
 | `error_document_404` | none | a view for 404s |
+| `error_document_503` | none | a view for when the database can't be reached (outside development) |
 | `site_url` | none | the site's address (same as `RASTER_URL`) |
 | `cms_enabled` | true | the CMS and the editor toolbar |
 | `raster_page_size`, `<name>_page_size` | 10 | items per page |
@@ -971,8 +998,7 @@ Set in `config/the_app.php` with `config::set('name')->to(value)`.
 | `page_cache`, `page_cache_ttl`, `page_cache_skip` | on in production, 3600, none | |
 | `mcp_token` | none | same as `RASTER_MCP_TOKEN` |
 | `mcp_write_views` | false | lets MCP over HTTP write templates (`write_view`); over stdio it always can |
-| `api_system_models` | `cms` | system models reachable at `/api` |
-| `api_open` | false | sites made before 2.1.1: models without `api()` offer every public method at `/api`, to anyone, as before. `doctor` warns; removed in 2.2.0 |
+| `api_system_models` | `cms` | system models reachable at `/api`, for what their `api()` lists |
 | `allow_deprecated` | none | `array('<id>' => true or path pattern(s))`: uses of deprecated features this site keeps on purpose, so `doctor` counts them apart instead of warning |
 
 Environment variables: `RASTER_ENV`, `RASTER_URL`, `RASTER_DB`,
@@ -1011,7 +1037,8 @@ command-line output). They win over the settings above.
   templates, the database, whether `.htaccess` still carries every rule in
   `system/private_paths.php`, uses of deprecated features
   (`system/tools/deprecations.php`, minus the ones config `allow_deprecated`
-  says are on purpose) and, in production, the site address, mail and tokens.
+  says are on purpose) and, in production, the site address, mail, tokens
+  and whether PHP shows errors (`display_errors`).
   Exit 1 when something must be fixed.
 - `php bin/raster new <folder>` starts a new site from this copy of Raster.
 - `CHANGELOG.md` in the repository lists what changed in each release.

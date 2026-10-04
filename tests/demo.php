@@ -2392,22 +2392,17 @@ test('C48', '/api answers only what a model lists, for the roles it names', func
 	$vocabulary = json_decode(raster(array('vocabulary', '--json'))[1], true);
 	same(array('day' => 'editor'), $vocabulary['models']['reservation']['api']);
 	same(array(), $vocabulary['models']['secret']['api'], 'a model that lists nothing offers nothing');
-	check(!isset($vocabulary['models']['cms']['api']) && !isset($vocabulary['models']['feed']['api']), 'bundled models, overridden or not, guard themselves');
+	same('visitor', $vocabulary['models']['cms']['api']['editor_save_field'], 'the vocabulary lists what cms offers');
+	check(!isset($vocabulary['models']['cms']['api']['setup']), 'and nothing it doesn\'t list');
+	check(!isset($vocabulary['models']['feed']['api']), 'bundled models /api doesn\'t reach list nothing');
 	has(raster(array('vocabulary'))[1], '/api: day (editor)');
-	// api_open, which the 2.1.1 upgrade writes for older sites: models that
-	// list nothing answer as before, models that list keep their list
+	// a model that lists nothing offers nothing
 	$dir = "$root/demo/models/zzopen";
 	@mkdir($dir);
 	try {
 		with_file("$dir/zzopen.php", "<?php\nclass zzopen { function ping() { return 'pong'; } }\n", function () use ($base) {
-			$open = array('CAFE_API_OPEN' => 'on', 'RASTER_APP' => 'demo');
-			lacks(raster(array('render', '/api/zzopen/ping'))[1], 'pong', 'closed by default');
-			same('"pong"', trim(raster(array('render', '/api/zzopen/ping'), $open)[1]), 'open with api_open');
-			has(raster(array('render', '/api/cafe/stamp'), $open)[1], 'unknown method', 'a model that lists keeps its list');
-			has(raster(array('render', '/api/reservation/day/2026-12-01'), $open)[1], 'not allowed', 'and its roles');
-			has(raster(array('render', '/api/the_feed/generator'), $open)[1], 'unknown model', 'an override is still never addressed directly');
-			same('open', json_decode(raster(array('vocabulary', '--json'), $open)[1], true)['models']['zzopen']['api']);
-			has(raster(array('vocabulary'), $open)[1], '/api: every public method, to anyone');
+			lacks(raster(array('render', '/api/zzopen/ping'))[1], 'pong', 'closed');
+			same(404, http('GET', "$base/api/zzopen/ping")[0]);
 			// a member method: members yes, visitors asked to log in
 			file_put_contents(__DIR__.'/../demo/models/zzopen/zzopen.php', "<?php\nclass zzopen {\n\tstatic function api() { return array('ping' => 'member'); }\n\tfunction ping() { return 'pong'; }\n}\n");
 			same(401, http('GET', "$base/api/zzopen/ping")[0]);
@@ -2660,7 +2655,101 @@ test(array('L9', 'L10'), 'page cache: made-up list URLs are not kept, a change d
 });
 
 // ## 2.1.8 batch B: errors and /api
-// (batch B adds its tests here)
+
+test('C51', 'cms offers over /api only what its api() lists: the editor endpoints, style and logout; an override adds nothing unlisted', function () use ($base, $root) {
+	foreach (array('setup', 'route', 'inject_toolbar', 'login', 'login_message') as $method) {
+		list($status, $body) = http('GET', "$base/api/cms/$method");
+		same(404, $status, "/api/cms/$method");
+		lacks($body, 'There are no users');
+	}
+	same(403, http('POST', "$base/api/cms/editor_save_item", array('collection' => 'menu'))[0], 'editor endpoints check the caller themselves');
+	same(200, http('GET', "$base/api/cms/style")[0]);
+	same(200, http('GET', "$base/api/cms/editor_script")[0]);
+	$dir = "$root/demo/models/the_cms";
+	@mkdir($dir);
+	try {
+		with_file("$dir/the_cms.php", "<?php\nclass the_cms extends cms\n{\n\tfunction takings() { return 'today: 1200 lei'; }\n}\n", function () use ($base) {
+			list($status, $body) = http('GET', "$base/api/cms/takings");
+			same(404, $status, 'a public method of the_cms');
+			lacks($body, 'lei');
+			same(200, http('GET', "$base/api/cms/style")[0], 'what cms lists still answers');
+		});
+	} finally {
+		@rmdir($dir);
+	}
+});
+
+test('C50', '/api errors answer JSON: 500 logged with the URL, 503 when the database is down, 400 for missing arguments; development adds the trace', function () use ($base, $root, $tmp, $maildir) {
+	$prod_db = "$tmp/b-prod.sqlite";
+	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => $prod_db, 'RASTER_URL' => 'https://cafe.example/');
+	raster(array('schema', '--apply'), $env);
+	$prod = server(free_port(), array_merge($env, array('RASTER_MAIL' => "log://$maildir")));
+	$dir = "$root/demo/models/zzwebhook";
+	@mkdir($dir);
+	try {
+		with_file("$dir/zzwebhook.php", "<?php\nclass zzwebhook\n{\n\tstatic function api() { return array('paid' => 'visitor', 'down' => 'visitor'); }\n"
+			."\tfunction paid(\$order, \$amount) { throw new RuntimeException('signature mismatch for sk_live_123'); }\n"
+			."\tfunction down() { throw new PDOException('SQLSTATE[HY000] [2002] Connection refused'); }\n}\n", function () use ($base, $prod, $tmp) {
+			list($status, $body, $headers) = http('POST', "$prod/api/zzwebhook/paid/7/120", '{}', array('Content-Type: application/json'));
+			same(500, $status, $body);
+			same('{"error":"server error"}', $body);
+			has(header_value($headers, 'Content-Type'), 'application/json');
+			$log = file_get_contents("$tmp/php-errors.log");
+			has($log, 'signature mismatch for sk_live_123');
+			has($log, '/api/zzwebhook/paid/7/120', 'logged with the URL');
+			list($status, $body) = http('POST', "$prod/api/zzwebhook/paid/7", '{}', array('Content-Type: application/json'));
+			same(400, $status, $body);
+			lacks($body, 'sk_live');
+			// a database error while the database is there is a bug: 500, not 503
+			list($status, $body) = http('GET', "$prod/api/zzwebhook/down");
+			same(500, $status, $body);
+			lacks($body, 'Connection refused');
+			// development: the trace, for whoever is writing the model
+			list($status, $body) = http('POST', "$base/api/zzwebhook/paid/7/120", '{}', array('Content-Type: application/json'));
+			same(500, $status);
+			$json = json_decode($body, true);
+			has($json['exception'], 'signature mismatch');
+			check(count($json['trace']) > 0, 'a trace');
+		});
+	} finally {
+		@rmdir($dir);
+	}
+});
+
+test('L11', 'a database that can\'t be reached answers 503 outside development, with error_document_503, logged and never cached', function () use ($tmp, $maildir) {
+	$prod_db = "$tmp/b-prod.sqlite";
+	$down = "$tmp/b-down.sqlite";
+	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => $prod_db, 'RASTER_URL' => 'https://cafe.example/');
+	raster(array('schema', '--apply'), $env);
+	file_put_contents($down, str_repeat('not a database ', 200));
+	// no RASTER_URL: this server's own address keeps its pages apart in the cache
+	$prod = server(free_port(), array('RASTER_ENV' => 'production', 'RASTER_DB' => $down, 'RASTER_MAIL' => "log://$maildir"));
+	foreach (array(1, 2) as $time) {
+		list($status, $body, $headers) = http('GET', "$prod/menu");
+		same(503, $status, "request $time");
+		has($body, 'Back in a moment', 'the site\'s own 503 page');
+		lacks($body, '<!-- print.');
+		lacks($body, 'Flat white', 'no mock-up');
+		same(null, header_value($headers, 'X-Raster-Cache'), 'not cached');
+	}
+	same(503, http('GET', "$prod/journal.rss")[0], 'feeds too');
+	// /api too, before the method runs: the provider tries again later
+	list($status, $body) = http('GET', "$prod/api/cafe/category_count/coffee");
+	same(503, $status, $body);
+	same('{"error":"database unavailable"}', $body);
+	has(file_get_contents("$tmp/php-errors.log"), 'Raster error: the database can\'t be reached');
+	// back up: the real menu at once, nothing stale in the cache
+	copy($prod_db, $down);
+	list($status, $body, $headers) = http('GET', "$prod/menu");
+	same(200, $status);
+	same('miss', header_value($headers, 'X-Raster-Cache'));
+	lacks($body, '<!-- print.');
+	// raster render answers the same, and exits 1
+	file_put_contents($down, str_repeat('not a database ', 200));
+	list($code, $out) = raster(array('render', '/menu'), array_merge($env, array('RASTER_DB' => $down)));
+	same(1, $code);
+	has($out, 'HTTP 503');
+});
 
 // ## 2.1.8 batch C: list SQL
 

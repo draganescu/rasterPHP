@@ -1154,7 +1154,213 @@ test('a content change deletes temporary cache files left long ago', function ()
 });
 
 // ## 2.1.8 batch B: errors and /api
-// (batch B adds its tests here)
+
+// A server as PHP runs without a php.ini (the official Docker image): it
+// shows errors and buffers nothing. Errors PHP logs go to the file.
+function b_server($env) {
+	global $root;
+	$port = free_port();
+	$log = sys_get_temp_dir().'/raster-b-'.getmypid().'-'.$port.'.log';
+	$process = proc_open(array(PHP_BINARY, '-d', 'display_errors=1', '-d', 'log_errors=0', '-d', 'output_buffering=0', '-d', 'html_errors=0', '-d', "error_log=$log", '-S', "127.0.0.1:$port", "$root/index.php"),
+		array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array_merge(array('PATH' => getenv('PATH')), $env));
+	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
+	register_shutdown_function(function () use ($process, $log) { proc_terminate($process); @unlink($log); });
+	return array("http://127.0.0.1:$port", $log);
+}
+function b_header($headers, $name) {
+	foreach ($headers as $h) if (stripos($h, $name.':') === 0) return trim(substr($h, strlen($name) + 1));
+	return null;
+}
+// a model that breaks in every way /api and the request can see
+function b_with_boom($fn) {
+	global $root;
+	$dir = "$root/application/models/zzboom";
+	@mkdir($dir);
+	file_put_contents("$dir/zzboom.php", "<?php\nclass zzboom {\n"
+		."\tstatic function api() { return array('boom' => 'visitor', 'needs' => 'visitor', 'inner' => 'visitor', 'down' => 'visitor', 'echoes' => 'visitor', 'sql' => 'visitor', 'mine' => 'member'); }\n"
+		."\tstatic function listens() { return array('route_set' => 'trip'); }\n"
+		."\tfunction boom() { throw new RuntimeException('boom secret'); }\n"
+		."\tfunction needs(\$a, \$b) { return \$a.\$b; }\n"
+		."\tfunction inner() { return str_repeat('x'); }\n"
+		."\tfunction down() { throw new PDOException('the database secret is unreachable'); }\n"
+		."\tfunction echoes() { echo 'partial secret'; throw new RuntimeException('after output'); }\n"
+		."\tfunction sql() { database::instance(); return R::getAll('SELECT * FROM no_such_table_zz'); }\n"
+		."\tfunction mine() { return 'mine'; }\n"
+		."\tfunction trip() { if (isset(\$_GET['trip'])) throw new RuntimeException('listener secret'); }\n"
+		."}\n");
+	try { $fn(); } finally { @unlink("$dir/zzboom.php"); @rmdir($dir); }
+}
+$b_db = sys_get_temp_dir().'/raster-b-'.getmypid().'.sqlite';
+shell_exec('RASTER_ENV=production RASTER_DB='.escapeshellarg($b_db).' '.escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' schema --apply 2>&1');
+register_shutdown_function(function () use ($b_db) { array_map('unlink', glob("$b_db*") ?: array()); });
+
+test('cms answers /api only for what its api() lists (#32)', function () use ($base, $root) {
+	foreach (array('setup', 'route', 'inject_toolbar', 'login', 'login_message') as $method) {
+		list($status, $body) = http('GET', "$base/api/cms/$method");
+		same(404, $status, "/api/cms/$method");
+		check(strpos($body, 'no users') === false, 'login_message answered');
+	}
+	same(200, http('GET', "$base/api/cms/style")[0], 'style is listed');
+	same(403, http('POST', "$base/api/cms/editor_save_field", 'type=aboutpage', array('Content-Type: application/x-www-form-urlencoded'))[0], 'editor endpoints still answer 403 themselves');
+	same(array('editor_save_field' => 'visitor', 'style' => 'visitor', 'logout' => 'visitor'), array_intersect_key(api::offered('cms'), array('editor_save_field' => 1, 'style' => 1, 'logout' => 1)));
+	// a public method an override adds is not offered unless listed
+	$dir = "$root/application/models/the_cms";
+	@mkdir($dir);
+	file_put_contents("$dir/the_cms.php", "<?php\nclass the_cms extends cms {\n\tfunction secret_report() { return 'secret'; }\n}\n");
+	try {
+		list($status, $body) = http('GET', "$base/api/cms/secret_report");
+		same(404, $status, 'an override\'s public method');
+		check(strpos($body, 'secret') === false);
+		same(200, http('GET', "$base/api/cms/style")[0], 'the override keeps what cms lists');
+		// an override that lists its own methods adds to what cms lists
+		file_put_contents("$dir/the_cms.php", "<?php\nclass the_cms extends cms {\n\tstatic function api() { return array('report' => 'visitor'); }\n\tfunction report() { return 'r'; }\n}\n");
+		same(200, http('GET', "$base/api/cms/report")[0], 'its own method');
+		same(200, http('GET', "$base/api/cms/style")[0], 'and still what cms lists');
+		same(403, http('POST', "$base/api/cms/editor_save_field", 'type=aboutpage', array('Content-Type: application/x-www-form-urlencoded'))[0], 'the editor too');
+	} finally {
+		@unlink("$dir/the_cms.php");
+		@rmdir($dir);
+	}
+});
+
+test('api_open is gone: a model without api() offers nothing, whatever the config says (#24)', function () {
+	if (!class_exists('zzlisted', false)) eval('class zzlisted { function ping() { return 1; } }');
+	config::set('api_open')->to(true);
+	try {
+		same(array(), api::offered('zzlisted'));
+	} finally {
+		config::set('api_open')->to(null);
+	}
+	check(!is_file(BASE.'upgrades/2.1.1.php'), 'the 2.1.1 step that wrote it');
+	check(!array_key_exists('api-open', include BASE.'tools/deprecations.php'), 'its deprecation entry');
+});
+
+test('an /api method that throws answers JSON, logged, with no trace in production (#74)', function () use ($b_db) {
+	list($prod, $log) = b_server(array('RASTER_ENV' => 'production', 'RASTER_DB' => $b_db));
+	b_with_boom(function () use ($prod, $log) {
+		list($status, $body, $headers) = http('GET', "$prod/api/zzboom/boom");
+		same(500, $status, $body);
+		same(array('error' => 'server error'), json_decode($body, true), $body);
+		same('application/json', b_header($headers, 'Content-Type'));
+		check(strpos((string)@file_get_contents($log), 'boom secret') !== false && strpos((string)@file_get_contents($log), '/api/zzboom/boom') !== false, 'logged with its URL');
+		// too few arguments is the caller's mistake
+		list($status, $body) = http('GET', "$prod/api/zzboom/needs/x");
+		same(400, $status, $body);
+		check(strpos($body, 'Stack trace') === false && strpos($body, '{') === 0, $body);
+		same(200, http('GET', "$prod/api/zzboom/needs/x/y")[0]);
+		// an ArgumentCountError from inside the method is not the caller's
+		same(500, http('GET', "$prod/api/zzboom/inner")[0]);
+		// a database error while the database is there is a bug, not an outage
+		list($status, $body) = http('GET', "$prod/api/zzboom/down");
+		same(500, $status, $body);
+		check(strpos($body, 'secret') === false, $body);
+		list($status, $body) = http('GET', "$prod/api/zzboom/sql");
+		same(500, $status, $body);
+		same(array('error' => 'server error'), json_decode($body, true), $body);
+		// what a method printed before it threw doesn't turn the 500 into a 200
+		list($status, $body) = http('GET', "$prod/api/zzboom/echoes");
+		same(500, $status, $body);
+		same(array('error' => 'server error'), json_decode($body, true), $body);
+		// a listener that throws outside the render shows nothing of itself
+		list($status, $body) = http('GET', "$prod/about?trip=1");
+		same(500, $status);
+		check(strpos($body, 'listener secret') === false && strpos($body, 'Stack trace') === false, $body);
+		check(strpos((string)@file_get_contents($log), 'listener secret') !== false, 'PHP logs it');
+	});
+});
+
+test('development shows what went wrong on /api (#74)', function () use ($base) {
+	b_with_boom(function () use ($base) {
+		list($status, $body) = http('GET', "$base/api/zzboom/boom");
+		same(500, $status);
+		$json = json_decode($body, true);
+		same('server error', $json['error']);
+		check(strpos($json['exception'], 'boom secret') !== false && is_array($json['trace']), $body);
+	});
+});
+
+test('the fallback 404 prints after the session starts (#74)', function () use ($b_db) {
+	list($prod) = b_server(array('RASTER_ENV' => 'production', 'RASTER_DB' => $b_db));
+	list($status, $body) = http('GET', "$prod/nothing-here", null, array('Cookie: PHPSESSID=abcdefabcdefabcdefabcdefab'));
+	same(404, $status);
+	check(strpos($body, '404 Not Found') !== false, $body);
+	check(strpos($body, 'Warning') === false && strpos($body, 'session') === false, $body);
+});
+
+test('doctor warns when PHP shows errors in production; the command line keeps them (#74)', function () use ($root) {
+	$doctor = function ($display) use ($root) {
+		return shell_exec('RASTER_ENV=production '.escapeshellarg(PHP_BINARY).' -d display_errors='.$display.' '.escapeshellarg("$root/bin/raster").' doctor 2>&1');
+	};
+	check(strpos($doctor('1'), 'display_errors') !== false, 'on');
+	check(strpos($doctor('0'), 'display_errors') === false, 'off');
+	$code = 'require "system/boot.php"; boot::$appname = "application"; boot::cli(); echo ini_get("display_errors");';
+	same('1', shell_exec('cd '.escapeshellarg($root).' && RASTER_ENV=production '.escapeshellarg(PHP_BINARY).' -d display_errors=1 -r '.escapeshellarg($code)));
+});
+
+test('a database that can\'t be reached answers 503 outside development, logged, never cached (#65)', function () use ($b_db, $root) {
+	$cache = "$root/application/data/cache";
+	$had_cache = is_dir($cache);
+	$bad = sys_get_temp_dir().'/raster-b-down-'.getmypid().'.sqlite';
+	file_put_contents($bad, str_repeat('this is not a database ', 100));
+	list($prod, $log) = b_server(array('RASTER_ENV' => 'production', 'RASTER_DB' => $bad));
+	try {
+		foreach (array(1, 2) as $time) {
+			list($status, $body, $headers) = http('GET', "$prod/about");
+			same(503, $status, "request $time");
+			check(strpos($body, '<!-- print.') === false && strpos($body, 'Write HTML') === false, 'no mock-up');
+			check(b_header($headers, 'X-Raster-Cache') !== 'hit', 'not from the cache');
+		}
+		same(503, http('GET', "$prod/news.rss")[0], 'feeds too');
+		// /api too: a read during the outage is not an empty table
+		b_with_boom(function () use ($prod) {
+			list($status, $body) = http('GET', "$prod/api/zzboom/needs/x/y");
+			same(503, $status, $body);
+			same(array('error' => 'database unavailable'), json_decode($body, true), $body);
+			// who is asking can't be known either: an outage, not "log in"
+			list($status, $body) = http('GET', "$prod/api/zzboom/mine", null, array('Cookie: PHPSESSID=abcdefabcdefabcdefabcdefab'));
+			same(503, $status, $body);
+		});
+		check(strpos((string)@file_get_contents($log), 'database') !== false, 'logged');
+		// back up: the real page, at once
+		copy($b_db, $bad);
+		list($status, $body, $headers) = http('GET', "$prod/about");
+		same(200, $status);
+		same('miss', b_header($headers, 'X-Raster-Cache'));
+		check(strpos($body, '<!-- print.') === false);
+	} finally {
+		array_map('unlink', glob("$bad*") ?: array());
+		if (!$had_cache) exec('rm -rf '.escapeshellarg($cache));
+	}
+	// a database that is there but has no tables yet still shows the template
+	$empty = sys_get_temp_dir().'/raster-b-empty-'.getmypid().'.sqlite';
+	touch($empty);
+	list($prod) = b_server(array('RASTER_ENV' => 'production', 'RASTER_DB' => $empty, 'RASTER_URL' => 'http://example.test/'));
+	try {
+		list($status, $body) = http('GET', "$prod/");
+		same(200, $status);
+		check(strpos($body, 'Write HTML. Get a CMS.') !== false, 'template default');
+	} finally {
+		array_map('unlink', glob("$empty*") ?: array());
+		if (!$had_cache) exec('rm -rf '.escapeshellarg($cache));
+	}
+	// development says so plainly instead
+	$bad = sys_get_temp_dir().'/raster-b-down-dev-'.getmypid().'.sqlite';
+	file_put_contents($bad, str_repeat('this is not a database ', 100));
+	list($dev) = b_server(array('RASTER_ENV' => 'development', 'RASTER_DB' => $bad));
+	try {
+		list($status, $body) = http('GET', "$dev/about");
+		same(500, $status);
+		check(strpos($body, 'database') !== false, $body);
+		b_with_boom(function () use ($dev) {
+			list($status, $body) = http('GET', "$dev/api/zzboom/needs/x/y");
+			same(503, $status, $body);
+			$json = json_decode($body, true);
+			check(isset($json['exception']) && strpos($json['exception'], 'not a database') !== false, $body);
+		});
+	} finally {
+		array_map('unlink', glob("$bad*") ?: array());
+	}
+});
 
 // ## 2.1.8 batch C: list SQL
 

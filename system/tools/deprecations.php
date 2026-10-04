@@ -30,11 +30,4 @@ return array(
 		'pattern' => '/<!-- render\.validation\.(not_empty|email_format|are_the_same)\(/',
 		'message' => 'regions from older Raster: not_empty and email_format become required and type="email" on the input with render.validation.field(\'name\'); are_the_same becomes matches',
 	),
-	'api-open' => array(
-		'since' => '2.1.1',
-		'removed_in' => '2.2.0',
-		'in' => '#^config/#',
-		'pattern' => '/config::set\(\s*[\'"]api_open[\'"]\s*\)/',
-		'message' => 'api_open keeps every public method of your models reachable by anyone at /api/<model>/<method>. List what each model offers in static function api() (method => visitor, member, editor or admin), then remove the setting',
-	),
 );

@@ -168,7 +168,9 @@ When you've renamed a field, run the `--rename` that `raster schema` suggests be
 
 **Caching.** The page cache is on in production and cleared automatically whenever content changes. Nothing to set up. Links with tracking parameters (`?utm_source=…`, `fbclid`, `gclid`, `msclkid`) are served from the cache like the bare address, so a newsletter or an ad campaign doesn't make every visit render the page again. See [the page cache](Settings-and-Environments#the-page-cache).
 
-**Errors.** In production, a broken template shows a plain error page and the details go to PHP's error log. Run `php bin/raster lint` before deploying so this doesn't happen.
+**Errors.** In production, a broken template shows a plain error page and the details go to PHP's error log. Run `php bin/raster lint` before deploying so this doesn't happen. Raster turns PHP's `display_errors` off and `log_errors` on for every request outside development, so visitors never see paths or a stack trace, even on a PHP without a php.ini (the official Docker image). `/api` methods that fail answer `{"error":"server error"}` with a 500, logged with the URL. Still set `display_errors = Off` in php.ini (`php.ini-production` does): an error before Raster starts would otherwise show, and `doctor` warns about it.
+
+**When the database is down.** If MySQL stops or the web server can't read the SQLite file, every page answers 503, `/api` calls too (as JSON, so a payment provider retries its webhook), and the error goes to the log, so an uptime check notices. Nothing is cached meanwhile, so the real pages are back as soon as the database is. To show your own page instead of a plain line, add a view (say `503.html`) that uses no model needing the database, and set `config::set('error_document_503')->to('503')`.
 
 ## Checklist
 

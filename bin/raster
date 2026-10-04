@@ -230,8 +230,7 @@ switch ($command) {
 			if ($model['queries']) echo '    sql/: '.implode(', ', $model['queries'])."\n";
 			if (isset($model['api'])) {
 				$api = (array)$model['api'];
-				if ($model['api'] === 'open') echo "    /api: every public method, to anyone (config api_open)\n";
-				elseif ($api) echo '    /api: '.implode(', ', array_map(function ($m, $r) { return "$m ($r)"; }, array_keys($api), $api))."\n";
+				if ($api) echo '    /api: '.implode(', ', array_map(function ($m, $r) { return "$m ($r)"; }, array_keys($api), $api))."\n";
 			}
 		}
 		if ($vocabulary['shared_queries']) echo "\n".$paint('models/sql.php', '1').': '.implode(', ', $vocabulary['shared_queries'])."\n";

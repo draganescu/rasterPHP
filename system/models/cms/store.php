@@ -207,6 +207,19 @@ class cms_store {
 		cms_types::forget();
 	}
 
+	// Why the database doesn't answer, or null when it does. table_exists()
+	// can't tell a missing table from a database that is down; this asks
+	// once, at the start of the request (cms::setup).
+	static function unreachable() {
+		try {
+			$tables = R::inspect();
+		} catch (Exception $e) {
+			return $e->getMessage();
+		}
+		if (R::getRedBean()->isFrozen()) self::$tables = $tables;
+		return null;
+	}
+
 	static function table_exists($type) {
 		try {
 			if (!R::getRedBean()->isFrozen()) return in_array($type, R::inspect());

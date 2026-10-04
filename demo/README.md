@@ -96,8 +96,10 @@ php tests/demo.php                        # the whole matrix
 | C45 | a short closing tag (`<!-- /render -->`) is a lint error that names the full closing tag |
 | C46 | lint checks how many arguments a method takes, and names the nearest real method |
 | C47 | a relative link inside a `print.validation.alert()` block goes to the route, not the view file |
-| C48 | /api answers only what a model lists in `api()`, for the roles it names; overrides are never addressed as `the_<model>`; `api_open` keeps the old open /api; lint checks `api()` |
+| C48 | /api answers only what a model lists in `api()`, for the roles it names; a model that lists nothing offers nothing; the vocabulary shows each list, cms's included; overrides are never addressed as `the_<model>`; lint checks `api()` |
 | C49 | in production (strict templates off) any exception (a missing named query too) shows the plain error page and goes to the error log; `log::warning` and `log::error` always reach the error log |
+| C50 | an /api method that throws answers JSON: 500 `{"error":"server error"}` logged with the URL (a bad query too), 503 when the database is down, 400 for missing arguments; development adds the trace |
+| C51 | `cms` offers over /api only what its `api()` lists (the editor endpoints, `style`, `logout`); a public method of a `the_cms` override answers 404 unless listed |
 | D1 | raster_form and honeypot on every post form |
 | D2 | the session token on forms for logged in users |
 | D3 | posts from other sites refused (Origin, Sec-Fetch-Site, Referer, /api too) |
@@ -225,6 +227,7 @@ php tests/demo.php                        # the whole matrix
 | L8 | `raster cache clear` and MCP `clear_cache` for changes made outside Raster; `describe` says whether the cache is on |
 | L9 | page cache: empty filter pages, pages past the last one, unknown filter fields and other spellings of a list's URLs (`journal_page/1`, a segment left over) answer 200 but aren't kept; a content change deletes the old cached pages |
 | L10 | page cache: links with only tracking parameters (`utm_*`, `fbclid`, `gclid`, `msclkid`) are cache hits, and their values never reach the cached page |
+| L11 | a database that can't be reached answers 503 outside development (`error_document_503`, views/cafe/503.html; `/api` as JSON, before the method runs), logged, never cached |
 | M1 | MCP needs its token; GET is refused |
 | M2 | initialize, ping, tools/list, batches, errors |
 | M3 | notifications get 202 |

@@ -190,8 +190,10 @@ class controller {
 		template::set('static')->to($static);
 		event::dispatch('route_set');
 
+		// a 404 without error_document_404, printed once the session has
+		// started (route_set), so PHP has nothing to warn about
 		if (!$route) {
-			exit;
+			exit('<h1>404 Not Found</h1>');
 		}
 		
 		// just a hook
@@ -261,19 +263,40 @@ class controller {
 		}
 	}
 
+	// Sets the status and gives the view for it (config error_document_404,
+	// error_document_503), or false when the site has none. It prints
+	// nothing: the session may not have started yet.
 	public static function error($error, $document = false) {
-		if ($error == '404' && !headers_sent()) {
-			http_response_code(404);
+		if (!headers_sent()) {
+			http_response_code((int)$error);
 		}
 		if (!$document) {
 			$document = config::get('error_document_'.$error, false);
 		}
-		if ($document) {
-			$document = controller::build_view_path($document);
-		} else {
-			echo "<h1>404 Not Found</h1>";
+		return $document ? controller::build_view_path($document) : false;
+	}
+
+	// The database can't be reached (cms::setup asks). Outside development
+	// the page answers 503, as the view error_document_503 when the site has
+	// one, and nothing is cached, so the real page shows as soon as the
+	// database is back. Development says what is wrong.
+	static function unavailable($reason) {
+		log::error('the database can\'t be reached: '.$reason);
+		raster_cache::$cacheable = false;
+		if (config::get('environment') === 'development') {
+			if (!headers_sent()) http_response_code(500);
+			exit("<!doctype html><meta charset='utf-8'><title>No database</title><p>The database can't be reached: ".htmlspecialchars($reason)."</p>");
 		}
-		return $document;
+		$document = controller::error('503');
+		// the view is a page: feeds and data views (news.rss) get the plain line
+		if ($document && file_exists($document) && config::get('format', 'html') === 'html') {
+			$controller = controller::instance();
+			$controller->current_route = $document;
+			$controller->handle_response();
+			exit;
+		}
+		echo "<!doctype html><meta charset='utf-8'><title>Unavailable</title><p>This site is unavailable for a moment. Try again shortly.</p>";
+		exit;
 	}
 	
 	// internal method of the controller used in handle_response
