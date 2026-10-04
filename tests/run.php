@@ -43,6 +43,13 @@ function lint_html($html) {
 	unlink($file);
 	return $problems;
 }
+// a port nobody is listening on, so test runs in parallel never collide
+function free_port() {
+	$socket = stream_socket_server('tcp://127.0.0.1:0');
+	$name = stream_socket_get_name($socket, false);
+	fclose($socket);
+	return (int)substr($name, strrpos($name, ':') + 1);
+}
 function has_problem($problems, $needle, $line = null) {
 	foreach ($problems as $p) {
 		if (strpos($p['message'], $needle) !== false && ($line === null || $p['line'] === $line)) return true;
@@ -186,7 +193,7 @@ test('a page request loads no command line tools and looks up no core overrides'
 
 // ## Integration tests
 
-$port = 8765 + getmypid() % 100;
+$port = free_port();
 $base = "http://127.0.0.1:$port";
 $server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_MCP_TOKEN' => 'test-token', 'RASTER_MAIL' => "log://$maildir", 'PATH' => getenv('PATH')));
 register_shutdown_function(function () use ($server, $db, $maildir) {
@@ -492,7 +499,7 @@ test('i18n picks languages', function () {
 test('page cache in production', function () use ($root, $db) {
 	$env = 'RASTER_ENV=production RASTER_DB='.escapeshellarg($db);
 	shell_exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' schema --apply');
-	$port = 8865 + getmypid() % 100;
+	$port = free_port();
 	$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_ENV' => 'production', 'PATH' => getenv('PATH')));
 	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
 	try {
@@ -533,7 +540,7 @@ test('a production page reads the schema and each page row once, and counts noth
 	same('wal', $pdo->query('PRAGMA journal_mode')->fetchColumn());
 });
 test('a site under a path: RASTER_URL with a folder', function () use ($root, $db) {
-	$port = 8965 + getmypid() % 100;
+	$port = free_port();
 	$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_URL' => "http://127.0.0.1:$port/preview/abc/", 'PATH' => getenv('PATH')));
 	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
 	try {
@@ -564,7 +571,7 @@ test('a site under a path: RASTER_URL with a folder', function () use ($root, $d
 });
 
 test('raster serve passes site_url with a folder to the router', function () use ($root, $db) {
-	$port = 9065 + getmypid() % 100;
+	$port = free_port();
 	$config = "$root/application/config/the_app.php";
 	$original = file_get_contents($config);
 	file_put_contents($config, $original."\nconfig::set('site_url')->to('http://127.0.0.1:$port/shop/');\n");
