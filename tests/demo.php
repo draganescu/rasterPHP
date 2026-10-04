@@ -2487,6 +2487,10 @@ test('T2', 'values are stored as their type, whoever writes them, or refused nam
 	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'menu', 'id' => $tart['id'], 'fields' => array('price' => 'nine'), 'csrf' => $token), $h);
 	same(400, $status);
 	has($body, "'price' must be a number");
+	// with the mock-ups from the item's mark, it comes back as the page prints it
+	list(, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'menu', 'id' => $tart['id'], 'fields' => array('price' => '9.5'), 'examples' => array('price' => '14.50'), 'csrf' => $token), $h);
+	same('9.50', json_decode($body, true)['price']);
+	has(http('GET', "$base/menu", null, $h)[1], '"examples":{', 'item marks carry their mock-ups');
 	mcp($base, 'delete_item', array('collection' => 'events', 'id' => $gig['id']));
 	mcp($base, 'delete_item', array('collection' => 'menu', 'id' => $tart['id']));
 });
@@ -2555,6 +2559,23 @@ test('T5', 'templates print text: a number with its mock-up\'s decimals, nothing
 	has($body, 'We seat whole guests');
 	same(array(), cms_records::find('reservation', array('email' => 'half@example.com')), 'nothing stored');
 	lacks(raster(array('lint'))[1], 'guests_invalid', 'lint knows Raster raises it');
+	// any model's numbers print with the mock-up's decimals, records included
+	$model = dirname(__DIR__).'/demo/models/zzprices/zzprices.php';
+	@mkdir(dirname($model));
+	try {
+		with_file($model, '<?php class zzprices { function rows() { return array(array("price" => 24.0), array("price" => 9.5)); } }', function () use ($base) {
+			with_file(dirname(__DIR__).'/demo/views/cafe/zz-prices.html', '<!-- render.zzprices.rows --><b><!-- print.price -->24.00<!-- /print.price --></b><!-- /render.zzprices.rows -->', function () use ($base) {
+				has(http('GET', "$base/zz-prices")[1], '<b>24.00</b>'."\n".'<b>9.50</b>');
+			});
+		});
+	} finally {
+		@rmdir(dirname($model));
+	}
+	// a ticked box sends its own value
+	same(303, http('POST', "$base/visit", array('raster_form' => 'reservation.book', 'name' => 'Box', 'email' => 'box@example.com', 'date' => '2026-11-22', 'guests' => '2', 'newsletter' => 'subscribe', 'terms' => '1'))[0]);
+	$box = cms_records::find('reservation', array('email' => 'box@example.com'))[0];
+	same(true, $box['newsletter']);
+	mcp($base, 'delete_item', array('collection' => 'reservation', 'id' => $box['id']));
 });
 
 test('T6', 'schema --apply converts a column whose type changed when every value fits, and names the values that don\'t', function () use ($base) {
@@ -2568,12 +2589,20 @@ test('T6', 'schema --apply converts a column whose type changed when every value
 		list(, $out) = raster(array('schema'));
 		has($out, 'n (int in the database, text in the templates; --apply converts it)');
 		has(raster(array('schema', '--apply'))[1], 'zzretypedata.n is now text (was int)');
-		mcp($base, 'create_item', array('collection' => 'zzretype', 'fields' => array('n' => 'lots')));
+		$lots = mcp($base, 'create_item', array('collection' => 'zzretype', 'fields' => array('n' => 'lots')));
 		file_put_contents($view, $markup('5'));
 		list(, $out) = raster(array('schema', '--apply'));
 		has($out, 'kept zzretypedata.n as text: "lots" can\'t be int; change them and run --apply again');
 		cms_store::forget();
 		same('TEXT', cms_store::columns('zzretypedata')['n']);
+		// a column SQLite won't drop (it has an index) stays as it was, with
+		// nothing half done
+		mcp($base, 'delete_item', array('collection' => 'zzretype', 'id' => $lots['id']));
+		R::exec('CREATE INDEX zz_n ON zzretypedata (n)');
+		has(raster(array('schema', '--apply'))[1], 'kept zzretypedata.n as it was:');
+		cms_store::forget();
+		same(array('TEXT', false), array(cms_store::columns('zzretypedata')['n'], isset(cms_store::columns('zzretypedata')['raster_n_retyped'])));
+		R::exec('DROP INDEX zz_n');
 	});
 	raster(array('schema', '--drop=zzretypedata', '--force'));
 });

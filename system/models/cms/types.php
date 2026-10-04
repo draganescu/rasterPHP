@@ -21,10 +21,16 @@ class cms_types {
 
 	static $types = array('text', 'int', 'number', 'bool', 'date', 'datetime', 'time');
 
-	// what each type is declared as. Only TEXT is a name RedBean knows, so it
-	// never widens the others; SQLite gives them the affinity they need.
+	// what each type is declared as, in SQLite and in MySQL. RedBean knows
+	// none of these names but TEXT (and MySQL's DOUBLE, which only ever holds
+	// numbers), so it never widens them; SQLite gives them the affinity they
+	// need.
 	static $sql = array(
 		'text' => 'TEXT', 'int' => 'INT', 'number' => 'REAL', 'bool' => 'BOOLEAN',
+		'date' => 'DATE', 'datetime' => 'DATETIME', 'time' => 'TIME',
+	);
+	static $mysql = array(
+		'text' => 'TEXT', 'int' => 'INT', 'number' => 'DOUBLE', 'bool' => 'TINYINT(1)',
 		'date' => 'DATE', 'datetime' => 'DATETIME', 'time' => 'TIME',
 	);
 
@@ -56,12 +62,21 @@ class cms_types {
 		return 'text';
 	}
 
-	// a declared column type back to its field type; id is an int
+	// a declared column type back to its field type, as SQLite (INTEGER for
+	// id) or MySQL (int(11), tinyint(1), double) reports it
 	static function of_column($declared) {
 		$declared = strtoupper(trim((string)$declared));
-		if ($declared === 'INTEGER') return 'int';
-		$type = array_search($declared, self::$sql, true);
-		return $type === false ? 'text' : $type;
+		if ($declared === 'TINYINT(1)' || $declared === 'BOOLEAN') return 'bool';
+		$declared = trim(preg_replace('/\(.*\)| UNSIGNED/', '', $declared));
+		if (in_array($declared, array('INT', 'INTEGER', 'BIGINT', 'MEDIUMINT', 'SMALLINT', 'TINYINT'), true)) return 'int';
+		if (in_array($declared, array('REAL', 'DOUBLE', 'FLOAT'), true)) return 'number';
+		if (in_array($declared, array('DATE', 'DATETIME', 'TIME'), true)) return strtolower($declared);
+		return 'text';
+	}
+
+	// what a type is declared as in this database
+	static function sql($type) {
+		return R::getDatabaseAdapter()->getDatabase()->getDatabaseType() === 'mysql' ? self::$mysql[$type] : self::$sql[$type];
 	}
 
 	// field => type of a table as it is in the database
@@ -83,20 +98,25 @@ class cms_types {
 	static function ensure($table, $types) {
 		if (!preg_match('/^[a-z0-9_]+$/', $table)) throw new InvalidArgumentException("Invalid table '$table'");
 		if (!cms_store::table_exists($table)) {
-			R::exec("CREATE TABLE `$table` ( id INTEGER PRIMARY KEY AUTOINCREMENT )");
+			R::getWriter()->createTable($table);
 			cms_store::forget();
 		}
 		$have = cms_store::columns($table);
 		foreach ($types as $field => $type) {
 			if (array_key_exists($field, $have) || $field === 'id') continue;
 			if (!preg_match('/^[a-z0-9_]+$/', $field)) throw new InvalidArgumentException("Invalid field '$field'");
-			R::exec("ALTER TABLE `$table` ADD `$field` ".self::$sql[$type]);
+			// the adapter, not R::exec: a fluid RedBean ignores some failed SQL
+			R::getDatabaseAdapter()->exec("ALTER TABLE `$table` ADD `$field` ".self::sql($type));
 		}
 		cms_store::forget();
 	}
 
 	// Changes the type of a column whose stored values all convert; returns
-	// the values that don't (and changes nothing) otherwise.
+	// the values that don't (and changes nothing) otherwise. In SQLite it all
+	// happens in one transaction; MySQL can't roll back a change of columns,
+	// so there the column made for the copy is removed again if it fails.
+	// Throws when the database refuses (an indexed column, an SQLite older
+	// than 3.35), leaving the column as it was.
 	static function retype($table, $field, $type) {
 		$rows = R::getAll("SELECT id, `$field` AS v FROM `$table`");
 		$values = array();
@@ -110,10 +130,31 @@ class cms_types {
 		}
 		if ($bad) return array_slice(array_unique($bad), 0, 5);
 		$temp = "raster_{$field}_retyped";
-		R::exec("ALTER TABLE `$table` ADD `$temp` ".self::$sql[$type]);
-		foreach ($values as $id => $value) R::exec("UPDATE `$table` SET `$temp` = ? WHERE id = ?", array($value, $id));
-		R::exec("ALTER TABLE `$table` DROP COLUMN `$field`");
-		R::exec("ALTER TABLE `$table` RENAME COLUMN `$temp` TO `$field`");
+		$adapter = R::getDatabaseAdapter();
+		$mysql = $adapter->getDatabase()->getDatabaseType() === 'mysql';
+		if (!$mysql && version_compare($adapter->getCell('SELECT sqlite_version()'), '3.35.0', '<')) {
+			throw new RuntimeException("$table.$field as it was: SQLite ".$adapter->getCell('SELECT sqlite_version()')." can't drop a column; 3.35 or newer can");
+		}
+		// a copy column left by an earlier attempt. The adapter, not R::exec:
+		// a fluid RedBean ignores some failed SQL, and this must not
+		if (array_key_exists($temp, cms_store::columns($table))) $adapter->exec("ALTER TABLE `$table` DROP COLUMN `$temp`");
+		// MySQL commits each change of columns at once: no transaction there
+		if (!$mysql) $adapter->startTransaction();
+		try {
+			$adapter->exec("ALTER TABLE `$table` ADD `$temp` ".self::sql($type));
+			foreach ($values as $id => $value) $adapter->exec("UPDATE `$table` SET `$temp` = ? WHERE id = ?", array($value, $id));
+			$adapter->exec("ALTER TABLE `$table` DROP COLUMN `$field`");
+			$adapter->exec("ALTER TABLE `$table` RENAME COLUMN `$temp` TO `$field`");
+			if (!$mysql) $adapter->commit();
+		} catch (Exception $e) {
+			if (!$mysql) $adapter->rollback();
+			cms_store::forget();
+			if ($mysql && array_key_exists($temp, cms_store::columns($table)) && array_key_exists($field, cms_store::columns($table))) {
+				$adapter->exec("ALTER TABLE `$table` DROP COLUMN `$temp`");
+			}
+			cms_store::forget();
+			throw new RuntimeException("$table.$field as it was: ".$e->getMessage());
+		}
 		cms_store::forget();
 		return array();
 	}
@@ -134,12 +175,13 @@ class cms_types {
 		switch ($type) {
 			case 'int':
 				if (is_int($value)) return $value;
-				if (is_float($value) && floor($value) == $value) return (int)$value;
+				if (is_float($value) && floor($value) == $value && abs($value) < 1e18) return (int)$value;
 				if (is_string($value) && preg_match('/^[+-]?\d{1,18}$/', $value)) return (int)$value;
 				break;
 			case 'number':
-				if (is_int($value) || is_float($value)) return (float)$value;
-				if (is_string($value) && is_numeric($value)) return (float)$value;
+				if (is_string($value) && is_numeric($value)) $value = (float)$value;
+				// 1e999 is a number to PHP, but INF to the database
+				if ((is_int($value) || is_float($value)) && is_finite((float)$value)) return (float)$value;
 				break;
 			case 'bool':
 				if (is_bool($value)) return $value ? 1 : 0;
@@ -154,18 +196,25 @@ class cms_types {
 				break;
 			case 'time':
 				if (is_string($value) && preg_match('/^([01]?\d|2[0-3]):([0-5]\d)(:[0-5]\d)?$/', $value, $m)) return sprintf('%02d:%s', $m[1], $m[2]);
-				$time = is_string($value) && !preg_match('/^\d+$/', $value) ? strtotime($value) : false;
-				if ($time !== false) return date('H:i', $time);
+				// 8pm, noon; not a date, which has no time of day
+				$time = self::timestamp($value, true);
+				if ($time !== null) return date('H:i', $time);
 				break;
 		}
 		throw new cms_type_error($field, $type);
 	}
 
-	// what strtotime makes of a date, but a date that doesn't exist
-	// (2026-02-30) is refused instead of moved to March
-	protected static function timestamp($value) {
+	// What strtotime makes of a date or time, when there is one in it. PHP
+	// reads a lone letter as a military time zone ('a' is now in zone A), and
+	// moves a date that doesn't exist (31 Feb) into March; both are refused.
+	// today, now and next friday are dates.
+	protected static function timestamp($value, $time_of_day = false) {
 		if (!is_string($value) || preg_match('/^\d+$/', $value)) return null;
-		if (preg_match('/^(\d{4})-(\d\d)-(\d\d)/', $value, $m) && !checkdate((int)$m[2], (int)$m[3], (int)$m[1])) return null;
+		$parsed = date_parse($value);
+		if ($parsed['error_count'] || $parsed['warning_count']) return null;
+		$date = $parsed['year'] !== false || $parsed['month'] !== false || $parsed['day'] !== false || isset($parsed['relative']);
+		$hour = $parsed['hour'] !== false;
+		if ($time_of_day ? !$hour : (!$date && !$hour && !empty($parsed['zone_type']))) return null;
 		$time = strtotime($value);
 		return $time === false ? null : $time;
 	}

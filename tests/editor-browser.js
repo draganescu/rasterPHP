@@ -63,6 +63,20 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 		html = await (await fetch(base + '/')).text();
 		check(html.includes('<h1>Good coffee, slow mornings.</h1>'), 'undo puts it back');
 
+		// a typed field shows what was stored, the way the page prints it
+		await page.goto(base + '/menu');
+		await page.waitForTimeout(500);
+		const price = page.locator('p.price [data-raster-field]').first();
+		await price.click();
+		await page.keyboard.press('Control+A');
+		await page.keyboard.type('9.5');
+		await page.keyboard.press('Enter');
+		await page.waitForTimeout(700);
+		check((await price.innerText()).trim() === '9.50', 'a price typed as 9.5 shows as 9.50, as the mock-up (14.50) prints it: ' + await price.innerText());
+		await page.keyboard.press('Control+z');
+		await page.waitForTimeout(700);
+		check((await price.innerText()).trim() === '14.50', 'undo shows the old price: ' + await price.innerText());
+
 		// add a dish from the ghost card, with a photo
 		await page.goto(base + '/menu');
 		await page.waitForTimeout(500);

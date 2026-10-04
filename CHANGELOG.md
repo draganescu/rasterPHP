@@ -18,14 +18,19 @@ columns (`enabled`, `published_at`) stay as they were made.
   the rest. The column is declared as the type.
 - **Values are stored as their type,** whoever writes them: `5 Oct 2026`
   becomes `2026-10-05`, `8pm` becomes `20:00`, `yes` becomes 1. A value
-  that can't be (`many` guests, `2026-02-30`) is refused with the field
-  and an example. A form value the HTML let through raises
-  `<field>_invalid`.
+  that can't be (`many` guests, `2026-02-30`, `31 Feb`, a stray letter
+  in a date) is refused with the field and an example. A form value the
+  HTML let through raises `<field>_invalid`; a ticked checkbox is yes
+  whatever its `value`.
 - **Lists compare and sort by type:** `order=-price` puts 100 above 18
   above 9.50, and `price<10` compares numbers.
 - **Models, MCP and `/api` read ints, floats and bools.** Templates and
   the in-page editor still get text; a number prints with its mock-up's
-  decimals, so `14.50` stays `14.50`.
+  decimals, so `14.50` stays `14.50`, from any model, records included.
+  After a save the editor shows what was stored (`9.50`, `2026-10-05`),
+  not what was typed.
+- Columns are declared the same way in MySQL (`DOUBLE`, `TINYINT(1)`),
+  and `schema --apply` never leaves a column half converted.
 - `schema`, `describe` and MCP `site_overview` list the types, and
   `schema --apply` converts a column whose type changed when every value
   fits.

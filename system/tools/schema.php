@@ -172,7 +172,12 @@ class raster_schema {
 		try {
 			foreach ($status['tables'] as $table) {
 				foreach ($table['retyped'] as $retype) {
-					$bad = cms_types::retype($table['table'], $retype['field'], $retype['to']);
+					try {
+						$bad = cms_types::retype($table['table'], $retype['field'], $retype['to']);
+					} catch (RuntimeException $e) {
+						$changes[] = 'kept '.$e->getMessage();
+						continue;
+					}
 					$changes[] = $bad
 						? "kept {$table['table']}.{$retype['field']} as {$retype['from']}: ".implode(', ', array_map('json_encode', $bad))." can't be {$retype['to']}; change them and run --apply again"
 						: "{$table['table']}.{$retype['field']} is now {$retype['to']} (was {$retype['from']})";

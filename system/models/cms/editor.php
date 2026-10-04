@@ -178,7 +178,15 @@ class cms_editor {
 		} catch (Exception $e) {
 			return self::fail($e->getMessage());
 		}
-		return array('value' => cms_types::show($saved['fields'][$field]), 'revision' => $saved['revision']);
+		// printed the way the page prints it (4.50 for a 14.50 mock-up), so the
+		// editor shows what was stored, not what was typed
+		return array('value' => cms_types::show($saved['fields'][$field], (string)util::post('example')), 'revision' => $saved['revision']);
+	}
+
+	// field => mock-up, from the item's mark: the decimals a number prints with
+	protected static function examples() {
+		$examples = util::post('examples');
+		return is_array($examples) ? array_filter($examples, 'is_string') : array();
 	}
 
 	// collection, id (0 for a new item), fields[name]=value
@@ -197,7 +205,7 @@ class cms_editor {
 		$allowed = $record ? cms_records::writable($record) : array_diff(array_keys($columns), array('id', 'updated_at'));
 		try {
 			// the page prints text, so the editor gets the item as text too
-			return cms_types::show_row(cms_store::save_item($type, (int)util::post('id'), $fields, $allowed));
+			return cms_types::show_row(cms_store::save_item($type, (int)util::post('id'), $fields, $allowed), self::examples());
 		} catch (cms_refused $e) {
 			return self::refused($e);
 		} catch (Exception $e) {
@@ -218,7 +226,7 @@ class cms_editor {
 		} catch (cms_refused $e) {
 			return self::refused($e);
 		}
-		return array('deleted' => true, 'item' => cms_types::show_row($item));
+		return array('deleted' => true, 'item' => cms_types::show_row($item, self::examples()));
 	}
 
 	// collection, id, action, input[name]=value: runs one of the actions the
@@ -230,7 +238,7 @@ class cms_editor {
 		$input = util::post('input');
 		try {
 			$item = cms_records::act($collection, (int)util::post('id'), (string)util::post('action'), is_array($input) ? $input : array());
-			return cms_types::show_row(cms_records::shown(cms_records::info($collection), $item));
+			return cms_types::show_row(cms_records::shown(cms_records::info($collection), $item), self::examples());
 		} catch (cms_refused $e) {
 			return self::refused($e);
 		} catch (Exception $e) {

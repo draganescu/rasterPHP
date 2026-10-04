@@ -421,14 +421,17 @@ item of a collection is the mock-up content.
   - Whoever writes (the editor, MCP, a form, a model), the value is stored
     as its type: `4.5` for `4.50`, `2026-10-05` for `5 Oct 2026`, `20:00`
     for `8pm`, `1` for `yes`. One that can't be (`many` for an int,
-    `2026-02-30`) is refused with the field and an example. An empty value
-    is `null` (`false` for a bool, `''` for text).
+    `2026-02-30`, `x` for a date) is refused with the field and an
+    example. An empty value is `null` (`false` for a bool, `''` for text).
+    A form's ticked checkbox is yes, whatever its `value`.
   - Lists filter and sort by type: `order=-price` puts 100 above 18 above
     9.50.
   - Models, MCP and `/api` read ints, floats and bools. Templates print
     text: a number with as many decimals as its mock-up (with `14.50` in
     the mock-up, 4.5 prints `4.50`), a bool `1` or `0`, an empty value
-    nothing.
+    nothing. That holds for any model's rows, so a model returning
+    `24.0` under a `24.00` mock-up prints `24.00`. The in-page editor
+    shows what was stored the same way.
   - `schema`, `describe` and `site_overview` list each field's type. When
     a mock-up changes type (`14` becomes `14 lei`), `schema` shows the
     column as retyped and `schema --apply` converts it if every stored

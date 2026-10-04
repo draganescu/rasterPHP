@@ -179,7 +179,11 @@ class cms_records {
 	// them), so the editor still gets the real values; lists inside a row are
 	// escaped here, for HTML views.
 	static function for_template($info, $row) {
-		$row = cms_types::show_row($row);
+		// text, except numbers: the template prints those with as many
+		// decimals as its mock-up (24.00, not 24)
+		foreach ($row as $field => $value) {
+			if (!is_float($value) && !is_array($value)) $row[$field] = cms_types::show($value);
+		}
 		$escape = array();
 		foreach ($row as $field => $value) {
 			if (in_array($field, $info['html'], true)) continue;
@@ -380,6 +384,10 @@ class cms_records {
 			// fields the form doesn't send keep the type's default
 			if (in_array($field, $info['lists']) || !array_key_exists($field, $_POST) || is_array($_POST[$field])) continue;
 			$values[$field] = trim((string)util::post($field));
+			// a ticked box sends its value, whatever it is (on, yes, subscribe)
+			if ($info['types'][$field] === 'bool' && $values[$field] !== '') {
+				$values[$field] = in_array(strtolower($values[$field]), array('0', 'false', 'no', 'off'), true) ? 0 : 1;
+			}
 		}
 		try {
 			cms_store::connect();

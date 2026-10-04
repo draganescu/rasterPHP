@@ -875,7 +875,13 @@ test('values are stored as their type, or refused naming the field', function ()
 	same('19:00', cms_types::clean('time', '7pm', 'time'));
 	same(null, cms_types::clean('date', '', 'date'), 'empty is null, not text');
 	same('', cms_types::clean('text', null, 'name'));
-	foreach (array(array('int', '2.5'), array('int', 'many'), array('number', '4,50'), array('bool', 'maybe'), array('date', '2026-02-30'), array('date', '20261005'), array('time', '25:00')) as $bad) {
+	same(date('Y-m-d'), cms_types::clean('date', 'today', 'date'), 'date>=today');
+	same('12:00', cms_types::clean('time', 'noon', 'time'));
+	// PHP reads a lone letter as a time zone and moves 31 Feb into March; a
+	// date is not a time of day; 1e19 is past an int, 1e999 is INF
+	foreach (array(array('int', '2.5'), array('int', 'many'), array('int', 1e19), array('number', '4,50'), array('number', '1e999'), array('bool', 'maybe'),
+		array('date', '2026-02-30'), array('date', '31 Feb 2026'), array('date', '20261005'), array('date', 'a'), array('date', 'x'), array('datetime', 'eat'),
+		array('time', '25:00'), array('time', 'a'), array('time', '2026-10-05')) as $bad) {
 		try {
 			cms_types::clean($bad[0], $bad[1], 'x');
 			throw new Exception("'{$bad[1]}' passed as {$bad[0]}");
@@ -888,6 +894,14 @@ test('values are stored as their type, or refused naming the field', function ()
 
 test('reads give PHP types; templates print text with the mock-up\'s decimals', function () {
 	same(array(3, 4.5, true, null, ''), array(cms_types::read('int', '3'), cms_types::read('number', '4.5'), cms_types::read('bool', 1), cms_types::read('date', null), cms_types::read('text', null)));
+	// as SQLite and MySQL report columns
+	foreach (array('INTEGER' => 'int', 'int(11)' => 'int', 'int(11) unsigned' => 'int', 'tinyint(3) unsigned' => 'int', 'tinyint(1)' => 'bool', 'BOOLEAN' => 'bool',
+		'REAL' => 'number', 'double' => 'number', 'date' => 'date', 'datetime' => 'datetime', 'time' => 'time', 'TEXT' => 'text', 'varchar(191)' => 'text', 'NUMERIC' => 'text') as $column => $type) {
+		same($type, cms_types::of_column($column), "$column:");
+	}
+	// a record's row keeps its numbers, which the template prints with its
+	// mock-up's decimals
+	same(array('price' => 24.0, 'name' => 'Mug', 'raster_escape' => array('name')), cms_records::for_template(array('html' => array()), array('price' => 24.0, 'name' => 'Mug')));
 	same('4.50', cms_types::show(4.5, '14.50'));
 	same('4.5', cms_types::show(4.5, 'Price'));
 	same('12', cms_types::show(12.0, '0'));

@@ -668,6 +668,9 @@ class template {
     function render_rows($render_template, $rows, $list = null, $marking = false, $nested = false) {
 		preg_match_all('/<!-- print\.([@\+,a-z,A-Z,_,-,\.,0-9]*) (\/?)-->/', $render_template, $datastarts);
 		$rendered_data = '';
+		// the mock-up of each field, for the editor: what it saves comes back
+		// printed the way this template prints it (4.5 as 4.50)
+		$examples = $marking ? array_filter($this->mockup($render_template)['fields'], 'is_string') : array();
 		foreach($rows as $data)
 		{
 			if(is_object($data))
@@ -692,7 +695,7 @@ class template {
 					foreach ($record['hidden'] as $hidden) unset($values[$hidden]);
 					$details += array('record' => true, 'readonly' => array_values(array_filter(array_keys($values), function ($k) use ($record) { return cms_records::locked($record, $k); })), 'actions' => cms_records::allowed_actions($record));
 				}
-				$item_mark = $this->mark($details + array('values' => $values));
+				$item_mark = $this->mark($details + array('values' => cms_types::show_row($values, $examples), 'examples' => $examples));
 			}
 
 			$rendered_tpl = $render_template;
@@ -783,6 +786,8 @@ class template {
 		                }
 		                else
 		                {
+		                	// a number prints with as many decimals as its mock-up: 4.5 as 4.50
+		                	if (is_float($data[$datakey])) $data[$datakey] = cms_types::show($data[$datakey], trim($current_item));
 		                	$printed = $this->escape($data[$datakey]);
 		                	// records (cms_records::for_template) print what visitors typed as text
 		                	if ($this->format === 'html' && isset($data['raster_escape']) && is_array($data['raster_escape']) && in_array($datakey, $data['raster_escape'], true)) {
