@@ -40,7 +40,14 @@ class raster_project
 	}
 
 	static function set_app_version($app_dir, $version) {
-		file_put_contents($app_dir.'/config/raster-version', $version."\n");
+		return @file_put_contents($app_dir.'/config/raster-version', $version."\n") !== false;
+	}
+
+	// an app folder is a folder with a config/ inside; `raster upgrade`
+	// refuses anything else (a misspelled RASTER_APP) rather than say it
+	// upgraded it
+	static function is_app($root, $app) {
+		return $app !== '' && is_dir($root.'/'.$app.'/config');
 	}
 
 	// app folders: top-level folders with a config/ inside
@@ -262,7 +269,9 @@ class raster_project
 			$result = call_user_func($step['apply'], $step['context']);
 			$done[] = array('version' => $step['version'], 'id' => $step['id'], 'description' => $step['description'], 'result' => is_string($result) ? $result : '');
 		}
-		self::set_app_version($root.'/'.$app, self::version($root));
+		if (!self::set_app_version($root.'/'.$app, self::version($root))) {
+			throw new RuntimeException("Could not write $app/config/raster-version".($done ? ' (the steps above ran; upgrade runs them again next time)' : ''));
+		}
 		return $done;
 	}
 

@@ -437,6 +437,10 @@ switch ($command) {
 	case 'upgrade':
 		require_once BASE.'tools/project.php';
 		$app = boot::$appname;
+		if (!raster_project::is_app($root, $app)) {
+			fwrite(STDERR, $paint('error', '31').": $app/ is not a Raster app (it has no config/ folder). Check RASTER_APP.\n");
+			exit(1);
+		}
 		$pending = raster_project::pending($root, $app);
 		$to = raster_project::version($root);
 		// an app with no version file is taken as current, never as 1.x
@@ -448,7 +452,12 @@ switch ($command) {
 			foreach ($pending as $step) echo "  {$step['version']} {$step['id']}: {$step['description']}\n";
 			exit(0);
 		}
-		$done = raster_project::upgrade($root, $app);
+		try {
+			$done = raster_project::upgrade($root, $app);
+		} catch (RuntimeException $e) {
+			fwrite(STDERR, $paint('error', '31').': '.$e->getMessage()."\n");
+			exit(1);
+		}
 		foreach ($done as $step) echo "  ✓ {$step['version']} {$step['id']}: {$step['description']}".($step['result'] !== '' ? " ({$step['result']})" : '')."\n";
 		if ($unversioned) echo "$app/ had no config/raster-version: taken as Raster $to, no upgrade steps run ($hint)\n";
 		else echo "$app/ is at Raster $to".($done ? '' : ', nothing to change')."\n";

@@ -51,6 +51,8 @@ php bin/raster upgrade             # apply them
 
 An app without that file, such as a second app you made by copying the first, is taken as current: `raster upgrade` writes today's version into it, runs no old steps and says so in one line. From then on it updates like any other app.
 
+`raster upgrade` works on the app `RASTER_APP` names (`application` by default). A name that isn't an app folder, misspelled or without a `config/` folder inside, is refused with an error and exit code 1, and nothing is written.
+
 Upgrade steps only change files. Database changes are always yours to apply, with `php bin/raster schema --apply` in production.
 
 ## Deprecated features

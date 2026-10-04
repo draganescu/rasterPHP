@@ -1004,7 +1004,9 @@ command-line output). They win over the settings above.
   moved files). The version an app is at is in `config/raster-version`.
   An app without that file (one made by hand) is taken as current: `upgrade`
   writes today's version into it and runs no old steps. An app from Raster
-  1.x gets them by having `1.0.0` written there first.
+  1.x gets them by having `1.0.0` written there first. A `RASTER_APP`
+  that names no app folder (missing, or without `config/`) is refused with
+  an error and exit 1, and nothing is written.
   Database changes stay with `raster schema --apply`.
 - `php bin/raster doctor` checks PHP, versions, edited framework files,
   templates, the database, whether `.htaccess` still carries every rule in
