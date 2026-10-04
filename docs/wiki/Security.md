@@ -10,7 +10,9 @@ This page lists the protections Raster applies for you, and the few things that 
 
 **Spam bots are fooled.** Every post form has a hidden honeypot field. Posts that fill it get a fake success and nothing is done.
 
-**Validation runs on the server.** The rules in your HTML (`required`, `type`, `maxlength`, `pattern`…) are enforced on the server as well as in the browser.
+**Validation runs on the server.** The rules in your HTML (`required`, `type`, `maxlength`, `pattern`…) are enforced on the server as well as in the browser. A field sent as a list the form didn't ask for (`name[]=x`), or with bytes that aren't UTF-8, fails `required` instead of slipping past the rules.
+
+**Links visitors type can't run script.** A record field a visitor wrote and a view prints as a link (`print.@href.website`) is dropped when it is a `javascript:`, `data:` or `vbscript:` URL, also when an HTML entity, a tab, a newline or a control byte hides the scheme. The in-page editor applies the same rule to links editors type.
 
 **Passwords** are hashed with PHP's `password_hash`. Five wrong passwords lock an account for 15 minutes (once 15 minutes pass after the last one, counting starts again), and failed attempts are slowed down. Changing a password logs out other sessions. The password-reset form answers the same whether or not an account exists, and reset links expire after an hour and work once.
 

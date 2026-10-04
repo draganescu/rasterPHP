@@ -1514,7 +1514,67 @@ test('after a lock runs out, wrong passwords are counted from zero (#73)', funct
 });
 
 // ## 2.1.8 batch E: template output
-// (batch E adds its tests here)
+test('a form shown again keeps $100, \\1 and $0 as typed (#66)', function () {
+	$typed = 'Table for $20 a head, not $100 \\1 $0 \\\\2 ${1}';
+	$e = htmlspecialchars($typed, ENT_QUOTES, 'UTF-8');
+	$out = template::instance()->fill_form('<form method="post"><input name="name"><input name="phone" value="x" /><p class="spa_name">n</p></form>', array('name' => $typed, 'phone' => '\\1 $0', 'extra' => $typed), true);
+	check(strpos($out, '<input name="name" value="'.$e.'">') !== false, 'input value: '.$out);
+	check(strpos($out, 'name="phone" value="\\1 $0" />') !== false, 'a value of \\1 $0: '.$out);
+	check(strpos($out, '<p class="spa_name">'.$e.'</p>') !== false, 'spa_ text: '.$out);
+	check(strpos($out, '<form method="post">'."\n".'<input type="hidden" name="extra" value="'.$e.'">') !== false, 'hidden input: '.$out);
+});
+test('an attribute added to a tag keeps $1 and \\1 (#66)', function () {
+	same('<a class="x" href="/pay?$1=\\1&amp;$0">p</a>', template::set_attribute('<a class="x">p</a>', 'href', '/pay?$1=\\1&$0'));
+	same('<img src="a.jpg" alt="$5 \\1"/>', template::set_attribute('<img src="a.jpg" />', 'alt', '$5 \\1'));
+});
+test('a link a visitor typed is no script, whatever bytes hide the scheme (#67)', function () {
+	foreach (array("javascript:alert(1)", " javascript:x", "java\tscript:x", "java\nscript:x", "java\rscript:x", "\x01javascript:x", "\x00javascript:x", "j\x0Bavascript:x",
+		"JaVaScRiPt:x", "&#106;avascript:x", "&#106avascript:x", "&#x6A;avascript:x", "javascript&colon;x", "java&Tab;script:x", "data:text/html,x", "vbscript:x", " v b s c r i p t :x", "\x1Fdata:x",
+		"&#1;javascript:x", "java&#13;script:x", "&#x1F;javascript:x", "&#x0D;javascript:x", "&#0;javascript:x", "java&#x09script:x", "&#32;javascript:x") as $link) {
+		same(true, template::script_link($link), json_encode($link));
+	}
+	foreach (array("https://example.com/", "/about", "mailto:a@b.co", "about.html", "#top", "javascripts/app.js", "?q=data:x", "") as $link) {
+		same(false, template::script_link($link), json_encode($link));
+	}
+});
+test('the editor\'s clean() drops the same script links (#67)', function () use ($root) {
+	$node = trim((string)shell_exec('command -v node 2>/dev/null'));
+	if ($node === '') return; // no node here: tests/editor-browser.js covers it in a browser
+	$js = file_get_contents("$root/system/models/cms/editor/editor.js");
+	check(preg_match('/\tfunction scriptLink\(href\) \{.*?\n\t\}\n/s', $js, $m), 'editor.js has scriptLink()');
+	$cases = array("javascript:x" => true, "java\tscript:x" => true, "java\nscript:x" => true, "\x01javascript:x" => true, "vbscript:x" => true, "data:x" => true,
+		"&#106avascript:x" => true, "https://example.com/" => false, "/about" => false);
+	$file = sys_get_temp_dir().'/raster-clean-'.getmypid().'.js';
+	file_put_contents($file, $m[0]."\nvar cases = ".json_encode(array_keys($cases)).";\nprocess.stdout.write(JSON.stringify(cases.map(scriptLink)));\n");
+	$out = shell_exec(escapeshellarg($node).' '.escapeshellarg($file).' 2>&1');
+	unlink($file);
+	same(array_values($cases), json_decode((string)$out, true), (string)$out);
+});
+test('arrays and bad bytes fail required; a field named tags[] takes a list (#70)', function () use ($base) {
+	$v = validation::get();
+	$r = new ReflectionMethod($v, 'check_field');
+	$r->setAccessible(true);
+	$saved = $_POST;
+	$cases = array(
+		array(array('required' => true, 'type' => 'text'), array('x'), array('required')),
+		array(array('type' => 'text'), array('x'), array('required')),
+		array(array('type' => 'text', 'pattern' => '[0-9 ]+'), "\xFF12", array('required')),
+		array(array('type' => 'text'), "caf\xC3", array('required')),
+		array(array('type' => 'text', 'list' => true), array('a', 'b'), array()),
+		array(array('type' => 'text', 'list' => true, 'required' => true), array('', ''), array('required')),
+		array(array('type' => 'text', 'list' => true), array("\xFF"), array('required')),
+		array(array('type' => 'text'), 'Café $5', array()),
+		array(array('type' => 'text', 'pattern' => '(a+)+b'), str_repeat('a', 40000).'c', array('pattern')),
+	);
+	try {
+		foreach ($cases as $i => $case) {
+			$_POST = array('f' => $case[1]);
+			same($case[2], $r->invoke($v, 'f', $case[0]), "case $i");
+		}
+	} finally { $_POST = $saved; }
+	same(array('type' => 'checkbox', 'list' => true), array_intersect_key(template::instance()->constraints('<input type="checkbox" name="tags[]" value="a">')['tags'], array('list' => 1, 'type' => 1)));
+	check(!isset(template::instance()->constraints('<input name="tags">')['tags']['list']), 'a plain name is no list');
+});
 
 // ## 2.1.8 batch F: upgrade tooling
 // (batch F adds its tests here)

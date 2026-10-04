@@ -100,6 +100,7 @@ php tests/demo.php                        # the whole matrix
 | C49 | in production (strict templates off) any exception (a missing named query too) shows the plain error page and goes to the error log; `log::warning` and `log::error` always reach the error log |
 | C50 | an /api method that throws answers JSON: 500 `{"error":"server error"}` logged with the URL (a bad query too), 503 when the database is down, 400 for missing arguments; development adds the trace |
 | C51 | `cms` offers over /api only what its `api()` lists (the editor endpoints, `style`, `logout`); a public method of a `the_cms` override answers 404 unless listed |
+| C52 | a link a visitor typed can't run script, even with a tab, newline, control byte or HTML entity hiding `javascript:`, `data:` or `vbscript:` |
 | D1 | raster_form and honeypot on every post form |
 | D2 | the session token on forms for logged in users |
 | D3 | posts from other sites refused (Origin, Sec-Fetch-Site, Referer, /api too) |
@@ -126,6 +127,8 @@ php tests/demo.php                        # the whole matrix
 | D24 | `field('guests', 'max')` shows only when that rule fails |
 | D25 | validation::errors() lists what failed |
 | D26 | a form with `method="get"` shows what the URL asked (the staff page's filters) |
+| D27 | a form shown again keeps what was typed exactly, `$100`, `\1` and `$0` included |
+| D28 | a field sent as a list (`name[]`) when the form doesn't name it so, or with bytes that aren't UTF-8, fails `required`; a field named `tags[]` takes a list |
 | E1 | page fields with defaults from the markup |
 | E2 | site_ fields shared by every page |
 | E3 | collections seeded from the mock-up |
@@ -157,6 +160,7 @@ php tests/demo.php                        # the whole matrix
 | E29 | photos: page and item image fields; an empty value keeps the template's picture |
 | E30 | admin pages: views `protected` keeps for editors or admins are listed in the editor's Admin menu, by title, for whoever may open them; `describe` lists them |
 | E31 | fields named like SQL words (`when`, `from`, `group`) sort, filter (`group>2`) and link to their filter pages (`/trips/trips_items/from/Paris`) like any other field |
+| E32 | the in-page editor gets stored text as it is: `$5`, `\1` and backslashes, so Duplicate copies it unchanged |
 | F1 | schema status as JSON |
 | F2 | schema --check |
 | F3 | schema --apply in production, including model tables |
