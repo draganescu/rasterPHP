@@ -675,9 +675,12 @@ class reservation {
   see **Editors and agents**),
   `registration` (false turns sign-up off), `login_page`, `after_login`,
   `password_min_length` (8).
-- Five wrong passwords lock an account for 15 minutes.
+- Five wrong passwords lock an account for 15 minutes. Once 15 minutes have
+  passed since the last wrong one, counting starts again from zero.
 - Command line: `php bin/raster user <email|name> [--role=…] [--password=…]`
-  and `php bin/raster users`.
+  and `php bin/raster users`. A new account is an admin with a random
+  password unless the options say otherwise; an existing one keeps the role
+  or password the command isn't given.
 
 **newsletter**: sign-ups with double opt-in.
 - Regions:

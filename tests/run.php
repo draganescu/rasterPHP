@@ -933,7 +933,64 @@ test('the ORM does not need pdo_mysql for an SQLite site', function () {
 // (batch C adds its tests here)
 
 // ## 2.1.8 batch D: accounts
-// (batch D adds its tests here)
+
+test('raster user keeps the role and password it is not given (#71)', function () use ($root) {
+	$db = sys_get_temp_dir().'/raster-user-'.getmypid().'.sqlite';
+	$env = 'RASTER_ENV=development RASTER_DB='.escapeshellarg($db);
+	$raster = function ($args) use ($env, $root) {
+		exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' '.$args.' 2>&1', $out, $code);
+		same(0, $code, implode("\n", $out));
+		return implode("\n", $out);
+	};
+	$account = function ($login, $password) use ($env, $root) {
+		$code = 'require "'.$root.'/system/boot.php"; boot::$appname = "application"; boot::cli(); authentication::connect();'
+			.' $u = authentication::find('.var_export($login, true).'); echo $u->role, " ", authentication::check_login('.var_export($login, true).', '.var_export($password, true).') ? "ok" : "fail";';
+		return trim(shell_exec("$env ".escapeshellarg(PHP_BINARY).' -r '.escapeshellarg($code).' 2>&1'));
+	};
+	try {
+		$raster('user reader@example.test --role=member --password=first-password');
+		same('member ok', $account('reader@example.test', 'first-password'));
+		// a password reset keeps the role
+		$out = $raster('user reader@example.test --password=second-password');
+		check(strpos($out, 'saved as member') !== false && strpos($out, 'role kept') !== false, $out);
+		same('member ok', $account('reader@example.test', 'second-password'));
+		// a role change keeps the password, and prints none
+		$out = $raster('user reader@example.test --role=editor');
+		check(strpos($out, 'saved as editor') !== false && strpos($out, 'password kept') !== false, $out);
+		check(strpos($out, 'Password:') === false, "no new password: $out");
+		same('editor ok', $account('reader@example.test', 'second-password'));
+		// neither: nothing changes
+		$out = $raster('user reader@example.test');
+		check(strpos($out, 'saved as editor') !== false && strpos($out, 'Password:') === false, $out);
+		same('editor ok', $account('reader@example.test', 'second-password'));
+		// a new account is still an admin with a random password
+		$out = $raster('user owner@example.test');
+		check(preg_match('/saved as admin\. Password: ([a-f0-9]{18})/', $out, $m), $out);
+		same('admin ok', $account('owner@example.test', $m[1]));
+	} finally {
+		array_map('unlink', glob("$db*") ?: array());
+	}
+});
+test('after a lock runs out, wrong passwords are counted from zero (#73)', function () {
+	authentication::connect();
+	$id = authentication::save_user('relock@example.test', 'right password', 'member');
+	$wrong = function ($times) {
+		for ($i = 0; $i < $times; $i++) same(false, authentication::check_login('relock@example.test', 'wrong'));
+	};
+	$expire = function () use ($id) {
+		R::exec('UPDATE user SET failed_at = ? WHERE id = ?', array(date('Y-m-d H:i:s', time() - 16 * 60), $id));
+	};
+	$wrong(5);
+	same(false, authentication::check_login('relock@example.test', 'right password'), 'locked');
+	$expire();
+	$wrong(1);
+	same($id, authentication::check_login('relock@example.test', 'right password'), 'one wrong guess after the lock ran out locked it again');
+	$wrong(5);
+	same(false, authentication::check_login('relock@example.test', 'right password'), 'five new wrong passwords lock it again');
+	$expire();
+	$wrong(4);
+	same($id, authentication::check_login('relock@example.test', 'right password'), 'four wrong passwords after the lock ran out locked it');
+});
 
 // ## 2.1.8 batch E: template output
 // (batch E adds its tests here)

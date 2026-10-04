@@ -2617,7 +2617,40 @@ test('T6', 'schema --apply converts a column whose type changed when every value
 // (batch C adds its tests here)
 
 // ## 2.1.8 batch D: accounts
-// (batch D adds its tests here)
+
+test('G22', 'raster user changes only what it is given (#71)', function () use ($base) {
+	same(0, raster(array('user', 'keeper@cafe.test', '--role=member', '--password=first password'))[0]);
+	list($code, $out) = raster(array('user', 'keeper@cafe.test', '--password=second password'));
+	same(0, $code, $out);
+	has($out, "saved as member (role kept)");
+	has(raster(array('users'))[1], 'member   keeper@cafe.test', 'a password reset made them');
+	login($base, 'keeper@cafe.test', 'second password');
+	list($code, $out) = raster(array('user', 'keeper@cafe.test', '--role=editor'));
+	same(0, $code, $out);
+	has($out, 'saved as editor (password kept)');
+	lacks($out, 'Password:');
+	has(raster(array('users'))[1], 'editor   keeper@cafe.test');
+	login($base, 'keeper@cafe.test', 'second password');
+});
+test('G23', 'once a lock runs out, five new wrong passwords lock again (#73)', function () use ($base) {
+	raster(array('user', 'relock@cafe.test', '--role=member', '--password=right password'));
+	$wrong = function ($times) use ($base) {
+		for ($i = 0; $i < $times; $i++) http('POST', "$base/login", array('raster_form' => 'authentication.login', 'login' => 'relock@cafe.test', 'password' => 'wrong'));
+	};
+	$expire = function () {
+		database::instance('cms');
+		R::exec("UPDATE user SET failed_at = ? WHERE email = 'relock@cafe.test'", array(date('Y-m-d H:i:s', time() - 16 * 60)));
+	};
+	$wrong(5);
+	$expire();
+	$wrong(1);
+	login($base, 'relock@cafe.test', 'right password');
+	$wrong(5);
+	has(http('POST', "$base/login", array('raster_form' => 'authentication.login', 'login' => 'relock@cafe.test', 'password' => 'right password'))[1], 'Wrong email or password.', 'locked again');
+	$expire();
+	$wrong(4);
+	login($base, 'relock@cafe.test', 'right password');
+});
 
 // ## 2.1.8 batch E: template output
 // (batch E adds its tests here)

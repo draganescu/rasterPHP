@@ -181,7 +181,9 @@ php tests/demo.php                        # the whole matrix
 | G18 | visitors get no cookies |
 | G19 | `login_page` |
 | G20 | log in with a username |
-| G21 | `raster user` defaults: admin, random password |
+| G21 | `raster user` defaults for a new account: admin, random password |
+| G22 | `raster user` on an existing account keeps the role and password it isn't given |
+| G23 | once a lock runs out, wrong passwords are counted from zero |
 | H1 | newsletter sign up sends a confirmation |
 | H2 | the same answer for people already subscribed |
 | H3 | confirm |
