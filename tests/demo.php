@@ -2672,7 +2672,43 @@ test(array('L9', 'L10'), 'page cache: made-up list URLs are not kept, a change d
 // (batch E adds its tests here)
 
 // ## 2.1.8 batch F: upgrade tooling
-// (batch F adds its tests here)
+
+test('A17', 'theme files of every kind are served: no old .htaccess below the root', function () use ($base, $root, $views) {
+	// application/.htaccess and system/.htaccess once allowed only a few
+	// extensions on Apache; the root .htaccess has every rule on its own
+	exec('git -C '.escapeshellarg($root).' ls-files', $files);
+	same(array('.htaccess'), array_values(preg_grep('#(^|/)\.htaccess$#', $files)), 'only the root .htaccess');
+	foreach (array('a17.webp', 'a17.woff2', 'a17.ico', 'a17.pdf') as $file) {
+		with_file("$views/img/$file", "x", function () use ($base, $file) {
+			same(200, http('GET', "$base/demo/views/cafe/img/$file")[0], $file);
+		});
+	}
+	same(200, http('GET', "$base/demo/views/cafe/img/logo.svg")[0]);
+	foreach (array('/demo/config/the_app.php', '/demo/data/x', '/demo/models/cafe/cafe.php', '/system/VERSION') as $path) {
+		same(403, http('GET', $base.$path)[0], $path);
+	}
+});
+
+test('N15', 'raster upgrade takes an app with no version file as current', function () use ($root) {
+	// a second app made by hand: a copy of the demo's settings, no version file
+	$app = "$root/zzn15";
+	mkdir("$app/models", 0775, true);
+	exec('cp -R '.escapeshellarg("$root/demo/config").' '.escapeshellarg("$app/config"));
+	@unlink("$app/config/raster-version");
+	try {
+		$version = trim(file_get_contents("$root/system/VERSION"));
+		$env = array('RASTER_APP' => 'zzn15');
+		has(raster(array('upgrade', '--dry-run'), $env)[1], 'zzn15/ has no config/raster-version: upgrade takes it as Raster '.$version.' and runs no steps');
+		check(!is_file("$app/config/raster-version"));
+		list($code, $out) = raster(array('upgrade'), $env);
+		same(0, $code, $out);
+		same("zzn15/ had no config/raster-version: taken as Raster $version, no upgrade steps run (for an app from Raster 1.x, write 1.0.0 in that file and run upgrade again)", trim($out));
+		same("$version\n", file_get_contents("$app/config/raster-version"));
+		has(raster(array('upgrade'), $env)[1], "zzn15/ is at Raster $version, nothing to change");
+	} finally {
+		exec('rm -rf '.escapeshellarg($app));
+	}
+});
 
 // ## 2.1.8 batch G: MCP themes
 
