@@ -2094,7 +2094,7 @@ test(array('R15', 'D26'), 'list options: filters from the URL, dates, several or
 	$list = cms_store::list_options('status!=cancelled&date<today&guests>=2&seating=?seating&order=-date,name&limit=5');
 	same(array(array('status', '!=', 'cancelled'), array('date', '<', $day(0)), array('guests', '>=', '2')), $list['conditions'], 'no ?seating in the URL here');
 	same(array('order' => '-date,name', 'limit' => '5'), $list['options']);
-	same('date DESC, name ASC, id ASC', cms_store::order_sql('-date,name', array('date' => 1, 'name' => 1)));
+	same('`date` DESC, `name` ASC, id ASC', cms_store::order_sql('-date,name', array('date' => 1, 'name' => 1)));
 	same('id ASC', cms_store::order_sql('nope,-nope', array('date' => 1)));
 	// pages of a list filtered from the URL keep the query
 	has(http('GET', "$base/menu?category=cakes")[1], 'menu_page/2?category=cakes', 'pagination keeps the query');
@@ -2632,7 +2632,7 @@ test('E31', 'fields named like SQL words (when, from, group) sort, filter and li
 			same(200, $status);
 			same(array('Oslo', 'Lima', 'Rome'), $titles($html, 'by-when'), 'order=when');
 			same(array('Lima', 'Rome'), $titles($html, 'big'), 'group>2&order=-group');
-			has($html, 'href="'.$base.'/zztrips/zztrips_items/from/Paris"');
+			has($html, 'href="'.$base.'/zztrips/zztrips_items/from/Paris/"');
 			list($status, $html) = http('GET', "$base/zztrips/zztrips_items/from/Paris");
 			same(200, $status);
 			same(array('Lima', 'Rome'), $titles($html, 'by-when'), 'the filter page');
