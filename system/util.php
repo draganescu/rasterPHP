@@ -160,12 +160,15 @@ function raster_path($path) {
 }
 
 // #Page cache
-// Whole pages are cached for visitors (no session, no query string) and
-// thrown away when content changes. On by default in production; set
-// config page_cache to true or false to decide yourself.
+// Whole pages are cached for visitors (no session, no query string but
+// tracking parameters) and thrown away when content changes. On by default
+// in production; set config page_cache to true or false to decide yourself.
 class raster_cache {
 
 	static $cacheable = null;
+	// the version when the request started: the page is stored under it, so
+	// one whose render overlapped a content change is never served as fresh
+	static $version = null;
 
 	static function dir() {
 		return APPBASE.'data/cache/';
@@ -187,44 +190,65 @@ class raster_cache {
 		$uri = (string)config::get('uri_string');
 		$ok = self::enabled()
 			&& isset($_SERVER['REQUEST_METHOD']) && in_array($_SERVER['REQUEST_METHOD'], array('GET', 'HEAD'))
-			&& empty($_SERVER['QUERY_STRING'])
 			&& !isset($_COOKIE[session_name()])
 			&& !preg_match('#^/(api|mcp|login)(/|$)#', $uri);
+		// a link shared with ?utm_source=… or an ad's click id is the same page
+		foreach (explode('&', isset($_SERVER['QUERY_STRING']) ? (string)$_SERVER['QUERY_STRING'] : '') as $pair) {
+			if ($pair !== '' && !preg_match('/^(utm_[a-z0-9_]*|fbclid|gclid|msclkid)$/i', urldecode(strtok($pair, '=')))) $ok = false;
+		}
 		foreach ((array)config::get('page_cache_skip', array()) as $pattern) {
 			if (preg_match('%^/?'.$pattern.'%', $uri)) $ok = false;
 		}
 		return self::$cacheable = $ok;
 	}
 
-	static function version() {
-		$file = self::dir().'version';
-		return is_file($file) ? (int)file_get_contents($file) : 0;
+	// a page the request decided not to keep, though it answers 200: a filter
+	// page with no items, a page past the last one
+	static function skip() {
+		self::$cacheable = false;
 	}
 
-	static function bump() {
+	static function version() {
+		$file = self::dir().'version';
+		return is_file($file) ? (string)file_get_contents($file) : '';
+	}
+
+	// writes a file whole, under a temporary name it then takes: whoever
+	// reads it gets the old file or the new one, never part of one
+	static function write($file, $content) {
 		if (!is_dir(self::dir())) @mkdir(self::dir(), 0775, true);
-		@file_put_contents(self::dir().'version', (string)(self::version() + 1), LOCK_EX);
+		$temporary = $file.'.'.bin2hex(random_bytes(6)).'.tmp';
+		if (@file_put_contents($temporary, $content) === false || !@rename($temporary, $file)) @unlink($temporary);
+	}
+
+	// content changed: a new version, and the pages cached under the old one
+	// are deleted (files other requests are still writing are left alone).
+	// The version is random, not counted, so it is never read to make the
+	// next one and an old one never comes back. Returns how many pages were
+	// deleted.
+	static function bump() {
+		self::write(self::dir().'version', bin2hex(random_bytes(8)));
+		$removed = 0;
+		foreach (glob(self::dir().'*') ?: array() as $file) {
+			if (preg_match('/^[0-9a-f]{40}$/', basename($file)) && @unlink($file)) $removed++;
+		}
+		return $removed;
 	}
 
 	// throws every cached page away: for changes Raster can't see, such as
 	// views, models or the database edited directly. Returns the new version
 	// and how many cached pages were deleted.
 	static function clear() {
-		self::bump();
-		$removed = 0;
-		foreach (glob(self::dir().'*') ?: array() as $file) {
-			if (preg_match('/^[0-9a-f]{40}$/', basename($file)) && @unlink($file)) $removed++;
-		}
+		$removed = self::bump();
 		return array('version' => self::version(), 'removed' => $removed);
 	}
 
 	// an item scheduled for later: the cache is thrown away at that time
 	static function schedule($timestamp) {
 		if ($timestamp <= time()) return;
-		if (!is_dir(self::dir())) @mkdir(self::dir(), 0775, true);
 		$file = self::dir().'next';
 		$next = is_file($file) ? (int)file_get_contents($file) : 0;
-		if ($next === 0 || $next <= time() || $timestamp < $next) @file_put_contents($file, (string)$timestamp, LOCK_EX);
+		if ($next === 0 || $next <= time() || $timestamp < $next) self::write($file, (string)$timestamp);
 	}
 
 	// a scheduled item's time has come: that's a content change too
@@ -239,12 +263,13 @@ class raster_cache {
 	static function serve() {
 		if (!self::cacheable()) return;
 		self::publish_due();
+		self::$version = self::version();
 		$file = self::dir().self::key();
-		if (!is_file($file)) return;
-		$handle = fopen($file, 'r');
+		$handle = @fopen($file, 'r');
+		if (!$handle) return;
 		$meta = json_decode((string)fgets($handle), true);
 		$ttl = (int)config::get('page_cache_ttl', 3600);
-		if (!$meta || $meta['v'] !== self::version() || time() - $meta['t'] > $ttl) { fclose($handle); return; }
+		if (!$meta || $meta['v'] !== self::$version || time() - $meta['t'] > $ttl) { fclose($handle); return; }
 		header('Content-Type: '.$meta['type']);
 		header('X-Raster-Cache: hit');
 		fpassthru($handle);
@@ -254,14 +279,15 @@ class raster_cache {
 
 	static function store($output) {
 		if (!self::cacheable() || http_response_code() !== 200 || session_status() === PHP_SESSION_ACTIVE) return;
+		// content changed while the page was made: it may show the old content
+		if (self::$version === null || self::$version !== self::version()) return;
 		$type = 'text/html; charset=utf-8';
 		foreach (headers_list() as $header) {
 			if (stripos($header, 'Set-Cookie:') === 0) return;
 			if (stripos($header, 'Content-Type:') === 0) $type = trim(substr($header, 13));
 		}
-		if (!is_dir(self::dir())) @mkdir(self::dir(), 0775, true);
-		$meta = json_encode(array('v' => self::version(), 't' => time(), 'type' => $type));
-		@file_put_contents(self::dir().self::key(), $meta."\n".$output, LOCK_EX);
+		$meta = json_encode(array('v' => self::$version, 't' => time(), 'type' => $type));
+		self::write(self::dir().self::key(), $meta."\n".$output);
 		if (!headers_sent()) header('X-Raster-Cache: miss');
 	}
 }

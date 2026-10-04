@@ -220,6 +220,8 @@ php tests/demo.php                        # the whole matrix
 | L6 | `site_url` in config |
 | L7 | `page_cache_skip`, `page_cache_ttl`, `page_cache` off |
 | L8 | `raster cache clear` and MCP `clear_cache` for changes made outside Raster; `describe` says whether the cache is on |
+| L9 | page cache: empty filter pages, pages past the last one and unknown filter fields answer 200 but aren't kept; a content change deletes the old cached pages |
+| L10 | page cache: links with only tracking parameters (`utm_*`, `fbclid`, `gclid`, `msclkid`) are cache hits |
 | M1 | MCP needs its token; GET is refused |
 | M2 | initialize, ping, tools/list, batches, errors |
 | M3 | notifications get 202 |

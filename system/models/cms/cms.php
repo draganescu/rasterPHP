@@ -249,6 +249,8 @@ class cms
 
 		$page = (int)util::param($name.'_page', 0);
 		$roffset = $page > 1 ? ($page-1)*$page_size : 0;
+		// /news/news_page/2x shows page 2, but is not a page worth keeping
+		if (util::param($name.'_page') !== false && (string)$page !== util::param($name.'_page')) raster_cache::skip();
 
 		// one item: /news/news_item/3 or /news/news_item/raster-runs-on-php-8
 		if (util::param($name) == $name.'_item') {
@@ -258,16 +260,18 @@ class cms
 		}
 
 		// uri filters: /news/news_items/tag/php
+		$uri_filters = array();
 		if (util::param($name) == $name.'_items') {
 			$uri_segments = config::get('uri_segments');
 			$start_key = array_search($name.'_items', $uri_segments);
 			foreach ($uri_segments as $key => $value) {
 				if ($key > $start_key && ($key - $start_key)%2 == 0) {
-					$filters[$uri_segments[$key-1]] = $value;
+					$uri_filters[$uri_segments[$key-1]] = $value;
 				}
 			}
+			unset($uri_filters[$name.'_page']);
+			$filters = $uri_filters + $filters;
 		}
-		unset($filters[$name.'_page']);
 
 		// param filters: render.cms.news('featured=1&order=newest&limit=3'),
 		// render.cms.booking('stylist=?stylist&date>=today&order=date,time')
@@ -359,12 +363,19 @@ class cms
 		// "did this email book?")
 		if ($record && !cms::loggedin()) {
 			$secret = array_merge($record['hidden'], array('owner'));
-			foreach ($secret as $hidden) unset($filters[$hidden]);
+			foreach ($secret as $hidden) {
+				// a filter the URL asks for and the list ignores
+				if (isset($uri_filters[$hidden])) raster_cache::skip();
+				unset($filters[$hidden]);
+			}
 			$compare = array_filter($compare, function ($c) use ($secret) { return !in_array($c[0], $secret, true); });
 		}
 		foreach ($filters as $key => $value) {
 			if (!array_key_exists($key, $fields) || !preg_match('/^[a-z0-9_]+$/', $key)) {
 				if ($key === 'id' || $key === 'slug') return array();
+				// /news/news_items/nonsense/x lists everything; it answers,
+				// but every made-up field would be a page of its own
+				if (array_key_exists($key, $uri_filters)) raster_cache::skip();
 				continue;
 			}
 			$compare[] = array($key, '=', $value);
@@ -376,6 +387,9 @@ class cms
 		$sql .= ' ORDER BY '.cms_store::order_sql(isset($options['order']) ? $options['order'] : '', $fields).' LIMIT '.(int)$page_size.' OFFSET '.(int)$roffset;
 		$data = array_values(array_map(array('cms_store', 'export_item'), R::find($this->data_name, $sql, $bindings)));
 		if (!$data && !$record && database::$frozen && R::count($this->data_name) == 0) return false;
+		// a filter nothing matches and a page past the last one answer, empty;
+		// they are not kept, so made-up URLs don't fill the page cache
+		if (!$data && ($page > 1 || $uri_filters)) raster_cache::skip();
 		// the template prints text: 4.5 as its mock-up 4.50 does
 		foreach ($data as $key => $row) $data[$key] = cms_types::show_row($row, $expected_properties);
 		if ($record) {

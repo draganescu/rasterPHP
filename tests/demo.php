@@ -2608,7 +2608,36 @@ test('T6', 'schema --apply converts a column whose type changed when every value
 });
 
 // ## 2.1.8 batch A: page cache
-// (batch A adds its tests here)
+
+test(array('L9', 'L10'), 'page cache: made-up list URLs are not kept, a change deletes old pages, tracking links are hits', function () use ($root, $tmp, $maildir) {
+	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => "$tmp/prod.sqlite", 'RASTER_URL' => 'https://cafe.example/', 'RASTER_MAIL' => "log://$maildir", 'RASTER_MCP_TOKEN' => 'demo-token');
+	$prod = server(free_port(), $env);
+	$cache = function ($path) use ($prod) {
+		list($status, , $headers) = http('GET', "$prod$path");
+		return $status.' '.(header_value($headers, 'X-Raster-Cache') ?: 'not kept');
+	};
+	$pages = function () use ($root) { return count(preg_grep('#/[0-9a-f]{40}$#', glob("$root/demo/data/cache/*") ?: array())); };
+	mcp($prod, 'create_item', array('collection' => 'journal', 'fields' => array('title' => 'Notes on caching', 'author' => 'Mara')));
+	raster(array('cache', 'clear'), $env);
+	same('200 miss', $cache('/journal/journal_items/author/Mara'));
+	same('200 hit', $cache('/journal/journal_items/author/Mara'));
+	// L9: a filter nothing matches, a page past the last one and a field the
+	// list doesn't have all answer, and none of them is kept
+	foreach (array('/journal/journal_items/author/nobody-1', '/journal/journal_items/author/nobody-2', '/journal/journal_page/99999', '/journal/journal_items/flavour/x') as $path) {
+		same('200 not kept', $cache($path), $path);
+		same('200 not kept', $cache($path), $path);
+	}
+	same(1, $pages(), 'only the real list is cached');
+	// L10: links with only tracking parameters are the same page
+	foreach (array('utm_source=newsletter&utm_medium=email&utm_campaign=october', 'fbclid=IwAR0x', 'gclid=Cj0K', 'msclkid=5a2b') as $query) {
+		same('200 hit', $cache("/journal/journal_items/author/Mara?$query"), $query);
+	}
+	same('200 not kept', $cache('/journal/journal_items/author/Mara?utm_source=x&page=2'), 'any other parameter still skips the cache');
+	// L9: a content change deletes the pages cached before it
+	mcp($prod, 'create_item', array('collection' => 'journal', 'fields' => array('title' => 'More notes', 'author' => 'Mara')));
+	same(0, $pages(), 'pages cached before a content change are deleted');
+	same('200 miss', $cache('/journal/journal_items/author/Mara'));
+});
 
 // ## 2.1.8 batch B: errors and /api
 // (batch B adds its tests here)

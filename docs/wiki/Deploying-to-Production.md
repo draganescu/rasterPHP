@@ -166,7 +166,7 @@ When you've renamed a field, run the `--rename` that `raster schema` suggests be
 
 **Backups.** Back up `application/data/raster.sqlite` (or your MySQL database) and `media/`. Everything else is in git.
 
-**Caching.** The page cache is on in production and cleared automatically whenever content changes. Nothing to set up.
+**Caching.** The page cache is on in production and cleared automatically whenever content changes. Nothing to set up. Links with tracking parameters (`?utm_source=…`, `fbclid`, `gclid`, `msclkid`) are served from the cache like the bare address, so a newsletter or an ad campaign doesn't make every visit render the page again. See [the page cache](Settings-and-Environments#the-page-cache).
 
 **Errors.** In production, a broken template shows a plain error page and the details go to PHP's error log. Run `php bin/raster lint` before deploying so this doesn't happen.
 
