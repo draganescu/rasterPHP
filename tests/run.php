@@ -924,7 +924,234 @@ test('the ORM does not need pdo_mysql for an SQLite site', function () {
 });
 
 // ## 2.1.8 batch A: page cache
-// (batch A adds its tests here)
+
+// a PHP process of its own with the cache on, as a request for /about would
+// be; $code runs after it
+function cache_php($code) {
+	global $root;
+	return array(PHP_BINARY, '-r', 'require "'.$root.'/system/boot.php"; boot::$appname = "application"; boot::cli("/about"); config::set("page_cache")->to(true); raster_cache::$cacheable = true; http_response_code(200); '.$code);
+}
+function cache_run($code) {
+	$process = proc_open(cache_php($code), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes);
+	$out = stream_get_contents($pipes[1]).stream_get_contents($pipes[2]);
+	proc_close($process);
+	return $out;
+}
+function cache_empty() {
+	foreach (glob(APPBASE.'data/cache/*') ?: array() as $f) unlink($f);
+}
+
+test('a cached page is never read half written', function () {
+	cache_empty();
+	// one process rebuilds the page after content changes, as busy pages are,
+	// while another reads it the way serve() does
+	$writer = proc_open(cache_php('$end = microtime(true) + 2; for ($i = 0; microtime(true) < $end; $i++) { raster_cache::bump(); raster_cache::serve(); raster_cache::store(str_repeat($i % 2 ? "a" : "b", $i % 2 ? 300000 : 200000)); }'), array(1 => array('file', '/dev/null', 'w')), $pipes);
+	$out = cache_run('$file = raster_cache::dir().raster_cache::key(); $end = microtime(true) + 2; $reads = 0; $short = 0;
+		while (microtime(true) < $end) {
+			$handle = @fopen($file, "r");
+			if (!$handle) continue;
+			$meta = fgets($handle);
+			$body = stream_get_contents($handle);
+			fclose($handle);
+			if ($meta === false) continue;
+			$reads++;
+			if (strlen($body) !== 300000 && strlen($body) !== 200000) $short++;
+		}
+		echo "$reads $short";');
+	proc_close($writer);
+	cache_empty();
+	list($reads, $short) = explode(' ', trim($out)) + array(0, -1);
+	check((int)$reads > 50, "too few reads to tell: $out");
+	same('0', $short, "of $reads reads, pages cut short:");
+});
+
+test('a page whose render overlapped a content change is not served as fresh', function () {
+	cache_empty();
+	// the request starts (and finds nothing cached), an editor saves while it
+	// renders, and it stores the page it built from the old content
+	cache_run('raster_cache::serve(); util::content_changed(); raster_cache::store("old page");');
+	$next = cache_run('raster_cache::serve(); echo "miss";');
+	cache_empty();
+	same('miss', $next, 'the next visitor gets the old page as a hit:');
+});
+
+test('many cache bumps at once never bring an old version back', function () {
+	cache_empty();
+	cache_run('raster_cache::bump();');
+	$bumpers = array();
+	for ($i = 0; $i < 6; $i++) $bumpers[] = proc_open(cache_php('for ($i = 0; $i < 400; $i++) raster_cache::bump();'), array(1 => array('file', '/dev/null', 'w')), $pipes);
+	$seen = cache_run('$seen = array(); $end = microtime(true) + 1.5;
+		while (microtime(true) < $end) { $v = raster_cache::version(); if (!$seen || end($seen) !== $v) $seen[] = $v; }
+		echo json_encode($seen);');
+	foreach ($bumpers as $process) proc_close($process);
+	$seen = json_decode($seen, true);
+	check(is_array($seen) && count($seen) > 1, 'the version changed');
+	foreach ($seen as $v) check($v !== 0 && $v !== '' && $v !== '0', 'a version read as empty: '.json_encode($v));
+	same(count($seen), count(array_unique($seen, SORT_REGULAR)), 'a version came back:');
+	cache_empty();
+});
+
+test('a content change deletes the cached pages it made old, and leaves pages being written', function () {
+	cache_empty();
+	cache_run('raster_cache::serve(); raster_cache::store("a page");');
+	$pages = function () { return count(preg_grep('/\/[0-9a-f]{40}$/', glob(APPBASE.'data/cache/*') ?: array())); };
+	same(1, $pages());
+	// a page another request is writing right now
+	$writing = APPBASE.'data/cache/'.str_repeat('a', 40).'.'.str_repeat('b', 12).'.tmp';
+	file_put_contents($writing, 'half');
+	cache_run('util::content_changed();');
+	same(0, $pages(), 'cached pages left behind after a content change:');
+	check(is_file($writing), 'a page being written was deleted');
+	cache_empty();
+});
+
+test('tracking parameters alone still use the cache', function () {
+	$was = array(config::get('page_cache'), isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : null, isset($_SERVER['QUERY_STRING']) ? $_SERVER['QUERY_STRING'] : null);
+	config::set('page_cache')->to(true);
+	$_SERVER['REQUEST_METHOD'] = 'GET';
+	$cacheable = function ($query) { $_SERVER['QUERY_STRING'] = $query; raster_cache::$cacheable = null; return raster_cache::cacheable(); };
+	try {
+		same(true, $cacheable(''));
+		foreach (array('utm_source=x', 'utm_source=news&utm_medium=email&utm_campaign=oct', 'fbclid=IwAR0', 'gclid=abc', 'msclkid=1', 'utm_content=a&fbclid=b&') as $query) same(true, $cacheable($query), $query);
+		foreach (array('x=1', 'utm_source=x&page=2', 'lang=ro', 'fbclid2=1', 'gclid[]=1') as $query) same(false, $cacheable($query), $query);
+	} finally {
+		config::set('page_cache')->to($was[0]);
+		$_SERVER['REQUEST_METHOD'] = $was[1];
+		$_SERVER['QUERY_STRING'] = $was[2];
+		raster_cache::$cacheable = null;
+	}
+});
+
+test('empty filter pages, pages past the last one and unknown filters are not cached', function () use ($root, $db) {
+	cache_empty();
+	$port = free_port();
+	$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_ENV' => 'production', 'PATH' => getenv('PATH')));
+	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
+	try {
+		$get = function ($path) use ($port) {
+			list($status, , $headers) = http('GET', "http://127.0.0.1:$port$path");
+			return $status.' '.(current(preg_grep('/^X-Raster-Cache/i', $headers)) ?: 'not cached');
+		};
+		foreach (array('/news/news_items/headline/nobody-wrote-this', '/news/news_page/999', '/news/news_items/no_such_field/x', '/news/news_page/2x') as $path) {
+			same('200 not cached', $get($path), $path);
+			same('200 not cached', $get($path), $path);
+		}
+		same(0, count(glob(APPBASE.'data/cache/*') ?: array()), 'cache files');
+		// lists with items are cached as before
+		foreach (array('/news/news_items/headline/Filler%201', '/news/news_page/2', '/news') as $path) {
+			same('200 X-Raster-Cache: miss', $get($path), $path);
+			same('200 X-Raster-Cache: hit', $get($path), $path);
+		}
+		// a link with only tracking parameters is the same page
+		same('200 X-Raster-Cache: hit', $get('/news?utm_source=newsletter&fbclid=x'));
+		same('200 not cached', $get('/news?x=1'));
+	} finally {
+		proc_terminate($server);
+		cache_empty();
+	}
+});
+
+// a production server on its own port, for the cache tests over HTTP
+function cache_server($db, $test) {
+	global $root;
+	$port = free_port();
+	$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_ENV' => 'production', 'PATH' => getenv('PATH')));
+	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
+	$get = function ($path) use ($port) {
+		list($status, $body, $headers) = http('GET', "http://127.0.0.1:$port$path");
+		return array($status.' '.(current(preg_grep('/^X-Raster-Cache/i', $headers)) ?: 'not cached'), $body);
+	};
+	try {
+		$test($get);
+	} finally {
+		proc_terminate($server);
+		cache_empty();
+	}
+}
+
+test('other spellings of a list or item URL are not cached', function () use ($db) {
+	cache_empty();
+	cache_server($db, function ($get) {
+		// each answers as the page it stands for, but there is no end to them
+		foreach (array('/news/news_page/-1', '/news/news_page/0', '/news/news_page/1', '/news/news_page/02', '/news/news_page/2/abc', '/news/news_page/2/abc/def',
+			'/news/news_items/headline/Filler%201/junk', '/news/news_items/headline/Filler%201/news_page/-5', '/news/news_items/news_page/2/headline/Filler%201',
+			'/news/news_items/headline/Filler%201/headline/Filler%201', '/news/news_item/01', '/news/news_item/001', '/news/news_item/1/junk', '/news/news_item/1/x/y') as $path) {
+			same('200 not cached', $get($path)[0], $path);
+			same('200 not cached', $get($path)[0], $path);
+		}
+		same(0, count(glob(APPBASE.'data/cache/*') ?: array()), 'cache files');
+		// the URLs the site's own links use are cached
+		foreach (array('/news/news_item/1', '/news/news_page/2', '/news/news_items/headline/Filler%201') as $path) {
+			same('200 X-Raster-Cache: miss', $get($path)[0], $path);
+			same('200 X-Raster-Cache: hit', $get($path)[0], $path);
+		}
+	});
+});
+
+test('a typed filter spelled another way is not cached', function () use ($db) {
+	cache_empty();
+	cache_server($db, function ($get) {
+		// the same date, the same id, but there is no end to the spellings
+		foreach (array('/news/news_items/date/25%20Sep%202026', '/news/news_items/date/2026-09-25%2000:00', '/news/news_items/date/%202026-09-25',
+			'/news/news_items/id/+1') as $path) {
+			check(strpos($get($path)[1], 'Raster runs on PHP 8') !== false, "$path lists the item");
+			same('200 not cached', $get($path)[0], $path);
+		}
+		same(0, count(glob(APPBASE.'data/cache/*') ?: array()), 'cache files');
+		// the spelling the site prints is cached
+		foreach (array('/news/news_items/date/2026-09-25', '/news/news_items/id/1') as $path) {
+			same('200 X-Raster-Cache: miss', $get($path)[0], $path);
+			same('200 X-Raster-Cache: hit', $get($path)[0], $path);
+		}
+	});
+});
+
+test('a tracking link does not leave its parameters in the page every visitor gets', function () use ($db) {
+	cache_empty();
+	cache_server($db, function ($get) {
+		list($first, $body) = $get('/news?utm_source=attacker&utm_campaign=evil');
+		same('200 X-Raster-Cache: miss', $first);
+		check(strpos($body, 'news_page/2') !== false, 'the list has a link to page 2');
+		list($next, $body) = $get('/news');
+		same('200 X-Raster-Cache: hit', $next);
+		check(strpos($body, 'attacker') === false && strpos($body, 'evil') === false, 'the cached page carries the tracking link\'s parameters');
+	});
+});
+
+test('in production, made-up URLs of a list with no items are not cached', function () use ($db) {
+	cache_empty();
+	$empty = sys_get_temp_dir().'/raster-test-empty-'.getmypid().'.sqlite';
+	copy($db, $empty);
+	$pdo = new PDO("sqlite:$empty");
+	$pdo->exec('DELETE FROM newsdata');
+	$pdo = null;
+	try {
+		cache_server($empty, function ($get) {
+			foreach (array('/news/news_items/headline/r1', '/news/news_items/headline/r2', '/news/news_page/500') as $path) {
+				same('200 not cached', $get($path)[0], $path);
+				same('200 not cached', $get($path)[0], $path);
+			}
+			same(0, count(glob(APPBASE.'data/cache/*') ?: array()), 'cache files');
+		});
+	} finally {
+		array_map('unlink', glob("$empty*") ?: array());
+	}
+});
+
+test('a content change deletes temporary cache files left long ago', function () {
+	cache_empty();
+	$dir = APPBASE.'data/cache/';
+	if (!is_dir($dir)) mkdir($dir, 0775, true);
+	$old = $dir.str_repeat('c', 40).'.'.str_repeat('d', 12).'.tmp';
+	$new = $dir.str_repeat('e', 40).'.'.str_repeat('f', 12).'.tmp';
+	file_put_contents($old, 'left by a request that died');
+	touch($old, time() - 7200);
+	file_put_contents($new, 'being written');
+	cache_run('util::content_changed();');
+	check(!is_file($old), 'a temporary file from two hours ago is still there');
+	check(is_file($new), 'a page being written was deleted');
+	cache_empty();
+});
 
 // ## 2.1.8 batch B: errors and /api
 // (batch B adds its tests here)

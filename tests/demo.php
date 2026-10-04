@@ -2608,7 +2608,56 @@ test('T6', 'schema --apply converts a column whose type changed when every value
 });
 
 // ## 2.1.8 batch A: page cache
-// (batch A adds its tests here)
+
+test(array('L9', 'L10'), 'page cache: made-up list URLs are not kept, a change deletes old pages, tracking links are hits', function () use ($root, $tmp, $maildir) {
+	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => "$tmp/prod.sqlite", 'RASTER_URL' => 'https://cafe.example/', 'RASTER_MAIL' => "log://$maildir", 'RASTER_MCP_TOKEN' => 'demo-token');
+	$prod = server(free_port(), $env);
+	$cache = function ($path) use ($prod) {
+		list($status, , $headers) = http('GET', "$prod$path");
+		return $status.' '.(header_value($headers, 'X-Raster-Cache') ?: 'not kept');
+	};
+	$pages = function () use ($root) { return count(preg_grep('#/[0-9a-f]{40}$#', glob("$root/demo/data/cache/*") ?: array())); };
+	mcp($prod, 'create_item', array('collection' => 'journal', 'fields' => array('title' => 'Notes on caching', 'author' => 'Mara')));
+	raster(array('cache', 'clear'), $env);
+	same('200 miss', $cache('/journal/journal_items/author/Mara'));
+	same('200 hit', $cache('/journal/journal_items/author/Mara'));
+	// L9: a filter nothing matches, a page past the last one and a field the
+	// list doesn't have all answer, and none of them is kept
+	// nor are other spellings of a list's own URLs
+	foreach (array('/journal/journal_items/author/nobody-1', '/journal/journal_items/author/nobody-2', '/journal/journal_page/99999', '/journal/journal_items/flavour/x',
+		'/journal/journal_page/-1', '/journal/journal_page/1', '/journal/journal_items/author/Mara/junk', '/journal/journal_items/author/Mara/journal_page/-5') as $path) {
+		same('200 not kept', $cache($path), $path);
+		same('200 not kept', $cache($path), $path);
+	}
+	same(1, $pages(), 'only the real list is cached');
+	// nor a typed filter spelled another way than the site prints it
+	mcp($prod, 'create_item', array('collection' => 'events', 'fields' => array('title' => 'Pi day', 'date' => '2027-03-14', 'summary' => 'x')));
+	raster(array('cache', 'clear'), $env);
+	same('200 miss', $cache('/events/events_items/date/2027-03-14'));
+	same('200 hit', $cache('/events/events_items/date/2027-03-14'));
+	foreach (array('/events/events_items/date/14%20Mar%202027', '/events/events_items/date/2027-03-14%2000:00') as $path) {
+		same('200 not kept', $cache($path), $path);
+		same('200 not kept', $cache($path), $path);
+	}
+	same(1, $pages(), 'only the date as the site prints it is cached');
+	raster(array('cache', 'clear'), $env);
+	$cache('/journal/journal_items/author/Mara');
+	// L10: links with only tracking parameters are the same page
+	foreach (array('utm_source=newsletter&utm_medium=email&utm_campaign=october', 'fbclid=IwAR0x', 'gclid=Cj0K', 'msclkid=5a2b') as $query) {
+		same('200 hit', $cache("/journal/journal_items/author/Mara?$query"), $query);
+	}
+	same('200 not kept', $cache('/journal/journal_items/author/Mara?utm_source=x&page=2'), 'any other parameter still skips the cache');
+	// and the page every visitor then gets doesn't carry the tracking values
+	list($status, $body, $headers) = http('GET', "$prod/journal?utm_source=attacker");
+	same('200 miss', $status.' '.header_value($headers, 'X-Raster-Cache'));
+	list($status, $body, $headers) = http('GET', "$prod/journal");
+	same('200 hit', $status.' '.header_value($headers, 'X-Raster-Cache'));
+	check(strpos($body, 'attacker') === false, 'the cached /journal carries a tracking link\'s values');
+	// L9: a content change deletes the pages cached before it
+	mcp($prod, 'create_item', array('collection' => 'journal', 'fields' => array('title' => 'More notes', 'author' => 'Mara')));
+	same(0, $pages(), 'pages cached before a content change are deleted');
+	same('200 miss', $cache('/journal/journal_items/author/Mara'));
+});
 
 // ## 2.1.8 batch B: errors and /api
 // (batch B adds its tests here)

@@ -782,8 +782,22 @@ use `'model.method'`: `method(true)` returns
   `security.txt`).
 - **Page cache**, on by default in production (config `page_cache`):
   - Whole pages are cached for visitors without a session or a query string.
-  - Any content change throws the cache away (`util::content_changed()` in
-    your own models), and so does the moment a scheduled item is published.
+    Tracking parameters don't count: `/about?utm_source=x` (any `utm_*`,
+    `fbclid`, `gclid`, `msclkid`) is served the cached `/about`, and is
+    made as `/about` is, without them (models don't see them in `$_GET`).
+  - Any content change throws the cache away and deletes the cached files
+    (`util::content_changed()` in your own models), and so does the moment
+    a scheduled item is published. A page whose render overlapped the
+    change is not kept.
+  - A filter page with no items (`/news/news_items/tag/nothing`), a page
+    past the last one and a filter on a field the list doesn't have answer
+    200 but are never cached, so made-up URLs don't fill the disk. Neither
+    is a list or item URL spelled other than the way its links spell it
+    (`/news/news_page/1`, `/news/news_page/02`, `/news/news_item/007`, a
+    segment left over at the end), or a typed filter spelled other than the
+    way the page prints it (`/menu/menu_items/price/14.500` for `14.50`,
+    `/events/events_items/date/10 Oct 2026`). A model that decides the same calls
+    `raster_cache::skip()`.
   - Settings: `page_cache_ttl` (3600 seconds) and `page_cache_skip` (path
     patterns). Responses carry `X-Raster-Cache: hit|miss`. `describe` says
     whether the cache is on (`site.page_cache`).
