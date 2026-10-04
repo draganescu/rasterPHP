@@ -567,6 +567,18 @@
 
 	// ##Cleaning pasted and formatted HTML
 	var allowed = { P: 1, BR: 1, STRONG: 1, B: 1, EM: 1, I: 1, A: 1, UL: 1, OL: 1, LI: 1, H2: 1, H3: 1, H4: 1, BLOCKQUOTE: 1 };
+	// a link that would run script, the server's rule (template::script_link):
+	// entities decoded, every byte up to a space dropped, as browsers do
+	function scriptLink(href) {
+		var plain = String(href || '').replace(/&#(x[0-9a-f]+|[0-9]+);?/gi, function (m, n) {
+			var code = n[0] === 'x' || n[0] === 'X' ? parseInt(n.slice(1), 16) : parseInt(n, 10);
+			return code > 0x10FFFF ? '' : String.fromCodePoint(code);
+		}).replace(/&(colon|tab|newline);?/gi, function (m, n) {
+			return { colon: ':', tab: '\t', newline: '\n' }[n.toLowerCase()];
+		});
+		return /^(javascript|data|vbscript):/i.test(plain.replace(/[\x00-\x20]+/g, ''));
+	}
+
 	function clean(html) {
 		var box = document.createElement('template');
 		box.innerHTML = html;
@@ -584,7 +596,7 @@
 				Array.prototype.slice.call(child.attributes).forEach(function (a) {
 					if (!(child.tagName === 'A' && a.name === 'href')) child.removeAttribute(a.name);
 				});
-				if (child.tagName === 'A' && /^\s*(javascript|data):/i.test(child.getAttribute('href') || '')) child.removeAttribute('href');
+				if (child.tagName === 'A' && scriptLink(child.getAttribute('href'))) child.removeAttribute('href');
 			});
 		})(box.content);
 		var out = document.createElement('div');

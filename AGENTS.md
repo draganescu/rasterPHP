@@ -346,7 +346,12 @@ class contact {
 
 - **Rules live in the HTML.** `required`, `type` (email, url, number, date),
   `minlength`, `maxlength`, `min`, `max` and `pattern` are enforced on the
-  server too.
+  server too. A field sent as a list (`name[]=x`) when the form doesn't name
+  it `name[]`, or with bytes that aren't UTF-8, fails `required`, so the
+  form's own words for an empty field show; a field named `tags[]` takes a
+  list. A `pattern` that can't run counts as not matched.
+- **What was typed comes back as typed** when the form is shown again:
+  `$100`, `\1` and `$0` included.
 - **`validation.field('name')`** shows its block when that field breaks a rule.
   Other regions: `matches('password', 'password_again')`, `cant_be('name',
   'admin')`, `accepted('terms')`. For your own rules, add
@@ -523,7 +528,8 @@ class reservation {
   what they made, editors included, and visitors nothing. Records print what
   visitors typed as text: every field is escaped unless the type lists it in
   `html`, and a link a visitor typed (`print.@href.website`) can't be a
-  `javascript:` URL. Visitors can't filter a public type by its hidden fields
+  `javascript:`, `data:` or `vbscript:` URL, also when an entity, a tab, a
+  newline or a control byte hides the scheme. Visitors can't filter a public type by its hidden fields
   (`/guestbook/guestbook_items/email/…`).
 - **Forms.** `cms_records::submit($type, $done)` is the whole handler: it
   shows the form (`false`), shows it again with the values when the HTML

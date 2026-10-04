@@ -2620,7 +2620,75 @@ test('T6', 'schema --apply converts a column whose type changed when every value
 // (batch D adds its tests here)
 
 // ## 2.1.8 batch E: template output
-// (batch E adds its tests here)
+test('D27', 'a form shown again keeps $100, \\1 and $0 exactly as typed (#66)', function () use ($base) {
+	$name = 'Table for $20 a head, not $100 \\1';
+	list($status, $body) = http('POST', "$base/visit", array('raster_form' => 'reservation.book', 'name' => $name, 'email' => '', 'phone' => '\\1 $0', 'date' => '2026-10-07', 'guests' => '2', 'notes' => 'US$12.50 \\2', 'terms' => '1'));
+	same(200, $status);
+	has($body, 'We need a valid email to confirm.');
+	has($body, 'value="Table for $20 a head, not $100 \\1"', 'the name');
+	has($body, 'name="phone" pattern="\\+?[0-9 ]{6,15}" value="\\1 $0"', 'the phone');
+	has($body, '>US$12.50 \\2</textarea>', 'the notes');
+});
+test('E32', 'the editor gets stored text with $5 and backslashes as it is (#66)', function () use ($base) {
+	$staff = login($base, 'staff@cafe.test', 'staff password');
+	$before = mcp($base, 'get_page', array('page' => '/about'))['fields']['heading'];
+	try {
+		foreach (array('Only $5 today, was $12. Path C:\\new', 'Say \\"hello\\" for $5 \\1') as $text) {
+			mcp($base, 'update_page', array('page' => '/about', 'fields' => array('heading' => $text)));
+			$page = http('GET', "$base/about", null, array("Cookie: $staff"))[1];
+			$config = editor_config($page);
+			check(is_array($config), 'the editor config is valid JSON for '.$text);
+			list(, $mark) = mark_of($config, 'field', function ($m) { return $m['field'] === 'heading'; });
+			same($text, $mark['value'], 'what the editor shows, and Duplicate copies');
+		}
+	} finally { mcp($base, 'update_page', array('page' => '/about', 'fields' => array('heading' => $before))); }
+});
+test('C52', 'a link a visitor typed is no script, whatever hides the scheme (#67)', function () use ($base, $views) {
+	$links = array("java\tscript:alert(1)", "java\nscript:alert(2)", "\x01javascript:alert(3)", "&#106avascript:alert(4)", "vbscript:msgbox(5)", "data:text/html,6");
+	$ids = array();
+	foreach ($links as $i => $link) $ids[] = cms_records::create('reservation', array('name' => "Zz link $i", 'email' => 'zz-links@example.com', 'date' => '2030-03-06', 'guests' => 1, 'notes' => $link))['id'];
+	$ids[] = cms_records::create('reservation', array('name' => 'Zz link ok', 'email' => 'zz-links@example.com', 'date' => '2030-03-06', 'guests' => 1, 'notes' => 'https://example.com/menu'))['id'];
+	try {
+		with_file("$views/zz-links.html", "<html><body><!-- render.cms.reservation('email=zz-links@example.com&order=oldest') --><!-- print.@href.notes --><a class=\"zz\" href=\"#\">x</a><!-- /print.@href.notes --><!-- /render.cms.reservation('email=zz-links@example.com&order=oldest') --></body></html>", function () use ($base) {
+			$staff = login($base, 'staff@cafe.test', 'staff password');
+			$page = http('GET', "$base/zz-links", null, array("Cookie: $staff"))[1];
+			same(6, substr_count($page, '<a class="zz">'), 'every script link is dropped');
+			same(1, substr_count($page, '<a class="zz" href="https://example.com/menu">'), 'the web address keeps its link');
+			has($page, 'href="https://example.com/menu"');
+			// the editor's config carries the text as data, for its Details panel
+			$links = preg_replace('#<script id="raster-editor-config".*?</script>#s', '', $page);
+			foreach (array('script:', 'data:', 'alert') as $bad) lacks($links, $bad);
+		});
+	} finally { foreach ($ids as $id) cms_records::delete('reservation', $id); }
+});
+test('D28', 'a field sent as name[] or with a bad byte fails required; a field named tags[] takes a list (#70)', function () use ($base, $views) {
+	database::instance('cms');
+	$count = (int)R::count('reservationdata');
+	$good = array('raster_form' => 'reservation.book', 'name' => 'Zz Ana', 'email' => 'zz@example.com', 'date' => '2026-10-08', 'guests' => '2', 'terms' => '1');
+	$body = http('POST', "$base/visit", http_build_query(array_merge($good, array('name' => array('x'), 'email' => array('not-an-email')))), array('Content-Type: application/x-www-form-urlencoded'))[1];
+	has($body, 'Tell us your name (2 to 80 letters).', 'name[] fails required');
+	has($body, 'We need a valid email to confirm.', 'email[] too');
+	list($status, $body) = http('POST', "$base/visit", http_build_query($good).'&phone=%FFnot+a+phone', array('Content-Type: application/x-www-form-urlencoded'));
+	same(200, $status, 'a bad byte is refused');
+	has($body, 'Digits and spaces only', 'like a value without it');
+	list($status, $body) = http('POST', "$base/visit", http_build_query($good).'&notes=caf%C3', array('Content-Type: application/x-www-form-urlencoded'));
+	has($body, 'Keep notes under 300 characters.', 'on a field with no pattern too');
+	same($count, (int)R::count('reservationdata'), 'nothing was stored');
+	$form = '<html><body><!-- render.reservation.contact --><form method="post"><input type="email" name="email" required><label><input type="checkbox" name="tags[]" value="cakes" required> Cakes</label><label><input type="checkbox" name="tags[]" value="coffee"> Coffee</label><!-- render.validation.field(\'tags\') --><p class="error">Pick a topic.</p><!-- /render.validation.field(\'tags\') --><textarea name="message" required></textarea><!-- render.validation.field(\'message\') --><p class="error">Write a message.</p><!-- /render.validation.field(\'message\') --><button>Send</button></form><!-- /render.reservation.contact --></body></html>';
+	with_file("$views/zz-topics.html", $form, function () use ($base) {
+		$send = function ($extra) use ($base) { return http('POST', "$base/zz-topics", 'raster_form=reservation.contact&email=zz%40example.com'.$extra, array('Content-Type: application/x-www-form-urlencoded')); };
+		list($status, , $headers) = $send('&tags%5B%5D=cakes&tags%5B%5D=coffee&message=Hi');
+		same(303, $status, 'tags[] is a list the form asked for');
+		has(header_value($headers, 'Location'), 'done=contacted');
+		list($status, $body) = $send('&message=Hi');
+		same(200, $status);
+		has($body, 'Pick a topic.', 'and still required');
+		list($status, $body) = $send('&tags%5B%5D=cakes&message%5B%5D=Hi');
+		same(200, $status, 'message[] is not');
+		has($body, 'Write a message.');
+		lacks($body, 'Pick a topic.');
+	});
+});
 
 // ## 2.1.8 batch F: upgrade tooling
 // (batch F adds its tests here)

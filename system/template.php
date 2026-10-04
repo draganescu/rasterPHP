@@ -82,9 +82,23 @@ class template {
         return $m[1].'"'.($append ? trim($m[3].' '.$value) : $value).'"';
       }, $open, 1);
     } else {
-      $changed = preg_replace('/\s*(\/?)>$/', ' '.$attribute.'="'.$value.'"$1>', $open, 1);
+      // the value is text, never a replacement pattern ($1 and \1 stay as they are)
+      $changed = preg_replace_callback('/\s*(\/?)>$/', function ($m) use ($attribute, $value) {
+        return ' '.$attribute.'="'.$value.'"'.$m[1].'>';
+      }, $open, 1);
     }
     return substr_replace($html, $changed, $tag[0][1], strlen($open));
+  }
+
+  // a link that would run script: javascript:, data: or vbscript:, also when
+  // entities, spaces, tabs, newlines or control bytes hide the scheme, since
+  // browsers decode the first and drop the rest
+  static function script_link($value) {
+    $value = preg_replace_callback('/&#(x[0-9a-f]+|[0-9]+);?/i', function ($m) {
+      return html_entity_decode('&#'.$m[1].';', ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    }, (string)$value);
+    $value = preg_replace('/[\x00-\x20]+/', '', html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+    return (bool)preg_match('/^(javascript|data|vbscript):/i', $value);
   }
 
   // removes an attribute (with or without a value) from the first tag in $html
@@ -444,9 +458,12 @@ class template {
   		if (empty($attributes['name'])) continue;
   		$name = preg_replace('/\[\]$/', '', $attributes['name']);
   		if (in_array($name, array('raster_form', 'raster_hp', 'csrf'))) continue;
+  		// name="tags[]" asks for a list; any other field takes one value
+  		$list = $name !== $attributes['name'];
   		$type = strtolower($input[1]) === 'input' ? strtolower(isset($attributes['type']) ? $attributes['type'] : 'text') : strtolower($input[1]);
   		if (in_array($type, array('submit', 'button', 'reset', 'image'))) continue;
   		$rule = isset($fields[$name]) ? $fields[$name] : array('type' => $type);
+  		if ($list) $rule['list'] = true;
   		foreach (array('required', 'minlength', 'maxlength', 'min', 'max', 'pattern') as $constraint) {
   			if (array_key_exists($constraint, $attributes)) $rule[$constraint] = $attributes[$constraint];
   		}
@@ -581,7 +598,8 @@ class template {
 			}
 			if (is_array($value)) return $tag;
 			$tag = $without($tag, 'value');
-			return preg_replace('/\s*\/?>$/', ' value="'.$e($value).'"$0', $tag);
+			// what was typed is text, never a replacement pattern ($1, \1, $0)
+			return preg_replace_callback('/\s*\/?>$/', function ($m) use ($e, $value) { return ' value="'.$e($value).'"'.$m[0]; }, $tag);
 		}, $block);
 
 		$block = preg_replace_callback('/(<textarea\b[^>]*>)(.*?)(<\/textarea>)/is', function ($m) use ($attr, $lookup, $e) {
@@ -602,7 +620,7 @@ class template {
 
 		foreach ($data as $key => $value) {
 			if (is_scalar($value)) {
-				$block = preg_replace('/class="spa_'.preg_quote($key, '/').'">(.*?)<\//', 'class="spa_'.$key.'">'.$e($value).'</', $block);
+				$block = preg_replace_callback('/class="spa_'.preg_quote($key, '/').'">(.*?)<\//', function ($m) use ($key, $e, $value) { return 'class="spa_'.$key.'">'.$e($value).'</'; }, $block);
 			}
 		}
 
@@ -612,7 +630,7 @@ class template {
 				if (isset($used[$key]) || !is_scalar($value)) continue;
 				$hidden .= '<input type="hidden" name="'.$e($key).'" value="'.$e($value).'">'."\n";
 			}
-			if ($hidden !== '') $block = preg_replace('/<form\b[^>]*>/i', "$0\n".$hidden, $block, 1);
+			if ($hidden !== '') $block = preg_replace_callback('/<form\b[^>]*>/i', function ($m) use ($hidden) { return $m[0]."\n".$hidden; }, $block, 1);
 		}
 
 		return $block;
@@ -769,7 +787,7 @@ class template {
 		                if($is_attr)
 		                {
 		                	// a link a visitor typed into a record can't run script
-		                	if (isset($data['raster_escape']) && is_array($data['raster_escape']) && in_array($datakey, $data['raster_escape'], true) && preg_match('/^\s*(javascript|data|vbscript):/i', (string)$data[$datakey])) $data[$datakey] = false;
+		                	if (isset($data['raster_escape']) && is_array($data['raster_escape']) && in_array($datakey, $data['raster_escape'], true) && self::script_link($data[$datakey])) $data[$datakey] = false;
 			                // an empty value keeps the mock-up's attribute (a new image field, say)
 			                if($data[$datakey] === null || $data[$datakey] === '')
 								$attrchange = $current_item;

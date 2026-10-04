@@ -873,7 +873,7 @@ class raster_inspector {
 			}
 			if ($method === 'field' && $fields && isset($form['fields'][reset($fields)])) {
 				$rules = $form['fields'][reset($fields)];
-				unset($rules['type']);
+				unset($rules['type'], $rules['list']);
 				if (!$rules && !in_array($form['fields'][reset($fields)]['type'], array('email', 'url', 'number', 'range', 'date'))) {
 					$problems[] = self::problem_at('warning', $html, $at, "validation.field('".reset($fields)."') never shows: the input has no constraint (required, type, minlength, maxlength, min, max, pattern)");
 				}
