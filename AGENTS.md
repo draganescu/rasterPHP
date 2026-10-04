@@ -384,7 +384,9 @@ item of a collection is the mock-up content.
 - **Names:** lowercase letters, digits and `_`, starting with a letter.
   Reserved: CMS method names (`style`, `login`, …), `slug`, `id`,
   `updated_at`, `enabled` and `published_at` for fields; `users` and `raster`
-  for collections. `lint` reports these.
+  for collections. `lint` reports these. Words SQL keeps for itself
+  (`when`, `from`, `group`, `order`) are fine: lists sort and filter by them
+  like any other field.
 - **Site-wide fields:** a field whose name starts with `site_`
   (`print.cms.site_name`) is shared by every page. Put these in `_layout.html`.
 - **Collection URLs** are routed to views that render that collection:

@@ -271,7 +271,7 @@ class cms_records {
 		foreach ($filters as $field => $value) {
 			if (!preg_match('/^[a-z0-9_]+$/', $field) || !array_key_exists($field, $columns)) throw new InvalidArgumentException("$collection has no field '$field'");
 			$value = cms_types::clean(cms_types::of_column($columns[$field]), $value, $field);
-			$sql .= $value === null ? " AND $field IS NULL " : " AND $field = :f_$field ";
+			$sql .= $value === null ? " AND `$field` IS NULL " : " AND `$field` = :f_$field ";
 			if ($value !== null) $bindings[":f_$field"] = $value;
 		}
 		$sql .= ' ORDER BY '.cms_store::order_sql($order, $columns).' LIMIT '.max(1, (int)$limit);

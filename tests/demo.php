@@ -2094,7 +2094,7 @@ test(array('R15', 'D26'), 'list options: filters from the URL, dates, several or
 	$list = cms_store::list_options('status!=cancelled&date<today&guests>=2&seating=?seating&order=-date,name&limit=5');
 	same(array(array('status', '!=', 'cancelled'), array('date', '<', $day(0)), array('guests', '>=', '2')), $list['conditions'], 'no ?seating in the URL here');
 	same(array('order' => '-date,name', 'limit' => '5'), $list['options']);
-	same('date DESC, name ASC, id ASC', cms_store::order_sql('-date,name', array('date' => 1, 'name' => 1)));
+	same('`date` DESC, `name` ASC, id ASC', cms_store::order_sql('-date,name', array('date' => 1, 'name' => 1)));
 	same('id ASC', cms_store::order_sql('nope,-nope', array('date' => 1)));
 	// pages of a list filtered from the URL keep the query
 	has(http('GET', "$base/menu?category=cakes")[1], 'menu_page/2?category=cakes', 'pagination keeps the query');
@@ -2614,7 +2614,61 @@ test('T6', 'schema --apply converts a column whose type changed when every value
 // (batch B adds its tests here)
 
 // ## 2.1.8 batch C: list SQL
-// (batch C adds its tests here)
+
+test('E31', 'fields named like SQL words (when, from, group) sort, filter and link to their filter pages', function () use ($base) {
+	$row = '<li><!-- print.@href.raster_filter@from --><a href="#"><!-- print.title -->Rome<!-- /print.title --> from <!-- print.from -->Paris<!-- /print.from --></a><!-- /print.@href.raster_filter@from --> <!-- print.when -->2026-12-01<!-- /print.when --> <!-- print.group -->3<!-- /print.group --></li>';
+	$list = function ($options) use ($row) { return "<!-- render.cms.zztrips('$options') -->$row<!-- /render.cms.zztrips('$options') -->"; };
+	$titles = function ($html, $class) {
+		preg_match('#<(ul|ol) class="'.$class.'">(.*?)</\1>#s', $html, $m);
+		preg_match_all('#>(\w+) from #', isset($m[2]) ? $m[2] : '', $t);
+		return $t[1];
+	};
+	try {
+		with_file(dirname(__DIR__).'/demo/views/cafe/zztrips.html', '<ul class="by-when">'.$list('order=when').'</ul><ol class="big">'.$list('group>2&order=-group').'</ol>', function () use ($base, $titles) {
+			http('GET', "$base/zztrips");
+			mcp($base, 'create_item', array('collection' => 'zztrips', 'fields' => array('title' => 'Oslo', 'when' => '2026-10-01', 'from' => 'Berlin', 'group' => '1')));
+			mcp($base, 'create_item', array('collection' => 'zztrips', 'fields' => array('title' => 'Lima', 'when' => '2026-11-01', 'from' => 'Paris', 'group' => '5')));
+			list($status, $html) = http('GET', "$base/zztrips");
+			same(200, $status);
+			same(array('Oslo', 'Lima', 'Rome'), $titles($html, 'by-when'), 'order=when');
+			same(array('Lima', 'Rome'), $titles($html, 'big'), 'group>2&order=-group');
+			has($html, 'href="'.$base.'/zztrips/zztrips_items/from/Paris/"');
+			list($status, $html) = http('GET', "$base/zztrips/zztrips_items/from/Paris");
+			same(200, $status);
+			same(array('Lima', 'Rome'), $titles($html, 'by-when'), 'the filter page');
+		});
+	} finally {
+		raster(array('schema', '--drop=zztripsdata', '--force'));
+	}
+});
+
+test('T7', 'a time prints 19:00 whatever the database gives back; lists hide drafts and order by newest whether published_at is typed or still text', function () use ($base) {
+	$show = mcp($base, 'create_item', array('collection' => 'events', 'fields' => array('title' => 'Seconds show', 'date' => '2026-10-10', 'starts' => '19:00', 'summary' => 'x')));
+	cms_store::connect();
+	try {
+		// MySQL hands a TIME back with its seconds
+		R::exec('UPDATE eventsdata SET starts = ? WHERE id = ?', array('19:00:00', $show['id']));
+		$events = http('GET', "$base/events")[1];
+		check(preg_match('#Seconds show.*?2026-10-10</span>\s*at\s*<span[^>]*>19:00<|Seconds show.*?2026-10-10 at 19:00<#s', $events), 'prints 19:00');
+		lacks($events, '19:00:00');
+	} finally {
+		mcp($base, 'delete_item', array('collection' => 'events', 'id' => $show['id']));
+	}
+	// a table made before 2.1.7 keeps a text published_at, empty for "now"
+	R::exec('CREATE TABLE zzolddata (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, slug TEXT, enabled TEXT, published_at TEXT, updated_at TEXT)');
+	try {
+		foreach (array('Empty' => '', 'Past' => date('Y-m-d H:i:s', time() - 86400), 'Future' => '2099-01-01 10:00:00') as $title => $published) {
+			R::exec('INSERT INTO zzolddata (title, slug, enabled, published_at, updated_at) VALUES (?, ?, ?, ?, ?)', array($title, strtolower($title), '1', $published, '2026-01-01 10:00:00'));
+		}
+		with_file(dirname(__DIR__).'/demo/views/cafe/zzold.html', "<ul><!-- render.cms.zzold('order=newest') --><li><!-- print.title -->Old<!-- /print.title --></li><!-- /render.cms.zzold('order=newest') --></ul>", function () use ($base) {
+			list($status, $html) = http('GET', "$base/zzold");
+			same(200, $status);
+			check(preg_match('#<li>Past</li>\s*<li>Empty</li>\s*</ul>#', $html), 'newest first, nothing scheduled: '.$html);
+		});
+	} finally {
+		raster(array('schema', '--drop=zzolddata', '--force'));
+	}
+});
 
 // ## 2.1.8 batch D: accounts
 

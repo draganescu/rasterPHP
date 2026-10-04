@@ -154,6 +154,7 @@ php tests/demo.php                        # the whole matrix
 | E28 | page history and restoring a revision from the editor |
 | E29 | photos: page and item image fields; an empty value keeps the template's picture |
 | E30 | admin pages: views `protected` keeps for editors or admins are listed in the editor's Admin menu, by title, for whoever may open them; `describe` lists them |
+| E31 | fields named like SQL words (`when`, `from`, `group`) sort, filter (`group>2`) and link to their filter pages (`/trips/trips_items/from/Paris`) like any other field |
 | F1 | schema status as JSON |
 | F2 | schema --check |
 | F3 | schema --apply in production, including model tables |
@@ -281,3 +282,4 @@ php tests/demo.php                        # the whole matrix
 | T4 | models, MCP and /api read ints, floats and bools, so the reservation model has no casts |
 | T5 | templates print text: a number with as many decimals as its mock-up, nothing for an empty value; a form value of the wrong type raises `<field>_invalid` |
 | T6 | `schema --apply` converts a column whose type changed when every value fits, and names the values that don't |
+| T7 | a time prints `19:00` whatever the database gives back (MySQL's `19:00:00`); lists hide drafts and scheduled items and sort by `newest` whether `published_at` is a typed column or still text from before 2.1.7 (only a text one is compared with `''`, which MySQL refuses for a date) |

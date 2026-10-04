@@ -930,7 +930,95 @@ test('the ORM does not need pdo_mysql for an SQLite site', function () {
 // (batch B adds its tests here)
 
 // ## 2.1.8 batch C: list SQL
-// (batch C adds its tests here)
+
+// the adapter throws on bad SQL, where a fluid R::find returns nothing
+function sql_titles($table, $conditions, $order) {
+	$columns = cms_store::columns($table);
+	list($sql, $bindings) = cms_store::conditions_sql($conditions, $columns);
+	return R::getDatabaseAdapter()->getCol("SELECT title FROM $table WHERE 1 = 1 $sql ORDER BY ".cms_store::order_sql($order, $columns), $bindings);
+}
+
+test('fields named like SQL words sort, filter, rename and drop', function () {
+	cms_store::connect();
+	cms_types::ensure('zzwordsdata', array('title' => 'text', 'when' => 'date', 'from' => 'text', 'group' => 'int', 'to' => 'text'));
+	try {
+		foreach (array(array('Rome', '2026-12-01', 'Paris', 3), array('Oslo', '2026-10-01', 'Berlin', 1), array('Lima', '2026-11-01', 'Paris', 5)) as $row) {
+			R::getDatabaseAdapter()->exec('INSERT INTO zzwordsdata (title, `when`, `from`, `group`) VALUES (?, ?, ?, ?)', $row);
+		}
+		same(array('Oslo', 'Lima', 'Rome'), sql_titles('zzwordsdata', array(), 'when'), 'order=when');
+		same(array('Rome', 'Lima'), sql_titles('zzwordsdata', array(array('from', '=', 'Paris')), '-when'), 'from=Paris');
+		same(array('Lima', 'Rome'), sql_titles('zzwordsdata', array(array('group', '>', '2')), '-group'), 'group>2');
+		same(array('Oslo'), sql_titles('zzwordsdata', array(array('from', '!=', 'Paris')), 'oldest'), 'from!=Paris');
+		same(array('Rome', 'Oslo', 'Lima'), sql_titles('zzwordsdata', array(array('when', '!=', '')), 'oldest'), 'when is not empty');
+		$schema = new raster_schema();
+		same('renamed zzwordsdata.from to where', $schema->rename('zzwordsdata', 'from', 'where'));
+		same('moved zzwordsdata.where into to', $schema->rename('zzwordsdata', 'where', 'to'));
+		same(array('Rome', 'Lima'), sql_titles('zzwordsdata', array(array('to', '=', 'Paris')), 'oldest'));
+		same('dropped zzwordsdata.group', $schema->drop('zzwordsdata', 'group'));
+		check(!array_key_exists('group', cms_store::columns('zzwordsdata')), 'group is gone');
+	} finally {
+		R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS zzwordsdata');
+		cms_store::forget();
+	}
+});
+
+test('cms_records::find filters and sorts by fields named like SQL words', function () use ($root) {
+	$dir = "$root/application/models/zzwords";
+	@mkdir($dir);
+	file_put_contents("$dir/zzwords.php", '<?php class zzwords { static function types() { return array("zzword" => array("fields" => array("title" => "", "when" => "", "from" => "", "group" => 0), "types" => array("when" => "date"))); } }');
+	cms_records::forget();
+	try {
+		cms_records::create('zzword', array('title' => 'Rome', 'when' => '2026-12-01', 'from' => 'Paris', 'group' => 3));
+		cms_records::create('zzword', array('title' => 'Oslo', 'when' => '2026-10-01', 'from' => 'Berlin', 'group' => 1));
+		cms_records::create('zzword', array('title' => 'Lima', 'when' => '2026-11-01', 'from' => 'Paris', 'group' => 5));
+		same(array('Lima', 'Rome'), array_column(cms_records::find('zzword', array('from' => 'Paris'), 'when'), 'title'));
+		same(array('Rome'), array_column(cms_records::find('zzword', array('from' => 'Paris', 'group' => 3), '-group'), 'title'));
+		same(array('Rome', 'Lima', 'Oslo'), array_column(cms_records::find('zzword', array(), '-when'), 'title'));
+	} finally {
+		unlink("$dir/zzwords.php");
+		rmdir($dir);
+		cms_records::forget();
+		R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS zzworddata');
+		cms_store::forget();
+	}
+});
+
+test('published_at is compared with an empty string only while it is text', function () {
+	// typed (2.1.7 and later): MySQL refuses '' for a DATETIME
+	foreach (array('DATETIME', 'datetime') as $declared) {
+		list($sql) = cms_store::published_sql(array('enabled' => 'BOOLEAN', 'published_at' => $declared));
+		check(strpos($sql, "''") === false, "$declared: $sql");
+		$order = cms_store::order_sql('newest', array('published_at' => $declared));
+		check(strpos($order, "''") === false, "$declared: $order");
+	}
+	// a site whose column is still text keeps the test
+	list($sql) = cms_store::published_sql(array('published_at' => 'TEXT'));
+	check(strpos($sql, "published_at = ''") !== false, $sql);
+	check(strpos(cms_store::order_sql('newest', array('published_at' => 'TEXT')), "published_at = ''") !== false);
+	// and both list what they should on SQLite
+	cms_store::connect();
+	$future = date('Y-m-d H:i:s', time() + 86400);
+	$past = date('Y-m-d H:i:s', time() - 86400);
+	R::getDatabaseAdapter()->exec('CREATE TABLE zzoldpubdata (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, published_at TEXT, updated_at TEXT)');
+	cms_types::ensure('zznewpubdata', array('title' => 'text', 'published_at' => 'datetime', 'updated_at' => 'datetime'));
+	try {
+		foreach (array('zzoldpubdata' => array('Empty' => '', 'Never' => null, 'Past' => $past, 'Future' => $future), 'zznewpubdata' => array('Never' => null, 'Past' => $past, 'Future' => $future)) as $table => $rows) {
+			foreach ($rows as $title => $published) R::getDatabaseAdapter()->exec("INSERT INTO $table (title, published_at, updated_at) VALUES (?, ?, ?)", array($title, $published, '2026-01-01 10:00:00'));
+			same(count($rows) - 1, cms_store::count_published($table), $table);
+		}
+		list($sql, $bindings) = cms_store::published_sql(cms_store::columns('zzoldpubdata'));
+		same(array('Past', 'Never', 'Empty'), R::getDatabaseAdapter()->getCol("SELECT title FROM zzoldpubdata WHERE $sql ORDER BY ".cms_store::order_sql('newest', cms_store::columns('zzoldpubdata')), $bindings));
+	} finally {
+		R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS zzoldpubdata');
+		R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS zznewpubdata');
+		cms_store::forget();
+	}
+});
+
+test('a time reads without seconds, as MySQL gives it', function () {
+	same(array('19:00', '19:00', '09:05', null), array(cms_types::read('time', '19:00:00'), cms_types::read('time', '19:00'), cms_types::read('time', '09:05:30'), cms_types::read('time', null)));
+	same('2026-10-10 19:00:00', cms_types::read('datetime', '2026-10-10 19:00:00'), 'a datetime keeps them');
+});
 
 // ## 2.1.8 batch D: accounts
 
