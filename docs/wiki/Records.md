@@ -44,7 +44,8 @@ What each part of the type means:
 
 | Key | What it does |
 |---|---|
-| `fields` | What a record holds, with defaults. A default of `array()` makes a list (the lines of an order). |
+| `fields` | What a record holds, with defaults. A default of `array()` makes a list (the lines of an order). The default's PHP type is the field's: `0` an int, `0.0` a number, `false` a bool, `''` text. |
+| `types` | Types the defaults can't say: `array('date' => 'date', 'starts' => 'time')`. Also `datetime`, or any type to override a default's. |
 | `create` | Who may send the form: `visitor`, `member` or `editor` (the default). |
 | `staff_add` | `true` lets staff add records in the page too, though visitors make them with a form: a booking taken over the phone. |
 | `owner` | `true` remembers the account that made each record, and lets that person read their own. |

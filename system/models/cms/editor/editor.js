@@ -530,8 +530,8 @@
 	function saveValue(field, value) {
 		working(1);
 		var request = field.item
-			? call('editor_save_item', { collection: field.item.info.collection, id: field.item.info.id, fields: obj(field.info.field, value) }).then(function (item) { field.item.info.values = item; return item[field.info.field]; })
-			: call('editor_save_field', { type: field.info.type, slug: field.info.slug, field: field.info.field, value: value }).then(function (r) { field.info.value = r.value; return r.value; });
+			? call('editor_save_item', { collection: field.item.info.collection, id: field.item.info.id, fields: obj(field.info.field, value), examples: field.item.info.examples }).then(function (item) { field.item.info.values = item; return item[field.info.field]; })
+			: call('editor_save_field', { type: field.info.type, slug: field.info.slug, field: field.info.field, value: value, example: field.info.default }).then(function (r) { field.info.value = r.value; return r.value; });
 		return request.then(function (saved) { working(-1); return saved; }, function (e) { working(-1); throw e; });
 	}
 	function obj(key, value) { var o = {}; o[key] = value; return o; }
@@ -549,12 +549,15 @@
 		var value = fieldValue(field), before = field.before;
 		field.before = null;
 		if (before == null || value === before.value) return;
-		saveValue(field, value).then(function () {
-			show(field, value);
+		// what was stored, as the page prints it: 2026-10-05 for "5 Oct 2026",
+		// 14.50 for 14.5
+		var shown = function (saved) { return saved == null ? '' : String(saved); };
+		saveValue(field, value).then(function (saved) {
+			show(field, shown(saved));
 			tick(field.el);
 			var label = field.item ? human(field.info.field) + ' · ' + itemName(field.item) : human(field.info.field);
 			toast(t('changed', { field: label.toLowerCase() }), function () {
-				return saveValue(field, before.value).then(function () { show(field, before.value); tick(field.el); });
+				return saveValue(field, before.value).then(function (saved) { show(field, shown(saved)); tick(field.el); });
 			});
 		}, function (e) {
 			failed(e);
@@ -769,7 +772,7 @@
 	function actionLabel(name) { return T['action_' + name] || human(name); }
 	function runAction(item, name) {
 		working(1);
-		call('editor_action', { collection: item.info.collection, id: item.info.id, action: name }).then(function (saved) {
+		call('editor_action', { collection: item.info.collection, id: item.info.id, action: name, examples: item.info.examples }).then(function (saved) {
 			working(-1);
 			item.info.values = Object.assign({}, item.info.values, saved);
 			applyValues(item, saved);
@@ -844,7 +847,7 @@
 
 	function saveItem(item, values) {
 		working(1);
-		return call('editor_save_item', { collection: item.info.collection, id: item.info.id, fields: values }).then(function (saved) {
+		return call('editor_save_item', { collection: item.info.collection, id: item.info.id, fields: values, examples: item.info.examples }).then(function (saved) {
 			working(-1);
 			item.info.values = saved;
 			item.info.enabled = saved.enabled;
@@ -870,7 +873,7 @@
 		clearFloats();
 		item.el.classList.add('raster-leaving');
 		working(1);
-		call('editor_delete_item', { collection: item.info.collection, id: item.info.id }).then(function (result) {
+		call('editor_delete_item', { collection: item.info.collection, id: item.info.id, examples: item.info.examples }).then(function (result) {
 			working(-1);
 			var putBack;
 			setTimeout(function () { putBack = detachItem(item); delete items[item.id]; refreshBadges(); }, reduceMotion ? 0 : 340);
@@ -879,7 +882,7 @@
 			toast(t('deleted', { name: itemName(item) }), item.info.record ? null : function () {
 				var values = writable(item.info, result.item);
 				['id', 'updated_at', 'created_at', 'owner'].forEach(function (k) { delete values[k]; });
-				return call('editor_save_item', { collection: item.info.collection, id: 0, fields: values }).then(function (saved) {
+				return call('editor_save_item', { collection: item.info.collection, id: 0, fields: values, examples: item.info.examples }).then(function (saved) {
 					item.info.id = saved.id;
 					item.info.values = saved;
 					if (putBack) putBack();
@@ -895,7 +898,7 @@
 		var values = Object.assign({}, item.info.values);
 		['id', 'updated_at', 'slug'].forEach(function (k) { delete values[k]; });
 		working(1);
-		call('editor_save_item', { collection: item.info.collection, id: 0, fields: values }).then(function (saved) {
+		call('editor_save_item', { collection: item.info.collection, id: 0, fields: values, examples: item.info.examples }).then(function (saved) {
 			working(-1);
 			var copy = cloneItem(item, saved);
 			clearFloats();
@@ -908,7 +911,7 @@
 	var nextId = 100000;
 	function cloneItem(item, saved) {
 		var id = String(nextId++);
-		var info = { kind: 'item', collection: item.info.collection, id: saved.id, enabled: saved.enabled, published_at: saved.published_at, values: saved };
+		var info = { kind: 'item', collection: item.info.collection, id: saved.id, enabled: saved.enabled, published_at: saved.published_at, values: saved, examples: item.info.examples };
 		marks[id] = info;
 		var nodes = between(item.start, item.end).map(function (n) { return n.cloneNode(true); });
 		var start = document.createComment('raster:s ' + id), end = document.createComment('raster:e ' + id);
@@ -1151,13 +1154,13 @@
 			fieldsOut[name] = node.getAttribute('data-raster-edit') === 'text' ? node.innerText.replace(/\s+/g, ' ').trim() : clean(node.innerHTML).trim();
 		});
 		working(1);
-		call('editor_save_item', { collection: list.info.collection, id: 0, fields: fieldsOut }).then(function (saved) {
+		call('editor_save_item', { collection: list.info.collection, id: 0, fields: fieldsOut, examples: list.info.fields }).then(function (saved) {
 			working(-1);
 			var el = ghost.el;
 			if (ghost.bar) ghost.bar.remove();
 			ghosts.splice(ghosts.indexOf(ghost), 1);
 			var id = String(nextId++);
-			var info = { kind: 'item', collection: list.info.collection, id: saved.id, enabled: saved.enabled, published_at: saved.published_at, values: saved };
+			var info = { kind: 'item', collection: list.info.collection, id: saved.id, enabled: saved.enabled, published_at: saved.published_at, values: saved, examples: list.info.fields };
 			marks[id] = info;
 			var start = document.createComment('raster:s ' + id), end = document.createComment('raster:e ' + id);
 			el.parentNode.insertBefore(start, el);

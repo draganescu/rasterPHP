@@ -6,6 +6,11 @@
 // booking valid, and the CMS stores them, shows them on /staff (where the
 // template renders render.cms.reservation) and lets staff edit them in the
 // page or over MCP. Every write, whoever makes it, passes check().
+//
+// Fields have types: guests is an int (its default is 0), newsletter a bool
+// (false), date a date (named in 'types'). The code below reads them as
+// such, with no casts: a booking for "2" guests is 2, and its date
+// 2026-10-05 whether staff typed that or "5 Oct 2026".
 class reservation
 {
 	// how many guests the café seats in a day
@@ -15,8 +20,9 @@ class reservation
 		return array('reservation' => array(
 			'fields' => array(
 				'name' => '', 'email' => '', 'phone' => '', 'date' => '', 'guests' => 0,
-				'seating' => '', 'newsletter' => '', 'notes' => '', 'status' => 'new',
+				'seating' => '', 'newsletter' => false, 'notes' => '', 'status' => 'new',
 			),
+			'types' => array('date' => 'date'),
 			// anyone can book; staff see every booking, and a guest who was
 			// logged in sees their own on /account
 			'create' => 'visitor',
@@ -35,10 +41,10 @@ class reservation
 		$problems = array();
 		$taken = 0;
 		foreach (cms_records::find('reservation', array('date' => $after['date'])) as $booking) {
-			if ($booking['status'] === 'cancelled' || ($before && (int)$booking['id'] === (int)$before['id'])) continue;
-			$taken += (int)$booking['guests'];
+			if ($booking['status'] === 'cancelled' || ($before && $booking['id'] === $before['id'])) continue;
+			$taken += $booking['guests'];
 		}
-		if ($taken + (int)$after['guests'] > self::SEATS) $problems[] = 'fully_booked';
+		if ($taken + $after['guests'] > self::SEATS) $problems[] = 'fully_booked';
 		return $problems;
 	}
 
@@ -53,10 +59,10 @@ class reservation
 		}
 		$rows = array();
 		foreach (array_slice($evenings, 0, 7, true) as $date => $bookings) {
-			$guests = array_sum(array_map(function ($b) { return (int)$b['guests']; }, $bookings));
+			$guests = array_sum(array_map(function ($b) { return $b['guests']; }, $bookings));
 			$rows[] = array(
 				'date' => $date,
-				'seats_left' => (string)max(0, self::SEATS - $guests),
+				'seats_left' => max(0, self::SEATS - $guests),
 				'bookings' => cms_records::listed('reservation', $bookings),
 			);
 		}
@@ -100,14 +106,14 @@ class reservation
 		mail::send_view('_email/reservation', config::get('cafe_staff_email', 'staff@cafe.test'), array(
 			'name' => $booking['name'],
 			'date' => $booking['date'],
-			'guests' => (string)$booking['guests'],
+			'guests' => $booking['guests'],
 			'notes' => $booking['notes'],
 		));
 		// other models react to a booking without this one knowing them
 		// (cafe::subscribe_guest adds the guest to the newsletter)
 		event::dispatch('reservation.booked', array(
 			'name' => $booking['name'], 'email' => $booking['email'], 'date' => $booking['date'],
-			'guests' => (int)$booking['guests'], 'newsletter' => $booking['newsletter'] === 'yes',
+			'guests' => $booking['guests'], 'newsletter' => $booking['newsletter'],
 		));
 		return null;
 	}

@@ -8,6 +8,7 @@
 //   add an annotation to a view (the markup is the schema)
 // - records of a type a model declares (records.php) are checked by that
 //   model before every write, whoever makes it
+require_once __DIR__.'/types.php';
 require_once __DIR__.'/records.php';
 
 class cms_store {
@@ -78,7 +79,8 @@ class cms_store {
 	//   stylist=?stylist      the value of ?stylist in the URL; left out when
 	//                         the URL has none or it is empty
 	//   date>=today           also >, <, <= and != ; today is the date the
-	//                         page is shown (2026-10-03)
+	//                         page is shown (2026-10-03). Values compare as
+	//                         the field's type: guests>4 as numbers
 	//   order=date,-time      newest, oldest, a field, -field for descending,
 	//                         several separated by commas
 	//   limit=3
@@ -137,6 +139,18 @@ class cms_store {
 			list($field, $operator, $value) = $condition;
 			if (!preg_match('/^[a-z0-9_]+$/', $field) || !array_key_exists($field, $columns)) continue;
 			if (!in_array($operator, array('=', '!=', '<', '<=', '>', '>='), true)) continue;
+			// the value as the field's type: guests>4 compares numbers, and a
+			// value that can't be one (guests=many) matches nothing
+			try {
+				$value = cms_types::clean(cms_types::of_column($columns[$field]), $value, $field);
+			} catch (InvalidArgumentException $e) {
+				$sql .= $operator === '!=' ? '' : ' AND 1 = 0 ';
+				continue;
+			}
+			if ($value === null) {
+				$sql .= $operator === '=' ? " AND $field IS NULL " : ($operator === '!=' ? " AND $field IS NOT NULL " : ' AND 1 = 0 ');
+				continue;
+			}
 			$name = ':'.$prefix.$i.'_'.$field;
 			// a field nobody filled is not equal to anything
 			$sql .= $operator === '!=' ? " AND ($field IS NULL OR $field != $name) " : " AND $field $operator $name ";
@@ -183,6 +197,7 @@ class cms_store {
 	static function forget() {
 		self::$tables = null;
 		self::$columns = array();
+		cms_types::forget();
 	}
 
 	static function table_exists($type) {
@@ -211,19 +226,12 @@ class cms_store {
 		return R::findOne($type, ' ORDER BY id DESC ');
 	}
 
-	static function clean_value($value) {
-		if (is_bool($value)) return $value ? '1' : '0';
-		if ($value === null) return '';
-		if (!is_scalar($value)) throw new InvalidArgumentException('Field values must be strings');
-		return (string)$value;
-	}
-
 	// ##Pages
 
 	static function page_values($type) {
 		$page = self::latest($type);
 		if (!$page) return null;
-		$values = $page->export();
+		$values = cms_types::read_row($type, $page->export());
 		foreach (self::$system_fields as $field) unset($values[$field]);
 		return array(
 			'revision' => (int)$page->id,
@@ -247,8 +255,9 @@ class cms_store {
 			$page = R::dispense($type);
 			$page->slug = $slug;
 		}
+		$types = cms_types::of_table($type);
 		foreach ($values as $field => $value) {
-			$page->$field = self::clean_value($value);
+			$page->$field = cms_types::clean(isset($types[$field]) ? $types[$field] : 'text', $value, $field);
 		}
 		$page->updated_at = R::isoDateTime();
 		R::store($page);
@@ -263,7 +272,7 @@ class cms_store {
 		$revisions = R::find($type, ' ORDER BY id DESC LIMIT '.max(1, (int)$limit));
 		$history = array();
 		foreach ($revisions as $revision) {
-			$values = $revision->export();
+			$values = cms_types::read_row($type, $revision->export());
 			foreach (self::$system_fields as $field) unset($values[$field]);
 			$history[] = array('revision' => (int)$revision->id, 'updated_at' => $revision->updated_at, 'fields' => $values);
 		}
@@ -272,8 +281,9 @@ class cms_store {
 
 	// ##Collections
 
+	// a stored item, each field as its type
 	static function export_item($bean) {
-		$item = $bean->export();
+		$item = cms_types::read_row($bean->getMeta('type'), $bean->export());
 		$item['id'] = (int)$item['id'];
 		return $item;
 	}
@@ -320,10 +330,7 @@ class cms_store {
 		// slug, enabled (0 = draft) and published_at can always be set, except by visitors
 		if ($who !== 'visitor') $allowed = array_merge($allowed, array('slug', 'enabled', 'published_at'));
 		if (isset($values['slug'])) $values['slug'] = self::unique_slug($type, $values['slug'] ?: 'item', (int)$id);
-		if (isset($values['published_at']) && $values['published_at'] !== '' && strtotime($values['published_at']) === false) {
-			throw new InvalidArgumentException("published_at must be a date like 2026-10-01 09:00");
-		}
-		if (isset($values['published_at']) && $values['published_at'] !== '') $values['published_at'] = date('Y-m-d H:i:s', strtotime($values['published_at']));
+		$types = cms_types::of_table($type);
 		foreach ($values as $field => $value) {
 			if (!in_array($field, $allowed, true)) {
 				if ($info && array_key_exists($field, $info['fields'])) {
@@ -336,18 +343,21 @@ class cms_store {
 				if (is_string($value)) $value = json_decode($value, true);
 				if (!is_array($value)) throw new InvalidArgumentException("'$field' is a list");
 				$values[$field] = json_encode(array_values($value), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+				continue;
 			}
+			// the field's type: 'guests' => '4' is stored as 4, 'many' is refused
+			$values[$field] = cms_types::clean(isset($types[$field]) ? $types[$field] : 'text', $value, $field);
 		}
 		if ($id) {
 			$bean = R::findOne($type, ' id = ? ', array((int)$id));
 			if (!$bean) throw new InvalidArgumentException("No item $id");
 		} else {
 			$bean = R::dispense($type);
-			$bean->enabled = '1';
+			$bean->enabled = 1;
 		}
 		$before = $id ? self::export_item($bean) : null;
 		foreach ($values as $field => $value) {
-			$bean->$field = self::clean_value($value);
+			$bean->$field = $value;
 		}
 		if (!empty($bean->published_at) && strtotime($bean->published_at) > time()) {
 			raster_cache::schedule(strtotime($bean->published_at));
@@ -355,7 +365,6 @@ class cms_store {
 		if (empty($bean->slug)) {
 			$bean->slug = self::unique_slug($type, self::slug_source($bean->export()), (int)$bean->id);
 		}
-		if ($bean->published_at === null) $bean->published_at = '';
 		if ($info && !$id) {
 			$bean->created_at = R::isoDateTime();
 			// a record remembers who made it, so they can read it later (a
@@ -366,11 +375,11 @@ class cms_store {
 			}
 			if ($info['owner'] && $bean->owner === null) $bean->owner = 0;
 			foreach ($info['fields'] as $field => $default) {
-				if ($bean->$field === null) $bean->$field = is_array($default) ? '[]' : (string)$default;
+				if ($bean->$field === null) $bean->$field = is_array($default) ? '[]' : cms_types::clean($info['types'][$field], $default, $field);
 			}
 		}
 		if ($info) {
-			$after = cms_records::decode($info, $bean->export());
+			$after = cms_records::decode($info, cms_types::read_row($type, $bean->export()));
 			cms_records::check($info, $after, $before ? cms_records::decode($info, $before) : null);
 		}
 		$bean->updated_at = R::isoDateTime();

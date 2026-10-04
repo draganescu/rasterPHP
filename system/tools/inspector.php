@@ -797,8 +797,12 @@ class raster_inspector {
 				foreach ($m as $call) $names[] = isset($call[2]) && $call[2] !== '' ? $call[2] : $call[1];
 			}
 		}
-		// what a records form raises when the visitor may not create
+		// what a records form raises when the visitor may not create, and
+		// when a value isn't of its field's type (guests_invalid)
 		$names = array_merge($names, array('login_required', 'not_allowed'));
+		foreach (cms_records::types() as $info) {
+			foreach ($info['types'] as $field => $type) if ($type !== 'text') $names[] = $field.'_invalid';
+		}
 		return $names = array_unique($names);
 	}
 
@@ -1268,12 +1272,19 @@ class raster_inspector {
 				break;
 			}
 		}
+		// a collection's fields are typed by the mock-up the first item is
+		// stored from: its own view's (collection_defaults)
+		foreach ($collections as $name => $collection) {
+			foreach ($this->collection_defaults($name, $theme) as $field => $default) {
+				if (isset($collection['fields'][$field])) $collections[$name]['fields'][$field] = array('default' => $default, 'type' => cms_types::of_example($default));
+			}
+		}
 		// types models declare (static function types()) are collections too;
 		// their fields come from the model, not the markup
 		foreach (cms_records::types() as $name => $info) {
 			$views = isset($collections[$name]) ? $collections[$name]['views'] : array();
 			$fields = array();
-			foreach ($info['fields'] as $field => $default) $fields[$field] = array('default' => is_array($default) ? '[]' : (string)$default);
+			foreach ($info['fields'] as $field => $default) $fields[$field] = array('default' => is_array($default) ? '[]' : cms_types::show($default), 'type' => $info['types'][$field]);
 			$collections[$name] = array(
 				'name' => $name, 'type' => $info['type'], 'fields' => $fields, 'views' => $views,
 				'model' => $info['model'], 'public' => $info['public'], 'owner' => $info['owner'], 'create' => $info['create'], 'staff_add' => $info['staff_add'],
@@ -1322,7 +1333,8 @@ class raster_inspector {
 				$call = template::parse_call($ref['method']);
 				if ($call !== false && !in_array($call[0], $reserved)) {
 					if ($block['keyword'] === 'print' && !isset($fields[$call[0]])) {
-						$fields[$call[0]] = array('default' => $attribute ? template::get_attribute($block['inner'], $attribute['attribute']) : trim($block['inner']));
+						$default = $attribute ? template::get_attribute($block['inner'], $attribute['attribute']) : trim($block['inner']);
+						$fields[$call[0]] = array('default' => $default, 'type' => cms_types::of_example($default));
 					}
 					if ($block['keyword'] === 'render') {
 						$this->collect_collection($block, $call, $collections, $view);
@@ -1349,7 +1361,7 @@ class raster_inspector {
 					$key = raster_inspector::data_key($child['ref']);
 					if (!$key['builtin'] && strpos($key['key'], '.') === false && !isset($collection['fields'][$key['key']])) {
 						$default = $key['attribute'] !== null ? template::get_attribute($child['inner'], $key['attribute']) : trim($child['inner']);
-						$collection['fields'][$key['key']] = array('default' => $default);
+						$collection['fields'][$key['key']] = array('default' => $default, 'type' => cms_types::of_example($default));
 					}
 				}
 				// nested renders are separate collections
@@ -1361,7 +1373,7 @@ class raster_inspector {
 		// render.cms.booking('stylist=?stylist&date>=today')
 		if (!empty($arguments) && is_string($arguments[0])) {
 			foreach (cms_store::list_options($arguments[0])['fields'] as $field => $default) {
-				if (!isset($collection['fields'][$field])) $collection['fields'][$field] = array('default' => $default);
+				if (!isset($collection['fields'][$field])) $collection['fields'][$field] = array('default' => $default, 'type' => cms_types::of_example($default));
 			}
 		}
 		unset($collection);

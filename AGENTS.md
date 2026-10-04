@@ -407,10 +407,35 @@ item of a collection is the mock-up content.
     keeps what was chosen.
   - `field>=value`, also `>`, `<`, `<=` and `!=` (which keeps empty fields).
     `today` is the date the page is shown (`2026-10-03`): `date>=today` is
-    what is coming, `date<today` what is past. Dates compare as text, so
-    store them as `YYYY-MM-DD`.
+    what is coming, `date<today` what is past. Values compare as the
+    field's type (see **Types**): `price<10` compares numbers. A value
+    that can't be of the type (`?max=lots` for a number) matches nothing.
   - A new item added to the list in the page starts with the values its
     `=` filters ask for, as the URL gives them.
+- **Types.** Every field is text, `int`, `number`, `bool`, `date`,
+  `datetime` or `time`, and its mock-up says which: `14` is an int, `4.50`
+  a number, `2026-10-10` a date, `2026-10-10 19:00` a datetime, `19:00` a
+  time. Anything else is text, so `14 lei`, `0721 000 000` and `Jazz night`
+  are. A collection's fields take the mock-up of its own view (`news.html`,
+  else `news_item.html`), the one its first item is stored from.
+  - Whoever writes (the editor, MCP, a form, a model), the value is stored
+    as its type: `4.5` for `4.50`, `2026-10-05` for `5 Oct 2026`, `20:00`
+    for `8pm`, `1` for `yes`. One that can't be (`many` for an int,
+    `2026-02-30`, `x` for a date) is refused with the field and an
+    example. An empty value is `null` (`false` for a bool, `''` for text).
+    A form's ticked checkbox is yes, whatever its `value`.
+  - Lists filter and sort by type: `order=-price` puts 100 above 18 above
+    9.50.
+  - Models, MCP and `/api` read ints, floats and bools. Templates print
+    text: a number with as many decimals as its mock-up (with `14.50` in
+    the mock-up, 4.5 prints `4.50`), a bool `1` or `0`, an empty value
+    nothing. That holds for any model's rows, so a model returning
+    `24.0` under a `24.00` mock-up prints `24.00`. The in-page editor
+    shows what was stored the same way.
+  - `schema`, `describe` and `site_overview` list each field's type. When
+    a mock-up changes type (`14` becomes `14 lei`), `schema` shows the
+    column as retyped and `schema --apply` converts it if every stored
+    value fits; otherwise it names the values that don't.
 - **Items** get a `slug` made from their title, headline or name. They also
   have `enabled` (`0` makes a draft) and `published_at` (a future date
   schedules the item). Visitors don't see drafts or scheduled items; editors
@@ -440,6 +465,7 @@ class reservation {
     static function types() {
         return array('reservation' => array(
             'fields'   => array('name' => '', 'date' => '', 'guests' => 0, 'status' => 'new', 'lines' => array()),
+            'types'    => array('date' => 'date'),   // the rest come from the defaults: 0 an int, '' text
             'create'   => 'visitor',           // who may send the form: visitor, member, editor (default)
             'staff_add' => true,               // staff also add them in the page (phone bookings)
             'owner'    => true,                // remember who made it; they may read their own
@@ -470,6 +496,11 @@ class reservation {
   model that declares it. Its fields come from `types()`, not the markup, and
   no mock-up row is ever stored. Records also get `created_at` and, with
   `owner`, the account id in `owner`.
+- **Field types** come from the defaults: `0` is an int, `0.0` a number,
+  `false` a bool, `''` text. `'types'` names the others: `'date'`,
+  `'datetime'` or `'time'` (or any type, overriding the default's). The
+  model reads them as such (`$after['guests'] > 8`, `if
+  ($booking['newsletter'])`), with no casts. See **Types** above.
 - **`check($type, $after, $before)` runs before every write**, whoever makes
   it: a form, the in-page editor, MCP, or the model's own code. `$after` is
   the whole record as it would be stored (`null` when deleting), `$before` as
@@ -500,6 +531,8 @@ class reservation {
   or hidden; a field the form doesn't send keeps the type's default), runs
   `check()` and raises each problem as an alert, or stores
   the record and redirects with `?done=$done` (the type's name by default).
+  A value the HTML rules let through but the field's type doesn't (`2.5`
+  guests in a number input) raises `<field>_invalid` (`guests_invalid`).
   `$done = false` returns the stored record instead, for a checkout that goes
   on to pay. A visitor who may not create gets `login_required` (member
   types) or `not_allowed`.
@@ -859,7 +892,9 @@ of lists and filter pages come along; drafts and the editor don't.
 - **Addressing pages:** by URL (`/about`), by view (`about`), or `site` for the
   `site_*` fields.
 - **Writes** are limited to fields in the templates, plus `slug`, `enabled`
-  and `published_at` on items.
+  and `published_at` on items. Values are given as their types (`4`,
+  `4.5`, `true`, `"2026-10-05"`); text is fine too and is converted the
+  same way.
 - **`write_view` edits code, not content**, since a template can call any
   model. Over stdio the agent is already on the machine with the files, so it
   is available. Over HTTP it is not offered until the site sets

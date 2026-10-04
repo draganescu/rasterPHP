@@ -531,7 +531,7 @@ test(array('E8', 'K1', 'E9', 'E24'), 'pagination for collections and for models'
 	has(http('GET', "$base/menu/menu_items/category/cakes")[1], '<h1>Menu</h1>');
 	lacks(http('GET', "$base/menu/menu_items/category/cakes")[1], 'menu_page/2', 'filters shrink the pages');
 	$ordering = between(http('GET', "$base/lab")[1], 'ordering');
-	check(preg_match('#<ol class="priciest">\s*<li>Crème brûlée 18</li>\s*<li>Flat white 14</li></ol>#', $ordering), "order=-price: $ordering");
+	check(preg_match('#<ol class="priciest">\s*<li>Crème brûlée 18.00</li>\s*<li>Flat white 14.50</li></ol>#', $ordering), "order=-price: $ordering");
 	has($ordering, 'Opening day', 'order=oldest');
 	lacks($ordering, 'coffee has pages', 'pagination follows the filter argument');
 	has($ordering, 'the menu has 2 pages');
@@ -1504,7 +1504,7 @@ test('A14', 'a route to a view in another theme', function () use ($base) {
 	same(200, $status);
 	has($body, '<title>Menu (print)</title>');
 	has($body, "<base href='$base/demo/views/print/'");
-	has($body, '<tr><td>Flat white</td><td>14 lei</td></tr>');
+	has($body, '<tr><td>Flat white</td><td>14.50 lei</td></tr>');
 	same(200, http('GET', "$base/demo/views/print/print.css")[0], 'the other theme\'s assets');
 });
 test('A15', 'rewrite off: links go through index.php', function () use ($db, $maildir) {
@@ -2432,6 +2432,179 @@ test('C48', '/api answers only what a model lists, for the roles it names', func
 	} finally {
 		@rmdir($dir);
 	}
+});
+
+// ## T. Field types
+
+test('T1', 'a template field is of its mock-up\'s type, a record field of its default\'s or the one types() names; schema, describe and site_overview say so', function () use ($base) {
+	http('GET', "$base/menu");
+	http('GET', "$base/events");
+	$schema = json_decode(raster(array('schema', '--json'))[1], true);
+	$types = array();
+	foreach ($schema['tables'] as $table) {
+		if (isset($table['name'])) foreach ($table['fields'] as $name => $field) $types[$table['name']][$name] = $field['type'];
+	}
+	same('number', $types['menu']['price'], 'price is 14.50 in menu.html');
+	same('int', $types['menu']['featured'], 'featured=1 in index.html');
+	same('text', $types['menu']['name']);
+	same(array('date', 'time'), array($types['events']['date'], $types['events']['starts']));
+	same(array('int', 'bool', 'date', 'text'), array($types['reservation']['guests'], $types['reservation']['newsletter'], $types['reservation']['date'], $types['reservation']['name']));
+	database::instance('cms');
+	cms_store::forget();
+	same(array('REAL', 'DATE', 'TIME', 'BOOLEAN'), array(cms_store::columns('menudata')['price'], cms_store::columns('eventsdata')['date'], cms_store::columns('eventsdata')['starts'], cms_store::columns('menudata')['enabled']), 'the columns are declared as their types');
+	$overview = mcp($base, 'site_overview');
+	foreach ($overview['collections'] as $c) $listed[$c['name']] = isset($c['types']) ? $c['types'] : array();
+	same(array('price' => 'number', 'featured' => 'int'), $listed['menu'], 'only the fields that aren\'t text');
+	same(array('date' => 'date', 'starts' => 'time'), $listed['events']);
+	$described = json_decode(raster(array('describe', '--json', '--sections=collections'))[1], true);
+	foreach ($described['collections'] as $c) if ($c['name'] === 'reservation') same(array('date' => 'date', 'guests' => 'int', 'newsletter' => 'bool'), $c['types'] + array());
+});
+
+test('T2', 'values are stored as their type, whoever writes them, or refused naming the field', function () use ($base) {
+	$gig = mcp($base, 'create_item', array('collection' => 'events', 'fields' => array('title' => 'Typed gig', 'date' => '12 Dec 2026', 'starts' => '8pm', 'summary' => 'x')));
+	same(array('2026-12-12', '20:00'), array($gig['date'], $gig['starts']), 'MCP');
+	try {
+		mcp($base, 'create_item', array('collection' => 'menu', 'fields' => array('name' => 'Free lunch', 'price' => 'cheap')));
+		throw new Exception('a price that is no number was stored');
+	} catch (Exception $e) {
+		has($e->getMessage(), "'price' must be a number, like 4.50");
+	}
+	try {
+		mcp($base, 'update_item', array('collection' => 'events', 'id' => $gig['id'], 'fields' => array('date' => '2026-02-30')));
+		throw new Exception('a date that does not exist was stored');
+	} catch (Exception $e) {
+		has($e->getMessage(), "'date' must be a date, like 2026-10-05");
+	}
+	// the in-page editor posts text, and gets the item back as text
+	$staff = login($base, 'staff@cafe.test', 'staff password');
+	$h = array("Cookie: $staff");
+	$token = token_in(http('GET', "$base/menu", null, $h)[1]);
+	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'menu', 'id' => 0, 'fields' => array('name' => 'Typed tart', 'price' => ' 9.5 ', 'category' => 'cakes'), 'csrf' => $token), $h);
+	same(200, $status);
+	$tart = json_decode($body, true);
+	same(array('9.5', '1'), array($tart['price'], $tart['enabled']));
+	same(9.5, cms_store::get_item('menudata', $tart['id'])['price'], 'stored as a number');
+	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'menu', 'id' => $tart['id'], 'fields' => array('price' => 'nine'), 'csrf' => $token), $h);
+	same(400, $status);
+	has($body, "'price' must be a number");
+	// with the mock-ups from the item's mark, it comes back as the page prints it
+	list(, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'menu', 'id' => $tart['id'], 'fields' => array('price' => '9.5'), 'examples' => array('price' => '14.50'), 'csrf' => $token), $h);
+	same('9.50', json_decode($body, true)['price']);
+	has(http('GET', "$base/menu", null, $h)[1], '"examples":{', 'item marks carry their mock-ups');
+	mcp($base, 'delete_item', array('collection' => 'events', 'id' => $gig['id']));
+	mcp($base, 'delete_item', array('collection' => 'menu', 'id' => $tart['id']));
+});
+
+test('T3', 'lists filter and sort by type: numbers as numbers, dates as dates', function () use ($base) {
+	$platter = mcp($base, 'create_item', array('collection' => 'menu', 'fields' => array('name' => 'Big platter', 'price' => '100', 'category' => 'plates')));
+	$tea = mcp($base, 'create_item', array('collection' => 'menu', 'fields' => array('name' => 'Mint tea', 'price' => '9.5', 'category' => 'tea')));
+	try {
+		// as text, "9.50" sorts above "18.00" and "100.00" below both
+		check(preg_match('#<ol class="priciest">\s*<li>Big platter 100.00</li>\s*<li>Crème brûlée 18.00</li></ol>#', between(http('GET', "$base/lab")[1], 'ordering'), $m), 'order=-price');
+		with_file(dirname(__DIR__).'/demo/views/cafe/zz-types.html', "<ul><!-- render.cms.menu('price>=10&price<=18&order=price&limit=50') --><li><!-- print.name -->Dish<!-- /print.name --></li><!-- /render.cms.menu('price>=10&price<=18&order=price&limit=50') --></ul>", function () use ($base) {
+			$listed = http('GET', "$base/zz-types")[1];
+			lacks($listed, 'Mint tea', '9.5 < 10');
+			lacks($listed, 'Big platter', '100 > 18');
+			check(strpos($listed, 'Flat white') < strpos($listed, 'Crème brûlée'), '14.50 before 18');
+			// a value that can't be a number matches nothing
+			file_put_contents(dirname(__DIR__).'/demo/views/cafe/zz-types.html', "<ul><!-- render.cms.menu('price=?max') --><li><!-- print.name -->Dish<!-- /print.name --></li><!-- /render.cms.menu('price=?max') --></ul>");
+			lacks(http('GET', "$base/zz-types?max=lots")[1], '<li>');
+			has(http('GET', "$base/zz-types?max=100.0")[1], '<li>Big platter</li>', '100.0 is 100');
+		});
+		$late = mcp($base, 'create_item', array('collection' => 'events', 'fields' => array('title' => 'Late show', 'date' => '2026-10-10', 'starts' => '9:30pm', 'summary' => 'x')));
+		$early = mcp($base, 'create_item', array('collection' => 'events', 'fields' => array('title' => 'Early show', 'date' => '2026-10-10', 'starts' => '18:00', 'summary' => 'x')));
+		$events = http('GET', "$base/events")[1];
+		check(strpos($events, 'Early show') < strpos($events, 'Late show'), 'order=date,starts: 18:00 before 21:30');
+		mcp($base, 'delete_item', array('collection' => 'events', 'id' => $late['id']));
+		mcp($base, 'delete_item', array('collection' => 'events', 'id' => $early['id']));
+	} finally {
+		mcp($base, 'delete_item', array('collection' => 'menu', 'id' => $platter['id']));
+		mcp($base, 'delete_item', array('collection' => 'menu', 'id' => $tea['id']));
+	}
+});
+
+test('T4', 'models, MCP and /api read ints, floats and bools; the model needs no casts', function () use ($base) {
+	same(303, http('POST', "$base/visit", array('raster_form' => 'reservation.book', 'name' => 'Tudor', 'email' => 'tudor@example.com', 'date' => '2026-11-20', 'guests' => '3', 'newsletter' => 'yes', 'terms' => '1'))[0]);
+	$booking = cms_records::find('reservation', array('email' => 'tudor@example.com'))[0];
+	same(array(3, true, '2026-11-20'), array($booking['guests'], $booking['newsletter'], $booking['date']));
+	check(is_int($booking['id']) && is_int($booking['owner']), 'ids are ints');
+	same(array(), cms_records::find('reservation', array('email' => 'tudor@example.com', 'newsletter' => false)), 'find() filters by type too');
+	same(3, mcp($base, 'get_item', array('collection' => 'reservation', 'id' => $booking['id']))['guests']);
+	$staff = login($base, 'staff@cafe.test', 'staff password');
+	$day = json_decode(http('GET', "$base/api/reservation/day/2026-11-20", null, array("Cookie: $staff"))[1], true);
+	$tudor = array_values(array_filter($day, function ($b) { return $b['name'] === 'Tudor'; }))[0];
+	same(array(3, true), array($tudor['guests'], $tudor['newsletter']));
+	// MCP takes values as their types, and a whole number for an int
+	same(4, mcp($base, 'update_item', array('collection' => 'reservation', 'id' => $booking['id'], 'fields' => array('guests' => 4)))['guests']);
+	try {
+		mcp($base, 'update_item', array('collection' => 'reservation', 'id' => $booking['id'], 'fields' => array('guests' => 'many')));
+		throw new Exception('many guests were stored');
+	} catch (Exception $e) {
+		has($e->getMessage(), "'guests' must be a whole number, like 4");
+	}
+	mcp($base, 'delete_item', array('collection' => 'reservation', 'id' => $booking['id']));
+});
+
+test('T5', 'templates print text: a number with its mock-up\'s decimals, nothing for an empty value; a form value of the wrong type raises <field>_invalid', function () use ($base) {
+	$menu = http('GET', "$base/menu")[1];
+	has($menu, '<p class="price">10.00 lei', 'the mock-up (14.50) has two decimals, so 10 prints 10.00');
+	has(http('GET', "$base/menu/menu_item/flat-white")[1], '14.50 lei');
+	$untimed = mcp($base, 'create_item', array('collection' => 'events', 'fields' => array('title' => 'Untimed', 'date' => '2026-10-11', 'summary' => 'x')));
+	same(null, mcp($base, 'get_item', array('collection' => 'events', 'id' => $untimed['id']))['starts'], 'an empty time is null to models');
+	has(http('GET', "$base/events/events_item/untimed")[1], '2026-10-11 at </p>', 'and prints nothing');
+	mcp($base, 'delete_item', array('collection' => 'events', 'id' => $untimed['id']));
+	// HTML lets 2.5 through a number input; the int field doesn't
+	list($status, $body) = http('POST', "$base/visit", array('raster_form' => 'reservation.book', 'name' => 'Half', 'email' => 'half@example.com', 'date' => '2026-11-21', 'guests' => '2.5', 'terms' => '1'));
+	same(200, $status);
+	has($body, 'We seat whole guests');
+	same(array(), cms_records::find('reservation', array('email' => 'half@example.com')), 'nothing stored');
+	lacks(raster(array('lint'))[1], 'guests_invalid', 'lint knows Raster raises it');
+	// any model's numbers print with the mock-up's decimals, records included
+	$model = dirname(__DIR__).'/demo/models/zzprices/zzprices.php';
+	@mkdir(dirname($model));
+	try {
+		with_file($model, '<?php class zzprices { function rows() { return array(array("price" => 24.0), array("price" => 9.5)); } }', function () use ($base) {
+			with_file(dirname(__DIR__).'/demo/views/cafe/zz-prices.html', '<!-- render.zzprices.rows --><b><!-- print.price -->24.00<!-- /print.price --></b><!-- /render.zzprices.rows -->', function () use ($base) {
+				has(http('GET', "$base/zz-prices")[1], '<b>24.00</b>'."\n".'<b>9.50</b>');
+			});
+		});
+	} finally {
+		@rmdir(dirname($model));
+	}
+	// a ticked box sends its own value
+	same(303, http('POST', "$base/visit", array('raster_form' => 'reservation.book', 'name' => 'Box', 'email' => 'box@example.com', 'date' => '2026-11-22', 'guests' => '2', 'newsletter' => 'subscribe', 'terms' => '1'))[0]);
+	$box = cms_records::find('reservation', array('email' => 'box@example.com'))[0];
+	same(true, $box['newsletter']);
+	mcp($base, 'delete_item', array('collection' => 'reservation', 'id' => $box['id']));
+});
+
+test('T6', 'schema --apply converts a column whose type changed when every value fits, and names the values that don\'t', function () use ($base) {
+	$view = dirname(__DIR__).'/demo/views/cafe/zz-retype.html';
+	$markup = function ($mock) { return "<!-- render.cms.zzretype --><p><!-- print.n -->$mock<!-- /print.n --></p><!-- /render.cms.zzretype -->"; };
+	with_file($view, $markup('5'), function () use ($base, $view, $markup) {
+		http('GET', "$base/zz-retype");
+		cms_store::forget();
+		same('INT', cms_store::columns('zzretypedata')['n']);
+		file_put_contents($view, $markup('five'));
+		list(, $out) = raster(array('schema'));
+		has($out, 'n (int in the database, text in the templates; --apply converts it)');
+		has(raster(array('schema', '--apply'))[1], 'zzretypedata.n is now text (was int)');
+		$lots = mcp($base, 'create_item', array('collection' => 'zzretype', 'fields' => array('n' => 'lots')));
+		file_put_contents($view, $markup('5'));
+		list(, $out) = raster(array('schema', '--apply'));
+		has($out, 'kept zzretypedata.n as text: "lots" can\'t be int; change them and run --apply again');
+		cms_store::forget();
+		same('TEXT', cms_store::columns('zzretypedata')['n']);
+		// a column SQLite won't drop (it has an index) stays as it was, with
+		// nothing half done
+		mcp($base, 'delete_item', array('collection' => 'zzretype', 'id' => $lots['id']));
+		R::exec('CREATE INDEX zz_n ON zzretypedata (n)');
+		has(raster(array('schema', '--apply'))[1], 'kept zzretypedata.n as it was:');
+		cms_store::forget();
+		same(array('TEXT', false), array(cms_store::columns('zzretypedata')['n'], isset(cms_store::columns('zzretypedata')['raster_n_retyped'])));
+		R::exec('DROP INDEX zz_n');
+	});
+	raster(array('schema', '--drop=zzretypedata', '--force'));
 });
 
 // ## No PHP warnings, notices or deprecations on any request
