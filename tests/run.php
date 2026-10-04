@@ -1051,6 +1051,90 @@ test('empty filter pages, pages past the last one and unknown filters are not ca
 	}
 });
 
+// a production server on its own port, for the cache tests over HTTP
+function cache_server($db, $test) {
+	global $root;
+	$port = free_port();
+	$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_ENV' => 'production', 'PATH' => getenv('PATH')));
+	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
+	$get = function ($path) use ($port) {
+		list($status, $body, $headers) = http('GET', "http://127.0.0.1:$port$path");
+		return array($status.' '.(current(preg_grep('/^X-Raster-Cache/i', $headers)) ?: 'not cached'), $body);
+	};
+	try {
+		$test($get);
+	} finally {
+		proc_terminate($server);
+		cache_empty();
+	}
+}
+
+test('other spellings of a list or item URL are not cached', function () use ($db) {
+	cache_empty();
+	cache_server($db, function ($get) {
+		// each answers as the page it stands for, but there is no end to them
+		foreach (array('/news/news_page/-1', '/news/news_page/0', '/news/news_page/1', '/news/news_page/02', '/news/news_page/2/abc', '/news/news_page/2/abc/def',
+			'/news/news_items/headline/Filler%201/junk', '/news/news_items/headline/Filler%201/news_page/-5', '/news/news_items/news_page/2/headline/Filler%201',
+			'/news/news_items/headline/Filler%201/headline/Filler%201', '/news/news_item/01', '/news/news_item/001', '/news/news_item/1/junk', '/news/news_item/1/x/y') as $path) {
+			same('200 not cached', $get($path)[0], $path);
+			same('200 not cached', $get($path)[0], $path);
+		}
+		same(0, count(glob(APPBASE.'data/cache/*') ?: array()), 'cache files');
+		// the URLs the site's own links use are cached
+		foreach (array('/news/news_item/1', '/news/news_page/2', '/news/news_items/headline/Filler%201') as $path) {
+			same('200 X-Raster-Cache: miss', $get($path)[0], $path);
+			same('200 X-Raster-Cache: hit', $get($path)[0], $path);
+		}
+	});
+});
+
+test('a tracking link does not leave its parameters in the page every visitor gets', function () use ($db) {
+	cache_empty();
+	cache_server($db, function ($get) {
+		list($first, $body) = $get('/news?utm_source=attacker&utm_campaign=evil');
+		same('200 X-Raster-Cache: miss', $first);
+		check(strpos($body, 'news_page/2') !== false, 'the list has a link to page 2');
+		list($next, $body) = $get('/news');
+		same('200 X-Raster-Cache: hit', $next);
+		check(strpos($body, 'attacker') === false && strpos($body, 'evil') === false, 'the cached page carries the tracking link\'s parameters');
+	});
+});
+
+test('in production, made-up URLs of a list with no items are not cached', function () use ($db) {
+	cache_empty();
+	$empty = sys_get_temp_dir().'/raster-test-empty-'.getmypid().'.sqlite';
+	copy($db, $empty);
+	$pdo = new PDO("sqlite:$empty");
+	$pdo->exec('DELETE FROM newsdata');
+	$pdo = null;
+	try {
+		cache_server($empty, function ($get) {
+			foreach (array('/news/news_items/headline/r1', '/news/news_items/headline/r2', '/news/news_page/500') as $path) {
+				same('200 not cached', $get($path)[0], $path);
+				same('200 not cached', $get($path)[0], $path);
+			}
+			same(0, count(glob(APPBASE.'data/cache/*') ?: array()), 'cache files');
+		});
+	} finally {
+		array_map('unlink', glob("$empty*") ?: array());
+	}
+});
+
+test('a content change deletes temporary cache files left long ago', function () {
+	cache_empty();
+	$dir = APPBASE.'data/cache/';
+	if (!is_dir($dir)) mkdir($dir, 0775, true);
+	$old = $dir.str_repeat('c', 40).'.'.str_repeat('d', 12).'.tmp';
+	$new = $dir.str_repeat('e', 40).'.'.str_repeat('f', 12).'.tmp';
+	file_put_contents($old, 'left by a request that died');
+	touch($old, time() - 7200);
+	file_put_contents($new, 'being written');
+	cache_run('util::content_changed();');
+	check(!is_file($old), 'a temporary file from two hours ago is still there');
+	check(is_file($new), 'a page being written was deleted');
+	cache_empty();
+});
+
 // ## 2.1.8 batch B: errors and /api
 // (batch B adds its tests here)
 

@@ -169,6 +169,9 @@ class raster_cache {
 	// the version when the request started: the page is stored under it, so
 	// one whose render overlapped a content change is never served as fresh
 	static $version = null;
+	// query parameters that don't change the page: a link shared with
+	// ?utm_source=… or an ad's click id
+	static $tracking = '/^(utm_[a-z0-9_]*|fbclid|gclid|msclkid)$/i';
 
 	static function dir() {
 		return APPBASE.'data/cache/';
@@ -192,9 +195,9 @@ class raster_cache {
 			&& isset($_SERVER['REQUEST_METHOD']) && in_array($_SERVER['REQUEST_METHOD'], array('GET', 'HEAD'))
 			&& !isset($_COOKIE[session_name()])
 			&& !preg_match('#^/(api|mcp|login)(/|$)#', $uri);
-		// a link shared with ?utm_source=… or an ad's click id is the same page
+		// a link with only tracking parameters is the same page
 		foreach (explode('&', isset($_SERVER['QUERY_STRING']) ? (string)$_SERVER['QUERY_STRING'] : '') as $pair) {
-			if ($pair !== '' && !preg_match('/^(utm_[a-z0-9_]*|fbclid|gclid|msclkid)$/i', urldecode(strtok($pair, '=')))) $ok = false;
+			if ($pair !== '' && !preg_match(self::$tracking, urldecode(strtok($pair, '=')))) $ok = false;
 		}
 		foreach ((array)config::get('page_cache_skip', array()) as $pattern) {
 			if (preg_match('%^/?'.$pattern.'%', $uri)) $ok = false;
@@ -222,7 +225,8 @@ class raster_cache {
 	}
 
 	// content changed: a new version, and the pages cached under the old one
-	// are deleted (files other requests are still writing are left alone).
+	// are deleted. Files other requests are still writing are left alone;
+	// one an hour old was left by a request that died before it was done.
 	// The version is random, not counted, so it is never read to make the
 	// next one and an old one never comes back. Returns how many pages were
 	// deleted.
@@ -231,6 +235,7 @@ class raster_cache {
 		$removed = 0;
 		foreach (glob(self::dir().'*') ?: array() as $file) {
 			if (preg_match('/^[0-9a-f]{40}$/', basename($file)) && @unlink($file)) $removed++;
+			elseif (substr($file, -4) === '.tmp' && @filemtime($file) < time() - 3600) @unlink($file);
 		}
 		return $removed;
 	}
@@ -262,6 +267,11 @@ class raster_cache {
 
 	static function serve() {
 		if (!self::cacheable()) return;
+		// the page is made as the plain URL would be, so tracking values
+		// (anyone's to choose) never end up in the copy every visitor gets
+		foreach (array_keys($_GET) as $name) {
+			if (preg_match(self::$tracking, $name)) unset($_GET[$name]);
+		}
 		self::publish_due();
 		self::$version = self::version();
 		$file = self::dir().self::key();

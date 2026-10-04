@@ -82,6 +82,35 @@ class cms
 		util::session($force);
 	}
 
+	// Is the URL spelled the way the list's own links spell it?
+	// /news/news_page/2, /news/news_items/tag/php, /news/news_item/7. Other
+	// spellings of the same page (/news/news_page/02, /news/news_page/1, a
+	// segment left over, an id with zeros in front) still answer, but are
+	// not kept, since there is no end to them.
+	static function canonical_uri($name) {
+		$segments = (array)config::get('uri_segments');
+		// /news/news_page/2.rss is page 2 of the feed
+		$segments[count($segments) - 1] = preg_replace('/\.(rss|atom|xml|json|txt)$/', '', (string)end($segments));
+		$page = function ($value) { return (bool)preg_match('/^[1-9][0-9]*$/', $value) && $value !== '1'; };
+		foreach ($segments as $i => $segment) {
+			$rest = array_slice($segments, $i + 1);
+			if ($segment === $name.'_page') return count($rest) === 1 && $page($rest[0]);
+			if ($segment === $name.'_item') return count($rest) === 1 && (!ctype_digit($rest[0]) || $rest[0] === (string)(int)$rest[0]);
+			if ($segment === $name.'_items') {
+				if (count($rest) % 2) return false;
+				$seen = array();
+				for ($j = 0; $j < count($rest); $j += 2) {
+					if (isset($seen[$rest[$j]])) return false;
+					$seen[$rest[$j]] = true;
+					// the page comes last: /news/news_items/tag/php/news_page/2
+					if ($rest[$j] === $name.'_page') return $j + 2 === count($rest) && $page($rest[$j + 1]);
+				}
+				return true;
+			}
+		}
+		return true;
+	}
+
 	// custom cms routes for admin panels and collection URLs
 	public function route() {
 		include 'routes.php';
@@ -249,8 +278,8 @@ class cms
 
 		$page = (int)util::param($name.'_page', 0);
 		$roffset = $page > 1 ? ($page-1)*$page_size : 0;
-		// /news/news_page/2x shows page 2, but is not a page worth keeping
-		if (util::param($name.'_page') !== false && (string)$page !== util::param($name.'_page')) raster_cache::skip();
+		// /news/news_page/02 shows page 2, but is not a page worth keeping
+		if (!cms::canonical_uri($name)) raster_cache::skip();
 
 		// one item: /news/news_item/3 or /news/news_item/raster-runs-on-php-8
 		if (util::param($name) == $name.'_item') {
@@ -386,10 +415,11 @@ class cms
 		$bindings += $more_bindings;
 		$sql .= ' ORDER BY '.cms_store::order_sql(isset($options['order']) ? $options['order'] : '', $fields).' LIMIT '.(int)$page_size.' OFFSET '.(int)$roffset;
 		$data = array_values(array_map(array('cms_store', 'export_item'), R::find($this->data_name, $sql, $bindings)));
-		if (!$data && !$record && database::$frozen && R::count($this->data_name) == 0) return false;
-		// a filter nothing matches and a page past the last one answer, empty;
-		// they are not kept, so made-up URLs don't fill the page cache
+		// a filter nothing matches and a page past the last one answer, empty
+		// (or with the mock-up, while the list has no items); they are not
+		// kept, so made-up URLs don't fill the page cache
 		if (!$data && ($page > 1 || $uri_filters)) raster_cache::skip();
+		if (!$data && !$record && database::$frozen && R::count($this->data_name) == 0) return false;
 		// the template prints text: 4.5 as its mock-up 4.50 does
 		foreach ($data as $key => $row) $data[$key] = cms_types::show_row($row, $expected_properties);
 		if ($record) {

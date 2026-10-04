@@ -2623,7 +2623,9 @@ test(array('L9', 'L10'), 'page cache: made-up list URLs are not kept, a change d
 	same('200 hit', $cache('/journal/journal_items/author/Mara'));
 	// L9: a filter nothing matches, a page past the last one and a field the
 	// list doesn't have all answer, and none of them is kept
-	foreach (array('/journal/journal_items/author/nobody-1', '/journal/journal_items/author/nobody-2', '/journal/journal_page/99999', '/journal/journal_items/flavour/x') as $path) {
+	// nor are other spellings of a list's own URLs
+	foreach (array('/journal/journal_items/author/nobody-1', '/journal/journal_items/author/nobody-2', '/journal/journal_page/99999', '/journal/journal_items/flavour/x',
+		'/journal/journal_page/-1', '/journal/journal_page/1', '/journal/journal_items/author/Mara/junk', '/journal/journal_items/author/Mara/journal_page/-5') as $path) {
 		same('200 not kept', $cache($path), $path);
 		same('200 not kept', $cache($path), $path);
 	}
@@ -2633,6 +2635,12 @@ test(array('L9', 'L10'), 'page cache: made-up list URLs are not kept, a change d
 		same('200 hit', $cache("/journal/journal_items/author/Mara?$query"), $query);
 	}
 	same('200 not kept', $cache('/journal/journal_items/author/Mara?utm_source=x&page=2'), 'any other parameter still skips the cache');
+	// and the page every visitor then gets doesn't carry the tracking values
+	list($status, $body, $headers) = http('GET', "$prod/journal?utm_source=attacker");
+	same('200 miss', $status.' '.header_value($headers, 'X-Raster-Cache'));
+	list($status, $body, $headers) = http('GET', "$prod/journal");
+	same('200 hit', $status.' '.header_value($headers, 'X-Raster-Cache'));
+	check(strpos($body, 'attacker') === false, 'the cached /journal carries a tracking link\'s values');
 	// L9: a content change deletes the pages cached before it
 	mcp($prod, 'create_item', array('collection' => 'journal', 'fields' => array('title' => 'More notes', 'author' => 'Mara')));
 	same(0, $pages(), 'pages cached before a content change are deleted');
