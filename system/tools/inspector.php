@@ -414,8 +414,9 @@ class raster_inspector {
 				'methods' => $methods,
 			);
 			// what /api/<model>/<method> answers, and for whom. A bundled model,
-			// overridden or not, is governed by config api_system_models instead
-			if (!file_exists(BASE.$models_path.'/'.$name.'/'.$name.'.php')) $models[$name]['api'] = $this->model_api($name);
+			// overridden or not, only when config api_system_models lets it through
+			$bundled = file_exists(BASE.$models_path.'/'.$name.'/'.$name.'.php');
+			if (!$bundled || in_array($name, (array)config::get('api_system_models', array('cms')))) $models[$name]['api'] = $this->model_api($name);
 		}
 		ksort($models);
 		$listeners = array();
@@ -436,8 +437,7 @@ class raster_inspector {
 		);
 	}
 
-	// What an application model offers over /api: array(method => role), or
-	// 'open' when config api_open leaves every public method reachable.
+	// What an application model offers over /api: array(method => role).
 	function model_api($model) {
 		$info = $this->model_info($model);
 		if (!$info) return array();
@@ -445,11 +445,12 @@ class raster_inspector {
 		try {
 			if (!class_exists($class, false)) require_once $info['file'];
 			if (!class_exists($class, false)) return array();
-			$offered = api::offered($class);
+			// an override adds to what the model it overrides lists, as api.php does
+			$offered = array_merge(class_exists($model) ? api::offered($model) : array(), api::offered($class));
 		} catch (Throwable $e) {
 			return array();
 		}
-		return $offered === null ? 'open' : (object)$offered;
+		return (object)$offered;
 	}
 
 	// the named queries a model can call as methods: its own sql/ folder
@@ -873,7 +874,7 @@ class raster_inspector {
 			}
 			if ($method === 'field' && $fields && isset($form['fields'][reset($fields)])) {
 				$rules = $form['fields'][reset($fields)];
-				unset($rules['type']);
+				unset($rules['type'], $rules['list']);
 				if (!$rules && !in_array($form['fields'][reset($fields)]['type'], array('email', 'url', 'number', 'range', 'date'))) {
 					$problems[] = self::problem_at('warning', $html, $at, "validation.field('".reset($fields)."') never shows: the input has no constraint (required, type, minlength, maxlength, min, max, pattern)");
 				}

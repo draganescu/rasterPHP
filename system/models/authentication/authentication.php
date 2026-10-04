@@ -75,12 +75,16 @@ class authentication
 		return R::findOne('user', ' LOWER(email) = ? OR username = ? ', array(strtolower($login), $login));
 	}
 
-	// Creates or updates an account. $login is an email or a username.
+	// Creates or updates an account. $login is an email or a username. A
+	// null $role or $password keeps what an existing account has; a new
+	// account needs a password and is a member unless $role says otherwise.
 	static function save_user($login, $password, $role = 'member', $name = null) {
 		self::connect();
-		if (!isset(self::$roles[$role])) throw new InvalidArgumentException("Role must be one of: ".implode(', ', array_keys(self::$roles)));
+		if ($role !== null && !isset(self::$roles[$role])) throw new InvalidArgumentException("Role must be one of: ".implode(', ', array_keys(self::$roles)));
 		$user = self::find($login);
 		if (!$user) {
+			if ($password === null) throw new InvalidArgumentException('A new account needs a password');
+			if ($role === null) $role = 'member';
 			$user = R::dispense('user');
 			$is_email = filter_var($login, FILTER_VALIDATE_EMAIL);
 			$user->email = $is_email ? strtolower($login) : '';
@@ -88,8 +92,8 @@ class authentication
 			$user->created_at = R::isoDateTime();
 		}
 		if ($name !== null || empty($user->name)) $user->name = $name !== null ? $name : preg_replace('/@.*$/', '', $login);
-		$user->role = $role;
-		$user->password = password_hash($password, PASSWORD_DEFAULT);
+		if ($role !== null) $user->role = $role;
+		if ($password !== null) $user->password = password_hash($password, PASSWORD_DEFAULT);
 		R::store($user);
 		return (int)$user->id;
 	}
@@ -121,7 +125,9 @@ class authentication
 	static function check_login($login, $password) {
 		$user = self::find($login);
 		if (!$user || !is_string($password) || $password === '') return false;
-		// five wrong passwords lock the account for 15 minutes
+		// five wrong passwords lock the account for 15 minutes; once 15
+		// minutes have passed since the last one, counting starts again
+		if ((int)$user->failed_count > 0 && (int)strtotime((string)$user->failed_at) <= time() - 900) $user->failed_count = 0;
 		if ((int)$user->failed_count >= 5 && strtotime((string)$user->failed_at) > time() - 900) return false;
 		$hash = (string)$user->password;
 		$ok = preg_match('/^[a-f0-9]{32}$/', $hash) ? hash_equals($hash, md5($password)) : password_verify($password, $hash);

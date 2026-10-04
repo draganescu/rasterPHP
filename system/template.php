@@ -82,9 +82,28 @@ class template {
         return $m[1].'"'.($append ? trim($m[3].' '.$value) : $value).'"';
       }, $open, 1);
     } else {
-      $changed = preg_replace('/\s*(\/?)>$/', ' '.$attribute.'="'.$value.'"$1>', $open, 1);
+      // the value is text, never a replacement pattern ($1 and \1 stay as they are)
+      $changed = preg_replace_callback('/\s*(\/?)>$/', function ($m) use ($attribute, $value) {
+        return ' '.$attribute.'="'.$value.'"'.$m[1].'>';
+      }, $open, 1);
     }
     return substr_replace($html, $changed, $tag[0][1], strlen($open));
+  }
+
+  // a link that would run script: javascript:, data: or vbscript:, also when
+  // entities, spaces, tabs, newlines or control bytes hide the scheme, since
+  // browsers decode the first and drop the rest
+  static function script_link($value) {
+    $value = preg_replace_callback('/&#(x[0-9a-f]+|[0-9]+);?/i', function ($m) {
+      // PHP leaves control characters (&#1;, &#13;) undecoded and browsers
+      // don't: those, and anything else PHP won't decode, count as dropped
+      $code = strtolower($m[1][0]) === 'x' ? hexdec(substr($m[1], 1)) : (int)$m[1];
+      if ($code <= 0x20) return '';
+      $char = html_entity_decode('&#'.$m[1].';', ENT_QUOTES | ENT_HTML5, 'UTF-8');
+      return $char[0] === '&' ? '' : $char;
+    }, (string)$value);
+    $value = preg_replace('/[\x00-\x20]+/', '', html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+    return (bool)preg_match('/^(javascript|data|vbscript):/i', $value);
   }
 
   // removes an attribute (with or without a value) from the first tag in $html
@@ -444,9 +463,12 @@ class template {
   		if (empty($attributes['name'])) continue;
   		$name = preg_replace('/\[\]$/', '', $attributes['name']);
   		if (in_array($name, array('raster_form', 'raster_hp', 'csrf'))) continue;
+  		// name="tags[]" asks for a list; any other field takes one value
+  		$list = $name !== $attributes['name'];
   		$type = strtolower($input[1]) === 'input' ? strtolower(isset($attributes['type']) ? $attributes['type'] : 'text') : strtolower($input[1]);
   		if (in_array($type, array('submit', 'button', 'reset', 'image'))) continue;
   		$rule = isset($fields[$name]) ? $fields[$name] : array('type' => $type);
+  		if ($list) $rule['list'] = true;
   		foreach (array('required', 'minlength', 'maxlength', 'min', 'max', 'pattern') as $constraint) {
   			if (array_key_exists($constraint, $attributes)) $rule[$constraint] = $attributes[$constraint];
   		}
@@ -470,60 +492,79 @@ class template {
   }
     
         
+  // Prints the model's value into every copy of the block's tag. A print
+  // inside a render block has one copy per row, and all of them get the
+  // same value in one pass over the page, so a long list costs no more than
+  // its length. The page is split on the tag's three exact forms (opening,
+  // closing, self-closing) rather than matched with the block's content,
+  // because a pattern that spans a large block runs out of PCRE's
+  // backtracking limit.
   public function _print($data, $model, $method) {
-    	
-  		extract($this->current_params);
-  		if ($pos1 === false) return false;
+		if ($this->current_params['pos1'] === false) return false;
 
-			if ($this->current_attr !== null) {
-				$tag = $render_template;
-				if (!($data === false || $data === null || $data === '')) {
-					if (!is_scalar($data)) $this->fail("print.{$this->current_attr}.$model.$method returned ".gettype($data)."; an attribute needs a string");
-					$tag = self::set_attribute($tag, substr($this->current_attr, 1), $data, $this->current_attr[0] === '+');
+		if ($this->current_attr !== null) {
+			if (!($data === false || $data === null || $data === '') && !is_scalar($data)) $this->fail("print.{$this->current_attr}.$model.$method returned ".gettype($data)."; an attribute needs a string");
+			$name = "{$this->current_attr}.$model.$method";
+			$alt = null;
+		} else {
+			if (!in_array($model, array('session', 'self', 'if')) && !($data === false || $data === null) && !is_scalar($data)) $this->fail("print.$model.$method returned ".gettype($data)."; print needs a string (use render for lists)");
+			$name = "$model.$method";
+			$alt = "<!-- print.$name /-->";
+		}
+		$start = "<!-- print.$name -->";
+		$end = "<!-- /print.$name -->";
+		$value = $this->print_value($data, $model, $method);
+
+		$parts = preg_split('/('.preg_quote($start, '/').'|'.preg_quote($end, '/').($alt === null ? '' : '|'.preg_quote($alt, '/')).')/', $this->output, -1, PREG_SPLIT_DELIM_CAPTURE);
+		$output = array();
+		$inner = null;
+		foreach ($parts as $i => $part) {
+			if ($inner !== null) {
+				// inside a copy, up to the first closing tag (as strpos finds it)
+				if ($i % 2 && $part === $end) {
+					$output[] = $this->print_copy($value, $model, $method, implode('', $inner));
+					$inner = null;
+				} else {
+					$inner[] = $part;
 				}
-				if ($this->pending_mark !== null) $tag = '<!--raster:a '.$this->pending_mark.'-->'.$tag;
-				$this->output = substr_replace($this->output, $tag, $pos1, $pos2);
-				return 'attr';
+			} elseif ($i % 2 && $part === $start) {
+				$inner = array();
+			} elseif ($i % 2 && $part === $alt) {
+				$output[] = $this->print_copy($value, $model, $method, '');
+			} else {
+				$output[] = $part;
 			}
+		}
+		if ($inner !== null) $this->fail("Unclosed $start (expected $end)");
+		$this->output = implode('', $output);
+		return true;
+	}
 
-			if($model == 'session')
-			{
-				if(isset($_SESSION) && array_key_exists($method, $_SESSION))
-					$this->output = substr_replace($this->output, $_SESSION[$method], $pos1, $pos2);
-				else
-					$this->output = substr_replace($this->output, "", $pos1, $pos2);
-				return 'session';
+	// what every copy of a print gets, worked out once
+	function print_value($data, $model, $method) {
+		if ($this->current_attr !== null) return $data;
+		if ($model == 'session') return isset($_SESSION) && array_key_exists($method, $_SESSION) ? (string)$_SESSION[$method] : '';
+		// values handed to a view (emails) are data, so they are escaped
+		if ($model == 'self') return $this->format === 'html' ? htmlspecialchars((string)$this->$method, ENT_QUOTES, 'UTF-8', false) : $this->escape((string)$this->$method);
+		if ($model == 'if') return $this->$method === true;
+		if ($data === false || $data === null) return null;
+		return $this->escape($data);
+	}
+
+	// one copy of a print: $inner is that copy's own content (its default)
+	function print_copy($value, $model, $method, $inner) {
+		if ($this->current_attr !== null) {
+			$tag = $inner;
+			if (!($value === false || $value === null || $value === '')) {
+				$tag = self::set_attribute($tag, substr($this->current_attr, 1), $value, $this->current_attr[0] === '+');
 			}
-
-			if($model == 'self')
-			{
-				// values handed to a view (emails) are data, so they are escaped
-				$value = (string)$this->$method;
-				$value = $this->format === 'html' ? htmlspecialchars($value, ENT_QUOTES, 'UTF-8', false) : $this->escape($value);
-				$this->output = substr_replace($this->output, $value, $pos1, $pos2);
-				return 'self';
-			}
-
-			// @TODO implement else
-			if($model == 'if')
-			{
-				if($this->$method === true) 
-					$this->output = substr_replace($this->output, $render_template, $pos1, $pos2);
-				else
-					$this->output = substr_replace($this->output, '', $pos1, $pos2);
-
-				return 'if';
-			}
-
-			if($data === false || $data === null)
-				$this->output = substr_replace($this->output, $render_template, $pos1, $pos2);
-			elseif(is_scalar($data))
-				$this->output = substr_replace($this->output, $this->escape($data), $pos1, $pos2);
-			else
-				$this->fail("print.$model.$method returned ".gettype($data)."; print needs a string (use render for lists)");
-
-			unset($object);
-    }
+			if ($this->pending_mark !== null) $tag = '<!--raster:a '.$this->pending_mark.'-->'.$tag;
+			return $tag;
+		}
+		if ($model == 'session' || $model == 'self') return $value;
+		if ($model == 'if') return $value ? $inner : '';
+		return $value === null ? $inner : $value;
+	}
     
   public function render_results($model, $method, $index = 0)
 	{
@@ -581,7 +622,8 @@ class template {
 			}
 			if (is_array($value)) return $tag;
 			$tag = $without($tag, 'value');
-			return preg_replace('/\s*\/?>$/', ' value="'.$e($value).'"$0', $tag);
+			// what was typed is text, never a replacement pattern ($1, \1, $0)
+			return preg_replace_callback('/\s*\/?>$/', function ($m) use ($e, $value) { return ' value="'.$e($value).'"'.$m[0]; }, $tag);
 		}, $block);
 
 		$block = preg_replace_callback('/(<textarea\b[^>]*>)(.*?)(<\/textarea>)/is', function ($m) use ($attr, $lookup, $e) {
@@ -602,7 +644,7 @@ class template {
 
 		foreach ($data as $key => $value) {
 			if (is_scalar($value)) {
-				$block = preg_replace('/class="spa_'.preg_quote($key, '/').'">(.*?)<\//', 'class="spa_'.$key.'">'.$e($value).'</', $block);
+				$block = preg_replace_callback('/class="spa_'.preg_quote($key, '/').'">(.*?)<\//', function ($m) use ($key, $e, $value) { return 'class="spa_'.$key.'">'.$e($value).'</'; }, $block);
 			}
 		}
 
@@ -612,7 +654,7 @@ class template {
 				if (isset($used[$key]) || !is_scalar($value)) continue;
 				$hidden .= '<input type="hidden" name="'.$e($key).'" value="'.$e($value).'">'."\n";
 			}
-			if ($hidden !== '') $block = preg_replace('/<form\b[^>]*>/i', "$0\n".$hidden, $block, 1);
+			if ($hidden !== '') $block = preg_replace_callback('/<form\b[^>]*>/i', function ($m) use ($hidden) { return $m[0]."\n".$hidden; }, $block, 1);
 		}
 
 		return $block;
@@ -769,7 +811,7 @@ class template {
 		                if($is_attr)
 		                {
 		                	// a link a visitor typed into a record can't run script
-		                	if (isset($data['raster_escape']) && is_array($data['raster_escape']) && in_array($datakey, $data['raster_escape'], true) && preg_match('/^\s*(javascript|data|vbscript):/i', (string)$data[$datakey])) $data[$datakey] = false;
+		                	if (isset($data['raster_escape']) && is_array($data['raster_escape']) && in_array($datakey, $data['raster_escape'], true) && self::script_link($data[$datakey])) $data[$datakey] = false;
 			                // an empty value keeps the mock-up's attribute (a new image field, say)
 			                if($data[$datakey] === null || $data[$datakey] === '')
 								$attrchange = $current_item;

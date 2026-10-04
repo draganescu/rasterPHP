@@ -137,6 +137,9 @@ in, so write the short form if it is quicker and let the fix finish it.
 ```
 
 - `print.key` is replaced by the row's value.
+- `print.model.method` and `print.if.flag` work inside a render block too:
+  the method is called once and every row gets the same value (or hides
+  the block), however long the list.
 - `print.@attr.key` wraps a tag and sets its `attr` to the value (escaped).
   `print.+attr.key` appends the value to the attribute instead. The attribute
   must already exist on the tag.
@@ -299,15 +302,26 @@ Anything not listed answers 404, public or not: the methods templates call,
 form handlers, listeners. A model without `api()` offers nothing. A role the
 caller lacks answers 401 (not logged in) or 403. Static methods are never
 reachable, even listed. Of the system models, only `cms` is reachable, and
-an override (`the_feed`) only by the name it overrides. Posts
+only for what its own `api()` lists: the in-page editor's endpoints, `style`
+and `logout`, which check the caller themselves. An override (`the_feed`)
+is reached only by the name it overrides, and a public method it adds
+answers 404 unless its `api()` lists it; that list adds to the bundled
+model's, so the editor's endpoints stay. Posts
 there pass the same site check as forms, but they are not form submissions:
 `validation::get()->submitted()` is false, so form models do nothing over
 `/api`. A method listed for visitors can be called by anyone: if it changes
 data, it checks what it is given. `lint` reports an `api()` naming a method
 that doesn't exist or can't be called, or a role that doesn't exist, and
-`vocabulary` shows what each model offers. Sites made before 2.1.1 may have
-config `api_open`, which keeps every public method of models without `api()`
-reachable, as before; `doctor` warns, and 2.2.0 removes it.
+`vocabulary` shows what each model offers.
+
+A method that throws answers `{"error":"server error"}` with status 500,
+and the error goes to the log with the URL, so a payment provider sees a
+failure and tries again. Output the method printed before it threw is
+dropped. A database that can't be reached answers 503 before the method
+runs, so a webhook is never told "no such order" during an outage; a bad
+query on a database that is there is a 500 like any other error. A call
+with too few arguments answers 400 (`/api/reservation/day` for
+`day($date)`). In development the answer also has `exception` and `trace`.
 
 The database is RedBeanPHP (`R::dispense`, `R::store`, `R::load`) for rows
 as objects, and named queries in `sql/` files for everything you would write
@@ -346,7 +360,12 @@ class contact {
 
 - **Rules live in the HTML.** `required`, `type` (email, url, number, date),
   `minlength`, `maxlength`, `min`, `max` and `pattern` are enforced on the
-  server too.
+  server too. A field sent as a list (`name[]=x`) when the form doesn't name
+  it `name[]`, or with bytes that aren't UTF-8, fails `required`, so the
+  form's own words for an empty field show; a field named `tags[]` takes a
+  list. A `pattern` that can't run counts as not matched.
+- **What was typed comes back as typed** when the form is shown again:
+  `$100`, `\1` and `$0` included.
 - **`validation.field('name')`** shows its block when that field breaks a rule.
   Other regions: `matches('password', 'password_again')`, `cant_be('name',
   'admin')`, `accepted('terms')`. For your own rules, add
@@ -384,7 +403,9 @@ item of a collection is the mock-up content.
 - **Names:** lowercase letters, digits and `_`, starting with a letter.
   Reserved: CMS method names (`style`, `login`, …), `slug`, `id`,
   `updated_at`, `enabled` and `published_at` for fields; `users` and `raster`
-  for collections. `lint` reports these.
+  for collections. `lint` reports these. Words SQL keeps for itself
+  (`when`, `from`, `group`, `order`) are fine: lists sort and filter by them
+  like any other field.
 - **Site-wide fields:** a field whose name starts with `site_`
   (`print.cms.site_name`) is shared by every page. Put these in `_layout.html`.
 - **Collection URLs** are routed to views that render that collection:
@@ -523,7 +544,8 @@ class reservation {
   what they made, editors included, and visitors nothing. Records print what
   visitors typed as text: every field is escaped unless the type lists it in
   `html`, and a link a visitor typed (`print.@href.website`) can't be a
-  `javascript:` URL. Visitors can't filter a public type by its hidden fields
+  `javascript:`, `data:` or `vbscript:` URL, also when an entity, a tab, a
+  newline or a control byte hides the scheme. Visitors can't filter a public type by its hidden fields
   (`/guestbook/guestbook_items/email/…`).
 - **Forms.** `cms_records::submit($type, $done)` is the whole handler: it
   shows the form (`false`), shows it again with the values when the HTML
@@ -675,9 +697,12 @@ class reservation {
   see **Editors and agents**),
   `registration` (false turns sign-up off), `login_page`, `after_login`,
   `password_min_length` (8).
-- Five wrong passwords lock an account for 15 minutes.
+- Five wrong passwords lock an account for 15 minutes. Once 15 minutes have
+  passed since the last wrong one, counting starts again from zero.
 - Command line: `php bin/raster user <email|name> [--role=…] [--password=…]`
-  and `php bin/raster users`.
+  and `php bin/raster users`. A new account is an admin with a random
+  password unless the options say otherwise; an existing one keeps the role
+  or password the command isn't given.
 
 **newsletter**: sign-ups with double opt-in.
 - Regions:
@@ -745,6 +770,17 @@ use `'model.method'`: `method(true)` returns
 - **Production** is frozen: the schema only changes through
   `schema --apply`, which also creates the tables the bundled models use
   (accounts, subscribers). Missing columns show the template default.
+- **Errors.** Outside development PHP's own messages go to the error log,
+  never to visitors: Raster turns `display_errors` off and `log_errors` on
+  for every request, whatever php.ini says (the command line keeps them).
+  `doctor` warns in production when php.ini has `display_errors` on, since
+  an error before Raster starts would still show.
+- **A database that can't be reached** (MySQL down, an SQLite file the web
+  server can't read) is not a missing table: outside development every page
+  answers 503 (`/api` too, as JSON), as the view `error_document_503` when the site sets one, or a
+  plain line. The error is logged and nothing is cached, so the real pages
+  show as soon as the database is back. Development shows the error
+  instead.
 - **The site's address:** set `RASTER_URL=https://example.com/` (or
   `config::set('site_url')`). Links in pages and emails then never depend on
   the visitor's `Host` header. In production, emails with links (password
@@ -940,6 +976,10 @@ of lists and filter pages come along; drafts and the editor don't.
 - **A route to another theme:** `controller::route('print/menu')->to('menu')->from('print')`.
 - **A 404 page:** `config::set('error_document_404')->to('404')` renders
   `404.html` with status 404.
+- **A page for a database outage:** `config::set('error_document_503')->to('503')`
+  renders `503.html` with status 503 when the database can't be reached
+  (see **Environments and cache**). Keep it to models that don't need the
+  database: the `cms` fields show their defaults there.
 
 ## Settings
 
@@ -953,6 +993,7 @@ Set in `config/the_app.php` with `config::set('name')->to(value)`.
 | `rewrite` | true | false puts `index.php/` in every link, for servers without rewrites |
 | `strict_templates` | true in development | template errors stop the page with a list (500) |
 | `error_document_404` | none | a view for 404s |
+| `error_document_503` | none | a view for when the database can't be reached (outside development) |
 | `site_url` | none | the site's address (same as `RASTER_URL`) |
 | `cms_enabled` | true | the CMS and the editor toolbar |
 | `raster_page_size`, `<name>_page_size` | 10 | items per page |
@@ -970,8 +1011,7 @@ Set in `config/the_app.php` with `config::set('name')->to(value)`.
 | `page_cache`, `page_cache_ttl`, `page_cache_skip` | on in production, 3600, none | |
 | `mcp_token` | none | same as `RASTER_MCP_TOKEN` |
 | `mcp_write_views` | false | lets MCP over HTTP write templates (`write_view`); over stdio it always can |
-| `api_system_models` | `cms` | system models reachable at `/api` |
-| `api_open` | false | sites made before 2.1.1: models without `api()` offer every public method at `/api`, to anyone, as before. `doctor` warns; removed in 2.2.0 |
+| `api_system_models` | `cms` | system models reachable at `/api`, for what their `api()` lists |
 | `allow_deprecated` | none | `array('<id>' => true or path pattern(s))`: uses of deprecated features this site keeps on purpose, so `doctor` counts them apart instead of warning |
 
 Environment variables: `RASTER_ENV`, `RASTER_URL`, `RASTER_DB`,
@@ -1017,7 +1057,8 @@ command-line output). They win over the settings above.
   templates, the database, whether `.htaccess` still carries every rule in
   `system/private_paths.php`, uses of deprecated features
   (`system/tools/deprecations.php`, minus the ones config `allow_deprecated`
-  says are on purpose) and, in production, the site address, mail and tokens.
+  says are on purpose) and, in production, the site address, mail, tokens
+  and whether PHP shows errors (`display_errors`).
   Exit 1 when something must be fixed.
 - `php bin/raster new <folder>` starts a new site from this copy of Raster.
 - `CHANGELOG.md` in the repository lists what changed in each release.

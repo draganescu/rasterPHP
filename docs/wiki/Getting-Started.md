@@ -61,7 +61,7 @@ To choose the password, the role or the display name yourself:
 php bin/raster user admin@example.com --password=a-long-password --role=editor --name="Ada Lovelace"
 ```
 
-Running the command again for an existing account resets its password. `php bin/raster users` lists all accounts.
+Running it again for an existing account with `--password=…` resets the password and keeps the role; `--role=…` changes the role and keeps the password. `php bin/raster users` lists all accounts.
 
 ## 4. Edit a page
 

@@ -231,8 +231,7 @@ switch ($command) {
 			if ($model['queries']) echo '    sql/: '.implode(', ', $model['queries'])."\n";
 			if (isset($model['api'])) {
 				$api = (array)$model['api'];
-				if ($model['api'] === 'open') echo "    /api: every public method, to anyone (config api_open)\n";
-				elseif ($api) echo '    /api: '.implode(', ', array_map(function ($m, $r) { return "$m ($r)"; }, array_keys($api), $api))."\n";
+				if ($api) echo '    /api: '.implode(', ', array_map(function ($m, $r) { return "$m ($r)"; }, array_keys($api), $api))."\n";
 			}
 		}
 		if ($vocabulary['shared_queries']) echo "\n".$paint('models/sql.php', '1').': '.implode(', ', $vocabulary['shared_queries'])."\n";
@@ -346,20 +345,32 @@ switch ($command) {
 			fwrite(STDERR, "Usage: php bin/raster user <email or username> [--password=secret] [--role=admin|editor|member] [--name=\"Ada Lovelace\"]\n");
 			exit(2);
 		}
-		$role = isset($options['role']) && is_string($options['role']) ? $options['role'] : 'admin';
-		$password = isset($options['password']) && is_string($options['password']) ? $options['password'] : bin2hex(random_bytes(9));
+		// an existing account keeps the role and password it isn't given; a
+		// new one is an admin with a random password unless told otherwise
+		$role = isset($options['role']) && is_string($options['role']) ? $options['role'] : null;
+		$password = isset($options['password']) && is_string($options['password']) ? $options['password'] : null;
+		$kept = array();
 		$was_frozen = database::$frozen;
 		try {
 			authentication::connect();
 			R::freeze(false);
-			authentication::save_user($login, $password, $role, isset($options['name']) && is_string($options['name']) ? $options['name'] : null);
+			$existing = authentication::find($login);
+			if ($existing) {
+				if ($role === null) $kept[] = 'role';
+				if ($password === null) $kept[] = 'password';
+			} else {
+				if ($role === null) $role = 'admin';
+				if ($password === null) $random = $password = bin2hex(random_bytes(9));
+			}
+			$id = authentication::save_user($login, $password, $role, isset($options['name']) && is_string($options['name']) ? $options['name'] : null);
+			$role = (string)R::load('user', $id)->role;
 		} catch (Exception $e) {
 			fwrite(STDERR, $paint('error', '31').': '.$e->getMessage()."\n");
 			exit(1);
 		} finally {
 			R::freeze($was_frozen);
 		}
-		echo "User '$login' saved as $role.".(isset($options['password']) ? '' : " Password: $password")."\n";
+		echo "User '$login' saved as $role".($kept ? ' ('.implode(' and ', $kept).' kept)' : '').'.'.(isset($random) ? " Password: $random" : '')."\n";
 		echo "Log in at ".rtrim(config::get('link_uri'), '/')."/login\n";
 		exit(0);
 
@@ -635,7 +646,8 @@ Raster command line
         --drop=table.column              delete a column no template uses
         --drop=table                     delete a table no template uses
   php bin/raster user <email|name> [--password=...] [--role=admin|editor|member]
-                                         create a user or reset a password
+                                         create a user (admin, random password), or change
+                                         an existing one's password or role, keeping the other
   php bin/raster users                   list users
   php bin/raster make model <name> --from=<view> [--form=<method>] [--dry-run] [--force]
                                          a model for the records a form sends: its type,

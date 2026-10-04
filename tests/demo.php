@@ -2094,7 +2094,7 @@ test(array('R15', 'D26'), 'list options: filters from the URL, dates, several or
 	$list = cms_store::list_options('status!=cancelled&date<today&guests>=2&seating=?seating&order=-date,name&limit=5');
 	same(array(array('status', '!=', 'cancelled'), array('date', '<', $day(0)), array('guests', '>=', '2')), $list['conditions'], 'no ?seating in the URL here');
 	same(array('order' => '-date,name', 'limit' => '5'), $list['options']);
-	same('date DESC, name ASC, id ASC', cms_store::order_sql('-date,name', array('date' => 1, 'name' => 1)));
+	same('`date` DESC, `name` ASC, id ASC', cms_store::order_sql('-date,name', array('date' => 1, 'name' => 1)));
 	same('id ASC', cms_store::order_sql('nope,-nope', array('date' => 1)));
 	// pages of a list filtered from the URL keep the query
 	has(http('GET', "$base/menu?category=cakes")[1], 'menu_page/2?category=cakes', 'pagination keeps the query');
@@ -2392,22 +2392,17 @@ test('C48', '/api answers only what a model lists, for the roles it names', func
 	$vocabulary = json_decode(raster(array('vocabulary', '--json'))[1], true);
 	same(array('day' => 'editor'), $vocabulary['models']['reservation']['api']);
 	same(array(), $vocabulary['models']['secret']['api'], 'a model that lists nothing offers nothing');
-	check(!isset($vocabulary['models']['cms']['api']) && !isset($vocabulary['models']['feed']['api']), 'bundled models, overridden or not, guard themselves');
+	same('visitor', $vocabulary['models']['cms']['api']['editor_save_field'], 'the vocabulary lists what cms offers');
+	check(!isset($vocabulary['models']['cms']['api']['setup']), 'and nothing it doesn\'t list');
+	check(!isset($vocabulary['models']['feed']['api']), 'bundled models /api doesn\'t reach list nothing');
 	has(raster(array('vocabulary'))[1], '/api: day (editor)');
-	// api_open, which the 2.1.1 upgrade writes for older sites: models that
-	// list nothing answer as before, models that list keep their list
+	// a model that lists nothing offers nothing
 	$dir = "$root/demo/models/zzopen";
 	@mkdir($dir);
 	try {
 		with_file("$dir/zzopen.php", "<?php\nclass zzopen { function ping() { return 'pong'; } }\n", function () use ($base) {
-			$open = array('CAFE_API_OPEN' => 'on', 'RASTER_APP' => 'demo');
-			lacks(raster(array('render', '/api/zzopen/ping'))[1], 'pong', 'closed by default');
-			same('"pong"', trim(raster(array('render', '/api/zzopen/ping'), $open)[1]), 'open with api_open');
-			has(raster(array('render', '/api/cafe/stamp'), $open)[1], 'unknown method', 'a model that lists keeps its list');
-			has(raster(array('render', '/api/reservation/day/2026-12-01'), $open)[1], 'not allowed', 'and its roles');
-			has(raster(array('render', '/api/the_feed/generator'), $open)[1], 'unknown model', 'an override is still never addressed directly');
-			same('open', json_decode(raster(array('vocabulary', '--json'), $open)[1], true)['models']['zzopen']['api']);
-			has(raster(array('vocabulary'), $open)[1], '/api: every public method, to anyone');
+			lacks(raster(array('render', '/api/zzopen/ping'))[1], 'pong', 'closed');
+			same(404, http('GET', "$base/api/zzopen/ping")[0]);
 			// a member method: members yes, visitors asked to log in
 			file_put_contents(__DIR__.'/../demo/models/zzopen/zzopen.php', "<?php\nclass zzopen {\n\tstatic function api() { return array('ping' => 'member'); }\n\tfunction ping() { return 'pong'; }\n}\n");
 			same(401, http('GET', "$base/api/zzopen/ping")[0]);
@@ -2678,16 +2673,265 @@ test(array('L9', 'L10'), 'page cache: made-up list URLs are not kept, a change d
 });
 
 // ## 2.1.8 batch B: errors and /api
-// (batch B adds its tests here)
+
+test('C51', 'cms offers over /api only what its api() lists: the editor endpoints, style and logout; an override adds nothing unlisted', function () use ($base, $root) {
+	foreach (array('setup', 'route', 'inject_toolbar', 'login', 'login_message') as $method) {
+		list($status, $body) = http('GET', "$base/api/cms/$method");
+		same(404, $status, "/api/cms/$method");
+		lacks($body, 'There are no users');
+	}
+	same(403, http('POST', "$base/api/cms/editor_save_item", array('collection' => 'menu'))[0], 'editor endpoints check the caller themselves');
+	same(200, http('GET', "$base/api/cms/style")[0]);
+	same(200, http('GET', "$base/api/cms/editor_script")[0]);
+	$dir = "$root/demo/models/the_cms";
+	@mkdir($dir);
+	try {
+		with_file("$dir/the_cms.php", "<?php\nclass the_cms extends cms\n{\n\tfunction takings() { return 'today: 1200 lei'; }\n}\n", function () use ($base) {
+			list($status, $body) = http('GET', "$base/api/cms/takings");
+			same(404, $status, 'a public method of the_cms');
+			lacks($body, 'lei');
+			same(200, http('GET', "$base/api/cms/style")[0], 'what cms lists still answers');
+		});
+	} finally {
+		@rmdir($dir);
+	}
+});
+
+test('C50', '/api errors answer JSON: 500 logged with the URL, 503 when the database is down, 400 for missing arguments; development adds the trace', function () use ($base, $root, $tmp, $maildir) {
+	$prod_db = "$tmp/b-prod.sqlite";
+	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => $prod_db, 'RASTER_URL' => 'https://cafe.example/');
+	raster(array('schema', '--apply'), $env);
+	$prod = server(free_port(), array_merge($env, array('RASTER_MAIL' => "log://$maildir")));
+	$dir = "$root/demo/models/zzwebhook";
+	@mkdir($dir);
+	try {
+		with_file("$dir/zzwebhook.php", "<?php\nclass zzwebhook\n{\n\tstatic function api() { return array('paid' => 'visitor', 'down' => 'visitor'); }\n"
+			."\tfunction paid(\$order, \$amount) { throw new RuntimeException('signature mismatch for sk_live_123'); }\n"
+			."\tfunction down() { throw new PDOException('SQLSTATE[HY000] [2002] Connection refused'); }\n}\n", function () use ($base, $prod, $tmp) {
+			list($status, $body, $headers) = http('POST', "$prod/api/zzwebhook/paid/7/120", '{}', array('Content-Type: application/json'));
+			same(500, $status, $body);
+			same('{"error":"server error"}', $body);
+			has(header_value($headers, 'Content-Type'), 'application/json');
+			$log = file_get_contents("$tmp/php-errors.log");
+			has($log, 'signature mismatch for sk_live_123');
+			has($log, '/api/zzwebhook/paid/7/120', 'logged with the URL');
+			list($status, $body) = http('POST', "$prod/api/zzwebhook/paid/7", '{}', array('Content-Type: application/json'));
+			same(400, $status, $body);
+			lacks($body, 'sk_live');
+			// a database error while the database is there is a bug: 500, not 503
+			list($status, $body) = http('GET', "$prod/api/zzwebhook/down");
+			same(500, $status, $body);
+			lacks($body, 'Connection refused');
+			// development: the trace, for whoever is writing the model
+			list($status, $body) = http('POST', "$base/api/zzwebhook/paid/7/120", '{}', array('Content-Type: application/json'));
+			same(500, $status);
+			$json = json_decode($body, true);
+			has($json['exception'], 'signature mismatch');
+			check(count($json['trace']) > 0, 'a trace');
+		});
+	} finally {
+		@rmdir($dir);
+	}
+});
+
+test('L11', 'a database that can\'t be reached answers 503 outside development, with error_document_503, logged and never cached', function () use ($tmp, $maildir) {
+	$prod_db = "$tmp/b-prod.sqlite";
+	$down = "$tmp/b-down.sqlite";
+	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => $prod_db, 'RASTER_URL' => 'https://cafe.example/');
+	raster(array('schema', '--apply'), $env);
+	file_put_contents($down, str_repeat('not a database ', 200));
+	// no RASTER_URL: this server's own address keeps its pages apart in the cache
+	$prod = server(free_port(), array('RASTER_ENV' => 'production', 'RASTER_DB' => $down, 'RASTER_MAIL' => "log://$maildir"));
+	foreach (array(1, 2) as $time) {
+		list($status, $body, $headers) = http('GET', "$prod/menu");
+		same(503, $status, "request $time");
+		has($body, 'Back in a moment', 'the site\'s own 503 page');
+		lacks($body, '<!-- print.');
+		lacks($body, 'Flat white', 'no mock-up');
+		same(null, header_value($headers, 'X-Raster-Cache'), 'not cached');
+	}
+	same(503, http('GET', "$prod/journal.rss")[0], 'feeds too');
+	// /api too, before the method runs: the provider tries again later
+	list($status, $body) = http('GET', "$prod/api/cafe/category_count/coffee");
+	same(503, $status, $body);
+	same('{"error":"database unavailable"}', $body);
+	has(file_get_contents("$tmp/php-errors.log"), 'Raster error: the database can\'t be reached');
+	// back up: the real menu at once, nothing stale in the cache
+	copy($prod_db, $down);
+	list($status, $body, $headers) = http('GET', "$prod/menu");
+	same(200, $status);
+	same('miss', header_value($headers, 'X-Raster-Cache'));
+	lacks($body, '<!-- print.');
+	// raster render answers the same, and exits 1
+	file_put_contents($down, str_repeat('not a database ', 200));
+	list($code, $out) = raster(array('render', '/menu'), array_merge($env, array('RASTER_DB' => $down)));
+	same(1, $code);
+	has($out, 'HTTP 503');
+});
 
 // ## 2.1.8 batch C: list SQL
-// (batch C adds its tests here)
+
+test('E31', 'fields named like SQL words (when, from, group) sort, filter and link to their filter pages', function () use ($base) {
+	$row = '<li><!-- print.@href.raster_filter@from --><a href="#"><!-- print.title -->Rome<!-- /print.title --> from <!-- print.from -->Paris<!-- /print.from --></a><!-- /print.@href.raster_filter@from --> <!-- print.when -->2026-12-01<!-- /print.when --> <!-- print.group -->3<!-- /print.group --></li>';
+	$list = function ($options) use ($row) { return "<!-- render.cms.zztrips('$options') -->$row<!-- /render.cms.zztrips('$options') -->"; };
+	$titles = function ($html, $class) {
+		preg_match('#<(ul|ol) class="'.$class.'">(.*?)</\1>#s', $html, $m);
+		preg_match_all('#>(\w+) from #', isset($m[2]) ? $m[2] : '', $t);
+		return $t[1];
+	};
+	try {
+		with_file(dirname(__DIR__).'/demo/views/cafe/zztrips.html', '<ul class="by-when">'.$list('order=when').'</ul><ol class="big">'.$list('group>2&order=-group').'</ol>', function () use ($base, $titles) {
+			http('GET', "$base/zztrips");
+			mcp($base, 'create_item', array('collection' => 'zztrips', 'fields' => array('title' => 'Oslo', 'when' => '2026-10-01', 'from' => 'Berlin', 'group' => '1')));
+			mcp($base, 'create_item', array('collection' => 'zztrips', 'fields' => array('title' => 'Lima', 'when' => '2026-11-01', 'from' => 'Paris', 'group' => '5')));
+			list($status, $html) = http('GET', "$base/zztrips");
+			same(200, $status);
+			same(array('Oslo', 'Lima', 'Rome'), $titles($html, 'by-when'), 'order=when');
+			same(array('Lima', 'Rome'), $titles($html, 'big'), 'group>2&order=-group');
+			has($html, 'href="'.$base.'/zztrips/zztrips_items/from/Paris/"');
+			list($status, $html) = http('GET', "$base/zztrips/zztrips_items/from/Paris");
+			same(200, $status);
+			same(array('Lima', 'Rome'), $titles($html, 'by-when'), 'the filter page');
+		});
+	} finally {
+		raster(array('schema', '--drop=zztripsdata', '--force'));
+	}
+});
+
+test('T7', 'a time prints 19:00 whatever the database gives back; lists hide drafts and order by newest whether published_at is typed or still text', function () use ($base) {
+	$show = mcp($base, 'create_item', array('collection' => 'events', 'fields' => array('title' => 'Seconds show', 'date' => '2026-10-10', 'starts' => '19:00', 'summary' => 'x')));
+	cms_store::connect();
+	try {
+		// MySQL hands a TIME back with its seconds
+		R::exec('UPDATE eventsdata SET starts = ? WHERE id = ?', array('19:00:00', $show['id']));
+		$events = http('GET', "$base/events")[1];
+		check(preg_match('#Seconds show.*?2026-10-10</span>\s*at\s*<span[^>]*>19:00<|Seconds show.*?2026-10-10 at 19:00<#s', $events), 'prints 19:00');
+		lacks($events, '19:00:00');
+	} finally {
+		mcp($base, 'delete_item', array('collection' => 'events', 'id' => $show['id']));
+	}
+	// a table made before 2.1.7 keeps a text published_at, empty for "now"
+	R::exec('CREATE TABLE zzolddata (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, slug TEXT, enabled TEXT, published_at TEXT, updated_at TEXT)');
+	try {
+		foreach (array('Empty' => '', 'Past' => date('Y-m-d H:i:s', time() - 86400), 'Future' => '2099-01-01 10:00:00') as $title => $published) {
+			R::exec('INSERT INTO zzolddata (title, slug, enabled, published_at, updated_at) VALUES (?, ?, ?, ?, ?)', array($title, strtolower($title), '1', $published, '2026-01-01 10:00:00'));
+		}
+		with_file(dirname(__DIR__).'/demo/views/cafe/zzold.html', "<ul><!-- render.cms.zzold('order=newest') --><li><!-- print.title -->Old<!-- /print.title --></li><!-- /render.cms.zzold('order=newest') --></ul>", function () use ($base) {
+			list($status, $html) = http('GET', "$base/zzold");
+			same(200, $status);
+			check(preg_match('#<li>Past</li>\s*<li>Empty</li>\s*</ul>#', $html), 'newest first, nothing scheduled: '.$html);
+		});
+	} finally {
+		raster(array('schema', '--drop=zzolddata', '--force'));
+	}
+});
 
 // ## 2.1.8 batch D: accounts
-// (batch D adds its tests here)
+
+test('G22', 'raster user changes only what it is given (#71)', function () use ($base) {
+	same(0, raster(array('user', 'keeper@cafe.test', '--role=member', '--password=first password'))[0]);
+	list($code, $out) = raster(array('user', 'keeper@cafe.test', '--password=second password'));
+	same(0, $code, $out);
+	has($out, "saved as member (role kept)");
+	has(raster(array('users'))[1], 'member   keeper@cafe.test', 'a password reset made them');
+	login($base, 'keeper@cafe.test', 'second password');
+	list($code, $out) = raster(array('user', 'keeper@cafe.test', '--role=editor'));
+	same(0, $code, $out);
+	has($out, 'saved as editor (password kept)');
+	lacks($out, 'Password:');
+	has(raster(array('users'))[1], 'editor   keeper@cafe.test');
+	login($base, 'keeper@cafe.test', 'second password');
+});
+test('G23', 'once a lock runs out, five new wrong passwords lock again (#73)', function () use ($base) {
+	raster(array('user', 'relock@cafe.test', '--role=member', '--password=right password'));
+	$wrong = function ($times) use ($base) {
+		for ($i = 0; $i < $times; $i++) http('POST', "$base/login", array('raster_form' => 'authentication.login', 'login' => 'relock@cafe.test', 'password' => 'wrong'));
+	};
+	$expire = function () {
+		database::instance('cms');
+		R::exec("UPDATE user SET failed_at = ? WHERE email = 'relock@cafe.test'", array(date('Y-m-d H:i:s', time() - 16 * 60)));
+	};
+	$wrong(5);
+	$expire();
+	$wrong(1);
+	login($base, 'relock@cafe.test', 'right password');
+	$wrong(5);
+	has(http('POST', "$base/login", array('raster_form' => 'authentication.login', 'login' => 'relock@cafe.test', 'password' => 'right password'))[1], 'Wrong email or password.', 'locked again');
+	$expire();
+	$wrong(4);
+	login($base, 'relock@cafe.test', 'right password');
+});
 
 // ## 2.1.8 batch E: template output
-// (batch E adds its tests here)
+test('D27', 'a form shown again keeps $100, \\1 and $0 exactly as typed (#66)', function () use ($base) {
+	$name = 'Table for $20 a head, not $100 \\1';
+	list($status, $body) = http('POST', "$base/visit", array('raster_form' => 'reservation.book', 'name' => $name, 'email' => '', 'phone' => '\\1 $0', 'date' => '2026-10-07', 'guests' => '2', 'notes' => 'US$12.50 \\2', 'terms' => '1'));
+	same(200, $status);
+	has($body, 'We need a valid email to confirm.');
+	has($body, 'value="Table for $20 a head, not $100 \\1"', 'the name');
+	has($body, 'name="phone" pattern="\\+?[0-9 ]{6,15}" value="\\1 $0"', 'the phone');
+	has($body, '>US$12.50 \\2</textarea>', 'the notes');
+});
+test('E32', 'the editor gets stored text with $5 and backslashes as it is (#66)', function () use ($base) {
+	$staff = login($base, 'staff@cafe.test', 'staff password');
+	$before = mcp($base, 'get_page', array('page' => '/about'))['fields']['heading'];
+	try {
+		foreach (array('Only $5 today, was $12. Path C:\\new', 'Say \\"hello\\" for $5 \\1') as $text) {
+			mcp($base, 'update_page', array('page' => '/about', 'fields' => array('heading' => $text)));
+			$page = http('GET', "$base/about", null, array("Cookie: $staff"))[1];
+			$config = editor_config($page);
+			check(is_array($config), 'the editor config is valid JSON for '.$text);
+			list(, $mark) = mark_of($config, 'field', function ($m) { return $m['field'] === 'heading'; });
+			same($text, $mark['value'], 'what the editor shows, and Duplicate copies');
+		}
+	} finally { mcp($base, 'update_page', array('page' => '/about', 'fields' => array('heading' => $before))); }
+});
+test('C52', 'a link a visitor typed is no script, whatever hides the scheme (#67)', function () use ($base, $views) {
+	$links = array("java\tscript:alert(1)", "java\nscript:alert(2)", "\x01javascript:alert(3)", "&#106avascript:alert(4)", "vbscript:msgbox(5)", "data:text/html,6", "&#1;javascript:alert(7)", "java&#13;script:alert(8)", "&#x1F;javascript:alert(9)");
+	$ids = array();
+	foreach ($links as $i => $link) $ids[] = cms_records::create('reservation', array('name' => "Zz link $i", 'email' => 'zz-links@example.com', 'date' => '2030-03-06', 'guests' => 1, 'notes' => $link))['id'];
+	$ids[] = cms_records::create('reservation', array('name' => 'Zz link ok', 'email' => 'zz-links@example.com', 'date' => '2030-03-06', 'guests' => 1, 'notes' => 'https://example.com/menu'))['id'];
+	try {
+		with_file("$views/zz-links.html", "<html><body><!-- render.cms.reservation('email=zz-links@example.com&order=oldest') --><!-- print.@href.notes --><a class=\"zz\" href=\"#\">x</a><!-- /print.@href.notes --><!-- /render.cms.reservation('email=zz-links@example.com&order=oldest') --></body></html>", function () use ($base) {
+			$staff = login($base, 'staff@cafe.test', 'staff password');
+			$page = http('GET', "$base/zz-links", null, array("Cookie: $staff"))[1];
+			same(9, substr_count($page, '<a class="zz">'), 'every script link is dropped');
+			same(1, substr_count($page, '<a class="zz" href="https://example.com/menu">'), 'the web address keeps its link');
+			has($page, 'href="https://example.com/menu"');
+			// the editor's config carries the text as data, for its Details panel
+			$links = preg_replace('#<script id="raster-editor-config".*?</script>#s', '', $page);
+			foreach (array('script:', 'data:', 'alert') as $bad) lacks($links, $bad);
+		});
+	} finally { foreach ($ids as $id) cms_records::delete('reservation', $id); }
+});
+test('D28', 'a field sent as name[] or with a bad byte fails required; a field named tags[] takes a list (#70)', function () use ($base, $views) {
+	database::instance('cms');
+	$count = (int)R::count('reservationdata');
+	$good = array('raster_form' => 'reservation.book', 'name' => 'Zz Ana', 'email' => 'zz@example.com', 'date' => '2026-10-08', 'guests' => '2', 'terms' => '1');
+	$body = http('POST', "$base/visit", http_build_query(array_merge($good, array('name' => array('x'), 'email' => array('not-an-email')))), array('Content-Type: application/x-www-form-urlencoded'))[1];
+	has($body, 'Tell us your name (2 to 80 letters).', 'name[] fails required');
+	has($body, 'We need a valid email to confirm.', 'email[] too');
+	list($status, $body) = http('POST', "$base/visit", http_build_query($good).'&phone=%FFnot+a+phone', array('Content-Type: application/x-www-form-urlencoded'));
+	same(200, $status, 'a bad byte is refused');
+	has($body, 'Digits and spaces only', 'like a value without it');
+	list($status, $body) = http('POST', "$base/visit", http_build_query($good).'&notes=caf%C3', array('Content-Type: application/x-www-form-urlencoded'));
+	has($body, 'Keep notes under 300 characters.', 'on a field with no pattern too');
+	same($count, (int)R::count('reservationdata'), 'nothing was stored');
+	$form = '<html><body><!-- render.reservation.contact --><form method="post"><input type="email" name="email" required><label><input type="checkbox" name="tags[]" value="cakes" required> Cakes</label><label><input type="checkbox" name="tags[]" value="coffee"> Coffee</label><!-- render.validation.field(\'tags\') --><p class="error">Pick a topic.</p><!-- /render.validation.field(\'tags\') --><textarea name="message" required></textarea><!-- render.validation.field(\'message\') --><p class="error">Write a message.</p><!-- /render.validation.field(\'message\') --><button>Send</button></form><!-- /render.reservation.contact --></body></html>';
+	with_file("$views/zz-topics.html", $form, function () use ($base) {
+		$send = function ($extra) use ($base) { return http('POST', "$base/zz-topics", 'raster_form=reservation.contact&email=zz%40example.com'.$extra, array('Content-Type: application/x-www-form-urlencoded')); };
+		list($status, , $headers) = $send('&tags%5B%5D=cakes&tags%5B%5D=coffee&message=Hi');
+		same(303, $status, 'tags[] is a list the form asked for');
+		has(header_value($headers, 'Location'), 'done=contacted');
+		list($status, $body) = $send('&message=Hi');
+		same(200, $status);
+		has($body, 'Pick a topic.', 'and still required');
+		list($status, $body) = $send('&tags%5B%5D=cakes&message%5B%5D=Hi');
+		same(200, $status, 'message[] is not');
+		has($body, 'Write a message.');
+		lacks($body, 'Pick a topic.');
+	});
+});
 
 // ## 2.1.8 batch F: upgrade tooling
 
@@ -2772,7 +3016,28 @@ test('M19', 'the MCP view tools take a theme only as a folder directly under vie
 });
 
 // ## 2.1.8 batch H: row loop
-// (batch H adds its tests here)
+test('C53', 'a print inside a render block fills every row of a long list: 1,500 rows, staff-only blocks hidden in all of them (#54)', function () use ($base, $views, $root) {
+	$dir = "$root/demo/models/zzmany";
+	@mkdir($dir);
+	$row = '<li><!-- print.n -->r0<!-- /print.n --> <!-- print.feed.site_url -->SITE<!-- /print.feed.site_url -->'
+		.'<!-- print.if.is_editor --><b>STAFF</b><!-- /print.if.is_editor --><!-- print.if.logged_out --><i>guest</i><!-- /print.if.logged_out --></li>';
+	try {
+		with_file("$dir/zzmany.php", "<?php\nclass zzmany {\n\tfunction rows() { \$rows = array(); for (\$i = 1; \$i <= 1500; \$i++) \$rows[] = array('n' => \"r\$i\"); return \$rows; }\n}\n", function () use ($base, $views, $row) {
+			with_file("$views/zz-many.html", "<!doctype html>\n<html>\n<body>\n<ul><!-- render.zzmany.rows -->$row<!-- /render.zzmany.rows --></ul>\n</body>\n</html>\n", function () use ($base) {
+				list($code, $body) = http('GET', "$base/zz-many");
+				same(200, $code, $body);
+				same(1500, substr_count($body, '<li>'), 'rows:');
+				has($body, '<li>r1500 ');
+				lacks($body, '<!-- print.', 'every copy is filled');
+				lacks($body, 'SITE', 'the site address is in every row');
+				lacks($body, 'STAFF', 'a staff-only block shows in no row');
+				same(1500, substr_count($body, '<i>guest</i>'));
+			});
+		});
+	} finally {
+		@rmdir($dir);
+	}
+});
 
 // ## No PHP warnings, notices or deprecations on any request
 

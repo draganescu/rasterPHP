@@ -63,6 +63,8 @@ These attributes are checked in the browser (as HTML always does) **and again on
 
 Empty optional fields are never checked against the other rules: an empty, non-required email field is fine.
 
+Two things browsers never send fail `required`, on any field, so the words you wrote for an empty field show: a list (`name[]=x`) for a field the form doesn't name `name[]`, and a value with bytes that aren't UTF-8. A field you do name `tags[]` (a group of checkboxes) takes a list as before. A `pattern` that can't run counts as not matched.
+
 ## Showing messages
 
 ### Per field
@@ -149,6 +151,8 @@ It sets:
 - `selected` on matching `<option>`s
 - the text of `<textarea>`s
 - the text of any element with the class `spa_<key>`, e.g. `<strong class="spa_email">` for showing a value that isn't an input
+
+Values go back exactly as they were typed: `$100`, `\1` and `$0` stay as they are.
 
 **Passwords are never filled in**, nor are file inputs. When you pass your own array, keys with no matching field become hidden inputs, which is handy for a token or an id the form must send back.
 

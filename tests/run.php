@@ -1195,16 +1195,427 @@ test('a view name in other letter case is not cached', function () use ($db) {
 });
 
 // ## 2.1.8 batch B: errors and /api
-// (batch B adds its tests here)
+
+// A server as PHP runs without a php.ini (the official Docker image): it
+// shows errors and buffers nothing. Errors PHP logs go to the file.
+function b_server($env) {
+	global $root;
+	$port = free_port();
+	$log = sys_get_temp_dir().'/raster-b-'.getmypid().'-'.$port.'.log';
+	$process = proc_open(array(PHP_BINARY, '-d', 'display_errors=1', '-d', 'log_errors=0', '-d', 'output_buffering=0', '-d', 'html_errors=0', '-d', "error_log=$log", '-S', "127.0.0.1:$port", "$root/index.php"),
+		array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array_merge(array('PATH' => getenv('PATH')), $env));
+	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
+	register_shutdown_function(function () use ($process, $log) { proc_terminate($process); @unlink($log); });
+	return array("http://127.0.0.1:$port", $log);
+}
+function b_header($headers, $name) {
+	foreach ($headers as $h) if (stripos($h, $name.':') === 0) return trim(substr($h, strlen($name) + 1));
+	return null;
+}
+// a model that breaks in every way /api and the request can see
+function b_with_boom($fn) {
+	global $root;
+	$dir = "$root/application/models/zzboom";
+	@mkdir($dir);
+	file_put_contents("$dir/zzboom.php", "<?php\nclass zzboom {\n"
+		."\tstatic function api() { return array('boom' => 'visitor', 'needs' => 'visitor', 'inner' => 'visitor', 'down' => 'visitor', 'echoes' => 'visitor', 'sql' => 'visitor', 'mine' => 'member'); }\n"
+		."\tstatic function listens() { return array('route_set' => 'trip'); }\n"
+		."\tfunction boom() { throw new RuntimeException('boom secret'); }\n"
+		."\tfunction needs(\$a, \$b) { return \$a.\$b; }\n"
+		."\tfunction inner() { return str_repeat('x'); }\n"
+		."\tfunction down() { throw new PDOException('the database secret is unreachable'); }\n"
+		."\tfunction echoes() { echo 'partial secret'; throw new RuntimeException('after output'); }\n"
+		."\tfunction sql() { database::instance(); return R::getAll('SELECT * FROM no_such_table_zz'); }\n"
+		."\tfunction mine() { return 'mine'; }\n"
+		."\tfunction trip() { if (isset(\$_GET['trip'])) throw new RuntimeException('listener secret'); }\n"
+		."}\n");
+	try { $fn(); } finally { @unlink("$dir/zzboom.php"); @rmdir($dir); }
+}
+$b_db = sys_get_temp_dir().'/raster-b-'.getmypid().'.sqlite';
+shell_exec('RASTER_ENV=production RASTER_DB='.escapeshellarg($b_db).' '.escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' schema --apply 2>&1');
+register_shutdown_function(function () use ($b_db) { array_map('unlink', glob("$b_db*") ?: array()); });
+
+test('cms answers /api only for what its api() lists (#32)', function () use ($base, $root) {
+	foreach (array('setup', 'route', 'inject_toolbar', 'login', 'login_message') as $method) {
+		list($status, $body) = http('GET', "$base/api/cms/$method");
+		same(404, $status, "/api/cms/$method");
+		check(strpos($body, 'no users') === false, 'login_message answered');
+	}
+	same(200, http('GET', "$base/api/cms/style")[0], 'style is listed');
+	same(403, http('POST', "$base/api/cms/editor_save_field", 'type=aboutpage', array('Content-Type: application/x-www-form-urlencoded'))[0], 'editor endpoints still answer 403 themselves');
+	same(array('editor_save_field' => 'visitor', 'style' => 'visitor', 'logout' => 'visitor'), array_intersect_key(api::offered('cms'), array('editor_save_field' => 1, 'style' => 1, 'logout' => 1)));
+	// a public method an override adds is not offered unless listed
+	$dir = "$root/application/models/the_cms";
+	@mkdir($dir);
+	file_put_contents("$dir/the_cms.php", "<?php\nclass the_cms extends cms {\n\tfunction secret_report() { return 'secret'; }\n}\n");
+	try {
+		list($status, $body) = http('GET', "$base/api/cms/secret_report");
+		same(404, $status, 'an override\'s public method');
+		check(strpos($body, 'secret') === false);
+		same(200, http('GET', "$base/api/cms/style")[0], 'the override keeps what cms lists');
+		// an override that lists its own methods adds to what cms lists
+		file_put_contents("$dir/the_cms.php", "<?php\nclass the_cms extends cms {\n\tstatic function api() { return array('report' => 'visitor'); }\n\tfunction report() { return 'r'; }\n}\n");
+		same(200, http('GET', "$base/api/cms/report")[0], 'its own method');
+		same(200, http('GET', "$base/api/cms/style")[0], 'and still what cms lists');
+		same(403, http('POST', "$base/api/cms/editor_save_field", 'type=aboutpage', array('Content-Type: application/x-www-form-urlencoded'))[0], 'the editor too');
+	} finally {
+		@unlink("$dir/the_cms.php");
+		@rmdir($dir);
+	}
+});
+
+test('api_open is gone: a model without api() offers nothing, whatever the config says (#24)', function () {
+	if (!class_exists('zzlisted', false)) eval('class zzlisted { function ping() { return 1; } }');
+	config::set('api_open')->to(true);
+	try {
+		same(array(), api::offered('zzlisted'));
+	} finally {
+		config::set('api_open')->to(null);
+	}
+	check(!is_file(BASE.'upgrades/2.1.1.php'), 'the 2.1.1 step that wrote it');
+	check(!array_key_exists('api-open', include BASE.'tools/deprecations.php'), 'its deprecation entry');
+});
+
+test('an /api method that throws answers JSON, logged, with no trace in production (#74)', function () use ($b_db) {
+	list($prod, $log) = b_server(array('RASTER_ENV' => 'production', 'RASTER_DB' => $b_db));
+	b_with_boom(function () use ($prod, $log) {
+		list($status, $body, $headers) = http('GET', "$prod/api/zzboom/boom");
+		same(500, $status, $body);
+		same(array('error' => 'server error'), json_decode($body, true), $body);
+		same('application/json', b_header($headers, 'Content-Type'));
+		check(strpos((string)@file_get_contents($log), 'boom secret') !== false && strpos((string)@file_get_contents($log), '/api/zzboom/boom') !== false, 'logged with its URL');
+		// too few arguments is the caller's mistake
+		list($status, $body) = http('GET', "$prod/api/zzboom/needs/x");
+		same(400, $status, $body);
+		check(strpos($body, 'Stack trace') === false && strpos($body, '{') === 0, $body);
+		same(200, http('GET', "$prod/api/zzboom/needs/x/y")[0]);
+		// an ArgumentCountError from inside the method is not the caller's
+		same(500, http('GET', "$prod/api/zzboom/inner")[0]);
+		// a database error while the database is there is a bug, not an outage
+		list($status, $body) = http('GET', "$prod/api/zzboom/down");
+		same(500, $status, $body);
+		check(strpos($body, 'secret') === false, $body);
+		list($status, $body) = http('GET', "$prod/api/zzboom/sql");
+		same(500, $status, $body);
+		same(array('error' => 'server error'), json_decode($body, true), $body);
+		// what a method printed before it threw doesn't turn the 500 into a 200
+		list($status, $body) = http('GET', "$prod/api/zzboom/echoes");
+		same(500, $status, $body);
+		same(array('error' => 'server error'), json_decode($body, true), $body);
+		// a listener that throws outside the render shows nothing of itself
+		list($status, $body) = http('GET', "$prod/about?trip=1");
+		same(500, $status);
+		check(strpos($body, 'listener secret') === false && strpos($body, 'Stack trace') === false, $body);
+		check(strpos((string)@file_get_contents($log), 'listener secret') !== false, 'PHP logs it');
+	});
+});
+
+test('development shows what went wrong on /api (#74)', function () use ($base) {
+	b_with_boom(function () use ($base) {
+		list($status, $body) = http('GET', "$base/api/zzboom/boom");
+		same(500, $status);
+		$json = json_decode($body, true);
+		same('server error', $json['error']);
+		check(strpos($json['exception'], 'boom secret') !== false && is_array($json['trace']), $body);
+	});
+});
+
+test('the fallback 404 prints after the session starts (#74)', function () use ($b_db) {
+	list($prod) = b_server(array('RASTER_ENV' => 'production', 'RASTER_DB' => $b_db));
+	list($status, $body) = http('GET', "$prod/nothing-here", null, array('Cookie: PHPSESSID=abcdefabcdefabcdefabcdefab'));
+	same(404, $status);
+	check(strpos($body, '404 Not Found') !== false, $body);
+	check(strpos($body, 'Warning') === false && strpos($body, 'session') === false, $body);
+});
+
+test('doctor warns when PHP shows errors in production; the command line keeps them (#74)', function () use ($root) {
+	$doctor = function ($display) use ($root) {
+		return shell_exec('RASTER_ENV=production '.escapeshellarg(PHP_BINARY).' -d display_errors='.$display.' '.escapeshellarg("$root/bin/raster").' doctor 2>&1');
+	};
+	check(strpos($doctor('1'), 'display_errors') !== false, 'on');
+	check(strpos($doctor('0'), 'display_errors') === false, 'off');
+	$code = 'require "system/boot.php"; boot::$appname = "application"; boot::cli(); echo ini_get("display_errors");';
+	same('1', shell_exec('cd '.escapeshellarg($root).' && RASTER_ENV=production '.escapeshellarg(PHP_BINARY).' -d display_errors=1 -r '.escapeshellarg($code)));
+});
+
+test('a database that can\'t be reached answers 503 outside development, logged, never cached (#65)', function () use ($b_db, $root) {
+	$cache = "$root/application/data/cache";
+	$had_cache = is_dir($cache);
+	$bad = sys_get_temp_dir().'/raster-b-down-'.getmypid().'.sqlite';
+	file_put_contents($bad, str_repeat('this is not a database ', 100));
+	list($prod, $log) = b_server(array('RASTER_ENV' => 'production', 'RASTER_DB' => $bad));
+	try {
+		foreach (array(1, 2) as $time) {
+			list($status, $body, $headers) = http('GET', "$prod/about");
+			same(503, $status, "request $time");
+			check(strpos($body, '<!-- print.') === false && strpos($body, 'Write HTML') === false, 'no mock-up');
+			check(b_header($headers, 'X-Raster-Cache') !== 'hit', 'not from the cache');
+		}
+		same(503, http('GET', "$prod/news.rss")[0], 'feeds too');
+		// /api too: a read during the outage is not an empty table
+		b_with_boom(function () use ($prod) {
+			list($status, $body) = http('GET', "$prod/api/zzboom/needs/x/y");
+			same(503, $status, $body);
+			same(array('error' => 'database unavailable'), json_decode($body, true), $body);
+			// who is asking can't be known either: an outage, not "log in"
+			list($status, $body) = http('GET', "$prod/api/zzboom/mine", null, array('Cookie: PHPSESSID=abcdefabcdefabcdefabcdefab'));
+			same(503, $status, $body);
+		});
+		check(strpos((string)@file_get_contents($log), 'database') !== false, 'logged');
+		// back up: the real page, at once
+		copy($b_db, $bad);
+		list($status, $body, $headers) = http('GET', "$prod/about");
+		same(200, $status);
+		same('miss', b_header($headers, 'X-Raster-Cache'));
+		check(strpos($body, '<!-- print.') === false);
+	} finally {
+		array_map('unlink', glob("$bad*") ?: array());
+		if (!$had_cache) exec('rm -rf '.escapeshellarg($cache));
+	}
+	// a database that is there but has no tables yet still shows the template
+	$empty = sys_get_temp_dir().'/raster-b-empty-'.getmypid().'.sqlite';
+	touch($empty);
+	list($prod) = b_server(array('RASTER_ENV' => 'production', 'RASTER_DB' => $empty, 'RASTER_URL' => 'http://example.test/'));
+	try {
+		list($status, $body) = http('GET', "$prod/");
+		same(200, $status);
+		check(strpos($body, 'Write HTML. Get a CMS.') !== false, 'template default');
+	} finally {
+		array_map('unlink', glob("$empty*") ?: array());
+		if (!$had_cache) exec('rm -rf '.escapeshellarg($cache));
+	}
+	// development says so plainly instead
+	$bad = sys_get_temp_dir().'/raster-b-down-dev-'.getmypid().'.sqlite';
+	file_put_contents($bad, str_repeat('this is not a database ', 100));
+	list($dev) = b_server(array('RASTER_ENV' => 'development', 'RASTER_DB' => $bad));
+	try {
+		list($status, $body) = http('GET', "$dev/about");
+		same(500, $status);
+		check(strpos($body, 'database') !== false, $body);
+		b_with_boom(function () use ($dev) {
+			list($status, $body) = http('GET', "$dev/api/zzboom/needs/x/y");
+			same(503, $status, $body);
+			$json = json_decode($body, true);
+			check(isset($json['exception']) && strpos($json['exception'], 'not a database') !== false, $body);
+		});
+	} finally {
+		array_map('unlink', glob("$bad*") ?: array());
+	}
+});
 
 // ## 2.1.8 batch C: list SQL
-// (batch C adds its tests here)
+
+// the adapter throws on bad SQL, where a fluid R::find returns nothing
+function sql_titles($table, $conditions, $order) {
+	$columns = cms_store::columns($table);
+	list($sql, $bindings) = cms_store::conditions_sql($conditions, $columns);
+	return R::getDatabaseAdapter()->getCol("SELECT title FROM $table WHERE 1 = 1 $sql ORDER BY ".cms_store::order_sql($order, $columns), $bindings);
+}
+
+test('fields named like SQL words sort, filter, rename and drop', function () {
+	cms_store::connect();
+	cms_types::ensure('zzwordsdata', array('title' => 'text', 'when' => 'date', 'from' => 'text', 'group' => 'int', 'to' => 'text'));
+	try {
+		foreach (array(array('Rome', '2026-12-01', 'Paris', 3), array('Oslo', '2026-10-01', 'Berlin', 1), array('Lima', '2026-11-01', 'Paris', 5)) as $row) {
+			R::getDatabaseAdapter()->exec('INSERT INTO zzwordsdata (title, `when`, `from`, `group`) VALUES (?, ?, ?, ?)', $row);
+		}
+		same(array('Oslo', 'Lima', 'Rome'), sql_titles('zzwordsdata', array(), 'when'), 'order=when');
+		same(array('Rome', 'Lima'), sql_titles('zzwordsdata', array(array('from', '=', 'Paris')), '-when'), 'from=Paris');
+		same(array('Lima', 'Rome'), sql_titles('zzwordsdata', array(array('group', '>', '2')), '-group'), 'group>2');
+		same(array('Oslo'), sql_titles('zzwordsdata', array(array('from', '!=', 'Paris')), 'oldest'), 'from!=Paris');
+		same(array('Rome', 'Oslo', 'Lima'), sql_titles('zzwordsdata', array(array('when', '!=', '')), 'oldest'), 'when is not empty');
+		$schema = new raster_schema();
+		same('renamed zzwordsdata.from to where', $schema->rename('zzwordsdata', 'from', 'where'));
+		same('moved zzwordsdata.where into to', $schema->rename('zzwordsdata', 'where', 'to'));
+		same(array('Rome', 'Lima'), sql_titles('zzwordsdata', array(array('to', '=', 'Paris')), 'oldest'));
+		same('dropped zzwordsdata.group', $schema->drop('zzwordsdata', 'group'));
+		check(!array_key_exists('group', cms_store::columns('zzwordsdata')), 'group is gone');
+	} finally {
+		R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS zzwordsdata');
+		cms_store::forget();
+	}
+});
+
+test('cms_records::find filters and sorts by fields named like SQL words', function () use ($root) {
+	$dir = "$root/application/models/zzwords";
+	@mkdir($dir);
+	file_put_contents("$dir/zzwords.php", '<?php class zzwords { static function types() { return array("zzword" => array("fields" => array("title" => "", "when" => "", "from" => "", "group" => 0), "types" => array("when" => "date"))); } }');
+	cms_records::forget();
+	try {
+		cms_records::create('zzword', array('title' => 'Rome', 'when' => '2026-12-01', 'from' => 'Paris', 'group' => 3));
+		cms_records::create('zzword', array('title' => 'Oslo', 'when' => '2026-10-01', 'from' => 'Berlin', 'group' => 1));
+		cms_records::create('zzword', array('title' => 'Lima', 'when' => '2026-11-01', 'from' => 'Paris', 'group' => 5));
+		same(array('Lima', 'Rome'), array_column(cms_records::find('zzword', array('from' => 'Paris'), 'when'), 'title'));
+		same(array('Rome'), array_column(cms_records::find('zzword', array('from' => 'Paris', 'group' => 3), '-group'), 'title'));
+		same(array('Rome', 'Lima', 'Oslo'), array_column(cms_records::find('zzword', array(), '-when'), 'title'));
+	} finally {
+		unlink("$dir/zzwords.php");
+		rmdir($dir);
+		cms_records::forget();
+		R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS zzworddata');
+		cms_store::forget();
+	}
+});
+
+test('published_at is compared with an empty string only while it is text', function () {
+	// typed (2.1.7 and later): MySQL refuses '' for a DATETIME
+	foreach (array('DATETIME', 'datetime') as $declared) {
+		list($sql) = cms_store::published_sql(array('enabled' => 'BOOLEAN', 'published_at' => $declared));
+		check(strpos($sql, "''") === false, "$declared: $sql");
+		$order = cms_store::order_sql('newest', array('published_at' => $declared));
+		check(strpos($order, "''") === false, "$declared: $order");
+	}
+	// a site whose column is still text keeps the test
+	list($sql) = cms_store::published_sql(array('published_at' => 'TEXT'));
+	check(strpos($sql, "published_at = ''") !== false, $sql);
+	check(strpos(cms_store::order_sql('newest', array('published_at' => 'TEXT')), "published_at = ''") !== false);
+	// and both list what they should on SQLite
+	cms_store::connect();
+	$future = date('Y-m-d H:i:s', time() + 86400);
+	$past = date('Y-m-d H:i:s', time() - 86400);
+	R::getDatabaseAdapter()->exec('CREATE TABLE zzoldpubdata (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, published_at TEXT, updated_at TEXT)');
+	cms_types::ensure('zznewpubdata', array('title' => 'text', 'published_at' => 'datetime', 'updated_at' => 'datetime'));
+	try {
+		foreach (array('zzoldpubdata' => array('Empty' => '', 'Never' => null, 'Past' => $past, 'Future' => $future), 'zznewpubdata' => array('Never' => null, 'Past' => $past, 'Future' => $future)) as $table => $rows) {
+			foreach ($rows as $title => $published) R::getDatabaseAdapter()->exec("INSERT INTO $table (title, published_at, updated_at) VALUES (?, ?, ?)", array($title, $published, '2026-01-01 10:00:00'));
+			same(count($rows) - 1, cms_store::count_published($table), $table);
+		}
+		list($sql, $bindings) = cms_store::published_sql(cms_store::columns('zzoldpubdata'));
+		same(array('Past', 'Never', 'Empty'), R::getDatabaseAdapter()->getCol("SELECT title FROM zzoldpubdata WHERE $sql ORDER BY ".cms_store::order_sql('newest', cms_store::columns('zzoldpubdata')), $bindings));
+	} finally {
+		R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS zzoldpubdata');
+		R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS zznewpubdata');
+		cms_store::forget();
+	}
+});
+
+test('a time reads without seconds, as MySQL gives it', function () {
+	same(array('19:00', '19:00', '09:05', null), array(cms_types::read('time', '19:00:00'), cms_types::read('time', '19:00'), cms_types::read('time', '09:05:30'), cms_types::read('time', null)));
+	same('2026-10-10 19:00:00', cms_types::read('datetime', '2026-10-10 19:00:00'), 'a datetime keeps them');
+});
 
 // ## 2.1.8 batch D: accounts
-// (batch D adds its tests here)
+
+test('raster user keeps the role and password it is not given (#71)', function () use ($root) {
+	$db = sys_get_temp_dir().'/raster-user-'.getmypid().'.sqlite';
+	$env = 'RASTER_ENV=development RASTER_DB='.escapeshellarg($db);
+	$raster = function ($args) use ($env, $root) {
+		exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' '.$args.' 2>&1', $out, $code);
+		same(0, $code, implode("\n", $out));
+		return implode("\n", $out);
+	};
+	$account = function ($login, $password) use ($env, $root) {
+		$code = 'require "'.$root.'/system/boot.php"; boot::$appname = "application"; boot::cli(); authentication::connect();'
+			.' $u = authentication::find('.var_export($login, true).'); echo $u->role, " ", authentication::check_login('.var_export($login, true).', '.var_export($password, true).') ? "ok" : "fail";';
+		return trim(shell_exec("$env ".escapeshellarg(PHP_BINARY).' -r '.escapeshellarg($code).' 2>&1'));
+	};
+	try {
+		$raster('user reader@example.test --role=member --password=first-password');
+		same('member ok', $account('reader@example.test', 'first-password'));
+		// a password reset keeps the role
+		$out = $raster('user reader@example.test --password=second-password');
+		check(strpos($out, 'saved as member') !== false && strpos($out, 'role kept') !== false, $out);
+		same('member ok', $account('reader@example.test', 'second-password'));
+		// a role change keeps the password, and prints none
+		$out = $raster('user reader@example.test --role=editor');
+		check(strpos($out, 'saved as editor') !== false && strpos($out, 'password kept') !== false, $out);
+		check(strpos($out, 'Password:') === false, "no new password: $out");
+		same('editor ok', $account('reader@example.test', 'second-password'));
+		// neither: nothing changes
+		$out = $raster('user reader@example.test');
+		check(strpos($out, 'saved as editor') !== false && strpos($out, 'Password:') === false, $out);
+		same('editor ok', $account('reader@example.test', 'second-password'));
+		// a new account is still an admin with a random password
+		$out = $raster('user owner@example.test');
+		check(preg_match('/saved as admin\. Password: ([a-f0-9]{18})/', $out, $m), $out);
+		same('admin ok', $account('owner@example.test', $m[1]));
+	} finally {
+		array_map('unlink', glob("$db*") ?: array());
+	}
+});
+test('after a lock runs out, wrong passwords are counted from zero (#73)', function () {
+	authentication::connect();
+	$id = authentication::save_user('relock@example.test', 'right password', 'member');
+	$wrong = function ($times) {
+		for ($i = 0; $i < $times; $i++) same(false, authentication::check_login('relock@example.test', 'wrong'));
+	};
+	$expire = function () use ($id) {
+		R::exec('UPDATE user SET failed_at = ? WHERE id = ?', array(date('Y-m-d H:i:s', time() - 16 * 60), $id));
+	};
+	$wrong(5);
+	same(false, authentication::check_login('relock@example.test', 'right password'), 'locked');
+	$expire();
+	$wrong(1);
+	same($id, authentication::check_login('relock@example.test', 'right password'), 'one wrong guess after the lock ran out locked it again');
+	$wrong(5);
+	same(false, authentication::check_login('relock@example.test', 'right password'), 'five new wrong passwords lock it again');
+	$expire();
+	$wrong(4);
+	same($id, authentication::check_login('relock@example.test', 'right password'), 'four wrong passwords after the lock ran out locked it');
+});
 
 // ## 2.1.8 batch E: template output
-// (batch E adds its tests here)
+test('a form shown again keeps $100, \\1 and $0 as typed (#66)', function () {
+	$typed = 'Table for $20 a head, not $100 \\1 $0 \\\\2 ${1}';
+	$e = htmlspecialchars($typed, ENT_QUOTES, 'UTF-8');
+	$out = template::instance()->fill_form('<form method="post"><input name="name"><input name="phone" value="x" /><p class="spa_name">n</p></form>', array('name' => $typed, 'phone' => '\\1 $0', 'extra' => $typed), true);
+	check(strpos($out, '<input name="name" value="'.$e.'">') !== false, 'input value: '.$out);
+	check(strpos($out, 'name="phone" value="\\1 $0" />') !== false, 'a value of \\1 $0: '.$out);
+	check(strpos($out, '<p class="spa_name">'.$e.'</p>') !== false, 'spa_ text: '.$out);
+	check(strpos($out, '<form method="post">'."\n".'<input type="hidden" name="extra" value="'.$e.'">') !== false, 'hidden input: '.$out);
+});
+test('an attribute added to a tag keeps $1 and \\1 (#66)', function () {
+	same('<a class="x" href="/pay?$1=\\1&amp;$0">p</a>', template::set_attribute('<a class="x">p</a>', 'href', '/pay?$1=\\1&$0'));
+	same('<img src="a.jpg" alt="$5 \\1"/>', template::set_attribute('<img src="a.jpg" />', 'alt', '$5 \\1'));
+});
+test('a link a visitor typed is no script, whatever bytes hide the scheme (#67)', function () {
+	foreach (array("javascript:alert(1)", " javascript:x", "java\tscript:x", "java\nscript:x", "java\rscript:x", "\x01javascript:x", "\x00javascript:x", "j\x0Bavascript:x",
+		"JaVaScRiPt:x", "&#106;avascript:x", "&#106avascript:x", "&#x6A;avascript:x", "javascript&colon;x", "java&Tab;script:x", "data:text/html,x", "vbscript:x", " v b s c r i p t :x", "\x1Fdata:x",
+		"&#1;javascript:x", "java&#13;script:x", "&#x1F;javascript:x", "&#x0D;javascript:x", "&#0;javascript:x", "java&#x09script:x", "&#32;javascript:x") as $link) {
+		same(true, template::script_link($link), json_encode($link));
+	}
+	foreach (array("https://example.com/", "/about", "mailto:a@b.co", "about.html", "#top", "javascripts/app.js", "?q=data:x", "") as $link) {
+		same(false, template::script_link($link), json_encode($link));
+	}
+});
+test('the editor\'s clean() drops the same script links (#67)', function () use ($root) {
+	$node = trim((string)shell_exec('command -v node 2>/dev/null'));
+	if ($node === '') return; // no node here: tests/editor-browser.js covers it in a browser
+	$js = file_get_contents("$root/system/models/cms/editor/editor.js");
+	check(preg_match('/\tfunction scriptLink\(href\) \{.*?\n\t\}\n/s', $js, $m), 'editor.js has scriptLink()');
+	$cases = array("javascript:x" => true, "java\tscript:x" => true, "java\nscript:x" => true, "\x01javascript:x" => true, "vbscript:x" => true, "data:x" => true,
+		"&#106avascript:x" => true, "https://example.com/" => false, "/about" => false);
+	$file = sys_get_temp_dir().'/raster-clean-'.getmypid().'.js';
+	file_put_contents($file, $m[0]."\nvar cases = ".json_encode(array_keys($cases)).";\nprocess.stdout.write(JSON.stringify(cases.map(scriptLink)));\n");
+	$out = shell_exec(escapeshellarg($node).' '.escapeshellarg($file).' 2>&1');
+	unlink($file);
+	same(array_values($cases), json_decode((string)$out, true), (string)$out);
+});
+test('arrays and bad bytes fail required; a field named tags[] takes a list (#70)', function () use ($base) {
+	$v = validation::get();
+	$r = new ReflectionMethod($v, 'check_field');
+	$r->setAccessible(true);
+	$saved = $_POST;
+	$cases = array(
+		array(array('required' => true, 'type' => 'text'), array('x'), array('required')),
+		array(array('type' => 'text'), array('x'), array('required')),
+		array(array('type' => 'text', 'pattern' => '[0-9 ]+'), "\xFF12", array('required')),
+		array(array('type' => 'text'), "caf\xC3", array('required')),
+		array(array('type' => 'text', 'list' => true), array('a', 'b'), array()),
+		array(array('type' => 'text', 'list' => true, 'required' => true), array('', ''), array('required')),
+		array(array('type' => 'text', 'list' => true), array("\xFF"), array('required')),
+		array(array('type' => 'text'), 'Café $5', array()),
+		array(array('type' => 'text', 'pattern' => '(a+)+b'), str_repeat('a', 40000).'c', array('pattern')),
+	);
+	try {
+		foreach ($cases as $i => $case) {
+			$_POST = array('f' => $case[1]);
+			same($case[2], $r->invoke($v, 'f', $case[0]), "case $i");
+		}
+	} finally { $_POST = $saved; }
+	same(array('type' => 'checkbox', 'list' => true), array_intersect_key(template::instance()->constraints('<input type="checkbox" name="tags[]" value="a">')['tags'], array('list' => 1, 'type' => 1)));
+	check(!isset(template::instance()->constraints('<input name="tags">')['tags']['list']), 'a plain name is no list');
+});
 
 // ## 2.1.8 batch F: upgrade tooling
 // (batch F adds its tests here)
@@ -1323,7 +1734,49 @@ test('mcp view tools refuse a view file linked outside the theme', function () u
 });
 
 // ## 2.1.8 batch H: row loop
-// (batch H adds its tests here)
+class test_many {
+	function rows() {
+		$rows = array();
+		for ($i = 1; $i <= 2000; $i++) $rows[] = array('n' => "r$i");
+		return $rows;
+	}
+	function word() { return 'filled'; }
+	function nothing() { return false; }
+	function link() { return '/go'; }
+}
+test('a print in each of 2,000 rows fills every row, each copy decided on its own (#54)', function () {
+	$file = sys_get_temp_dir().'/raster-many-'.getmypid().'.html';
+	file_put_contents($file, '<ul><!-- render.test_many.rows --><li>'
+		.'<!-- print.feed.site_url -->SITE<!-- /print.feed.site_url -->'
+		.'<!-- print.if.static --><b>STAFF</b><!-- /print.if.static -->'
+		.'<!-- print.if.shown --><i>shown</i><!-- /print.if.shown -->'
+		.'<!-- print.test_many.word -->MOCK<!-- /print.test_many.word -->'
+		.'<!-- print.test_many.word /-->'
+		.'<!-- print.test_many.nothing --><em><!-- print.n -->r0<!-- /print.n --></em><!-- /print.test_many.nothing -->'
+		.'<!-- print.@href.test_many.link --><a href="#">a</a><!-- /print.@href.test_many.link -->'
+		.'</li><!-- /render.test_many.rows --></ul>');
+	controller::instance()->objects['test_many'] = new test_many();
+	try {
+		$started = microtime(true);
+		$html = controller::render_view($file, array('shown' => true));
+		$took = microtime(true) - $started;
+	} finally {
+		unset(controller::instance()->objects['test_many']);
+		unlink($file);
+	}
+	same(2000, substr_count($html, '<li>'), 'rows:');
+	same(0, substr_count($html, '<!-- print.'), 'annotations left:');
+	same(0, substr_count($html, 'SITE'), 'mock-up site urls left:');
+	same(0, substr_count($html, 'STAFF'), 'hidden blocks shown:');
+	same(2000, substr_count($html, '<i>shown</i>'), 'shown blocks:');
+	same(4000, substr_count($html, 'filled'), 'printed values:');
+	same(0, substr_count($html, 'MOCK'), 'mock-up values left:');
+	// false keeps each copy's own default, its row's value
+	same(1, substr_count($html, '<em>r1</em>'));
+	same(1, substr_count($html, '<em>r2000</em>'));
+	same(2000, preg_match_all('#<a href="[^"]*/go">#', $html), 'attributes set:');
+	check($took < 2, "rendered in {$took}s");
+});
 
 echo "\n\n$passed passed, ".count($failed)." failed\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";

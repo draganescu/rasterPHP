@@ -17,13 +17,13 @@ Roles are ordered: an admin counts as an editor and a member too.
 **From the command line** (the way to create the first editor):
 
 ```sh
-php bin/raster user ada@example.com                       # role admin, random password printed
+php bin/raster user ada@example.com                       # a new account: role admin, random password printed
 php bin/raster user ada@example.com --role=editor --password=… --name="Ada Lovelace"
 php bin/raster user ada                                   # a username instead of an email works too
 php bin/raster users                                      # list accounts
 ```
 
-Running `user` for an existing account updates its role and password.
+Running `user` for an existing account changes only what you give it: `--password=…` resets the password and keeps the role, `--role=…` changes the role and keeps the password. The command says what it kept.
 
 **From the site**: visitors sign up on your registration page and get the `member` role. Turn sign-up off with:
 
@@ -50,7 +50,7 @@ Each page is a form inside a `render.authentication.<name>` block, with messages
 
 - Fields: `login` (an email or a username; `email` or `username` also work) and `password`.
 - After logging in, the visitor goes to `?next=/path` if the URL has one (only paths on your own site are accepted), else to the `after_login` page, else to the home page.
-- **Five wrong passwords lock the account for 15 minutes.** Each failed attempt also waits a moment before answering, which slows down guessing.
+- **Five wrong passwords lock the account for 15 minutes.** Once 15 minutes have passed since the last wrong password, counting starts again from zero. Each failed attempt also waits a moment before answering, which slows down guessing.
 
 ### Sign up: `render.authentication.register`
 

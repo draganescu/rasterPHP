@@ -592,6 +592,16 @@ test('the shop\'s code, config, data and seed script are never served', function
 // ## 2.1.8 batch B: errors and /api
 // (batch B adds its tests here)
 
+test('the webhook during a database outage answers 503, so the provider sends it again (#74, #65)', function () use ($tmp) {
+	$bad = "$tmp/down.sqlite";
+	file_put_contents($bad, str_repeat('this is not a database ', 100));
+	$down = server(array('RASTER_DB' => $bad));
+	$event = array('id' => 'evt_down', 'type' => 'checkout.session.completed', 'data' => array('object' => array('id' => 'cs_test_BH-1042', 'client_reference_id' => 'BH-1042', 'payment_status' => 'paid', 'amount_total' => 1600, 'currency' => 'eur')));
+	list($status, $body) = signed_event($down, $event);
+	same(503, $status, $body);
+	lacks($body, 'no such order');
+});
+
 // ## 2.1.8 batch C: list SQL
 // (batch C adds its tests here)
 

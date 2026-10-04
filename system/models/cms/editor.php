@@ -90,7 +90,10 @@ class cms_editor {
 		$script = '<script id="raster-editor-config" type="application/json">'
 			.json_encode($config, JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR)
 			.'</script><script src="'.config::get('link_uri').'api/cms/editor_script?v='.urlencode(self::version()).'" defer></script>';
-		$template->output = preg_replace('#</body>#i', $script."\n</body>", $template->output, 1);
+		// the config holds stored text: put it in as it is, not as a
+		// replacement pattern that would read $5 or \1 as a group
+		$at = stripos($template->output, '</body>');
+		if ($at !== false) $template->output = substr_replace($template->output, $script."\n", $at, 0);
 	}
 
 	// What the in-page editor can do on a rendered page, read back from its
@@ -151,6 +154,13 @@ class cms_editor {
 		return array('error' => $message);
 	}
 
+	// a mistake in the code (a TypeError, not a refusal): logged, and a plain
+	// 500 for the editor to show
+	protected static function broken($e) {
+		log::error('editor: '.get_class($e).': '.$e->getMessage().' in '.$e->getFile().':'.$e->getLine());
+		return self::fail('Something went wrong; it is in the error log', 500);
+	}
+
 	// a check() or an action said no: the names, and a line to show
 	protected static function refused($e) {
 		http_response_code(422);
@@ -177,6 +187,8 @@ class cms_editor {
 			$saved = cms_store::update_page($type, $slug, array($field => (string)util::post('value')), array($field));
 		} catch (Exception $e) {
 			return self::fail($e->getMessage());
+		} catch (Throwable $e) {
+			return self::broken($e);
 		}
 		// printed the way the page prints it (4.50 for a 14.50 mock-up), so the
 		// editor shows what was stored, not what was typed
@@ -210,6 +222,8 @@ class cms_editor {
 			return self::refused($e);
 		} catch (Exception $e) {
 			return self::fail($e->getMessage());
+		} catch (Throwable $e) {
+			return self::broken($e);
 		}
 	}
 
@@ -225,6 +239,8 @@ class cms_editor {
 			cms_store::delete_item($type, (int)util::post('id'));
 		} catch (cms_refused $e) {
 			return self::refused($e);
+		} catch (Throwable $e) {
+			return self::broken($e);
 		}
 		return array('deleted' => true, 'item' => cms_types::show_row($item, self::examples()));
 	}
@@ -243,6 +259,8 @@ class cms_editor {
 			return self::refused($e);
 		} catch (Exception $e) {
 			return self::fail($e->getMessage());
+		} catch (Throwable $e) {
+			return self::broken($e);
 		}
 	}
 
@@ -277,6 +295,8 @@ class cms_editor {
 			return $saved;
 		} catch (Exception $e) {
 			return self::fail($e->getMessage());
+		} catch (Throwable $e) {
+			return self::broken($e);
 		}
 	}
 

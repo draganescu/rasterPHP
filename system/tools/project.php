@@ -457,6 +457,10 @@ class raster_project
 			$token = getenv('RASTER_MCP_TOKEN') ?: config::get('mcp_token');
 			if ($token && strlen($token) < 32) $add('fail', 'The MCP token is short', 'Use at least 32 random characters');
 			if (!getenv('RASTER_ENV')) $add('warn', 'RASTER_ENV is not set', 'Production is picked from the host name; set RASTER_ENV=production on the server');
+			// PHP without a php.ini shows its errors, paths and all
+			if (!in_array(strtolower((string)ini_get('display_errors')), array('', '0', 'off', 'false', 'no'), true)) {
+				$add('warn', 'display_errors is on in PHP\'s settings', "Raster turns it off for each request, but an error before that (a mistake in config/) still reaches visitors.\nSet display_errors = Off and log_errors = On in php.ini, as php.ini-production does");
+			}
 		}
 		return $checks;
 	}
