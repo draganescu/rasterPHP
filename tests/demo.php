@@ -960,8 +960,11 @@ test(array('I3', 'I4', 'I8', 'I9'), 'SMTP: plain on localhost, STARTTLS and smtp
 		$port = free_port();
 		$transcript = "$tmp/smtp-$mode-$host.log";
 		$process = proc_open(array(PHP_BINARY, "$root/tests/fake_smtp.php", (string)$port, $transcript, $mode, $cert, $host), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes);
-		for ($i = 0; $i < 100 && !@fsockopen($host, $port); $i++) usleep(50000);
+		// a short timeout: on macOS an address like 127.0.0.2 that lo0 doesn't
+		// have never answers, and the default timeout stalls the whole run
+		for ($up = false, $i = 0; $i < 100 && !($up = @fsockopen($host, $port, $errno, $errstr, 0.2)); $i++) usleep(50000);
 		$GLOBALS['servers'][] = $process;
+		if (!$up) throw new Exception("the fake SMTP server did not answer on $host:$port".($host === '127.0.0.1' ? '' : "; on macOS add the address with `sudo ifconfig lo0 alias $host up`"));
 		return array($port, $transcript);
 	};
 	$send = function ($dsn, $from = true) use ($root, $cert) {
