@@ -1652,7 +1652,49 @@ test('mcp view tools refuse a theme outside the views folder', function () use (
 });
 
 // ## 2.1.8 batch H: row loop
-// (batch H adds its tests here)
+class test_many {
+	function rows() {
+		$rows = array();
+		for ($i = 1; $i <= 2000; $i++) $rows[] = array('n' => "r$i");
+		return $rows;
+	}
+	function word() { return 'filled'; }
+	function nothing() { return false; }
+	function link() { return '/go'; }
+}
+test('a print in each of 2,000 rows fills every row, each copy decided on its own (#54)', function () {
+	$file = sys_get_temp_dir().'/raster-many-'.getmypid().'.html';
+	file_put_contents($file, '<ul><!-- render.test_many.rows --><li>'
+		.'<!-- print.feed.site_url -->SITE<!-- /print.feed.site_url -->'
+		.'<!-- print.if.static --><b>STAFF</b><!-- /print.if.static -->'
+		.'<!-- print.if.shown --><i>shown</i><!-- /print.if.shown -->'
+		.'<!-- print.test_many.word -->MOCK<!-- /print.test_many.word -->'
+		.'<!-- print.test_many.word /-->'
+		.'<!-- print.test_many.nothing --><em><!-- print.n -->r0<!-- /print.n --></em><!-- /print.test_many.nothing -->'
+		.'<!-- print.@href.test_many.link --><a href="#">a</a><!-- /print.@href.test_many.link -->'
+		.'</li><!-- /render.test_many.rows --></ul>');
+	controller::instance()->objects['test_many'] = new test_many();
+	try {
+		$started = microtime(true);
+		$html = controller::render_view($file, array('shown' => true));
+		$took = microtime(true) - $started;
+	} finally {
+		unset(controller::instance()->objects['test_many']);
+		unlink($file);
+	}
+	same(2000, substr_count($html, '<li>'), 'rows:');
+	same(0, substr_count($html, '<!-- print.'), 'annotations left:');
+	same(0, substr_count($html, 'SITE'), 'mock-up site urls left:');
+	same(0, substr_count($html, 'STAFF'), 'hidden blocks shown:');
+	same(2000, substr_count($html, '<i>shown</i>'), 'shown blocks:');
+	same(4000, substr_count($html, 'filled'), 'printed values:');
+	same(0, substr_count($html, 'MOCK'), 'mock-up values left:');
+	// false keeps each copy's own default, its row's value
+	same(1, substr_count($html, '<em>r1</em>'));
+	same(1, substr_count($html, '<em>r2000</em>'));
+	same(2000, preg_match_all('#<a href="[^"]*/go">#', $html), 'attributes set:');
+	check($took < 2, "rendered in {$took}s");
+});
 
 echo "\n\n$passed passed, ".count($failed)." failed\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";

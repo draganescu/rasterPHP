@@ -101,6 +101,7 @@ php tests/demo.php                        # the whole matrix
 | C50 | an /api method that throws answers JSON: 500 `{"error":"server error"}` logged with the URL (a bad query too), 503 when the database is down, 400 for missing arguments; development adds the trace |
 | C51 | `cms` offers over /api only what its `api()` lists (the editor endpoints, `style`, `logout`); a public method of a `the_cms` override answers 404 unless listed |
 | C52 | a link a visitor typed can't run script, even with a tab, newline, control byte or HTML entity hiding `javascript:`, `data:` or `vbscript:` |
+| C53 | a `print.model.method` or `print.if.flag` inside a render block fills every row of a list of any length (no limit at 1,000 rows), so a staff-only block stays hidden in all of them |
 | D1 | raster_form and honeypot on every post form |
 | D2 | the session token on forms for logged in users |
 | D3 | posts from other sites refused (Origin, Sec-Fetch-Site, Referer, /api too) |

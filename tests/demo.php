@@ -2962,7 +2962,28 @@ test('M19', 'the MCP view tools take a theme only as a folder directly under vie
 });
 
 // ## 2.1.8 batch H: row loop
-// (batch H adds its tests here)
+test('C53', 'a print inside a render block fills every row of a long list: 1,500 rows, staff-only blocks hidden in all of them (#54)', function () use ($base, $views, $root) {
+	$dir = "$root/demo/models/zzmany";
+	@mkdir($dir);
+	$row = '<li><!-- print.n -->r0<!-- /print.n --> <!-- print.feed.site_url -->SITE<!-- /print.feed.site_url -->'
+		.'<!-- print.if.is_editor --><b>STAFF</b><!-- /print.if.is_editor --><!-- print.if.logged_out --><i>guest</i><!-- /print.if.logged_out --></li>';
+	try {
+		with_file("$dir/zzmany.php", "<?php\nclass zzmany {\n\tfunction rows() { \$rows = array(); for (\$i = 1; \$i <= 1500; \$i++) \$rows[] = array('n' => \"r\$i\"); return \$rows; }\n}\n", function () use ($base, $views, $row) {
+			with_file("$views/zz-many.html", "<!doctype html>\n<html>\n<body>\n<ul><!-- render.zzmany.rows -->$row<!-- /render.zzmany.rows --></ul>\n</body>\n</html>\n", function () use ($base) {
+				list($code, $body) = http('GET', "$base/zz-many");
+				same(200, $code, $body);
+				same(1500, substr_count($body, '<li>'), 'rows:');
+				has($body, '<li>r1500 ');
+				lacks($body, '<!-- print.', 'every copy is filled');
+				lacks($body, 'SITE', 'the site address is in every row');
+				lacks($body, 'STAFF', 'a staff-only block shows in no row');
+				same(1500, substr_count($body, '<i>guest</i>'));
+			});
+		});
+	} finally {
+		@rmdir($dir);
+	}
+});
 
 // ## No PHP warnings, notices or deprecations on any request
 

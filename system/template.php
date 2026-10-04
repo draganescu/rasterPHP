@@ -492,60 +492,79 @@ class template {
   }
     
         
+  // Prints the model's value into every copy of the block's tag. A print
+  // inside a render block has one copy per row, and all of them get the
+  // same value in one pass over the page, so a long list costs no more than
+  // its length. The page is split on the tag's three exact forms (opening,
+  // closing, self-closing) rather than matched with the block's content,
+  // because a pattern that spans a large block runs out of PCRE's
+  // backtracking limit.
   public function _print($data, $model, $method) {
-    	
-  		extract($this->current_params);
-  		if ($pos1 === false) return false;
+		if ($this->current_params['pos1'] === false) return false;
 
-			if ($this->current_attr !== null) {
-				$tag = $render_template;
-				if (!($data === false || $data === null || $data === '')) {
-					if (!is_scalar($data)) $this->fail("print.{$this->current_attr}.$model.$method returned ".gettype($data)."; an attribute needs a string");
-					$tag = self::set_attribute($tag, substr($this->current_attr, 1), $data, $this->current_attr[0] === '+');
+		if ($this->current_attr !== null) {
+			if (!($data === false || $data === null || $data === '') && !is_scalar($data)) $this->fail("print.{$this->current_attr}.$model.$method returned ".gettype($data)."; an attribute needs a string");
+			$name = "{$this->current_attr}.$model.$method";
+			$alt = null;
+		} else {
+			if (!in_array($model, array('session', 'self', 'if')) && !($data === false || $data === null) && !is_scalar($data)) $this->fail("print.$model.$method returned ".gettype($data)."; print needs a string (use render for lists)");
+			$name = "$model.$method";
+			$alt = "<!-- print.$name /-->";
+		}
+		$start = "<!-- print.$name -->";
+		$end = "<!-- /print.$name -->";
+		$value = $this->print_value($data, $model, $method);
+
+		$parts = preg_split('/('.preg_quote($start, '/').'|'.preg_quote($end, '/').($alt === null ? '' : '|'.preg_quote($alt, '/')).')/', $this->output, -1, PREG_SPLIT_DELIM_CAPTURE);
+		$output = array();
+		$inner = null;
+		foreach ($parts as $i => $part) {
+			if ($inner !== null) {
+				// inside a copy, up to the first closing tag (as strpos finds it)
+				if ($i % 2 && $part === $end) {
+					$output[] = $this->print_copy($value, $model, $method, implode('', $inner));
+					$inner = null;
+				} else {
+					$inner[] = $part;
 				}
-				if ($this->pending_mark !== null) $tag = '<!--raster:a '.$this->pending_mark.'-->'.$tag;
-				$this->output = substr_replace($this->output, $tag, $pos1, $pos2);
-				return 'attr';
+			} elseif ($i % 2 && $part === $start) {
+				$inner = array();
+			} elseif ($i % 2 && $part === $alt) {
+				$output[] = $this->print_copy($value, $model, $method, '');
+			} else {
+				$output[] = $part;
 			}
+		}
+		if ($inner !== null) $this->fail("Unclosed $start (expected $end)");
+		$this->output = implode('', $output);
+		return true;
+	}
 
-			if($model == 'session')
-			{
-				if(isset($_SESSION) && array_key_exists($method, $_SESSION))
-					$this->output = substr_replace($this->output, $_SESSION[$method], $pos1, $pos2);
-				else
-					$this->output = substr_replace($this->output, "", $pos1, $pos2);
-				return 'session';
+	// what every copy of a print gets, worked out once
+	function print_value($data, $model, $method) {
+		if ($this->current_attr !== null) return $data;
+		if ($model == 'session') return isset($_SESSION) && array_key_exists($method, $_SESSION) ? (string)$_SESSION[$method] : '';
+		// values handed to a view (emails) are data, so they are escaped
+		if ($model == 'self') return $this->format === 'html' ? htmlspecialchars((string)$this->$method, ENT_QUOTES, 'UTF-8', false) : $this->escape((string)$this->$method);
+		if ($model == 'if') return $this->$method === true;
+		if ($data === false || $data === null) return null;
+		return $this->escape($data);
+	}
+
+	// one copy of a print: $inner is that copy's own content (its default)
+	function print_copy($value, $model, $method, $inner) {
+		if ($this->current_attr !== null) {
+			$tag = $inner;
+			if (!($value === false || $value === null || $value === '')) {
+				$tag = self::set_attribute($tag, substr($this->current_attr, 1), $value, $this->current_attr[0] === '+');
 			}
-
-			if($model == 'self')
-			{
-				// values handed to a view (emails) are data, so they are escaped
-				$value = (string)$this->$method;
-				$value = $this->format === 'html' ? htmlspecialchars($value, ENT_QUOTES, 'UTF-8', false) : $this->escape($value);
-				$this->output = substr_replace($this->output, $value, $pos1, $pos2);
-				return 'self';
-			}
-
-			// @TODO implement else
-			if($model == 'if')
-			{
-				if($this->$method === true) 
-					$this->output = substr_replace($this->output, $render_template, $pos1, $pos2);
-				else
-					$this->output = substr_replace($this->output, '', $pos1, $pos2);
-
-				return 'if';
-			}
-
-			if($data === false || $data === null)
-				$this->output = substr_replace($this->output, $render_template, $pos1, $pos2);
-			elseif(is_scalar($data))
-				$this->output = substr_replace($this->output, $this->escape($data), $pos1, $pos2);
-			else
-				$this->fail("print.$model.$method returned ".gettype($data)."; print needs a string (use render for lists)");
-
-			unset($object);
-    }
+			if ($this->pending_mark !== null) $tag = '<!--raster:a '.$this->pending_mark.'-->'.$tag;
+			return $tag;
+		}
+		if ($model == 'session' || $model == 'self') return $value;
+		if ($model == 'if') return $value ? $inner : '';
+		return $value === null ? $inner : $value;
+	}
     
   public function render_results($model, $method, $index = 0)
 	{
