@@ -95,7 +95,7 @@ Pages are addressed by URL (`/about`), by view name (`about`), or `site` for the
 
 1. Ask it to run `describe` (or `php bin/raster describe`) first.
 2. For template changes: write the page as static HTML with real content, then annotate it, checking names against `vocabulary`.
-3. After each change: `lint`, then `render_url` (or `php bin/raster render /the-url`) to see the result.
+3. After each change: `lint`, then `render_url` (or `php bin/raster render /the-url`) to see the result. For pages staff edit, render as an editor too (`render_url` with `as: "editor"`, or `--as=editor`): the answer says whether the in-page editor still works there.
 4. Check `schema` shows the content model you meant.
 5. Review the diff like any other code change.
 

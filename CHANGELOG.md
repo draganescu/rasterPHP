@@ -3,6 +3,56 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.1.6
+
+Nothing for sites to do. Staff pages that show records with a model's own
+rows (`render.booking.rows` returning `cms_records::find(…)`) now get a
+`lint` warning: list them with `render.cms.<type>` and the options below,
+or return them through `cms_records::listed()`, so staff can edit them in
+the page again.
+
+- **Lists filter from the URL, by date, and sort by several fields.**
+  `render.cms.booking('stylist=?stylist&date>=today&order=date,time')`:
+  `field=?name` takes `?name=` from the URL and is left out when the URL
+  has none, so a plain `<form method="get">` filters a staff page with no
+  model code. `>`, `>=`, `<`, `<=` and `!=` compare, and `today` is the
+  date the page is shown, so upcoming and past bookings are two lists, not
+  a stored field that goes stale. `order` takes several fields.
+  Pagination takes the same options and its links keep the query string.
+- **Get forms keep what was asked.** `/bookings?stylist=Ana` shows Ana
+  chosen in a `<form method="get">`.
+- **Views a model builds stay editable.** A render method that returns
+  records through `cms_records::listed($type, $rows)` gets the in-page
+  editor's marks, also in lists inside its rows: an agenda grouped by day
+  is edited in place, with each record's actions. Lists inside rows now
+  render through the same code as a render block, so their attributes
+  (`print.@href`) and escaping work too.
+- **Staff can add records a form makes.** A type with
+  `'staff_add' => true` gets the in-page editor's card for a new item (a
+  booking taken over the phone). A new item starts with the values the
+  list's filters ask for, as the URL gives them. No card on an item's own
+  page.
+- **Render a page as staff.** `php bin/raster render /bookings --as=editor`
+  (an account's email or username, or a role) renders the page as that
+  person and prints what the in-page editor can edit there. MCP
+  `render_url` takes `as` and answers with the same as `editor`. Both
+  refuse in production, where they would show any account's pages
+  without a password. `raster render` also passes a URL's query string to
+  the page.
+- **`lint` warns about records staff can't reach:** a type a form makes
+  that no view lists with `render.cms.<type>`, and an admin page showing
+  records a model reads itself without `cms_records::listed()`.
+- **MCP over stdio survives a PHP error.** An `Error` in site code (a typo
+  in a listener, say) answers the call with its file and line instead of
+  ending the server, and output a tool's code prints no longer reaches the
+  protocol stream.
+- **The in-page editor keeps several lists of one collection apart.** An
+  item added from a list's card was counted in every list of that
+  collection on the page, so the next card of another list showed up
+  under the first one.
+- AGENTS.md: staff pages keep the in-page editor working: list options,
+  then a model view with `listed()`, then links to each record's page.
+
 ## 2.1.5
 
 Nothing for sites to do. Back up an SQLite database by copying the file

@@ -93,6 +93,25 @@ class cms_editor {
 		$template->output = preg_replace('#</body>#i', $script."\n</body>", $template->output, 1);
 	}
 
+	// What the in-page editor can do on a rendered page, read back from its
+	// config, for `raster render --as=editor` and MCP render_url: the role,
+	// how many fields and items it can edit, and each list (+ new when it
+	// ends with a card for a new item). null when the page has no editor.
+	static function summary($html) {
+		if (!preg_match('#<script id="raster-editor-config" type="application/json">(.*?)</script>#s', (string)$html, $m)) return null;
+		$config = json_decode($m[1], true);
+		if (!is_array($config)) return null;
+		$summary = array('role' => isset($config['user']['role']) ? $config['user']['role'] : '', 'fields' => 0, 'items' => 0, 'lists' => array());
+		foreach ((array)$config['marks'] as $mark) {
+			$kind = isset($mark['kind']) ? $mark['kind'] : '';
+			if ($kind === 'field' && empty($mark['hidden'])) $summary['fields']++;
+			if ($kind === 'item') $summary['items']++;
+			// lists render from the last in the page to the first
+			if ($kind === 'collection') array_unshift($summary['lists'], $mark['collection'].($mark['list'] !== '' ? "('{$mark['list']}')" : '').(!empty($mark['addable']) ? ' + new' : ''));
+		}
+		return $summary;
+	}
+
 	// the staff pages this person may open, for the editor's Admin menu
 	protected static function admin_pages() {
 		$uri = trim((string)strtok((string)config::get('uri_string'), '?'), '/');

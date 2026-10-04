@@ -195,6 +195,10 @@
 		inside.forEach(function (n) { wrapper.appendChild(n); });
 		return wrapper;
 	}
+	// whether an item sits inside a list on the page
+	function holds(list, item) {
+		return item.info.collection === list.info.collection && !!(list.start.compareDocumentPosition(item.el) & Node.DOCUMENT_POSITION_FOLLOWING) && !!(list.end.compareDocumentPosition(item.el) & Node.DOCUMENT_POSITION_PRECEDING);
+	}
 	function nextElement(node) {
 		for (var n = node && node.nextSibling; n; n = n.nextSibling) if (n.nodeType === 1) return n;
 		return null;
@@ -258,7 +262,7 @@
 		lists.forEach(function (list) {
 			Object.keys(items).forEach(function (id) {
 				var item = items[id];
-				if (item.info.collection === list.info.collection && list.start.compareDocumentPosition(item.el) & Node.DOCUMENT_POSITION_FOLLOWING && list.end.compareDocumentPosition(item.el) & Node.DOCUMENT_POSITION_PRECEDING) list.items.push(item);
+				if (holds(list, item)) list.items.push(item);
 			});
 		});
 		fields.forEach(function (f, i) { f.el.style.setProperty('--raster-i', Math.min(i, 30)); });
@@ -944,7 +948,8 @@
 		Object.keys(fresh).forEach(function (name) {
 			item.fields.forEach(function (f) { if (f.info.field === name) { if (f.kind === 'image') f.el.setAttribute('src', fresh[name] || f.el.getAttribute('src')); else if (f.kind === 'text') f.el.textContent = fresh[name]; else f.el.innerHTML = fresh[name]; } });
 		});
-		lists.forEach(function (list) { if (list.info.collection === info.collection) list.items.push(item); });
+		// the list it was added to: a page may show several lists of one collection
+		lists.forEach(function (list) { if (holds(list, item)) list.items.push(item); });
 		refreshBadges();
 		return item;
 	}
@@ -1063,12 +1068,10 @@
 	var ghosts = [];
 	function addGhosts() {
 		removeGhosts();
-		if (/_item\//.test(location.pathname)) return;
 		lists.forEach(function (list) {
-			if (!list.template) return;
-			// records visitors send (bookings, orders) come from their forms; the
-			// card for a new one is only for records staff make themselves
-			if (list.info.record && list.info.create !== 'editor') return;
+			// the server says where a card goes: not on an item's own page, and
+			// for records only when staff make them or also add them (staff_add)
+			if (!list.template || !list.info.addable) return;
 			var box = document.createElement('div');
 			box.appendChild(list.template.content.cloneNode(true));
 			var el = Array.prototype.filter.call(box.childNodes, function (n) { return n.nodeType === 1; })[0];

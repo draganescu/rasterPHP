@@ -123,6 +123,7 @@ php tests/demo.php                        # the whole matrix
 | D23 | type="url" |
 | D24 | `field('guests', 'max')` shows only when that rule fails |
 | D25 | validation::errors() lists what failed |
+| D26 | a form with `method="get"` shows what the URL asked (the staff page's filters) |
 | E1 | page fields with defaults from the markup |
 | E2 | site_ fields shared by every page |
 | E3 | collections seeded from the mock-up |
@@ -235,6 +236,8 @@ php tests/demo.php                        # the whole matrix
 | M14 | `check_view` lints a draft and writes nothing |
 | M15 | `write_view` refuses markup that does not lint, writes markup that does, and is off over HTTP |
 | M16 | `render_url` renders a page without a web server, in its own process |
+| M17 | `render_url` with `as`: the page as an editor, with what the in-page editor marks |
+| M18 | a PHP error in site code answers the MCP call over stdio with its file and line, and the server goes on |
 | N1 | raster help and unknown commands |
 | N2 | raster lint and --json, --all-themes |
 | N3 | raster render and its exit codes |
@@ -248,6 +251,7 @@ php tests/demo.php                        # the whole matrix
 | N11 | exporting again writes only files that changed, removes what the site no longer has, and does nothing when nothing changed |
 | N12 | raster vocabulary, and --json |
 | N13 | raster describe, and --sections |
+| N14 | `raster render <url> --as=<account or role>`, and a query string in the URL |
 | O1 | the sitemap skips private pages and lists items |
 | R1 | a model declares a type (`types()`): a collection with the model's fields and no mock-up row, in site_overview, describe and schema |
 | R2 | `cms_records::submit`: a form stores a record with only the fields people may write; what visitors typed prints as text |
@@ -263,3 +267,8 @@ php tests/demo.php                        # the whole matrix
 | R12 | `schema --apply` creates record tables in production, with every column and no row |
 | R13 | `raster make model <name> --from=<view>`: a model for the records a form sends |
 | R14 | a staff page lists records by status (`status=new&order=date`), and filter addresses (`/reservation/reservation_items/date/…`) show one evening, for staff only |
+| R15 | list options: filters from the URL (`seating=?seating`), dates (`date>=today`, `date<today`), `!=`, and `order=date,name`; pagination keeps the query |
+| R16 | `staff_add`: staff add bookings from the card at the end of a list; a new item starts with the list's filters; no card on an item's page |
+| R17 | lint warns about records a form makes that no view lists, and about admin pages listing records a model reads itself |
+| R18 | `cms_records::listed()`: a model's agenda of bookings by evening, nested in its rows, is edited in place with the record's actions; values the model adds are not editable |
+| R19 | a record's own page (`/reservation/reservation_item/<slug>`) is where editors edit a record a model view links to; visitors get a 404 |

@@ -28,7 +28,7 @@ class cms_records {
 
 	static $cache = null;
 	// names a type declaration understands
-	static $keys = array('fields', 'public', 'owner', 'create', 'readonly', 'hidden', 'actions', 'html');
+	static $keys = array('fields', 'public', 'owner', 'create', 'staff_add', 'readonly', 'hidden', 'actions', 'html');
 	// the model methods with a meaning of their own, never actions
 	static $hooks = array('types', 'check', 'schema', 'listens', 'api');
 	// events held back until the transaction they happened in commits
@@ -97,6 +97,9 @@ class cms_records {
 			'public' => !empty($d['public']),
 			'owner' => $owner,
 			'create' => isset($d['create']) && in_array($d['create'], array('visitor', 'member', 'editor'), true) ? $d['create'] : 'editor',
+			// staff add these in the page too (a booking taken over the phone),
+			// though visitors make them with a form
+			'staff_add' => !empty($d['staff_add']),
 			'readonly' => array_values(array_intersect((array)(isset($d['readonly']) ? $d['readonly'] : array()), array_keys($fields))),
 			'hidden' => array_values(array_intersect((array)(isset($d['hidden']) ? $d['hidden'] : array()), array_keys($fields))),
 			'actions' => $actions,
@@ -192,6 +195,42 @@ class cms_records {
 			elseif (is_array($inner)) $value[$key] = self::escape_list($inner);
 		}
 		return $value;
+	}
+
+	// whether the editor leaves a field of a record's row alone: readonly,
+	// hidden, Raster's own, or not stored at all (a value a model view adds)
+	static function locked($info, $field) {
+		if (!$info) return false;
+		if (in_array($field, array_merge($info['readonly'], $info['hidden'], array('owner', 'created_at')), true)) return true;
+		return !array_key_exists($field, $info['fields']) && !in_array($field, array('slug', 'enabled', 'published_at'), true);
+	}
+
+	// Records a model read itself (find, get), ready for its template, so a
+	// view the model builds (an agenda by day, a week grid, records of several
+	// types) stays editable in the page:
+	//
+	//   function agenda() {
+	//       $days = array();
+	//       foreach (cms_records::find('booking', array(), 'date,time') as $b) $days[$b['date']][] = $b;
+	//       $rows = array();
+	//       foreach ($days as $day => $bookings) $rows[] = array('day' => $day, 'bookings' => cms_records::listed('booking', $bookings));
+	//       return $rows;
+	//   }
+	//
+	// Each row prints as text, as in render.cms.<type>, and says which record
+	// it is, so staff edit it and run its actions where the page shows it.
+	// The model chose the rows: it decides what shows.
+	static function listed($collection, $rows) {
+		$info = self::required($collection);
+		$listed = array();
+		foreach ((array)$rows as $row) {
+			if (!is_array($row) || !isset($row['id'])) continue;
+			$row = self::for_template($info, self::decode($info, $row));
+			$row['raster_record'] = $info['name'];
+			$row['raster_detail_link'] = config::get('link_uri').$info['name'].'/'.$info['name'].'_item/'.(!empty($row['slug']) ? rawurlencode($row['slug']) : $row['id']);
+			$listed[] = $row;
+		}
+		return $listed;
 	}
 
 	// what editors and agents see: without hidden fields
@@ -350,6 +389,13 @@ class cms_records {
 		if ($done === false) return $item;
 		util::done($done === null ? $info['name'] : $done);
 		return false;
+	}
+
+	// whether the in-page editor offers a card for a new record at the end
+	// of a list: for types staff make (create is editor) or also add
+	// (staff_add: a booking taken over the phone)
+	static function addable($info) {
+		return $info['create'] === 'editor' || $info['staff_add'];
 	}
 
 	static function may_create($info) {
