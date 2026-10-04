@@ -438,7 +438,7 @@ switch ($command) {
 		require_once BASE.'tools/project.php';
 		$app = boot::$appname;
 		if (!raster_project::is_app($root, $app)) {
-			fwrite(STDERR, $paint('error', '31').": $app/ is not a Raster app (it has no config/ folder). Check RASTER_APP.\n");
+			fwrite(STDERR, $paint('error', '31').": $app/ is not a Raster app folder. Check RASTER_APP.\n");
 			exit(1);
 		}
 		$pending = raster_project::pending($root, $app);
