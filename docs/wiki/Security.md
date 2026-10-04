@@ -12,7 +12,7 @@ This page lists the protections Raster applies for you, and the few things that 
 
 **Validation runs on the server.** The rules in your HTML (`required`, `type`, `maxlength`, `pattern`…) are enforced on the server as well as in the browser.
 
-**Passwords** are hashed with PHP's `password_hash`. Five wrong passwords lock an account for 15 minutes, and failed attempts are slowed down. Changing a password logs out other sessions. The password-reset form answers the same whether or not an account exists, and reset links expire after an hour and work once.
+**Passwords** are hashed with PHP's `password_hash`. Five wrong passwords lock an account for 15 minutes (once 15 minutes pass after the last one, counting starts again), and failed attempts are slowed down. Changing a password logs out other sessions. The password-reset form answers the same whether or not an account exists, and reset links expire after an hour and work once.
 
 **Sessions** start only at log in; visitors get no session cookie (only a language cookie, if they pick a language). The session cookie is `HttpOnly` (scripts can't read it), `SameSite=Lax`, and `Secure` over HTTPS. Log-out is a POST.
 
