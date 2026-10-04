@@ -256,7 +256,74 @@ test('an older site upgrades with /api closed: api_open is gone (#24)', function
 // (batch E adds its tests here)
 
 // ## 2.1.8 batch F: upgrade tooling
-// (batch F adds its tests here)
+
+test('a hand-made second app is taken as current, not as 1.x (#75)', function () use ($repo, $tmp) {
+	$site = "$tmp/site-blog";
+	same(0, raster($repo, array('new', $site))[0]);
+	$version = trim(file_get_contents("$repo/system/VERSION"));
+	// a second app made by copying the first, without its version file, and a
+	// model that offers nothing at /api
+	exec('cp -R '.escapeshellarg("$site/application").' '.escapeshellarg("$site/blog"));
+	unlink("$site/blog/config/raster-version");
+	mkdir("$site/blog/models/posts");
+	file_put_contents("$site/blog/models/posts/posts.php", "<?php\nclass posts { function wipe() { return 'all posts deleted'; } }\n");
+	$config = file_get_contents("$site/blog/config/the_app.php");
+	$blog = array('RASTER_APP' => 'blog', 'RASTER_DB' => "$site/blog/data/test.sqlite");
+	// doctor and the dry run have nothing for it to do
+	list($code, $out) = raster($site, array('upgrade', '--dry-run'), $blog);
+	same(0, $code, $out);
+	has($out, 'blog/ has no config/raster-version');
+	lacks($out, '2.0.0 ');
+	lacks($out, '2.1.1 ');
+	check(!is_file("$site/blog/config/raster-version"), 'a dry run writes nothing');
+	list($code, $out) = raster($site, array('doctor'), $blog);
+	lacks($out, 'upgrade step(s) to run', $out);
+	has($out, "✓ Raster $version");
+	// updating the project upgrades every app: blog/ gets today's version and
+	// no old steps
+	list($code, $out) = raster($site, array('update', $repo));
+	same(0, $code, $out);
+	has($out, "blog/ had no config/raster-version: taken as Raster $version, no upgrade steps run");
+	lacks($out, '✓ 2.', 'no old steps');
+	same("$version\n", file_get_contents("$site/blog/config/raster-version"));
+	same($config, file_get_contents("$site/blog/config/the_app.php"), 'its config is left alone');
+	lacks(file_get_contents("$site/blog/config/the_app.php"), 'api_open');
+	list($code, $out) = raster($site, array('render', '/api/posts/wipe'), $blog);
+	has($out, 'HTTP 404', $out);
+	lacks($out, 'all posts deleted', '/api stays closed');
+	// from then on it upgrades like any other app
+	list($code, $out) = raster($site, array('upgrade'), $blog);
+	same(0, $code, $out);
+	has($out, "blog/ is at Raster $version, nothing to change");
+	lacks($out, 'no config/raster-version');
+	list($code, $out) = raster($site, array('version'));
+	has($out, "blog/ is at $version");
+	// an app really from Raster 1.x says so in its version file, and gets
+	// every step again
+	unlink("$site/blog/data/.gitignore");
+	lacks(raster($site, array('upgrade', '--dry-run'), $blog)[1], '2.0.0 private-folders', 'not while it is current');
+	file_put_contents("$site/blog/config/raster-version", "1.0.0\n");
+	has(raster($site, array('upgrade', '--dry-run'), $blog)[1], '2.0.0 private-folders');
+});
+
+test('new sites get no old .htaccess below the root (#76)', function () use ($repo, $tmp) {
+	check(!file_exists("$repo/application/.htaccess"), 'application/.htaccess is not in the repository');
+	check(!file_exists("$repo/system/.htaccess"), 'system/.htaccess is not in the repository');
+	$site = "$tmp/site-htaccess";
+	same(0, raster($repo, array('new', $site))[0]);
+	check(!file_exists("$site/application/.htaccess"), 'raster new copies no application/.htaccess');
+	check(!file_exists("$site/system/.htaccess"), 'raster new copies no system/.htaccess');
+	check(is_file("$site/.htaccess"), 'the root .htaccess is still there');
+	// the root rules still refuse config, data, models and system
+	require_once "$repo/system/private_paths.php";
+	foreach (array('/application/config/the_app.php', '/application/config/servers', '/application/data/raster.sqlite', '/application/data/mail/x.eml', '/application/models/x/x.php', '/application/models/x/sql/q', '/system/boot.php', '/system/VERSION') as $path) {
+		check(private_paths::blocked($path), "$path is refused");
+	}
+	foreach (array('logo.svg', 'photo.webp', 'font.woff2', 'favicon.ico', 'menu.pdf', 'style.css') as $file) {
+		check(!private_paths::blocked("/application/views/default/$file"), "theme file $file is served");
+	}
+	has(raster($site, array('doctor'))[1], '✓ .htaccess has every rule');
+});
 
 // ## 2.1.8 batch G: MCP themes
 // (batch G adds its tests here)

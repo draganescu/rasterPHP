@@ -30,10 +30,13 @@ class raster_project
 		return is_file($file) ? trim(file_get_contents($file)) : '1.0.0';
 	}
 
-	// the version an app was last upgraded to; apps from before 2.0 have none
+	// the version an app was last upgraded to, or null when it has no
+	// config/raster-version (an app made by hand). `raster upgrade` takes such
+	// an app as current: it writes today's version and runs no old steps. An
+	// app from Raster 1.x says so with 1.0.0 in that file.
 	static function app_version($app_dir) {
 		$file = $app_dir.'/config/raster-version';
-		return is_file($file) ? trim(file_get_contents($file)) : '1.0.0';
+		return is_file($file) ? trim(file_get_contents($file)) : null;
 	}
 
 	static function set_app_version($app_dir, $version) {
@@ -240,7 +243,9 @@ class raster_project
 		$app_dir = $root.'/'.$app;
 		$context = array('root' => $root, 'app' => $app_dir, 'name' => $app);
 		$pending = array();
-		foreach (self::upgrade_files($root, self::app_version($app_dir), self::version($root)) as $version => $file) {
+		$from = self::app_version($app_dir);
+		if ($from === null) return $pending;
+		foreach (self::upgrade_files($root, $from, self::version($root)) as $version => $file) {
 			$steps = include $file;
 			foreach ($steps as $id => $step) {
 				if (call_user_func($step['needed'], $context)) {

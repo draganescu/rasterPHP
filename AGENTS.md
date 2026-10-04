@@ -798,7 +798,8 @@ use `'model.method'`: `method(true)` returns
   of it is private: the framework, the app's code and config, the SQLite file,
   the view files themselves. The rules are in one list,
   `system/private_paths.php`, and everything comes from it — the router in
-  `index.php` for `php -S`, the `.htaccess` that ships with Raster, and:
+  `index.php` for `php -S`, the `.htaccess` that ships with Raster (the only
+  one: there is none inside the app or `system/` folders), and:
 
   ```sh
   php bin/raster deploy --config=apache          # the .htaccess itself
@@ -1041,6 +1042,9 @@ command-line output). They win over the settings above.
 - It then runs `php bin/raster upgrade` for every app: the steps in
   `system/upgrades/<version>.php` the app still needs (renamed annotations,
   moved files). The version an app is at is in `config/raster-version`.
+  An app without that file (one made by hand) is taken as current: `upgrade`
+  writes today's version into it and runs no old steps. An app from Raster
+  1.x gets them by having `1.0.0` written there first.
   Database changes stay with `raster schema --apply`.
 - `php bin/raster doctor` checks PHP, versions, edited framework files,
   templates, the database, whether `.htaccess` still carries every rule in
