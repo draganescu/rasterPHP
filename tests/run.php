@@ -1138,6 +1138,27 @@ test('in production, made-up URLs of a list with no items are not cached', funct
 	}
 });
 
+test('in production, made-up URLs of a list with no table yet are not cached', function () use ($db) {
+	cache_empty();
+	$bare = sys_get_temp_dir().'/raster-test-bare-'.getmypid().'.sqlite';
+	copy($db, $bare);
+	$pdo = new PDO("sqlite:$bare");
+	$pdo->exec('DROP TABLE newsdata');
+	$pdo = null;
+	try {
+		cache_server($bare, function ($get) {
+			// before schema --apply the list keeps its mock-up
+			foreach (array('/news/news_items/headline/r1', '/news/news_items/nonsense/x', '/news/news_page/7') as $path) {
+				same('200 not cached', $get($path)[0], $path);
+				same('200 not cached', $get($path)[0], $path);
+			}
+			same(0, count(glob(APPBASE.'data/cache/*') ?: array()), 'cache files');
+		});
+	} finally {
+		array_map('unlink', glob("$bare*") ?: array());
+	}
+});
+
 test('a content change deletes temporary cache files left long ago', function () {
 	cache_empty();
 	$dir = APPBASE.'data/cache/';
@@ -1151,6 +1172,26 @@ test('a content change deletes temporary cache files left long ago', function ()
 	check(!is_file($old), 'a temporary file from two hours ago is still there');
 	check(is_file($new), 'a page being written was deleted');
 	cache_empty();
+});
+
+test('a view name in other letter case is not cached', function () use ($db) {
+	cache_empty();
+	cache_server($db, function ($get) {
+		// on a disk that ignores case (macOS, Windows) these find about.html
+		// and news.html and answer; on one that doesn't they are 404s. Either
+		// way there is no end to them, so none is kept
+		foreach (array('/ABOUT', '/About', '/aBoUt', '/NEWS', '/News/news_page/2', '/NEWS/news_items/headline/Filler%201', '/NEWS.rss') as $path) {
+			list($status) = explode(' ', $get($path)[0]);
+			check(in_array($status, array('200', '404')), "$path answers $status");
+			same($status.' not cached', $get($path)[0], $path);
+		}
+		same(0, count(glob(APPBASE.'data/cache/*') ?: array()), 'cache files');
+		// the spelling of the view's own file is cached
+		foreach (array('/about', '/news/news_page/2', '/news/news_items/headline/Filler%201', '/news.rss') as $path) {
+			same('200 X-Raster-Cache: miss', $get($path)[0], $path);
+			same('200 X-Raster-Cache: hit', $get($path)[0], $path);
+		}
+	});
 });
 
 // ## 2.1.8 batch B: errors and /api
@@ -1646,6 +1687,47 @@ test('mcp view tools refuse a theme outside the views folder', function () use (
 	} finally {
 		@unlink($link);
 		foreach (array('media', 'application', 'application/views/default/_email') as $folder) @unlink("$root/$folder/zz-pwned.html");
+		foreach (glob("$outside/*") as $file) unlink($file);
+		@rmdir($outside);
+	}
+});
+
+// a view file that is a link is followed only while it stays inside the theme (#72)
+test('mcp view tools refuse a view file linked outside the theme', function () use ($root) {
+	$outside = sys_get_temp_dir().'/raster-viewlink-'.getmypid();
+	@mkdir($outside);
+	file_put_contents("$outside/secret.json", '{"secret":"sk-live-456"}');
+	file_put_contents("$outside/target.html", '<p>untouched</p>');
+	$theme = "$root/application/views/default";
+	$links = array(
+		"$theme/zzr25file.json" => "$outside/secret.json",
+		"$theme/zzr25target.html" => "$outside/target.html",
+		"$theme/zzr25gone.html" => "$outside/not-there.html",
+		"$theme/zzr25inside.html" => "$theme/index.html",
+	);
+	foreach ($links as $link => $target) symlink($target, $link);
+	try {
+		foreach (array('zzr25file.json', 'zzr25target.html', 'zzr25gone.html') as $view) {
+			$result = mcp_call('read_view', array('view' => $view));
+			check(!empty($result['isError']), "read_view followed $view out of the theme");
+			check(strpos(json_encode($result), 'sk-live-456') === false, 'nothing from outside');
+			check(!empty(mcp_call('check_view', array('content' => '<p>x</p>', 'view' => $view))['isError']), "check_view took $view");
+		}
+		$listed = mcp_call('list_views')['structuredContent']['views'];
+		check(!in_array('zzr25file.json', $listed) && !in_array('zzr25target.html', $listed) && !in_array('zzr25gone.html', $listed), 'list_views lists no link leading out: '.json_encode($listed));
+		// a link that stays inside the theme still works
+		check(in_array('zzr25inside.html', $listed), 'a link inside the theme is listed');
+		$inside = mcp_call('read_view', array('view' => 'zzr25inside.html'));
+		check(empty($inside['isError']), 'a link inside the theme reads: '.json_encode($inside));
+		$answers = mcp_stdio_calls(array(
+			array('write_view', array('view' => 'zzr25target.html', 'content' => '<p>pwned</p>')),
+			array('write_view', array('view' => 'zzr25gone.html', 'content' => '<p>pwned</p>')),
+		));
+		foreach (array(0, 1) as $i) check(!empty($answers[$i]['isError']), "write_view $i went through a link: ".json_encode(isset($answers[$i]) ? $answers[$i] : null));
+		same('<p>untouched</p>', file_get_contents("$outside/target.html"), 'the target is not overwritten');
+		check(!file_exists("$outside/not-there.html"), 'nor created through a dangling link');
+	} finally {
+		foreach (array_keys($links) as $link) @unlink($link);
 		foreach (glob("$outside/*") as $file) unlink($file);
 		@rmdir($outside);
 	}

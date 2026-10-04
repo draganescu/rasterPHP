@@ -828,7 +828,9 @@ use `'model.method'`: `method(true)` returns
     (`/news/news_page/1`, `/news/news_page/02`, `/news/news_item/007`, a
     segment left over at the end), or a typed filter spelled other than the
     way the page prints it (`/menu/menu_items/price/14.500` for `14.50`,
-    `/events/events_items/date/10 Oct 2026`). A model that decides the same calls
+    `/events/events_items/date/10 Oct 2026`), or a view name in other
+    letter case (`/ABOUT` finds `about.html` on a disk that ignores case,
+    as on macOS and Windows). A model that decides the same calls
     `raster_cache::skip()`.
   - Settings: `page_cache_ttl` (3600 seconds) and `page_cache_skip` (path
     patterns). Responses carry `X-Raster-Cache: hit|miss`. `describe` says
@@ -931,7 +933,8 @@ of lists and filter pages come along; drafts and the editor don't.
   - The four view tools take an optional `theme`: the name of a folder
     directly under `views/` (letters, digits, `_` and `-`), the site's theme
     when left out. A path, or a folder that links out of `views/`, is
-    refused.
+    refused, and so is a view file that links out of the theme
+    (`list_views` leaves it out); a link inside the theme works.
   - `render_url` — the page's status and HTML, no web server. With `as`
     (`editor`, `admin`, `member`, or an account's email) it renders the page
     as that person, outside production only, and for staff also says what the in-page editor marks:
@@ -1044,7 +1047,11 @@ command-line output). They win over the settings above.
   moved files). The version an app is at is in `config/raster-version`.
   An app without that file (one made by hand) is taken as current: `upgrade`
   writes today's version into it and runs no old steps. An app from Raster
-  1.x gets them by having `1.0.0` written there first.
+  1.x gets them by having `1.0.0` written there first. A `RASTER_APP`
+  that names no app folder (missing, without `config/`, or a framework
+  folder such as `system/`) is refused with an error and exit 1, and
+  nothing is written. When the version file can't be written, upgrade
+  says so, names the steps that ran, and exits 1.
   Database changes stay with `raster schema --apply`.
 - `php bin/raster doctor` checks PHP, versions, edited framework files,
   templates, the database, whether `.htaccess` still carries every rule in
