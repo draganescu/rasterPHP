@@ -42,6 +42,14 @@ class pagination
 			}
 			// the same filters as the list: pagination.links('cms.news', 'featured=1')
 			$conditions = cms_store::list_options($filter)['conditions'];
+			// and, as the list, no filtering on a record's hidden fields for
+			// visitors: the page count would answer what the list doesn't
+			$record = cms_records::info($name);
+			if ($record && !cms::loggedin()) {
+				$secret = $record['hidden'];
+				foreach ($secret as $hidden) unset($filters[$hidden]);
+				$conditions = array_filter($conditions, function ($c) use ($secret) { return !in_array($c[0], $secret, true); });
+			}
 			$total = cms_store::table_exists($type) ? cms_store::count_published($type, $filters, $conditions) : 0;
 			$perpage = (int)config::get($name.'_page_size') ?: ((int)config::get('raster_page_size') ?: 10);
 			$current = max(1, (int)util::param($name.'_page', 1));
