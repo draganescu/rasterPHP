@@ -35,6 +35,8 @@ An **environment** is a name for where the site is running. Raster uses two:
 |---|---|---|
 | Database | fluid: tables and columns are created as templates change | frozen: changes only through `raster schema --apply` |
 | Template errors | the page shows a list of problems (HTTP 500) | a plain "This page could not be shown", details go to the PHP error log |
+| PHP's own errors | shown as php.ini says | never shown to visitors (`display_errors` off, `log_errors` on, whatever php.ini says); `/api` answers `{"error":"server error"}` |
+| Database can't be reached | the page says why (HTTP 500) | every page answers 503 (the view `error_document_503`, if set), logged, nothing cached |
 | Page cache | off | on |
 | Email | written to files in `data/mail/` | sent with PHP's `mail()` unless you set `RASTER_MAIL` |
 | Email links | allowed without a configured address | need `RASTER_URL` |
@@ -106,6 +108,7 @@ Set with `config::set('name')->to(value)` in `config/the_app.php`.
 | `rewrite` | `true` | `false` puts `index.php/` in every link, for servers that can't rewrite URLs |
 | `strict_templates` | `true` in development | template errors stop the page with a list (HTTP 500) |
 | `error_document_404` | none | a view for 404 pages |
+| `error_document_503` | none | a view for when the database can't be reached, outside development; use no model that needs the database in it |
 | `site_url` | none | the site's address (same as `RASTER_URL`) |
 | `cms_enabled` | `true` | the CMS and the editor |
 | `raster_page_size` | `10` | items per page in every collection |
@@ -133,8 +136,7 @@ Set with `config::set('name')->to(value)` in `config/the_app.php`.
 | `export_skip` | none | paths or `#regex#` patterns left out of `raster export` |
 | `mcp_token` | none | turns on MCP over HTTP (same as `RASTER_MCP_TOKEN`) |
 | `mcp_write_views` | `false` | lets MCP over HTTP rewrite templates |
-| `api_system_models` | `cms` | bundled models reachable at `/api` |
-| `api_open` | `false` | for sites made before 2.1.1: models without `api()` offer every public method at `/api`, to anyone. `doctor` warns; removed in 2.2.0 |
+| `api_system_models` | `cms` | bundled models reachable at `/api`, for what their `api()` lists |
 | `api_blocked` | `mcp`, `api` | models never reachable at `/api`. Setting it replaces the list, so keep `mcp` and `api` in it: `array('mcp', 'api', 'billing')` |
 | `allow_deprecated` | none | deprecated features this site keeps on purpose, so `doctor` doesn't warn |
 

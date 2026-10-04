@@ -436,8 +436,7 @@ class raster_inspector {
 		);
 	}
 
-	// What an application model offers over /api: array(method => role), or
-	// 'open' when config api_open leaves every public method reachable.
+	// What an application model offers over /api: array(method => role).
 	function model_api($model) {
 		$info = $this->model_info($model);
 		if (!$info) return array();
@@ -449,7 +448,7 @@ class raster_inspector {
 		} catch (Throwable $e) {
 			return array();
 		}
-		return $offered === null ? 'open' : (object)$offered;
+		return (object)$offered;
 	}
 
 	// the named queries a model can call as methods: its own sql/ folder

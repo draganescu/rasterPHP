@@ -4,18 +4,20 @@
   *
   *   /api/products/latest/5  ->  products::latest('5'), sent as JSON
   *
-  * An application model offers methods over /api only by listing them,
-  * with the least role that may call each one:
+  * A model offers methods over /api only by listing them, with the least
+  * role that may call each one:
   *
   *   static function api() {
   *       return array('latest' => 'visitor', 'webhook' => 'visitor', 'report' => 'editor');
   *   }
   *
   * Anything not listed answers 404, whatever the method would return. The
-  * roles are visitor (anyone), member, editor and admin. A site that still
-  * sets config api_open (written by the 2.1.1 upgrade for sites made
-  * before) keeps every public method of its models that don't list theirs
-  * reachable, as before; `raster doctor` warns about it.
+  * roles are visitor (anyone), member, editor and admin. Bundled models
+  * follow the same rule: cms lists its editor endpoints.
+  *
+  * A method that throws answers {"error":"server error"} with a 500, and the
+  * error goes to the log with the URL; a database that can't be reached
+  * answers 503, and too few arguments 400. Development adds the trace.
   */
   class api
   {
@@ -38,7 +40,7 @@
       if (in_array($model, (array)config::get('api_blocked', array('mcp', 'api')))) $this->fail(404, 'unknown model');
 
       // bundled models (and overrides of them) only when listed in
-      // api_system_models; they guard their own methods
+      // api_system_models
       $paths = controller::build_model_paths($model);
       $bundled = file_exists($paths['system_path']);
       if ($bundled && !in_array($model, (array)config::get('api_system_models', array('cms')))) $this->fail(404, 'unknown model');
@@ -51,18 +53,20 @@
       $reflection = new ReflectionMethod($obj, $method);
       if (!$reflection->isPublic() || $reflection->isStatic()) $this->fail(404, 'unknown method');
 
-      // application models: only what the model lists, for the roles it names
-      if (!$bundled) {
-        $offered = self::offered(get_class($obj));
-        if ($offered !== null) {
-          if (!isset($offered[$method])) $this->fail(404, 'unknown method');
-          if (!self::may($offered[$method])) {
-            $this->fail(authentication::user() ? 403 : 401, 'not allowed');
-          }
-        }
+      // only what the model lists, for the roles it names
+      $offered = self::offered(get_class($obj));
+      if (!isset($offered[$method])) $this->fail(404, 'unknown method');
+      if (!self::may($offered[$method])) {
+        $this->fail(authentication::user() ? 403 : 401, 'not allowed');
       }
 
-      $result = call_user_func_array(array($obj, $method), array_slice($segments, 3));
+      $arguments = array_slice($segments, 3);
+      if (count($arguments) < $reflection->getNumberOfRequiredParameters()) $this->fail(400, 'missing arguments');
+      try {
+        $result = call_user_func_array(array($obj, $method), $arguments);
+      } catch (Throwable $e) {
+        $this->broken($e);
+      }
       if ($result !== false) {
         header('Content-Type: application/json');
         echo json_encode($result);
@@ -70,16 +74,13 @@
       exit;
     }
 
-    // What a model class offers over /api: array(method => role). An empty
-    // array when it lists nothing, and null when the site keeps the open
-    // /api of older versions (config api_open) and the model lists nothing.
-    // Every entry is method => role, nothing shorter: an entry without a
-    // role, or a role that isn't one of self::$roles, offers nothing (lint
-    // reports it), so a slip never opens a method by accident.
+    // What a model class offers over /api: array(method => role), empty
+    // when it lists nothing. Every entry is method => role, nothing shorter:
+    // an entry without a role, or a role that isn't one of self::$roles,
+    // offers nothing (lint reports it), so a slip never opens a method by
+    // accident.
     static function offered($class) {
-      if (!method_exists($class, 'api') || !(new ReflectionMethod($class, 'api'))->isStatic()) {
-        return config::get('api_open') ? null : array();
-      }
+      if (!method_exists($class, 'api') || !(new ReflectionMethod($class, 'api'))->isStatic()) return array();
       $offered = array();
       $listed = call_user_func(array($class, 'api'));
       foreach (is_array($listed) ? $listed : array() as $method => $role) {
@@ -92,10 +93,28 @@
       return $role === 'visitor' || authentication::can($role);
     }
 
+    // A method that threw: logged with the URL and answered as JSON, so a
+    // payment provider sees a failure and tries again. A database that
+    // can't be reached is 503; development adds what was thrown.
+    protected function broken($e) {
+      $request = (isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : 'GET').' '.config::get('uri_string');
+      $thrown = get_class($e).': '.$e->getMessage().' in '.$e->getFile().':'.$e->getLine();
+      log::error("$thrown, at $request");
+      $database = $e instanceof PDOException || $e instanceof RedBeanPHP\RedException\SQL;
+      $answer = array('error' => $database ? 'database unavailable' : 'server error');
+      if (config::get('environment') === 'development') {
+        $answer['exception'] = $thrown;
+        $answer['trace'] = explode("\n", $e->getTraceAsString());
+      }
+      $this->fail($database ? 503 : 500, $answer);
+    }
+
     protected function fail($status, $message) {
-      http_response_code($status);
-      header('Content-Type: application/json');
-      echo json_encode(array('error' => $message));
+      if (!headers_sent()) {
+        http_response_code($status);
+        header('Content-Type: application/json');
+      }
+      echo json_encode(is_array($message) ? $message : array('error' => $message));
       exit;
     }
   }

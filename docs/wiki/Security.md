@@ -44,7 +44,9 @@ Values in feeds, JSON views, attributes set with `@`/`+`, and `print.self` are e
 
 **Offer over `/api` only what you mean to.** A model's methods are reachable at `/api/<model>/<method>` only when it lists them in `static function api()`, each with the least role that may call it (`visitor`, `member`, `editor`, `admin`). Everything else answers 404. A method listed for visitors can be called by anyone, so if it writes, deletes or sends something it checks what it's given. See [Models](Models#a-models-json-api).
 
-Sites made before Raster 2.1.1 may still have `config::set('api_open')->to(true)` in `config/the_app.php`, which keeps every public method of models without `api()` reachable by anyone. `raster doctor` warns about it; list what your models offer and remove it.
+The same holds for the bundled models: `cms` offers only its editor endpoints, `style` and `logout`, and a public method you add in a `the_cms` override answers 404 unless your override's `api()` lists it. The `api_open` setting of earlier versions, which kept every public method reachable, is gone: setting it does nothing.
+
+**Errors stay in the log.** Outside development Raster turns PHP's `display_errors` off for every request, so an error shows visitors no paths or arguments: a page answers a plain 500, an `/api` method `{"error":"server error"}`, and the details go to the error log with the URL. `raster doctor` warns when php.ini still has `display_errors` on in production, because an error before Raster starts would still show; set it off there too.
 
 **Protect private pages on the server side.** `print.if.is_editor` only hides markup. To keep a whole page private, list it in `config::set('protected')`. See [Accounts and roles](Accounts-and-Roles#protected-pages).
 

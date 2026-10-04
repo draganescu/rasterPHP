@@ -119,6 +119,10 @@ class cms
 		if (!database::configured()) {
 			return;
 		}
+		// a database that can't be reached is an outage, not a missing
+		// table: never the mock-up as if it were the page
+		$down = cms_store::unreachable();
+		if ($down !== null) controller::unavailable($down);
 
 		$uri_string = config::get('uri_string');
 		$index_file = config::get('index_file');
@@ -427,6 +431,15 @@ class cms
 			exit('Forbidden');
 		}
 		database::instance('cms');
+	}
+
+	// What /api offers, like any model: the editor's endpoints, its style
+	// and logout. They check the caller themselves (require_admin answers
+	// 403), so they are listed for anyone; nothing else of cms, or of an
+	// override of it, answers there.
+	static function api() {
+		return array_fill_keys(array('editor_save_field', 'editor_save_item', 'editor_delete_item', 'editor_history', 'editor_restore',
+			'editor_upload', 'editor_action', 'editor_script', 'style', 'logout'), 'visitor');
 	}
 
 	// ##The in-page editor (see editor.php): POST /api/cms/editor_… with csrf
