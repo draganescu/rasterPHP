@@ -13,6 +13,9 @@ require_once __DIR__.'/store.php';
 *   <!-- render.cms.features --> ... <!-- print.title -->A<!-- /print.title --> ... <!-- /render.cms.features -->
 *     a collection called "features" whose items have a "title" field
 *
+* A field's type comes from its mock-up: 14 is an int, 2026-10-10 a date,
+* Hello text (types.php).
+*
 * In development (fluid database) tables and columns are created on the first
 * request that renders a new annotation. In production (frozen database) run
 * `php bin/raster schema --apply` after deploying new templates.
@@ -186,6 +189,7 @@ class cms
 		if (!array_key_exists($type, $this->pages)) $this->pages[$type] = cms_store::latest($type);
 		$page = $this->pages[$type];
 		if (!$page && !database::$frozen) {
+			cms_types::ensure($type, array('slug' => 'text', 'updated_at' => 'datetime'));
 			$page = R::dispense($type);
 			$page->slug = $type === 'sitepage' ? 'site' : $this->slug;
 			$page->updated_at = R::isoDateTime();
@@ -193,14 +197,18 @@ class cms
 			$this->pages[$type] = $page;
 		}
 		if (!$page) return false;
-		// a stored row carries every column of its table
+		// a stored row carries every column of its table; a new one is of the
+		// mock-up's type and starts as the mock-up
+		$example = trim(template::get('current_block'));
 		if (!array_key_exists($name, $page->getProperties())) {
 			if (database::$frozen) return false;
-			$page->$name = trim(template::get('current_block'));
+			$field_type = cms_types::of_example($example);
+			cms_types::ensure($type, array($name => $field_type));
+			$page->$name = cms_types::clean($field_type, $example, $name);
 			R::store($page);
 		}
-		$value = $page->$name;
-		$value = ($value === null || (string)$value === '') ? false : $value;
+		$value = cms_types::show($page->$name, $example);
+		$value = $value === '' ? false : $value;
 		if (cms_editor::editing()) {
 			return cms_editor::field($type, $type === 'sitepage' ? 'site' : $this->slug, $name, $value, template::get('current_block'));
 		}
@@ -301,36 +309,34 @@ class cms
 			if (!$exists) return false;
 		} elseif (!$exists || R::count($this->data_name) == 0) {
 			// the first item is the placeholder content from the template
-			$item = R::dispense($this->data_name);
 			require_once BASE.'tools/inspector.php';
 			$inspector = new raster_inspector();
 			$seed = array_merge($expected_properties, $inspector->collection_defaults($name));
+			$types = array_map(array('cms_types', 'of_example'), $seed);
+			cms_types::ensure($this->data_name, $types + array_intersect_key(cms_types::$system, array_flip(array('slug', 'enabled', 'published_at', 'updated_at'))));
+			$item = R::dispense($this->data_name);
 			foreach ($seed as $property=>$content) {
-				$item->$property = trim($content);
+				$item->$property = cms_types::clean($types[$property], $content, $property);
 			}
 			$item->updated_at = R::isoDateTime();
-			$item->enabled = '1';
-			$item->published_at = '';
+			$item->enabled = 1;
 			$item->slug = cms_store::unique_slug($this->data_name, cms_store::slug_source($seed), 0);
 			R::store($item);
 		} else {
-			// new fields in the template become new columns
+			// new fields in the template become new columns, of the type of the
+			// collection's own mock-up (as the first item); the newest item gets it
 			$fields = cms_store::columns($this->data_name);
-			$latest = cms_store::latest($this->data_name);
-			$changed = false;
-			foreach (array('slug', 'published_at') as $system) {
-				if (!array_key_exists($system, $fields)) {
-					$latest->$system = '';
-					$changed = true;
-				}
+			$new = array_diff_key($expected_properties, $fields);
+			if ($new) {
+				require_once BASE.'tools/inspector.php';
+				$inspector = new raster_inspector();
+				$new = array_merge($new, array_intersect_key($inspector->collection_defaults($name), $new));
+				$types = array_map(array('cms_types', 'of_example'), $new);
+				cms_types::ensure($this->data_name, $types);
+				$latest = cms_store::latest($this->data_name);
+				foreach ($new as $key => $value) $latest->$key = cms_types::clean($types[$key], $value, $key);
+				R::store($latest);
 			}
-			foreach ($expected_properties as $key => $value) {
-				if (!array_key_exists($key, $fields)) {
-					$latest->$key = trim($value);
-					$changed = true;
-				}
-			}
-			if ($changed) R::store($latest);
 		}
 
 		// only real columns can be filtered on
@@ -361,16 +367,17 @@ class cms
 				if ($key === 'id' || $key === 'slug') return array();
 				continue;
 			}
-			$sql .= ' AND '.$key.' = :'.$key.' ';
-			$bindings[':'.$key] = $value;
+			$compare[] = array($key, '=', $value);
 		}
-		// date>=today, guests>4
+		// featured=1, date>=today, guests>4, each as its field's type
 		list($more, $more_bindings) = cms_store::conditions_sql($compare, $fields);
 		$sql .= $more;
 		$bindings += $more_bindings;
 		$sql .= ' ORDER BY '.cms_store::order_sql(isset($options['order']) ? $options['order'] : '', $fields).' LIMIT '.(int)$page_size.' OFFSET '.(int)$roffset;
 		$data = array_values(array_map(array('cms_store', 'export_item'), R::find($this->data_name, $sql, $bindings)));
 		if (!$data && !$record && database::$frozen && R::count($this->data_name) == 0) return false;
+		// the template prints text: 4.5 as its mock-up 4.50 does
+		foreach ($data as $key => $row) $data[$key] = cms_types::show_row($row, $expected_properties);
 		if ($record) {
 			foreach ($data as $key => $row) $data[$key] = cms_records::for_template($record, cms_records::decode($record, $row));
 		}

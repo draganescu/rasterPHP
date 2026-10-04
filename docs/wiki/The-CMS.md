@@ -88,7 +88,7 @@ Pass options as one string, in the style of a URL query:
 | `<field>=?<name>` | equals the URL's `?<name>=`; left out when the URL has none or it is empty |
 | `<field>>=<value>` | also `>`, `<`, `<=`, and `!=` (which keeps items where the field is empty) |
 
-`today` is the date the page is shown: `date>=today` is what's coming, `date<today` what's past. Dates compare as text, so keep them as `2026-10-03` (what `<input type="date">` sends).
+`today` is the date the page is shown: `date>=today` is what's coming, `date<today` what's past. Values compare as the field's type: a field whose mock-up is `2026-10-10` is a date, `14` an int, `4.50` a number, `19:00` a time, and anything else text. Whoever writes a value, it is stored as its type (`5 Oct 2026` becomes `2026-10-05`), or refused when it can't be one.
 
 A filter on a field that doesn't exist yet **adds that field**. So `render.cms.products('featured=1')` gives products a `featured` field, which editors set to `1` on the items to show.
 

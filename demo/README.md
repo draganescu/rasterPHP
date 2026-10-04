@@ -272,3 +272,9 @@ php tests/demo.php                        # the whole matrix
 | R17 | lint warns about records a form makes that no view lists, and about admin pages listing records a model reads itself |
 | R18 | `cms_records::listed()`: a model's agenda of bookings by evening, nested in its rows, is edited in place with the record's actions; values the model adds are not editable |
 | R19 | a record's own page (`/reservation/reservation_item/<slug>`) is where editors edit a record a model view links to; visitors get a 404 |
+| T1 | a template field is of its mock-up's type (`14.50` a number, `2026-10-10` a date, `19:00` a time), a record field of its default's (`0` an int, `false` a bool) or the one `types` names; `schema`, `describe` and `site_overview` say so |
+| T2 | values are stored as their type whoever writes them (`12 Dec 2026` is `2026-12-12`, `8pm` is `20:00`), or refused with the field and an example |
+| T3 | lists filter and sort by type: `order=-price` puts 100 above 18 above 9.50, `price>=10` compares numbers, `order=date,starts` dates and times |
+| T4 | models, MCP and /api read ints, floats and bools, so the reservation model has no casts |
+| T5 | templates print text: a number with as many decimals as its mock-up, nothing for an empty value; a form value of the wrong type raises `<field>_invalid` |
+| T6 | `schema --apply` converts a column whose type changed when every value fits, and names the values that don't |

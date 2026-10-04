@@ -140,7 +140,7 @@ class mcp
 	protected function tools() {
 		$page = array('type' => 'string', 'description' => 'The page: its URL path (/about), view name (about) or table (aboutpage). See site_overview.');
 		$collection = array('type' => 'string', 'description' => 'Collection name as used in the templates, e.g. news for render.cms.news');
-		$fields = array('type' => 'object', 'description' => 'Field names and their new values (strings; HTML is allowed)', 'additionalProperties' => array('type' => 'string'));
+		$fields = array('type' => 'object', 'description' => 'Field names and their new values, as their types (site_overview lists the fields that aren\'t text): int 4, number 4.5, bool true, date 2026-10-05, datetime 2026-10-05 19:30, time 19:30; text may be HTML. Empty clears a field.', 'additionalProperties' => array('type' => array('string', 'number', 'boolean', 'null')));
 		$id = array('type' => 'integer', 'description' => 'Item id');
 		$read_only = array('readOnlyHint' => true, 'openWorldHint' => false);
 		$write = array('readOnlyHint' => false, 'destructiveHint' => false, 'openWorldHint' => false);
@@ -294,13 +294,14 @@ class mcp
 		$model = $this->model();
 		$pages = array();
 		foreach ($model['pages'] as $page) {
-			$pages[] = array('url' => $page['url'], 'view' => $page['view'], 'fields' => array_keys($page['fields']));
+			$pages[] = array('url' => $page['url'], 'view' => $page['view'], 'fields' => array_keys($page['fields'])) + raster_describe::types($page['fields']);
 		}
 		$collections = array();
 		foreach ($model['collections'] as $collection) {
 			$collections[] = array(
 				'name' => $collection['name'],
 				'fields' => array_keys($collection['fields']),
+			) + raster_describe::types($collection['fields']) + array(
 				'items' => cms_store::table_exists($collection['type']) ? (int)R::count($collection['type']) : 0,
 				'used_in' => $collection['views'],
 				'item_url' => '/'.$collection['name'].'/'.$collection['name'].'_item/{id}',
@@ -310,6 +311,7 @@ class mcp
 			if (isset($collection['model'])) {
 				$collections[count($collections) - 1] += array('declared_by' => $collection['model'], 'public' => $collection['public'], 'readonly' => $collection['readonly'], 'actions' => array_keys($collection['actions']));
 				$collections[count($collections) - 1]['fields'] = array_values(array_diff(array_keys($collection['fields']), $collection['hidden']));
+				if (isset($collections[count($collections) - 1]['types'])) $collections[count($collections) - 1]['types'] = array_diff_key($collections[count($collections) - 1]['types'], array_flip($collection['hidden']));
 			}
 		}
 		// who listens to what: saving an item or a booking may do more than it says
@@ -349,6 +351,7 @@ class mcp
 			foreach ($page['fields'] as $name => $field) $defaults[$name] = trim($field['default']);
 			$fields = $fields + $defaults;
 		}
+		$this->ensure_columns($page['type'], $page['fields'], array('slug', 'updated_at'));
 		cms_store::update_page($page['type'], $page['slug'], $fields, array_keys($page['fields']));
 		return $this->tool_get_page(array('page' => $page['type']));
 	}
@@ -377,9 +380,19 @@ class mcp
 		return $item;
 	}
 
+	// in development, the columns a write needs, of the templates' types, so a
+	// page or collection no request rendered yet is stored the same way
+	protected function ensure_columns($table, $fields, $system) {
+		if (database::$frozen) return;
+		$types = array_intersect_key(cms_types::$system, array_flip($system));
+		foreach ($fields as $name => $field) $types[$name] = $field['type'];
+		cms_types::ensure($table, $types);
+	}
+
 	protected function tool_create_item($arguments) {
 		cms_store::connect();
 		$collection = $this->find_collection($this->arg($arguments, 'collection'));
+		if (!isset($collection['model'])) $this->ensure_columns($collection['type'], $collection['fields'], array('slug', 'enabled', 'published_at', 'updated_at'));
 		return cms_store::save_item($collection['type'], 0, $this->fields_argument($arguments), array_keys($collection['fields']));
 	}
 

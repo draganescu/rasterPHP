@@ -306,7 +306,10 @@ switch ($command) {
 					$default = preg_replace('/\s+/', ' ', strip_tags($field['default']));
 					if (mb_strlen($default) > 50) $default = mb_substr($default, 0, 47).'...';
 					$mark = $field['in_database'] ? $paint('✓', '32') : $paint('+', '33');
-					echo "  $mark $name".($default !== '' ? $paint("  \"$default\"", '2') : '')."\n";
+					echo "  $mark $name".($field['type'] !== 'text' ? $paint("  {$field['type']}", '36') : '').($default !== '' ? $paint("  \"$default\"", '2') : '')."\n";
+				}
+				foreach ($table['retyped'] as $retype) {
+					echo '  '.$paint('~', '33')." {$retype['field']} ".$paint("({$retype['from']} in the database, {$retype['to']} in the templates".($status['frozen'] ? '; run --apply' : '; --apply converts it').")", '2')."\n";
 				}
 				foreach ($table['orphans'] as $orphan) {
 					echo '  '.$paint('-', '31')." $orphan ".$paint('(in database, not in any template)', '2')."\n";

@@ -85,7 +85,7 @@ class raster_describe
 				foreach ($page['fields'] as $name => $field) {
 					$fields[$name] = self::clip($field['default'], $limits['default']);
 				}
-				$pages[] = array('url' => $page['url'], 'view' => $page['view'], 'table' => $page['type'], 'fields' => $fields);
+				$pages[] = array('url' => $page['url'], 'view' => $page['view'], 'table' => $page['type'], 'fields' => $fields) + self::types($page['fields']);
 			}
 			$out['pages'] = $pages;
 		}
@@ -108,6 +108,7 @@ class raster_describe
 				$collections[] = array(
 					'name' => $collection['name'],
 					'fields' => $fields,
+				) + self::types($collection['fields']) + array(
 					'used_in' => $collection['views'],
 					'items' => self::count_items($collection['type']),
 					'item_url' => '/'.$collection['name'].'/'.$collection['name'].'_item/{slug}',
@@ -163,6 +164,15 @@ class raster_describe
 		} catch (Exception $e) {
 			return null;
 		}
+	}
+
+	// the fields that aren't text, with their types; the rest are text
+	static function types($fields) {
+		$types = array();
+		foreach ($fields as $name => $field) {
+			if (isset($field['type']) && $field['type'] !== 'text') $types[$name] = $field['type'];
+		}
+		return $types ? array('types' => $types) : array();
 	}
 
 	static protected function clip($text, $length) {

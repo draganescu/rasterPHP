@@ -34,8 +34,9 @@ class feed
 		$record = cms_records::info($collection);
 		foreach (R::find($type, $sql, $bindings) as $bean) {
 			$item = cms_store::export_item($bean);
-			// a public record type: lists decoded, hidden fields out, what visitors typed as text
-			if ($record) $item = cms_records::for_template($record, cms_records::shown($record, cms_records::decode($record, $item)));
+			// feeds print text; a public record type also has its lists
+			// decoded, hidden fields out, and what visitors typed escaped
+			$item = $record ? cms_records::for_template($record, cms_records::shown($record, cms_records::decode($record, $item))) : cms_types::show_row($item);
 			$date = !empty($item['published_at']) ? $item['published_at'] : (!empty($item['updated_at']) ? $item['updated_at'] : 'now');
 			$time = strtotime($date) ?: time();
 			$item['url'] = rtrim(config::get('link_uri'), '/').'/'.$collection.'/'.$collection.'_item/'.(!empty($item['slug']) ? rawurlencode($item['slug']) : $item['id']);

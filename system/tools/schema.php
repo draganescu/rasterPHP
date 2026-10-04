@@ -5,6 +5,8 @@
 // database has. Templates are the source of truth:
 // - missing: a field in a template with no column yet
 // - orphan: a column no template uses any more (often a renamed field)
+// - retyped: a column of another type than the field now has (its mock-up
+//   went from 14 to 14 lei); --apply converts it when every value fits
 //
 // In development missing columns appear on the next request that renders
 // them. In production the database is frozen: run `raster schema --apply`.
@@ -35,8 +37,8 @@ class raster_schema {
 			if (isset($collection['model'])) {
 				$meta['model'] = $collection['model'];
 				// every column a record needs, Raster's own included
-				foreach (cms_records::columns(cms_records::info($collection['name'])) as $column => $default) {
-					if (!isset($fields[$column])) $fields[$column] = array('default' => (string)$default);
+				foreach (cms_records::columns(cms_records::info($collection['name'])) as $column => $type) {
+					if (!isset($fields[$column])) $fields[$column] = array('default' => '', 'type' => $type);
 				}
 			}
 			$tables[] = $this->compare(isset($collection['model']) ? 'record' : 'collection', $collection['type'], $fields, $meta);
@@ -53,7 +55,7 @@ class raster_schema {
 
 		$drift = !empty($unused);
 		foreach ($tables as $table) {
-			if ((!$table['exists'] && $table['fields']) || $table['missing'] || $table['orphans']) $drift = true;
+			if ((!$table['exists'] && $table['fields']) || $table['missing'] || $table['orphans'] || $table['retyped']) $drift = true;
 		}
 
 		// tables the bundled models use (accounts, subscribers). A fluid
@@ -95,11 +97,15 @@ class raster_schema {
 		$exists = cms_store::table_exists($type);
 		$columns = $exists ? cms_store::columns($type) : array();
 		$missing = array();
+		$retyped = array();
 		$status = array();
 		foreach ($fields as $name => $field) {
 			$has = array_key_exists($name, $columns);
 			if (!$has) $missing[] = $name;
-			$status[$name] = array('default' => $field['default'], 'in_database' => $has);
+			$status[$name] = array('default' => $field['default'], 'type' => $field['type'], 'in_database' => $has);
+			if ($has && cms_types::of_column($columns[$name]) !== $field['type']) {
+				$retyped[] = array('field' => $name, 'from' => cms_types::of_column($columns[$name]), 'to' => $field['type']);
+			}
 		}
 		$orphans = array();
 		foreach (array_keys($columns) as $column) {
@@ -149,13 +155,15 @@ class raster_schema {
 			'rows' => $exists ? (int)R::count($type) : 0,
 			'fields' => $status,
 			'missing' => $missing,
+			'retyped' => $retyped,
 			'orphans' => $orphans,
 			'rename_candidates' => $renames,
 		);
 	}
 
-	// Creates missing tables and columns with the template defaults, the
-	// same way the CMS would on a request in development
+	// Creates missing tables and columns, each of its field's type, with the
+	// template defaults, the same way the CMS would on a request in
+	// development; converts retyped columns whose values all fit
 	function apply() {
 		$status = $this->status();
 		$changes = array();
@@ -163,6 +171,12 @@ class raster_schema {
 		R::freeze(false);
 		try {
 			foreach ($status['tables'] as $table) {
+				foreach ($table['retyped'] as $retype) {
+					$bad = cms_types::retype($table['table'], $retype['field'], $retype['to']);
+					$changes[] = $bad
+						? "kept {$table['table']}.{$retype['field']} as {$retype['from']}: ".implode(', ', array_map('json_encode', $bad))." can't be {$retype['to']}; change them and run --apply again"
+						: "{$table['table']}.{$retype['field']} is now {$retype['to']} (was {$retype['from']})";
+				}
 				// records: every column the model declares, and no row left behind
 				if ($table['kind'] === 'record') {
 					if ($table['exists'] && !$table['missing']) continue;
@@ -170,33 +184,25 @@ class raster_schema {
 					$changes[] = $table['exists'] ? "added {$table['table']}.".implode(", {$table['table']}.", $table['missing']) : "created table {$table['table']}";
 					continue;
 				}
-				if ($table['kind'] === 'collection' && $table['exists']) {
-					$columns = cms_store::columns($table['table']);
-					foreach (array('slug', 'published_at') as $system) {
-						if (!array_key_exists($system, $columns)) {
-							$latest = cms_store::latest($table['table']);
-							$latest->$system = '';
-							R::store($latest);
-							$changes[] = "added {$table['table']}.$system";
-						}
-					}
-				}
 				if ($table['exists'] && !$table['missing']) continue;
 				if (!$table['exists'] && !$table['fields']) continue; // a page with collections only
+				$system = $table['kind'] === 'page' ? array('slug', 'updated_at') : array('slug', 'enabled', 'published_at', 'updated_at');
+				$types = array_intersect_key(cms_types::$system, array_flip($system));
+				foreach ($table['fields'] as $name => $field) $types[$name] = $field['type'];
+				cms_types::ensure($table['table'], $types);
 				$bean = $table['exists'] ? cms_store::latest($table['table']) : null;
 				if (!$bean) {
 					$bean = R::dispense($table['table']);
 					if ($table['kind'] === 'page') $bean->slug = $table['slug'];
 					if ($table['kind'] === 'collection') {
-						$bean->enabled = '1';
-						$bean->published_at = '';
+						$bean->enabled = 1;
 						$bean->slug = cms_store::slugify(cms_store::slug_source(array_map(function ($f) { return $f['default']; }, $table['fields'])));
 					}
 					$changes[] = "created table {$table['table']}";
 				}
 				foreach ($table['fields'] as $name => $field) {
 					if ($field['in_database']) continue;
-					$bean->$name = trim($field['default']);
+					$bean->$name = cms_types::clean($field['type'], $field['default'], $name);
 					if ($table['exists']) $changes[] = "added {$table['table']}.$name";
 				}
 				$bean->updated_at = R::isoDateTime();

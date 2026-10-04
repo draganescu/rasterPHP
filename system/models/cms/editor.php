@@ -178,7 +178,7 @@ class cms_editor {
 		} catch (Exception $e) {
 			return self::fail($e->getMessage());
 		}
-		return array('value' => (string)$saved['fields'][$field], 'revision' => $saved['revision']);
+		return array('value' => cms_types::show($saved['fields'][$field]), 'revision' => $saved['revision']);
 	}
 
 	// collection, id (0 for a new item), fields[name]=value
@@ -196,7 +196,8 @@ class cms_editor {
 		unset($fields['id'], $fields['updated_at']);
 		$allowed = $record ? cms_records::writable($record) : array_diff(array_keys($columns), array('id', 'updated_at'));
 		try {
-			return cms_store::save_item($type, (int)util::post('id'), $fields, $allowed);
+			// the page prints text, so the editor gets the item as text too
+			return cms_types::show_row(cms_store::save_item($type, (int)util::post('id'), $fields, $allowed));
 		} catch (cms_refused $e) {
 			return self::refused($e);
 		} catch (Exception $e) {
@@ -217,7 +218,7 @@ class cms_editor {
 		} catch (cms_refused $e) {
 			return self::refused($e);
 		}
-		return array('deleted' => true, 'item' => $item);
+		return array('deleted' => true, 'item' => cms_types::show_row($item));
 	}
 
 	// collection, id, action, input[name]=value: runs one of the actions the
@@ -229,7 +230,7 @@ class cms_editor {
 		$input = util::post('input');
 		try {
 			$item = cms_records::act($collection, (int)util::post('id'), (string)util::post('action'), is_array($input) ? $input : array());
-			return cms_records::shown(cms_records::info($collection), $item);
+			return cms_types::show_row(cms_records::shown(cms_records::info($collection), $item));
 		} catch (cms_refused $e) {
 			return self::refused($e);
 		} catch (Exception $e) {
@@ -247,6 +248,7 @@ class cms_editor {
 		foreach ($revisions as $key => $revision) {
 			$time = strtotime((string)$revision['updated_at']);
 			if ($time) $revisions[$key]['updated_at'] = date(DATE_ATOM, $time);
+			$revisions[$key]['fields'] = cms_types::show_row($revision['fields']);
 		}
 		return array('revisions' => $revisions);
 	}
@@ -262,7 +264,9 @@ class cms_editor {
 		foreach (cms_store::$system_fields as $field) unset($values[$field]);
 		$slug = $type === 'sitepage' ? 'site' : (string)util::post('slug');
 		try {
-			return cms_store::update_page($type, $slug, $values, array_keys($values));
+			$saved = cms_store::update_page($type, $slug, $values, array_keys($values));
+			$saved['fields'] = cms_types::show_row($saved['fields']);
+			return $saved;
 		} catch (Exception $e) {
 			return self::fail($e->getMessage());
 		}

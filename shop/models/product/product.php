@@ -31,7 +31,7 @@ class product
 	static function for_sale($slug) {
 		if (!preg_match('/^[a-z0-9\-]+$/', (string)$slug)) return null;
 		$found = cms_records::find('product', array('slug' => $slug));
-		if (!$found || (string)$found[0]['enabled'] === '0') return null;
+		if (!$found || !$found[0]['enabled']) return null;
 		return $found[0];
 	}
 }

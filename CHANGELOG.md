@@ -3,6 +3,34 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## Unreleased: field types
+
+Existing databases are not converted for you. `php bin/raster schema`
+shows each field's type and the columns that differ, and
+`schema --apply` converts them where every value fits. Raster's own
+columns (`enabled`, `published_at`) stay as they were made.
+
+- **Fields have types.** A field is text, `int`, `number`, `bool`,
+  `date`, `datetime` or `time`. A template field's mock-up says which
+  (`14` an int, `4.50` a number, `2026-10-10` a date, `19:00` a time,
+  anything else text); a record field's default does (`0` an int, `false`
+  a bool), and `'types' => array('date' => 'date')` in `types()` names
+  the rest. The column is declared as the type.
+- **Values are stored as their type,** whoever writes them: `5 Oct 2026`
+  becomes `2026-10-05`, `8pm` becomes `20:00`, `yes` becomes 1. A value
+  that can't be (`many` guests, `2026-02-30`) is refused with the field
+  and an example. A form value the HTML let through raises
+  `<field>_invalid`.
+- **Lists compare and sort by type:** `order=-price` puts 100 above 18
+  above 9.50, and `price<10` compares numbers.
+- **Models, MCP and `/api` read ints, floats and bools.** Templates and
+  the in-page editor still get text; a number prints with its mock-up's
+  decimals, so `14.50` stays `14.50`.
+- `schema`, `describe` and MCP `site_overview` list the types, and
+  `schema --apply` converts a column whose type changed when every value
+  fits.
+- `enabled` is a bool now: compare `!$item['enabled']`, not `=== '0'`.
+
 ## 2.1.6
 
 Nothing for sites to do. Staff pages that show records with a model's own

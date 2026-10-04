@@ -11,6 +11,7 @@
 //       static function types() {
 //           return array('reservation' => array(
 //               'fields'   => array('name' => '', 'date' => '', 'guests' => 0, 'status' => 'new'),
+//               'types'    => array('date' => 'date'),     // the rest come from the defaults: 0 is an int
 //               'create'   => 'visitor',              // who may send the form: visitor, member, editor
 //               'readonly' => array('status'),         // shown to editors, changed only by the model
 //               'actions'  => array('confirm' => 'editor'),
@@ -28,7 +29,7 @@ class cms_records {
 
 	static $cache = null;
 	// names a type declaration understands
-	static $keys = array('fields', 'public', 'owner', 'create', 'staff_add', 'readonly', 'hidden', 'actions', 'html');
+	static $keys = array('fields', 'types', 'public', 'owner', 'create', 'staff_add', 'readonly', 'hidden', 'actions', 'html');
 	// the model methods with a meaning of their own, never actions
 	static $hooks = array('types', 'check', 'schema', 'listens', 'api');
 	// events held back until the transaction they happened in commits
@@ -77,8 +78,14 @@ class cms_records {
 		$fields = isset($d['fields']) && is_array($d['fields']) ? $d['fields'] : array();
 		foreach (array_merge(cms_store::$system_fields, array('owner', 'created_at')) as $system) unset($fields[$system]);
 		$lists = array();
+		// each field's type: the one 'types' names, else its default's (0 is an
+		// int, '' text); lists are stored as JSON text
+		$named = isset($d['types']) && is_array($d['types']) ? $d['types'] : array();
+		$types = array();
 		foreach ($fields as $field => $default) {
 			if (is_array($default)) $lists[] = $field;
+			$type = isset($named[$field]) ? $named[$field] : null;
+			$types[$field] = is_array($default) ? 'text' : (in_array($type, cms_types::$types, true) ? $type : cms_types::of_default($default));
 		}
 		$owner = !empty($d['owner']);
 		$actions = array();
@@ -93,6 +100,7 @@ class cms_records {
 			'model' => $model,
 			'class' => $class,
 			'fields' => $fields,
+			'types' => $types,
 			'lists' => $lists,
 			'public' => !empty($d['public']),
 			'owner' => $owner,
@@ -136,29 +144,22 @@ class cms_records {
 		return array_values(array_diff(array_keys($info['fields']), $info['readonly'], $info['hidden']));
 	}
 
-	// every column the table has: declared fields, then Raster's own
+	// every column the table has, with its type: declared fields, then
+	// Raster's own
 	static function columns($info) {
-		$columns = $info['fields'];
-		foreach ($info['lists'] as $list) $columns[$list] = '[]';
-		$columns += array('slug' => '', 'enabled' => '1', 'published_at' => '', 'updated_at' => '', 'created_at' => '');
-		if ($info['owner']) $columns['owner'] = 0;
+		$columns = $info['types'];
+		foreach (array('slug', 'enabled', 'published_at', 'updated_at', 'created_at') as $system) $columns[$system] = cms_types::$system[$system];
+		if ($info['owner']) $columns['owner'] = 'int';
 		return $columns;
 	}
 
 	// a fluid database gets the table and every column on first use, the way
-	// schema --apply does in production: one row with every column, removed
+	// schema --apply does in production
 	static function ensure($info, $even_frozen = false) {
 		if (database::$frozen && !$even_frozen) return;
-		$type = $info['type'];
-		$have = cms_store::columns($type);
 		$want = self::columns($info);
-		if ($have && !array_diff_key($want, $have)) return;
-		$bean = R::dispense($type);
-		// a column takes the kind of its first value: numbers for integer
-		// defaults, text for the rest (so "24.00" stays "24.00")
-		foreach ($want as $column => $default) $bean->$column = is_int($default) ? $default : 'raster text';
-		R::store($bean);
-		R::trash($bean);
+		if (!array_diff_key($want, cms_store::columns($info['type']))) return;
+		cms_types::ensure($info['type'], $want);
 	}
 
 	// ##Reading
@@ -170,7 +171,6 @@ class cms_records {
 			$value = is_string($item[$list]) ? json_decode($item[$list], true) : $item[$list];
 			$item[$list] = is_array($value) ? $value : array();
 		}
-		if (isset($item['owner'])) $item['owner'] = (int)$item['owner'];
 		return $item;
 	}
 
@@ -179,6 +179,7 @@ class cms_records {
 	// them), so the editor still gets the real values; lists inside a row are
 	// escaped here, for HTML views.
 	static function for_template($info, $row) {
+		$row = cms_types::show_row($row);
 		$escape = array();
 		foreach ($row as $field => $value) {
 			if (in_array($field, $info['html'], true)) continue;
@@ -265,8 +266,9 @@ class cms_records {
 		$bindings = array();
 		foreach ($filters as $field => $value) {
 			if (!preg_match('/^[a-z0-9_]+$/', $field) || !array_key_exists($field, $columns)) throw new InvalidArgumentException("$collection has no field '$field'");
-			$sql .= " AND $field = :f_$field ";
-			$bindings[":f_$field"] = is_bool($value) ? ($value ? '1' : '0') : (string)$value;
+			$value = cms_types::clean(cms_types::of_column($columns[$field]), $value, $field);
+			$sql .= $value === null ? " AND $field IS NULL " : " AND $field = :f_$field ";
+			if ($value !== null) $bindings[":f_$field"] = $value;
 		}
 		$sql .= ' ORDER BY '.cms_store::order_sql($order, $columns).' LIMIT '.max(1, (int)$limit);
 		$rows = array();
@@ -384,6 +386,11 @@ class cms_records {
 			$item = cms_store::save_item($info['type'], 0, $values, self::writable($info), 'visitor');
 		} catch (cms_refused $e) {
 			foreach ($e->problems as $problem) $v->raise($problem);
+			return template::instance()->form_state();
+		} catch (cms_type_error $e) {
+			// a value the HTML let through that isn't of the field's type
+			// (guests=2.5): the alert <field>_invalid
+			$v->raise($e->field.'_invalid');
 			return template::instance()->form_state();
 		}
 		if ($done === false) return $item;
