@@ -950,12 +950,14 @@ function b_with_boom($fn) {
 	$dir = "$root/application/models/zzboom";
 	@mkdir($dir);
 	file_put_contents("$dir/zzboom.php", "<?php\nclass zzboom {\n"
-		."\tstatic function api() { return array('boom' => 'visitor', 'needs' => 'visitor', 'inner' => 'visitor', 'down' => 'visitor'); }\n"
+		."\tstatic function api() { return array('boom' => 'visitor', 'needs' => 'visitor', 'inner' => 'visitor', 'down' => 'visitor', 'echoes' => 'visitor', 'sql' => 'visitor'); }\n"
 		."\tstatic function listens() { return array('route_set' => 'trip'); }\n"
 		."\tfunction boom() { throw new RuntimeException('boom secret'); }\n"
 		."\tfunction needs(\$a, \$b) { return \$a.\$b; }\n"
 		."\tfunction inner() { return str_repeat('x'); }\n"
 		."\tfunction down() { throw new PDOException('the database secret is unreachable'); }\n"
+		."\tfunction echoes() { echo 'partial secret'; throw new RuntimeException('after output'); }\n"
+		."\tfunction sql() { database::instance(); return R::getAll('SELECT * FROM no_such_table_zz'); }\n"
 		."\tfunction trip() { if (isset(\$_GET['trip'])) throw new RuntimeException('listener secret'); }\n"
 		."}\n");
 	try { $fn(); } finally { @unlink("$dir/zzboom.php"); @rmdir($dir); }
@@ -982,6 +984,11 @@ test('cms answers /api only for what its api() lists (#32)', function () use ($b
 		same(404, $status, 'an override\'s public method');
 		check(strpos($body, 'secret') === false);
 		same(200, http('GET', "$base/api/cms/style")[0], 'the override keeps what cms lists');
+		// an override that lists its own methods adds to what cms lists
+		file_put_contents("$dir/the_cms.php", "<?php\nclass the_cms extends cms {\n\tstatic function api() { return array('report' => 'visitor'); }\n\tfunction report() { return 'r'; }\n}\n");
+		same(200, http('GET', "$base/api/cms/report")[0], 'its own method');
+		same(200, http('GET', "$base/api/cms/style")[0], 'and still what cms lists');
+		same(403, http('POST', "$base/api/cms/editor_save_field", 'type=aboutpage', array('Content-Type: application/x-www-form-urlencoded'))[0], 'the editor too');
 	} finally {
 		@unlink("$dir/the_cms.php");
 		@rmdir($dir);
@@ -1015,10 +1022,17 @@ test('an /api method that throws answers JSON, logged, with no trace in producti
 		same(200, http('GET', "$prod/api/zzboom/needs/x/y")[0]);
 		// an ArgumentCountError from inside the method is not the caller's
 		same(500, http('GET', "$prod/api/zzboom/inner")[0]);
-		// a database that can't be reached: try again later
+		// a database error while the database is there is a bug, not an outage
 		list($status, $body) = http('GET', "$prod/api/zzboom/down");
-		same(503, $status, $body);
+		same(500, $status, $body);
 		check(strpos($body, 'secret') === false, $body);
+		list($status, $body) = http('GET', "$prod/api/zzboom/sql");
+		same(500, $status, $body);
+		same(array('error' => 'server error'), json_decode($body, true), $body);
+		// what a method printed before it threw doesn't turn the 500 into a 200
+		list($status, $body) = http('GET', "$prod/api/zzboom/echoes");
+		same(500, $status, $body);
+		same(array('error' => 'server error'), json_decode($body, true), $body);
 		// a listener that throws outside the render shows nothing of itself
 		list($status, $body) = http('GET', "$prod/about?trip=1");
 		same(500, $status);
@@ -1069,6 +1083,12 @@ test('a database that can\'t be reached answers 503 outside development, logged,
 			check(b_header($headers, 'X-Raster-Cache') !== 'hit', 'not from the cache');
 		}
 		same(503, http('GET', "$prod/news.rss")[0], 'feeds too');
+		// /api too: a read during the outage is not an empty table
+		b_with_boom(function () use ($prod) {
+			list($status, $body) = http('GET', "$prod/api/zzboom/needs/x/y");
+			same(503, $status, $body);
+			same(array('error' => 'database unavailable'), json_decode($body, true), $body);
+		});
 		check(strpos((string)@file_get_contents($log), 'database') !== false, 'logged');
 		// back up: the real page, at once
 		copy($b_db, $bad);

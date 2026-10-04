@@ -17,7 +17,8 @@
   *
   * A method that throws answers {"error":"server error"} with a 500, and the
   * error goes to the log with the URL; a database that can't be reached
-  * answers 503, and too few arguments 400. Development adds the trace.
+  * answers 503 before the method runs, and too few arguments 400.
+  * Development adds the trace.
   */
   class api
   {
@@ -53,8 +54,9 @@
       $reflection = new ReflectionMethod($obj, $method);
       if (!$reflection->isPublic() || $reflection->isStatic()) $this->fail(404, 'unknown method');
 
-      // only what the model lists, for the roles it names
-      $offered = self::offered(get_class($obj));
+      // only what the model lists, for the roles it names; an override
+      // (the_cms) adds to what the bundled model lists, it never drops it
+      $offered = array_merge(self::offered($model), self::offered(get_class($obj)));
       if (!isset($offered[$method])) $this->fail(404, 'unknown method');
       if (!self::may($offered[$method])) {
         $this->fail(authentication::user() ? 403 : 401, 'not allowed');
@@ -62,11 +64,21 @@
 
       $arguments = array_slice($segments, 3);
       if (count($arguments) < $reflection->getNumberOfRequiredParameters()) $this->fail(400, 'missing arguments');
+      // a database that can't be reached is an outage, not an empty table:
+      // a webhook told "no such order" would never be sent again
+      if (database::configured() && ($down = cms_store::unreachable()) !== null) {
+        log::error('the database can\'t be reached: '.$down.', at '.$this->request());
+        $this->fail(503, 'database unavailable');
+      }
+      // what the method printed before it threw is thrown away with it
+      ob_start();
       try {
         $result = call_user_func_array(array($obj, $method), $arguments);
       } catch (Throwable $e) {
+        ob_end_clean();
         $this->broken($e);
       }
+      ob_end_flush();
       if ($result !== false) {
         header('Content-Type: application/json');
         echo json_encode($result);
@@ -97,16 +109,21 @@
     // payment provider sees a failure and tries again. A database that
     // can't be reached is 503; development adds what was thrown.
     protected function broken($e) {
-      $request = (isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : 'GET').' '.config::get('uri_string');
       $thrown = get_class($e).': '.$e->getMessage().' in '.$e->getFile().':'.$e->getLine();
-      log::error("$thrown, at $request");
-      $database = $e instanceof PDOException || $e instanceof RedBeanPHP\RedException\SQL;
+      log::error("$thrown, at ".$this->request());
+      // a database error is an outage only when the database is gone; a
+      // bad query is a bug like any other
+      $database = ($e instanceof PDOException || $e instanceof RedBeanPHP\RedException\SQL) && cms_store::unreachable() !== null;
       $answer = array('error' => $database ? 'database unavailable' : 'server error');
       if (config::get('environment') === 'development') {
         $answer['exception'] = $thrown;
         $answer['trace'] = explode("\n", $e->getTraceAsString());
       }
       $this->fail($database ? 503 : 500, $answer);
+    }
+
+    protected function request() {
+      return (isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : 'GET').' '.config::get('uri_string');
     }
 
     protected function fail($status, $message) {

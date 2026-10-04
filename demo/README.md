@@ -98,7 +98,7 @@ php tests/demo.php                        # the whole matrix
 | C47 | a relative link inside a `print.validation.alert()` block goes to the route, not the view file |
 | C48 | /api answers only what a model lists in `api()`, for the roles it names; a model that lists nothing offers nothing; overrides are never addressed as `the_<model>`; lint checks `api()` |
 | C49 | in production (strict templates off) any exception (a missing named query too) shows the plain error page and goes to the error log; `log::warning` and `log::error` always reach the error log |
-| C50 | an /api method that throws answers JSON: 500 `{"error":"server error"}` logged with the URL, 503 when the database is down, 400 for missing arguments; development adds the trace |
+| C50 | an /api method that throws answers JSON: 500 `{"error":"server error"}` logged with the URL (a bad query too), 503 when the database is down, 400 for missing arguments; development adds the trace |
 | C51 | `cms` offers over /api only what its `api()` lists (the editor endpoints, `style`, `logout`); a public method of a `the_cms` override answers 404 unless listed |
 | D1 | raster_form and honeypot on every post form |
 | D2 | the session token on forms for logged in users |
@@ -222,7 +222,7 @@ php tests/demo.php                        # the whole matrix
 | L6 | `site_url` in config |
 | L7 | `page_cache_skip`, `page_cache_ttl`, `page_cache` off |
 | L8 | `raster cache clear` and MCP `clear_cache` for changes made outside Raster; `describe` says whether the cache is on |
-| L11 | a database that can't be reached answers 503 outside development (`error_document_503`, views/cafe/503.html), logged, never cached |
+| L11 | a database that can't be reached answers 503 outside development (`error_document_503`, views/cafe/503.html; `/api` as JSON, before the method runs), logged, never cached |
 | M1 | MCP needs its token; GET is refused |
 | M2 | initialize, ping, tools/list, batches, errors |
 | M3 | notifications get 202 |

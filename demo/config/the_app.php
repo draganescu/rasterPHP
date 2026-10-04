@@ -45,8 +45,6 @@ config::set('cafe_staff_email')->to('staff@cafe.test');
 // the suite still covers them (D14). doctor counts them apart instead of warning.
 config::set('allow_deprecated')->to(array(
 	'legacy-validation-regions' => '#^views/cafe/(visit|password/new)\.html$#',
-	// the knob below that turns the old open /api back on, for C40
-	'api-open' => '#^config/the_app\.php$#',
 ));
 
 // text replaced in pages under /lab only (template::replace)

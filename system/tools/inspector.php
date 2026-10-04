@@ -414,8 +414,9 @@ class raster_inspector {
 				'methods' => $methods,
 			);
 			// what /api/<model>/<method> answers, and for whom. A bundled model,
-			// overridden or not, is governed by config api_system_models instead
-			if (!file_exists(BASE.$models_path.'/'.$name.'/'.$name.'.php')) $models[$name]['api'] = $this->model_api($name);
+			// overridden or not, only when config api_system_models lets it through
+			$bundled = file_exists(BASE.$models_path.'/'.$name.'/'.$name.'.php');
+			if (!$bundled || in_array($name, (array)config::get('api_system_models', array('cms')))) $models[$name]['api'] = $this->model_api($name);
 		}
 		ksort($models);
 		$listeners = array();
@@ -444,7 +445,8 @@ class raster_inspector {
 		try {
 			if (!class_exists($class, false)) require_once $info['file'];
 			if (!class_exists($class, false)) return array();
-			$offered = api::offered($class);
+			// an override adds to what the model it overrides lists, as api.php does
+			$offered = array_merge(class_exists($model) ? api::offered($model) : array(), api::offered($class));
 		} catch (Throwable $e) {
 			return array();
 		}

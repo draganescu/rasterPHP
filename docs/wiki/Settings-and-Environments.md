@@ -36,7 +36,7 @@ An **environment** is a name for where the site is running. Raster uses two:
 | Database | fluid: tables and columns are created as templates change | frozen: changes only through `raster schema --apply` |
 | Template errors | the page shows a list of problems (HTTP 500) | a plain "This page could not be shown", details go to the PHP error log |
 | PHP's own errors | shown as php.ini says | never shown to visitors (`display_errors` off, `log_errors` on, whatever php.ini says); `/api` answers `{"error":"server error"}` |
-| Database can't be reached | the page says why (HTTP 500) | every page answers 503 (the view `error_document_503`, if set), logged, nothing cached |
+| Database can't be reached | the page says why (HTTP 500) | every page answers 503 (the view `error_document_503`, if set) and `/api` a JSON 503, logged, nothing cached |
 | Page cache | off | on |
 | Email | written to files in `data/mail/` | sent with PHP's `mail()` unless you set `RASTER_MAIL` |
 | Email links | allowed without a configured address | need `RASTER_URL` |

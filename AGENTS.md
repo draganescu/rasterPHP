@@ -302,7 +302,8 @@ reachable, even listed. Of the system models, only `cms` is reachable, and
 only for what its own `api()` lists: the in-page editor's endpoints, `style`
 and `logout`, which check the caller themselves. An override (`the_feed`)
 is reached only by the name it overrides, and a public method it adds
-answers 404 unless its `api()` lists it. Posts
+answers 404 unless its `api()` lists it; that list adds to the bundled
+model's, so the editor's endpoints stay. Posts
 there pass the same site check as forms, but they are not form submissions:
 `validation::get()->submitted()` is false, so form models do nothing over
 `/api`. A method listed for visitors can be called by anyone: if it changes
@@ -312,9 +313,12 @@ that doesn't exist or can't be called, or a role that doesn't exist, and
 
 A method that throws answers `{"error":"server error"}` with status 500,
 and the error goes to the log with the URL, so a payment provider sees a
-failure and tries again. A database that can't be reached answers 503, and
-a call with too few arguments 400 (`/api/reservation/day` for `day($date)`). In
-development the answer also has `exception` and `trace`.
+failure and tries again. Output the method printed before it threw is
+dropped. A database that can't be reached answers 503 before the method
+runs, so a webhook is never told "no such order" during an outage; a bad
+query on a database that is there is a 500 like any other error. A call
+with too few arguments answers 400 (`/api/reservation/day` for
+`day($date)`). In development the answer also has `exception` and `trace`.
 
 The database is RedBeanPHP (`R::dispense`, `R::store`, `R::load`) for rows
 as objects, and named queries in `sql/` files for everything you would write
@@ -759,7 +763,7 @@ use `'model.method'`: `method(true)` returns
   an error before Raster starts would still show.
 - **A database that can't be reached** (MySQL down, an SQLite file the web
   server can't read) is not a missing table: outside development every page
-  answers 503, as the view `error_document_503` when the site sets one, or a
+  answers 503 (`/api` too, as JSON), as the view `error_document_503` when the site sets one, or a
   plain line. The error is logged and nothing is cached, so the real pages
   show as soon as the database is back. Development shows the error
   instead.

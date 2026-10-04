@@ -2649,8 +2649,9 @@ test('C50', '/api errors answer JSON: 500 logged with the URL, 503 when the data
 			list($status, $body) = http('POST', "$prod/api/zzwebhook/paid/7", '{}', array('Content-Type: application/json'));
 			same(400, $status, $body);
 			lacks($body, 'sk_live');
+			// a database error while the database is there is a bug: 500, not 503
 			list($status, $body) = http('GET', "$prod/api/zzwebhook/down");
-			same(503, $status, 'the provider tries again later');
+			same(500, $status, $body);
 			lacks($body, 'Connection refused');
 			// development: the trace, for whoever is writing the model
 			list($status, $body) = http('POST', "$base/api/zzwebhook/paid/7/120", '{}', array('Content-Type: application/json'));
@@ -2681,6 +2682,10 @@ test('L11', 'a database that can\'t be reached answers 503 outside development, 
 		same(null, header_value($headers, 'X-Raster-Cache'), 'not cached');
 	}
 	same(503, http('GET', "$prod/journal.rss")[0], 'feeds too');
+	// /api too, before the method runs: the provider tries again later
+	list($status, $body) = http('GET', "$prod/api/cafe/category_count/coffee");
+	same(503, $status, $body);
+	same('{"error":"database unavailable"}', $body);
 	has(file_get_contents("$tmp/php-errors.log"), 'Raster error: the database can\'t be reached');
 	// back up: the real menu at once, nothing stale in the cache
 	copy($prod_db, $down);
