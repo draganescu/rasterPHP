@@ -483,7 +483,22 @@ class mcp
 
 	protected function tool_list_views($arguments) {
 		$inspector = $this->inspector_for($arguments);
-		return array('theme' => $inspector->theme, 'folder' => raster_inspector::short($inspector->theme_dir()), 'views' => $inspector->views());
+		$views = array_values(array_filter($inspector->views(), function ($view) use ($inspector) {
+			return $this->in_theme($inspector, $inspector->theme_dir().'/'.$view);
+		}));
+		return array('theme' => $inspector->theme, 'folder' => raster_inspector::short($inspector->theme_dir()), 'views' => $views);
+	}
+
+	// Whether a path inside the theme really is there, wherever ..'s and
+	// links lead: its folder, and the file itself when it is a link. A link
+	// that leads nowhere is refused too, since writing would create its target.
+	protected function in_theme($inspector, $path) {
+		$dir = realpath($inspector->theme_dir());
+		$parent = realpath(dirname($path));
+		if ($dir === false || $parent === false || strpos($parent.'/', $dir.'/') !== 0) return false;
+		if (!is_link($path) && !file_exists($path)) return true;
+		$real = realpath($path);
+		return $real !== false && strpos($real, $dir.'/') === 0;
 	}
 
 	// Where a view lives, refusing every name that points somewhere else. The
@@ -502,9 +517,8 @@ class mcp
 		$path = $dir.'/'.$view;
 		$parent = dirname($path);
 		if (!is_dir($parent)) throw new InvalidArgumentException('There is no folder '.raster_inspector::short($parent).' to put it in');
-		// the one check that matters: wherever ..'s and links lead, it has to
-		// land inside this theme
-		if (strpos(realpath($parent).'/', realpath($dir).'/') !== 0) {
+		// the one check that matters: it has to land inside this theme
+		if (!$this->in_theme($inspector, $path)) {
 			throw new InvalidArgumentException("'$view' is outside the theme folder");
 		}
 		return $path;
@@ -523,6 +537,10 @@ class mcp
 		$inspector = $this->inspector_for($arguments);
 		$content = (string)$this->arg($arguments, 'content');
 		$name = (string)$this->arg($arguments, 'view', 'draft'.$inspector->ext);
+		$path = $inspector->theme_dir().'/'.ltrim(str_replace('\\', '/', $name), '/');
+		if (strpos($name, "\0") === false && is_dir(dirname($path)) && !$this->in_theme($inspector, $path)) {
+			throw new InvalidArgumentException("'$name' is outside the theme folder");
+		}
 		$problems = $inspector->lint_source($content, $name, $inspector->theme);
 		$errors = count(array_filter($problems, function ($p) { return $p['severity'] === 'error'; }));
 		return array('view' => $name, 'errors' => $errors, 'warnings' => count($problems) - $errors, 'problems' => $problems);

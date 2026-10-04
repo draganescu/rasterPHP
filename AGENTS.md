@@ -895,7 +895,8 @@ of lists and filter pages come along; drafts and the editor don't.
   - The four view tools take an optional `theme`: the name of a folder
     directly under `views/` (letters, digits, `_` and `-`), the site's theme
     when left out. A path, or a folder that links out of `views/`, is
-    refused.
+    refused, and so is a view file that links out of the theme
+    (`list_views` leaves it out); a link inside the theme works.
   - `render_url` — the page's status and HTML, no web server. With `as`
     (`editor`, `admin`, `member`, or an account's email) it renders the page
     as that person, outside production only, and for staff also says what the in-page editor marks:

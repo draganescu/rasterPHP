@@ -1240,6 +1240,47 @@ test('mcp view tools refuse a theme outside the views folder', function () use (
 	}
 });
 
+// a view file that is a link is followed only while it stays inside the theme (#72)
+test('mcp view tools refuse a view file linked outside the theme', function () use ($root) {
+	$outside = sys_get_temp_dir().'/raster-viewlink-'.getmypid();
+	@mkdir($outside);
+	file_put_contents("$outside/secret.json", '{"secret":"sk-live-456"}');
+	file_put_contents("$outside/target.html", '<p>untouched</p>');
+	$theme = "$root/application/views/default";
+	$links = array(
+		"$theme/zzr25file.json" => "$outside/secret.json",
+		"$theme/zzr25target.html" => "$outside/target.html",
+		"$theme/zzr25gone.html" => "$outside/not-there.html",
+		"$theme/zzr25inside.html" => "$theme/index.html",
+	);
+	foreach ($links as $link => $target) symlink($target, $link);
+	try {
+		foreach (array('zzr25file.json', 'zzr25target.html', 'zzr25gone.html') as $view) {
+			$result = mcp_call('read_view', array('view' => $view));
+			check(!empty($result['isError']), "read_view followed $view out of the theme");
+			check(strpos(json_encode($result), 'sk-live-456') === false, 'nothing from outside');
+			check(!empty(mcp_call('check_view', array('content' => '<p>x</p>', 'view' => $view))['isError']), "check_view took $view");
+		}
+		$listed = mcp_call('list_views')['structuredContent']['views'];
+		check(!in_array('zzr25file.json', $listed) && !in_array('zzr25target.html', $listed) && !in_array('zzr25gone.html', $listed), 'list_views lists no link leading out: '.json_encode($listed));
+		// a link that stays inside the theme still works
+		check(in_array('zzr25inside.html', $listed), 'a link inside the theme is listed');
+		$inside = mcp_call('read_view', array('view' => 'zzr25inside.html'));
+		check(empty($inside['isError']), 'a link inside the theme reads: '.json_encode($inside));
+		$answers = mcp_stdio_calls(array(
+			array('write_view', array('view' => 'zzr25target.html', 'content' => '<p>pwned</p>')),
+			array('write_view', array('view' => 'zzr25gone.html', 'content' => '<p>pwned</p>')),
+		));
+		foreach (array(0, 1) as $i) check(!empty($answers[$i]['isError']), "write_view $i went through a link: ".json_encode(isset($answers[$i]) ? $answers[$i] : null));
+		same('<p>untouched</p>', file_get_contents("$outside/target.html"), 'the target is not overwritten');
+		check(!file_exists("$outside/not-there.html"), 'nor created through a dangling link');
+	} finally {
+		foreach (array_keys($links) as $link) @unlink($link);
+		foreach (glob("$outside/*") as $file) unlink($file);
+		@rmdir($outside);
+	}
+});
+
 // ## 2.1.8 batch H: row loop
 // (batch H adds its tests here)
 
