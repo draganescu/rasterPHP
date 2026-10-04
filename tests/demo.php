@@ -2644,7 +2644,7 @@ test('E32', 'the editor gets stored text with $5 and backslashes as it is (#66)'
 	} finally { mcp($base, 'update_page', array('page' => '/about', 'fields' => array('heading' => $before))); }
 });
 test('C52', 'a link a visitor typed is no script, whatever hides the scheme (#67)', function () use ($base, $views) {
-	$links = array("java\tscript:alert(1)", "java\nscript:alert(2)", "\x01javascript:alert(3)", "&#106avascript:alert(4)", "vbscript:msgbox(5)", "data:text/html,6");
+	$links = array("java\tscript:alert(1)", "java\nscript:alert(2)", "\x01javascript:alert(3)", "&#106avascript:alert(4)", "vbscript:msgbox(5)", "data:text/html,6", "&#1;javascript:alert(7)", "java&#13;script:alert(8)", "&#x1F;javascript:alert(9)");
 	$ids = array();
 	foreach ($links as $i => $link) $ids[] = cms_records::create('reservation', array('name' => "Zz link $i", 'email' => 'zz-links@example.com', 'date' => '2030-03-06', 'guests' => 1, 'notes' => $link))['id'];
 	$ids[] = cms_records::create('reservation', array('name' => 'Zz link ok', 'email' => 'zz-links@example.com', 'date' => '2030-03-06', 'guests' => 1, 'notes' => 'https://example.com/menu'))['id'];
@@ -2652,7 +2652,7 @@ test('C52', 'a link a visitor typed is no script, whatever hides the scheme (#67
 		with_file("$views/zz-links.html", "<html><body><!-- render.cms.reservation('email=zz-links@example.com&order=oldest') --><!-- print.@href.notes --><a class=\"zz\" href=\"#\">x</a><!-- /print.@href.notes --><!-- /render.cms.reservation('email=zz-links@example.com&order=oldest') --></body></html>", function () use ($base) {
 			$staff = login($base, 'staff@cafe.test', 'staff password');
 			$page = http('GET', "$base/zz-links", null, array("Cookie: $staff"))[1];
-			same(6, substr_count($page, '<a class="zz">'), 'every script link is dropped');
+			same(9, substr_count($page, '<a class="zz">'), 'every script link is dropped');
 			same(1, substr_count($page, '<a class="zz" href="https://example.com/menu">'), 'the web address keeps its link');
 			has($page, 'href="https://example.com/menu"');
 			// the editor's config carries the text as data, for its Details panel

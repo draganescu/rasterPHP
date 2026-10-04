@@ -95,7 +95,12 @@ class template {
   // browsers decode the first and drop the rest
   static function script_link($value) {
     $value = preg_replace_callback('/&#(x[0-9a-f]+|[0-9]+);?/i', function ($m) {
-      return html_entity_decode('&#'.$m[1].';', ENT_QUOTES | ENT_HTML5, 'UTF-8');
+      // PHP leaves control characters (&#1;, &#13;) undecoded and browsers
+      // don't: those, and anything else PHP won't decode, count as dropped
+      $code = strtolower($m[1][0]) === 'x' ? hexdec(substr($m[1], 1)) : (int)$m[1];
+      if ($code <= 0x20) return '';
+      $char = html_entity_decode('&#'.$m[1].';', ENT_QUOTES | ENT_HTML5, 'UTF-8');
+      return $char[0] === '&' ? '' : $char;
     }, (string)$value);
     $value = preg_replace('/[\x00-\x20]+/', '', html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
     return (bool)preg_match('/^(javascript|data|vbscript):/i', $value);
