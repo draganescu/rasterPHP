@@ -792,7 +792,9 @@ use `'model.method'`: `method(true)` returns
     (`/news/news_page/1`, `/news/news_page/02`, `/news/news_item/007`, a
     segment left over at the end), or a typed filter spelled other than the
     way the page prints it (`/menu/menu_items/price/14.500` for `14.50`,
-    `/events/events_items/date/10 Oct 2026`). A model that decides the same calls
+    `/events/events_items/date/10 Oct 2026`), or a view name in other
+    letter case (`/ABOUT` finds `about.html` on a disk that ignores case,
+    as on macOS and Windows). A model that decides the same calls
     `raster_cache::skip()`.
   - Settings: `page_cache_ttl` (3600 seconds) and `page_cache_skip` (path
     patterns). Responses carry `X-Raster-Cache: hit|miss`. `describe` says

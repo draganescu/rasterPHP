@@ -1153,6 +1153,26 @@ test('a content change deletes temporary cache files left long ago', function ()
 	cache_empty();
 });
 
+test('a view name in other letter case is not cached', function () use ($db) {
+	cache_empty();
+	cache_server($db, function ($get) {
+		// on a disk that ignores case (macOS, Windows) these find about.html
+		// and news.html and answer; on one that doesn't they are 404s. Either
+		// way there is no end to them, so none is kept
+		foreach (array('/ABOUT', '/About', '/aBoUt', '/NEWS', '/News/news_page/2', '/NEWS/news_items/headline/Filler%201', '/NEWS.rss') as $path) {
+			list($status) = explode(' ', $get($path)[0]);
+			check(in_array($status, array('200', '404')), "$path answers $status");
+			same($status.' not cached', $get($path)[0], $path);
+		}
+		same(0, count(glob(APPBASE.'data/cache/*') ?: array()), 'cache files');
+		// the spelling of the view's own file is cached
+		foreach (array('/about', '/news/news_page/2', '/news/news_items/headline/Filler%201', '/news.rss') as $path) {
+			same('200 X-Raster-Cache: miss', $get($path)[0], $path);
+			same('200 X-Raster-Cache: hit', $get($path)[0], $path);
+		}
+	});
+});
+
 // ## 2.1.8 batch B: errors and /api
 // (batch B adds its tests here)
 
