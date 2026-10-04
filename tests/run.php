@@ -1088,6 +1088,24 @@ test('other spellings of a list or item URL are not cached', function () use ($d
 	});
 });
 
+test('a typed filter spelled another way is not cached', function () use ($db) {
+	cache_empty();
+	cache_server($db, function ($get) {
+		// the same date, the same id, but there is no end to the spellings
+		foreach (array('/news/news_items/date/25%20Sep%202026', '/news/news_items/date/2026-09-25%2000:00', '/news/news_items/date/%202026-09-25',
+			'/news/news_items/id/+1') as $path) {
+			check(strpos($get($path)[1], 'Raster runs on PHP 8') !== false, "$path lists the item");
+			same('200 not cached', $get($path)[0], $path);
+		}
+		same(0, count(glob(APPBASE.'data/cache/*') ?: array()), 'cache files');
+		// the spelling the site prints is cached
+		foreach (array('/news/news_items/date/2026-09-25', '/news/news_items/id/1') as $path) {
+			same('200 X-Raster-Cache: miss', $get($path)[0], $path);
+			same('200 X-Raster-Cache: hit', $get($path)[0], $path);
+		}
+	});
+});
+
 test('a tracking link does not leave its parameters in the page every visitor gets', function () use ($db) {
 	cache_empty();
 	cache_server($db, function ($get) {

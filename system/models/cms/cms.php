@@ -111,6 +111,21 @@ class cms
 		return true;
 	}
 
+	// Is a URL filter's value spelled the way the template prints it? Text
+	// is as it is; 14.50 for a number whose mock-up is 14.50, 2026-10-10 for
+	// a date, 1 for a bool.
+	static function canonical_value($column, $value, $example) {
+		$type = cms_types::of_column($column);
+		if ($type === 'text') return true;
+		try {
+			$clean = cms_types::clean($type, $value, 'filter');
+		} catch (InvalidArgumentException $e) {
+			// it matches nothing, and an empty list is not kept anyway
+			return true;
+		}
+		return cms_types::show(cms_types::read($type, $clean), $example) === (string)$value;
+	}
+
 	// custom cms routes for admin panels and collection URLs
 	public function route() {
 		include 'routes.php';
@@ -407,6 +422,10 @@ class cms
 				if (array_key_exists($key, $uri_filters)) raster_cache::skip();
 				continue;
 			}
+			// /menu/menu_items/price/14.500 and /events/events_items/date/10 Oct 2026
+			// find what the site's own links (14.50, 2026-10-10) find; they
+			// answer, but there is no end to the spellings
+			if (array_key_exists($key, $uri_filters) && !cms::canonical_value($fields[$key], $value, isset($expected_properties[$key]) ? $expected_properties[$key] : null)) raster_cache::skip();
 			$compare[] = array($key, '=', $value);
 		}
 		// featured=1, date>=today, guests>4, each as its field's type

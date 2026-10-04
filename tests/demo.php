@@ -2630,6 +2630,18 @@ test(array('L9', 'L10'), 'page cache: made-up list URLs are not kept, a change d
 		same('200 not kept', $cache($path), $path);
 	}
 	same(1, $pages(), 'only the real list is cached');
+	// nor a typed filter spelled another way than the site prints it
+	mcp($prod, 'create_item', array('collection' => 'events', 'fields' => array('title' => 'Pi day', 'date' => '2027-03-14', 'summary' => 'x')));
+	raster(array('cache', 'clear'), $env);
+	same('200 miss', $cache('/events/events_items/date/2027-03-14'));
+	same('200 hit', $cache('/events/events_items/date/2027-03-14'));
+	foreach (array('/events/events_items/date/14%20Mar%202027', '/events/events_items/date/2027-03-14%2000:00') as $path) {
+		same('200 not kept', $cache($path), $path);
+		same('200 not kept', $cache($path), $path);
+	}
+	same(1, $pages(), 'only the date as the site prints it is cached');
+	raster(array('cache', 'clear'), $env);
+	$cache('/journal/journal_items/author/Mara');
 	// L10: links with only tracking parameters are the same page
 	foreach (array('utm_source=newsletter&utm_medium=email&utm_campaign=october', 'fbclid=IwAR0x', 'gclid=Cj0K', 'msclkid=5a2b') as $query) {
 		same('200 hit', $cache("/journal/journal_items/author/Mara?$query"), $query);
