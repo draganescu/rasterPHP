@@ -98,6 +98,7 @@ php tests/demo.php                        # the whole matrix
 | C47 | a relative link inside a `print.validation.alert()` block goes to the route, not the view file |
 | C48 | /api answers only what a model lists in `api()`, for the roles it names; overrides are never addressed as `the_<model>`; `api_open` keeps the old open /api; lint checks `api()` |
 | C49 | in production (strict templates off) any exception (a missing named query too) shows the plain error page and goes to the error log; `log::warning` and `log::error` always reach the error log |
+| C53 | a `print.model.method` or `print.if.flag` inside a render block fills every row of a list of any length (no limit at 1,000 rows), so a staff-only block stays hidden in all of them |
 | D1 | raster_form and honeypot on every post form |
 | D2 | the session token on forms for logged in users |
 | D3 | posts from other sites refused (Origin, Sec-Fetch-Site, Referer, /api too) |

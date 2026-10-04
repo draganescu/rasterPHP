@@ -415,18 +415,11 @@ class controller {
 
 			$object = controller::get_object($model);
 			$data = $this->call_method($object, $method);
-			$pending = $template->pending_mark;
-			
+
 			event::dispatch("before_print");
-			$template->_print($data, $model, $method);
 			// a print inside a repeated render block has one copy per row:
-			// fill them all with the same value
-			for ($copies = 0; $copies < 1000; $copies++) {
-				$template->set_current_block($model, $method, 'print', $attr);
-				$template->pending_mark = $pending;
-				if ($template->current_params['pos1'] === false) break;
-				$template->_print($data, $model, $method);
-			}
+			// this fills them all with the same value
+			$template->_print($data, $model, $method);
 			event::dispatch("after_print");
 		}
 		
