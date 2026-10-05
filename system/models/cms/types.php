@@ -168,7 +168,7 @@ class cms_types {
 		if (is_array($value) || is_object($value)) throw new cms_type_error($field, 'text', 'is a list, not one value');
 		if ($type === 'text') {
 			if (is_bool($value)) return $value ? '1' : '0';
-			return $value === null ? '' : (string)$value;
+			return $value === null ? '' : self::media_stored((string)$value);
 		}
 		if (is_string($value)) $value = trim($value);
 		if ($value === null || $value === '') return $type === 'bool' ? 0 : null;
@@ -230,8 +230,32 @@ class cms_types {
 			case 'bool': return (bool)(int)$value;
 			// MySQL gives 19:00:00 for what SQLite keeps as 19:00
 			case 'time': return substr((string)$value, 0, 5);
+			case 'text': return self::media_shown((string)$value);
 			default: return (string)$value;
 		}
+	}
+
+	// ##Uploads
+	// A picture's address is stored from the site's root, /media/<file>, and
+	// shown under the folder the site runs in now. A site moves between
+	// folders (a builder previews it under /preview/<id>/, then it is
+	// published at a domain's root), and its database goes with it, so an
+	// address saved under one folder is shown under the next. Only a value
+	// that is a whole address of a file in media/ is touched.
+	protected static function media_file($value) {
+		$folder = trim(config::get('raster_media_folder', 'media'), '/');
+		if (strlen($value) > 300 || !preg_match('~^(/[^\s"\'<>?#]*)?/'.preg_quote($folder, '~').'/([^/\s"\'<>?#]+)$~', $value, $m)) return null;
+		return is_file(dirname(BASE).'/'.$folder.'/'.$m[2]) ? '/'.$folder.'/'.$m[2] : null;
+	}
+
+	static function media_stored($value) {
+		$file = self::media_file($value);
+		return $file === null ? $value : $file;
+	}
+
+	static function media_shown($value) {
+		$file = self::media_file($value);
+		return $file === null ? $value : rtrim((string)parse_url(config::get('base_uri'), PHP_URL_PATH), '/').$file;
 	}
 
 	// a row of a table, every field read as its type
