@@ -127,7 +127,7 @@ Production databases are **frozen**: the structure only changes when you say so.
 RASTER_ENV=production php bin/raster schema --apply
 ```
 
-This creates the tables and columns your templates declare, plus the ones the bundled models (accounts, subscribers) and your own models' `schema()` methods declare. Every table with slugs (pages, collections, records) also gets an index on its slug, so opening an item stays quick in a big collection; on a site made before 2.1.9, run `schema --apply` once to add it.
+This creates the tables and columns your templates declare, plus the ones the bundled models (accounts, subscribers) and your own models' `schema()` methods declare. Every table with slugs (pages, collections, records) also gets an index on its slug, so opening an item stays quick in a big collection; on a site made before 2.1.10, run `schema --apply` once to add it.
 
 If you use MySQL, create the empty database and its user first, and set the connection in `application/config/db/production.php` ([The database](The-Database)).
 

@@ -871,6 +871,10 @@ test(array('E21', 'E29', 'C44'), 'pictures: upload, page and item photos, empty 
 	http('POST', "$base/api/cms/editor_save_field", array('csrf' => $token, 'type' => 'aboutpage', 'slug' => '/about', 'field' => 'photo', 'value' => $upload['url']), $h);
 	has(http('GET', "$base/about")[1], '<img class="photo wide" src="'.$upload['url'].'" alt="The café from across the street">');
 	same($upload['url'], mcp($base, 'get_page', array('page' => '/about'))['fields']['photo'], 'MCP knows the field');
+	// saved while the site ran under another folder (a builder's preview), then moved
+	$file = '/media/'.basename($upload['url']);
+	http('POST', "$base/api/cms/editor_save_field", array('csrf' => $token, 'type' => 'aboutpage', 'slug' => '/about', 'field' => 'photo', 'value' => '/preview/abc'.$file), $h);
+	has(http('GET', "$base/about")[1], '<img class="photo wide" src="'.$file.'"', 'a picture saved under another folder shows under this one');
 	http('POST', "$base/api/cms/editor_save_field", array('csrf' => $token, 'type' => 'aboutpage', 'slug' => '/about', 'field' => 'photo', 'value' => ''), $h);
 	has(http('GET', "$base/about")[1], '<img class="photo wide" src="img/about.jpg"', 'empty shows the template\'s picture');
 	// an item photo

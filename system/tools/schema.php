@@ -231,7 +231,7 @@ class raster_schema {
 				$bean->updated_at = R::isoDateTime();
 				R::store($bean);
 			}
-			// every table with slugs gets its index, new or made before 2.1.9
+			// every table with slugs gets its index, new or made before 2.1.10
 			foreach ($status['tables'] as $table) {
 				if (!cms_store::table_exists($table['table']) || !array_key_exists('slug', cms_store::columns($table['table']))) continue;
 				if (cms_types::index_slug($table['table'])) $changes[] = "indexed {$table['table']}.slug";

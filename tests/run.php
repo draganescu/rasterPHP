@@ -945,6 +945,29 @@ test('values are stored as their type, or refused naming the field', function ()
 	}
 });
 
+test('a picture keeps working when the site moves to another folder', function () use ($root) {
+	$name = 'zz-move-'.bin2hex(random_bytes(3)).'.png';
+	file_put_contents("$root/media/$name", 'png');
+	$base = config::get('base_uri');
+	try {
+		// saved in a builder preview, under /preview/abc/
+		same("/media/$name", cms_types::clean('text', "/preview/abc/media/$name", 'photo'), 'stored from the site root');
+		same("/media/$name", cms_types::clean('text', "/media/$name", 'photo'));
+		config::set('base_uri')->to('https://club.example/');
+		same("/media/$name", cms_types::read('text', "/preview/abc/media/$name"), 'an address saved under an old folder');
+		config::set('base_uri')->to('http://127.0.0.1:8080/preview/abc/');
+		same("/preview/abc/media/$name", cms_types::read('text', "/media/$name"), 'shown under the current folder');
+		// left alone: not a whole address, not a file in media/, another site
+		foreach (array("see /media/$name", '/media/zz-missing.png', "https://elsewhere.example/media/$name", "/media/$name?x=1", 'Penny Black') as $value) {
+			same($value, cms_types::clean('text', $value, 'photo'), $value);
+			same($value, cms_types::read('text', $value), $value);
+		}
+	} finally {
+		config::set('base_uri')->to($base);
+		unlink("$root/media/$name");
+	}
+});
+
 test('reads give PHP types; templates print text with the mock-up\'s decimals', function () {
 	same(array(3, 4.5, true, null, ''), array(cms_types::read('int', '3'), cms_types::read('number', '4.5'), cms_types::read('bool', 1), cms_types::read('date', null), cms_types::read('text', null)));
 	// as SQLite and MySQL report columns
