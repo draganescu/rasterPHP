@@ -5,6 +5,7 @@
 // the demo site in application/, using a throwaway SQLite database and PHP's
 // built in server. On MySQL:
 //   RASTER_DB=mysql://root@127.0.0.1:3306/raster php tests/run.php
+// Only some tests: RASTER_TEST_ONLY='page cache' php tests/run.php
 
 if (PHP_SAPI !== 'cli') exit;
 
@@ -27,6 +28,8 @@ require_once BASE.'models/cms/cms.php';
 $passed = 0; $failed = array(); $skipped = array(); $current = '';
 function test($name, $fn) {
 	global $passed, $failed, $skipped, $current;
+	// RASTER_TEST_ONLY=<words> runs only the tests whose name has them
+	if (getenv('RASTER_TEST_ONLY') && stripos($name, getenv('RASTER_TEST_ONLY')) === false) return;
 	$current = $name;
 	try { $fn(); $passed++; echo "."; }
 	catch (test_skipped $e) { $skipped[] = "$name: ".$e->getMessage(); echo "s"; }
@@ -361,6 +364,22 @@ test('frozen database falls back to template defaults', function () use ($root, 
 		file_put_contents($view, $original);
 		exec('RASTER_DB='.escapeshellarg($db).' '.escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' schema --drop=aboutpage.frozen_test');
 	}
+});
+test('schema --apply declares model tables by their types, and a long text or big number fits in production', function () use ($root) {
+	$db = test_db(sys_get_temp_dir().'/raster-model-tables-'.getmypid().'.sqlite');
+	$raster = 'RASTER_ENV=production RASTER_DB='.escapeshellarg($db).' '.escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster");
+	exec("$raster schema --apply 2>&1", $out, $code);
+	same(0, $code, 'schema --apply: '.implode("\n", $out));
+	$pdo = test_pdo($db);
+	same(0, (int)$pdo->query('SELECT COUNT(*) FROM user')->fetchColumn(), 'no row is left behind');
+	$long = str_repeat('a long name ', 40);
+	$code = 'require '.var_export("$root/system/boot.php", true).'; boot::$appname = "application"; boot::cli(); authentication::connect();'
+		.' $u = R::dispense("user"); $u->email = "long@example.com"; $u->name = '.var_export($long, true).'; $u->failed_count = 300; R::store($u);'
+		.' $s = R::dispense("subscriber"); $s->email = "long@example.com"; $s->name = '.var_export($long, true).'; R::store($s);';
+	$output = shell_exec('RASTER_ENV=production RASTER_DB='.escapeshellarg($db).' '.escapeshellarg(PHP_BINARY).' -r '.escapeshellarg($code).' 2>&1');
+	same('', trim((string)$output), 'storing in production');
+	same(array($long, '300'), array_map('strval', $pdo->query("SELECT name, failed_count FROM user WHERE email = 'long@example.com'")->fetch(PDO::FETCH_NUM)));
+	same($long, $pdo->query("SELECT name FROM subscriber WHERE email = 'long@example.com'")->fetchColumn());
 });
 test('mcp over stdio', function () use ($root, $db) {
 	$input = json_encode(array('jsonrpc' => '2.0', 'id' => 7, 'method' => 'tools/call', 'params' => array('name' => 'get_page', 'arguments' => array('page' => '/about'))))."\n";

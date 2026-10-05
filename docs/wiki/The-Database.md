@@ -164,7 +164,7 @@ class reservation {
 }
 ```
 
-The values are examples of the kind of data: `''` for text, `0` for numbers. The bundled models declare their tables the same way.
+The values are examples of the kind of data: `''` for text, `0` for whole numbers, `0.0` for decimals, `false` for yes/no. Each column is declared as that type (TEXT, INT and so on), so on MySQL a long message or a large number fits. The bundled models declare their tables the same way.
 
 ## Tables Raster uses
 

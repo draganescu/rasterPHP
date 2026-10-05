@@ -190,6 +190,9 @@ static function schema() {
 }
 ```
 
+Each column is declared as the type of its example: `''` is TEXT, `0` an
+integer, `0.0` a number, `false` a bool, on SQLite and MySQL alike.
+
 ### SQL in files
 
 **A model's SQL goes in files, not in PHP strings.** Each query is a file in

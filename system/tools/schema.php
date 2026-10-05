@@ -213,14 +213,13 @@ class raster_schema {
 				$bean->updated_at = R::isoDateTime();
 				R::store($bean);
 			}
-			// bundled model tables: a row with every column, then removed
+			// bundled and model-declared tables: each column declared as the
+			// type of its default (TEXT, INT), with no row written. A stored
+			// row would size MySQL's columns by its values (varchar(191),
+			// tinyint) and frozen, they'd never grow.
 			foreach ($status['system_tables'] as $table) {
 				if (!$table['missing']) continue;
-				$fields = $this->system_tables()[$table['table']];
-				$bean = R::dispense($table['table']);
-				foreach ($fields as $name => $default) $bean->$name = $default;
-				R::store($bean);
-				R::trash($bean);
+				cms_types::ensure($table['table'], array_map(array('cms_types', 'of_default'), $this->system_tables()[$table['table']]));
 				$changes[] = $table['exists'] ? "added {$table['table']}.".implode(", {$table['table']}.", $table['missing']) : "created table {$table['table']}";
 			}
 		} finally {
