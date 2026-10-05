@@ -167,6 +167,16 @@ class cms_editor {
 		return array('error' => $e->getMessage(), 'problems' => $e->problems);
 	}
 
+	// Each name the editor posts holds one value (lists come only under
+	// fields, examples and input): id[]=99 would be read as item 1, and
+	// value[]=x stored as 'Array'. Every endpoint that reads one of these refuses that first.
+	protected static function one_value() {
+		foreach (array('type', 'slug', 'field', 'value', 'example', 'collection', 'id', 'action', 'revision') as $name) {
+			if (is_array(util::post($name))) return self::fail("'$name' takes one value");
+		}
+		return null;
+	}
+
 	protected static function page_type() {
 		$type = strtolower((string)util::post('type'));
 		if (!preg_match('/^[a-z0-9]+page$/', $type) || !cms_store::table_exists($type)) return null;
@@ -176,6 +186,7 @@ class cms_editor {
 	// type, slug, field, value
 	static function save_field() {
 		cms::require_admin(true);
+		if ($bad = self::one_value()) return $bad;
 		$type = self::page_type();
 		$field = (string)util::post('field');
 		if (!$type) return self::fail('Unknown page');
@@ -204,6 +215,7 @@ class cms_editor {
 	// collection, id (0 for a new item), fields[name]=value
 	static function save_item() {
 		cms::require_admin(true);
+		if ($bad = self::one_value()) return $bad;
 		$collection = (string)util::post('collection');
 		if (!preg_match('/^[a-z][a-z0-9_]*$/', $collection) || cms::reserved($collection, 'collection')) return self::fail('Unknown collection');
 		$type = cms::collection_type($collection);
@@ -230,6 +242,7 @@ class cms_editor {
 	// collection, id: answers with the item, so the editor can bring it back
 	static function delete_item() {
 		cms::require_admin(true);
+		if ($bad = self::one_value()) return $bad;
 		$collection = (string)util::post('collection');
 		if (!preg_match('/^[a-z][a-z0-9_]*$/', $collection)) return self::fail('Unknown collection');
 		$type = cms::collection_type($collection);
@@ -249,6 +262,7 @@ class cms_editor {
 	// record's type declares, if the editor's role allows it
 	static function action() {
 		cms::require_admin(true);
+		if ($bad = self::one_value()) return $bad;
 		$collection = (string)util::post('collection');
 		if (!cms_records::info($collection)) return self::fail('Unknown collection');
 		$input = util::post('input');
@@ -267,6 +281,7 @@ class cms_editor {
 	// type: the page's revisions, newest first
 	static function history() {
 		cms::require_admin(true);
+		if ($bad = self::one_value()) return $bad;
 		$type = self::page_type();
 		if (!$type) return self::fail('Unknown page');
 		$revisions = cms_store::page_history($type, 30);
@@ -282,6 +297,7 @@ class cms_editor {
 	// type, slug, revision: a new revision with the old one's values
 	static function restore() {
 		cms::require_admin(true);
+		if ($bad = self::one_value()) return $bad;
 		$type = self::page_type();
 		if (!$type) return self::fail('Unknown page');
 		$old = R::findOne($type, ' id = ? ', array((int)util::post('revision')));
