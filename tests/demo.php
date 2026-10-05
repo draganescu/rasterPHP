@@ -3049,7 +3049,111 @@ test('C53', 'a print inside a render block fills every row of a long list: 1,500
 // (wave 2 newsletter part adds its tests here)
 
 // ## 2.1.8 wave 2: content saves and the cache bump
-// (wave 2 content part adds its tests here)
+
+// MCP calls sent all at once, spread over $bases (each its own server on the
+// demo's database, as two PHP workers are); the answers in the same order
+function mcp_at_once($bases, $calls) {
+	$multi = curl_multi_init();
+	$handles = array();
+	foreach ($calls as $i => $call) {
+		$handle = curl_init($bases[$i % count($bases)].'/mcp');
+		curl_setopt_array($handle, array(CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_HTTPHEADER => array('Authorization: Bearer demo-token', 'Content-Type: application/json'),
+			CURLOPT_POSTFIELDS => json_encode(array('jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => array('name' => $call[0], 'arguments' => $call[1])))));
+		curl_multi_add_handle($multi, $handle);
+		$handles[] = $handle;
+	}
+	do { curl_multi_exec($multi, $running); curl_multi_select($multi, 0.05); } while ($running);
+	$answers = array();
+	foreach ($handles as $handle) {
+		$answer = json_decode(curl_multi_getcontent($handle), true);
+		if (!isset($answer['result']) || !empty($answer['result']['isError'])) throw new Exception('mcp: '.curl_multi_getcontent($handle));
+		$answers[] = $answer['result']['structuredContent'];
+		curl_multi_remove_handle($multi, $handle);
+	}
+	curl_multi_close($multi);
+	return $answers;
+}
+
+test('E33', 'items saved at once with one title each get their own slug and page, and page saves at once keep each other\'s fields (on SQLite, #77)', function () use ($base, $db, $maildir) {
+	$second = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'RASTER_MCP_TOKEN' => 'demo-token'));
+	$about = mcp($base, 'get_page', array('page' => '/about'))['fields'];
+	$ids = array();
+	try {
+		$slugs = array();
+		for ($round = 0; $round < 4; $round++) {
+			$calls = array();
+			for ($i = 0; $i < 4; $i++) $calls[] = array('create_item', array('collection' => 'journal', 'fields' => array('title' => 'Harvest supper', 'author' => 'Ana', 'summary' => "<p>Round $round, editor $i</p>")));
+			foreach (mcp_at_once(array($base, $second), $calls) as $item) {
+				$ids[] = $item['id'];
+				$slugs[] = $item['slug'];
+			}
+		}
+		same(16, count(array_unique($slugs)), 'distinct slugs of 16:');
+		foreach (array_slice($slugs, -4) as $slug) {
+			list($status, $body) = http('GET', "$base/journal/journal_item/$slug");
+			same(200, $status);
+			same(1, substr_count($body, '<article'), "/journal/journal_item/$slug shows one article:");
+		}
+		// two editors on one page, one field each
+		for ($round = 1; $round <= 4; $round++) {
+			mcp_at_once(array($base, $second), array(
+				array('update_page', array('page' => '/about', 'fields' => array('heading' => "Heading $round"))),
+				array('update_page', array('page' => '/about', 'fields' => array('body' => "<p>Body $round</p>"))),
+			));
+			$fields = mcp($base, 'get_page', array('page' => '/about'))['fields'];
+			same(array("Heading $round", "<p>Body $round</p>"), array($fields['heading'], $fields['body']), "round $round:");
+		}
+	} finally {
+		foreach ($ids as $id) mcp($base, 'delete_item', array('collection' => 'journal', 'id' => $id));
+		mcp($base, 'update_page', array('page' => '/about', 'fields' => array('heading' => $about['heading'], 'body' => $about['body'])));
+	}
+});
+
+$changed_seen = array();
+function demo_content_changed() {
+	global $changed_seen, $db;
+	$other = new PDO("sqlite:$db");
+	$changed_seen[] = (int)$other->query('SELECT COUNT(*) FROM journaldata')->fetchColumn();
+}
+test('L12', 'content_changed and the page cache wait for the commit: a rolled back write leaves cached pages and sends nothing, a committed one clears them once (#81)', function () use ($db, $maildir) {
+	global $changed_seen;
+	$cached = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'CAFE_PAGE_CACHE' => 'on'));
+	http('GET', "$cached/journal");
+	same('hit', header_value(http('GET', "$cached/journal")[2], 'X-Raster-Cache'));
+	cms_store::connect();
+	$changed_seen = array();
+	event::bind('content_changed')->to(null, 'demo_content_changed');
+	$kept = array();
+	try {
+		$rows = R::count('journaldata');
+		try {
+			cms_records::transaction(function () {
+				cms_store::save_item('journaldata', 0, array('title' => 'Never printed', 'author' => 'Ana'), array('title', 'author'));
+				cms_records::create('reservation', array('name' => 'Rolled back', 'date' => '2026-12-24', 'guests' => 2));
+				cms_records::refuse('changed_my_mind');
+			});
+			check(false, 'refused');
+		} catch (cms_refused $e) {
+			same(array('changed_my_mind'), $e->problems);
+		}
+		same(array(), $changed_seen, 'content_changed after a rollback:');
+		list(, $body, $headers) = http('GET', "$cached/journal");
+		same('hit', header_value($headers, 'X-Raster-Cache'), 'the cached page stays');
+		lacks($body, 'Never printed');
+		cms_records::transaction(function () use (&$kept) {
+			$kept[] = cms_store::save_item('journaldata', 0, array('title' => 'Printed after the commit', 'author' => 'Ana'), array('title', 'author'))['id'];
+			$kept[] = cms_store::save_item('journaldata', 0, array('title' => 'Printed too', 'author' => 'Ana'), array('title', 'author'))['id'];
+		});
+		same(array($rows + 2), $changed_seen, 'content_changed once, its listener seeing the rows:');
+		list(, $body, $headers) = http('GET', "$cached/journal");
+		same('miss', header_value($headers, 'X-Raster-Cache'));
+		has($body, 'Printed after the commit');
+	} finally {
+		event::unbind('content_changed')->from(null, 'demo_content_changed');
+		foreach ($kept as $id) cms_store::delete_item('journaldata', $id);
+	}
+});
 
 // ## No PHP warnings, notices or deprecations on any request
 

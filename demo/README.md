@@ -163,6 +163,7 @@ php tests/demo.php                        # the whole matrix
 | E30 | admin pages: views `protected` keeps for editors or admins are listed in the editor's Admin menu, by title, for whoever may open them; `describe` lists them |
 | E31 | fields named like SQL words (`when`, `from`, `group`) sort, filter (`group>2`) and link to their filter pages (`/trips/trips_items/from/Paris`) like any other field |
 | E32 | the in-page editor gets stored text as it is: `$5`, `\1` and backslashes, so Duplicate copies it unchanged |
+| E33 | on SQLite, items saved at once with one title each get their own slug, and page saves at once (one field each) keep each other's changes: item and page saves run in a transaction |
 | F1 | schema status as JSON |
 | F2 | schema --check |
 | F3 | schema --apply in production, including model tables |
@@ -234,6 +235,7 @@ php tests/demo.php                        # the whole matrix
 | L9 | page cache: empty filter pages, pages past the last one, unknown filter fields and other spellings of a list's URLs (`journal_page/1`, a segment left over) answer 200 but aren't kept; a content change deletes the old cached pages |
 | L10 | page cache: links with only tracking parameters (`utm_*`, `fbclid`, `gclid`, `msclkid`) are cache hits, and their values never reach the cached page |
 | L11 | a database that can't be reached answers 503 outside development (`error_document_503`, views/cafe/503.html; `/api` as JSON, before the method runs), logged, never cached |
+| L12 | the page cache is thrown away and `content_changed` sent once a transaction commits, and not at all when it is rolled back |
 | M1 | MCP needs its token; GET is refused |
 | M2 | initialize, ping, tools/list, batches, errors |
 | M3 | notifications get 202 |

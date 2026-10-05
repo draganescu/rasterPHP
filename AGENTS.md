@@ -273,7 +273,7 @@ alike:
 | `cms.item_saved` | `collection`, `created` (true for new items), `item` |
 | `cms.item_deleted` | `collection`, `item` |
 | `cms.page_saved` | `type`, `slug`, `changed` (field names), `fields` |
-| `content_changed` | none (sent by `util::content_changed()`) |
+| `content_changed` | none (sent by `util::content_changed()`; inside a transaction, once after the commit) |
 | `mail.sent` / `mail.failed` | `to`, `subject` / and `error` |
 
 The request sends `launch`, `finding_route`, `route_set`, `route_found`,
@@ -653,8 +653,14 @@ class reservation {
   back. On SQLite the database is locked for writing from the start, so two
   checkouts can't both take the last item. Events (`cms.item_saved` and the
   rest) wait for the commit, so nothing is emailed about a write that was
-  rolled back. Every single write of a record is already one (its `check()`
-  and the write together); a transaction started inside another joins it.
+  rolled back. So does `util::content_changed()`: the page cache is thrown
+  away and `content_changed` sent once, after the commit, and not at all
+  after a rollback. Every single write of a record is already one (its
+  `check()` and the write together), and so is every save or delete of a
+  markup collection's item and every page save: on SQLite two items saved
+  at once with one title get different slugs, and two page saves at once
+  (one field each) keep each other's change. A transaction started inside
+  another joins it.
 - **Starting from a form:** `php bin/raster make model inquiry --from=contact.html`
   writes `models/inquiry/inquiry.php` with the type (fields from the form's
   inputs, passwords left out), an empty `check()` and the handler.
@@ -818,8 +824,9 @@ use `'model.method'`: `method(true)` returns
     `fbclid`, `gclid`, `msclkid`) is served the cached `/about`, and is
     made as `/about` is, without them (models don't see them in `$_GET`).
   - Any content change throws the cache away and deletes the cached files
-    (`util::content_changed()` in your own models), and so does the moment
-    a scheduled item is published. A page whose render overlapped the
+    (`util::content_changed()` in your own models; inside a transaction
+    when it commits), and so does the moment a scheduled item is
+    published. A page whose render overlapped the
     change is not kept.
   - A filter page with no items (`/news/news_items/tag/nothing`), a page
     past the last one and a filter on a field the list doesn't have answer
