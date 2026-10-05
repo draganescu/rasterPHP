@@ -163,7 +163,7 @@ php tests/demo.php                        # the whole matrix
 | E30 | admin pages: views `protected` keeps for editors or admins are listed in the editor's Admin menu, by title, for whoever may open them; `describe` lists them |
 | E31 | fields named like SQL words (`when`, `from`, `group`) sort, filter (`group>2`) and link to their filter pages (`/trips/trips_items/from/Paris`) like any other field |
 | E32 | the in-page editor gets stored text as it is: `$5`, `\1` and backslashes, so Duplicate copies it unchanged |
-| E33 | on SQLite, items saved at once with one title each get their own slug, and page saves at once (one field each) keep each other's changes: item and page saves run in a transaction |
+| E33 | items saved at once with one title each get their own slug, and page saves at once (one field each) keep each other's changes: item and page saves run in a transaction |
 | F1 | schema status as JSON |
 | F2 | schema --check |
 | F3 | schema --apply in production, including model tables |
@@ -194,7 +194,7 @@ php tests/demo.php                        # the whole matrix
 | G21 | `raster user` defaults for a new account: admin, random password |
 | G22 | `raster user` on an existing account keeps the role and password it isn't given |
 | G23 | once a lock runs out, wrong passwords are counted from zero |
-| G24 | two sign-ups or email changes at once with one email: one account gets it, the other is told it is taken (on SQLite) |
+| G24 | two sign-ups or email changes at once with one email: one account gets it, the other is told it is taken |
 | H1 | newsletter sign up sends a confirmation |
 | H2 | the same answer for people already subscribed |
 | H3 | confirm |
@@ -207,7 +207,7 @@ php tests/demo.php                        # the whole matrix
 | H10 | single opt-in |
 | H11 | `newsletter_confirm_page`, and the name is stored |
 | H12 | `raster send` refuses a page without a title |
-| H13 | on SQLite, sign-ups at once leave one subscriber; signing up again while pending resends the same link; the confirmation email comes from a listener on `newsletter.subscribed`, after the commit |
+| H13 | sign-ups at once leave one subscriber; signing up again while pending resends the same link; the confirmation email comes from a listener on `newsletter.subscribed`, after the commit |
 | I1 | emails are views; subject from the title; text version |
 | I2 | values escaped in emails; images absolute |
 | I3 | SMTP: AUTH, sender, recipient |

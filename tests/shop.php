@@ -4,14 +4,16 @@
 // Drives shop/ (Blue Hour Ceramics) over HTTP the way a buyer, the studio and
 // a payment provider would: the catalogue, the cart, checkout with the last
 // piece contested, the pretend provider, the signed webhook, the studio's
-// actions, and what visitors must never see.
+// actions, and what visitors must never see. On MySQL:
+//   RASTER_DB=mysql://root@127.0.0.1:3306/raster php tests/shop.php
 
 if (PHP_SAPI !== 'cli') exit;
 
 $root = dirname(__DIR__);
+require __DIR__.'/db.php';
 $tmp = sys_get_temp_dir().'/raster-shop-'.getmypid();
 @mkdir($tmp, 0775, true);
-$db = "$tmp/shop.sqlite";
+$db = test_db("$tmp/shop.sqlite");
 $maildir = "$tmp/mail";
 putenv('RASTER_APP=shop');
 putenv("RASTER_DB=$db");
@@ -23,10 +25,11 @@ boot::$appname = 'shop';
 boot::cli();
 require_once BASE.'tools/inspector.php';
 
-$passed = 0; $failed = array();
+$passed = 0; $failed = array(); $skipped = array();
 function test($name, $fn) {
-	global $passed, $failed;
+	global $passed, $failed, $skipped;
 	try { $fn(); $passed++; echo '.'; }
+	catch (test_skipped $e) { $skipped[] = "$name: ".$e->getMessage(); echo 's'; }
 	catch (Throwable $e) { $failed[] = "$name: ".$e->getMessage().' (line '.$e->getLine().')'; echo 'F'; }
 }
 function check($condition, $message = 'assertion failed') { if (!$condition) throw new Exception($message); }
@@ -521,7 +524,7 @@ test('the studio\'s own account lists the studio\'s own orders, not everyone\'s'
 });
 
 test('outside development the pretend provider and the example\'s secret are off, and checkout sells nothing', function () use ($tmp, $root, $maildir) {
-	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => "$tmp/prod.sqlite", 'RASTER_URL' => 'https://bluehour.example/', 'RASTER_MAIL' => "log://$maildir");
+	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => test_db("$tmp/prod.sqlite"), 'RASTER_URL' => 'https://bluehour.example/', 'RASTER_MAIL' => "log://$maildir");
 	$cmd = function ($args) use ($env, $root) {
 		$process = proc_open(array_merge(array(PHP_BINARY), $args), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, array_merge(getenv(), $env, array('RASTER_APP' => 'shop')));
 		$out = stream_get_contents($pipes[1]).stream_get_contents($pipes[2]);
@@ -593,8 +596,8 @@ test('the shop\'s code, config, data and seed script are never served', function
 // (batch B adds its tests here)
 
 test('the webhook during a database outage answers 503, so the provider sends it again (#74, #65)', function () use ($tmp) {
-	$bad = "$tmp/down.sqlite";
-	file_put_contents($bad, str_repeat('this is not a database ', 100));
+	$bad = test_db("$tmp/down.sqlite");
+	test_db_break($bad);
 	$down = server(array('RASTER_DB' => $bad));
 	$event = array('id' => 'evt_down', 'type' => 'checkout.session.completed', 'data' => array('object' => array('id' => 'cs_test_BH-1042', 'client_reference_id' => 'BH-1042', 'payment_status' => 'paid', 'amount_total' => 1600, 'currency' => 'eur')));
 	list($status, $body) = signed_event($down, $event);
@@ -627,6 +630,7 @@ test('lint is clean and there were no PHP warnings', function () use ($root, $tm
 	check(!preg_match('/PHP (Warning|Notice|Deprecated|Fatal error|Parse error):.*$/m', $log, $m), $m ? $m[0] : '');
 });
 
-echo "\n\n$passed passed, ".count($failed)." failed\n";
+echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";
+foreach ($skipped as $skip) echo "  - $skip\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";
 exit($failed ? 1 : 0);

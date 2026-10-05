@@ -312,30 +312,40 @@ class cms_records {
 		throw new cms_refused(is_array($problems) ? $problems : func_get_args());
 	}
 
-	// Runs $work so that every write in it happens, or none does. On SQLite
-	// the database is locked for writing from the start, so two checkouts
-	// can't both take the last mug, and two items saved at once can't both
-	// take one slug. Events wait for the commit: nothing is emailed about a
-	// write that was rolled back, and the page cache is thrown away (and
-	// content_changed sent) once, when the new rows can be read.
+	// Runs $work so that every write in it happens, or none does. The
+	// database is locked for writing from the start, so two checkouts can't
+	// both take the last mug, and two items saved at once can't both take
+	// one slug: SQLite with BEGIN IMMEDIATE, MySQL with a named lock taken
+	// before the transaction starts (so its reads see what the last holder
+	// committed) and released after it ends. Either gives up after 5 seconds.
+	// Events wait for the commit: nothing is emailed about a write that was
+	// rolled back, and the page cache is thrown away (and content_changed
+	// sent) once, when the new rows can be read.
 	static function transaction($work) {
 		cms_store::connect();
 		if (self::$depth > 0) return $work();
 		$pdo = R::getDatabaseAdapter()->getDatabase()->getPDO();
 		$sqlite = $pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite';
-		$sqlite ? $pdo->exec('BEGIN IMMEDIATE') : $pdo->beginTransaction();
-		self::$depth = 1;
-		self::$queued = array();
-		self::$changed = false;
+		$lock = $sqlite ? null : self::lock($pdo);
 		try {
-			$result = $work();
-			self::finish($pdo, $sqlite, 'COMMIT');
-		} catch (Throwable $e) {
-			self::$depth = 0;
+			$sqlite ? $pdo->exec('BEGIN IMMEDIATE') : $pdo->beginTransaction();
+			self::$depth = 1;
 			self::$queued = array();
 			self::$changed = false;
-			self::finish($pdo, $sqlite, 'ROLLBACK');
-			throw $e;
+			try {
+				$result = $work();
+				self::finish($pdo, $sqlite, 'COMMIT');
+			} catch (Throwable $e) {
+				self::$depth = 0;
+				self::$queued = array();
+				self::$changed = false;
+				self::finish($pdo, $sqlite, 'ROLLBACK');
+				throw $e;
+			}
+		} finally {
+			// a connection that died has let go of the lock already, and its
+			// error is the one to report, not this one
+			if ($lock) try { $pdo->query('SELECT RELEASE_LOCK('.$pdo->quote($lock).')'); } catch (PDOException $e) {}
 		}
 		self::$depth = 0;
 		$queued = self::$queued;
@@ -345,6 +355,16 @@ class cms_records {
 		if ($changed) util::content_changed();
 		foreach ($queued as $event) event::dispatch($event[0], $event[1]);
 		return $result;
+	}
+
+	// MySQL's lock for writing: one per database, as SQLite's is one per
+	// file. A lock name has at most 64 characters.
+	protected static function lock($pdo) {
+		$name = substr('raster:'.$pdo->query('SELECT DATABASE()')->fetchColumn(), 0, 64);
+		if ((int)$pdo->query('SELECT GET_LOCK('.$pdo->quote($name).', 5)')->fetchColumn() !== 1) {
+			throw new RuntimeException('database is locked: another write held it for 5 seconds');
+		}
+		return $name;
 	}
 
 	// MySQL commits by itself when the work changes the schema (a new table

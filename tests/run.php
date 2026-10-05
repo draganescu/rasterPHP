@@ -3,12 +3,15 @@
 //
 // Runs unit tests against the template tools and integration tests against
 // the demo site in application/, using a throwaway SQLite database and PHP's
-// built in server.
+// built in server. On MySQL:
+//   RASTER_DB=mysql://root@127.0.0.1:3306/raster php tests/run.php
+// Only some tests: RASTER_TEST_ONLY='page cache' php tests/run.php
 
 if (PHP_SAPI !== 'cli') exit;
 
 $root = dirname(__DIR__);
-$db = sys_get_temp_dir().'/raster-test-'.getmypid().'.sqlite';
+require __DIR__.'/db.php';
+$db = test_db(sys_get_temp_dir().'/raster-test-'.getmypid().'.sqlite');
 $maildir = sys_get_temp_dir().'/raster-mail-'.getmypid();
 putenv("RASTER_DB=$db");
 putenv("RASTER_MAIL=log://$maildir");
@@ -22,11 +25,14 @@ require_once BASE.'tools/schema.php';
 require_once BASE.'tools/project.php';
 require_once BASE.'models/cms/cms.php';
 
-$passed = 0; $failed = array(); $current = '';
+$passed = 0; $failed = array(); $skipped = array(); $current = '';
 function test($name, $fn) {
-	global $passed, $failed, $current;
+	global $passed, $failed, $skipped, $current;
+	// RASTER_TEST_ONLY=<words> runs only the tests whose name has them
+	if (getenv('RASTER_TEST_ONLY') && stripos($name, getenv('RASTER_TEST_ONLY')) === false) return;
 	$current = $name;
 	try { $fn(); $passed++; echo "."; }
+	catch (test_skipped $e) { $skipped[] = "$name: ".$e->getMessage(); echo "s"; }
 	catch (Throwable $e) { $failed[] = "$name: ".$e->getMessage(); echo "F"; }
 }
 function check($condition, $message = 'assertion failed') {
@@ -181,7 +187,7 @@ test('a page request loads no command line tools and looks up no core overrides'
 	@mkdir($dir);
 	file_put_contents("$dir/prepend.php", '<?php $GLOBALS["looked_up"] = array(); spl_autoload_register(function ($c) { $GLOBALS["looked_up"][] = $c; }, true, true);'
 		.' register_shutdown_function(function () { file_put_contents('.var_export("$dir/out.json", true).', json_encode(array("looked_up" => array_values(array_unique($GLOBALS["looked_up"])), "included" => get_included_files()))); });');
-	$env = 'RASTER_ENV=production RASTER_DB='.escapeshellarg("$dir/db.sqlite");
+	$env = 'RASTER_ENV=production RASTER_DB='.escapeshellarg(test_db("$dir/db.sqlite"));
 	shell_exec("$env ".escapeshellarg(PHP_BINARY).' -d auto_prepend_file='.escapeshellarg("$dir/prepend.php").' '.escapeshellarg("$root/bin/raster").' render /about 2>&1');
 	$out = json_decode((string)@file_get_contents("$dir/out.json"), true);
 	array_map('unlink', glob("$dir/*") ?: array());
@@ -349,13 +355,53 @@ test('frozen database falls back to template defaults', function () use ($root, 
 		check(strpos($html, '<p>Fallback</p>') !== false, 'frozen render failed');
 		exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' schema --check', $out, $code);
 		same(1, $code, 'schema --check should report drift');
-		exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' schema --apply', $out, $code);
+		$out = array();
+		exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' schema --apply 2>&1', $out, $code);
+		same(0, $code, 'schema --apply: '.implode("\n", $out));
 		exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' schema --check', $out, $code);
 		same(0, $code, 'schema --apply did not fix drift');
 	} finally {
 		file_put_contents($view, $original);
 		exec('RASTER_DB='.escapeshellarg($db).' '.escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' schema --drop=aboutpage.frozen_test');
 	}
+});
+test('schema --apply declares model tables by their types, and a long text or big number fits in production', function () use ($root) {
+	$db = test_db(sys_get_temp_dir().'/raster-model-tables-'.getmypid().'.sqlite');
+	$raster = 'RASTER_ENV=production RASTER_DB='.escapeshellarg($db).' '.escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster");
+	exec("$raster schema --apply 2>&1", $out, $code);
+	same(0, $code, 'schema --apply: '.implode("\n", $out));
+	$pdo = test_pdo($db);
+	same(0, (int)$pdo->query('SELECT COUNT(*) FROM user')->fetchColumn(), 'no row is left behind');
+	$long = str_repeat('a long name ', 40);
+	$code = 'require '.var_export("$root/system/boot.php", true).'; boot::$appname = "application"; boot::cli(); authentication::connect();'
+		.' $u = R::dispense("user"); $u->email = "long@example.com"; $u->name = '.var_export($long, true).'; $u->failed_count = 300; R::store($u);'
+		.' $s = R::dispense("subscriber"); $s->email = "long@example.com"; $s->name = '.var_export($long, true).'; R::store($s);';
+	$output = shell_exec('RASTER_ENV=production RASTER_DB='.escapeshellarg($db).' '.escapeshellarg(PHP_BINARY).' -r '.escapeshellarg($code).' 2>&1');
+	same('', trim((string)$output), 'storing in production');
+	same(array($long, '300'), array_map('strval', $pdo->query("SELECT name, failed_count FROM user WHERE email = 'long@example.com'")->fetch(PDO::FETCH_NUM)));
+	same($long, $pdo->query("SELECT name FROM subscriber WHERE email = 'long@example.com'")->fetchColumn());
+});
+test('schema --apply widens the small MySQL columns that 2.1.8 made for model tables', function () use ($root) {
+	if (!on_mysql()) throw new test_skipped('MySQL only: SQLite columns take any length');
+	$db = test_db(sys_get_temp_dir().'/raster-narrow-tables-'.getmypid().'.sqlite');
+	// the way 2.1.8 made them: a row of the defaults, stored and deleted
+	$code = 'require '.var_export("$root/system/boot.php", true).'; boot::$appname = "application"; boot::cli(); authentication::connect();'
+		.' foreach (authentication::schema() as $t => $fields) { $b = R::dispense($t); foreach ($fields as $f => $v) $b->$f = $v; R::store($b); R::trash($b); }';
+	same('', trim((string)shell_exec('RASTER_DB='.escapeshellarg($db).' '.escapeshellarg(PHP_BINARY).' -r '.escapeshellarg($code).' 2>&1')), 'making the old tables');
+	$pdo = test_pdo($db);
+	check(stripos($pdo->query("SHOW COLUMNS FROM user LIKE 'name'")->fetch(PDO::FETCH_ASSOC)['Type'], 'varchar') === 0, 'the old name column is a varchar');
+	$raster = 'RASTER_ENV=production RASTER_DB='.escapeshellarg($db).' '.escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster");
+	exec("$raster schema --check 2>&1", $out, $code);
+	same(1, $code, 'schema --check reports the small columns');
+	$out = array();
+	exec("$raster schema --apply 2>&1", $out, $code);
+	same(0, $code, 'schema --apply: '.implode("\n", $out));
+	check(strpos(implode("\n", $out), 'widened user.name to TEXT') !== false, implode("\n", $out));
+	same('text', strtolower($pdo->query("SHOW COLUMNS FROM user LIKE 'name'")->fetch(PDO::FETCH_ASSOC)['Type']));
+	same('int', strtolower($pdo->query("SHOW COLUMNS FROM user LIKE 'failed_count'")->fetch(PDO::FETCH_ASSOC)['Type']));
+	$out = array();
+	exec("$raster schema --check 2>&1", $out, $code);
+	same(0, $code, 'no drift after --apply: '.implode("\n", $out));
 });
 test('mcp over stdio', function () use ($root, $db) {
 	$input = json_encode(array('jsonrpc' => '2.0', 'id' => 7, 'method' => 'tools/call', 'params' => array('name' => 'get_page', 'arguments' => array('page' => '/about'))))."\n";
@@ -531,13 +577,12 @@ test('a production page reads the schema and each page row once, and counts noth
 	foreach (glob(APPBASE.'data/cache/*') ?: array() as $f) unlink($f);
 	check(strpos((string)$html, '</html>') !== false, 'the page did not render');
 	check(is_array($logs) && $logs, 'no queries logged');
-	$queries = array_values(array_filter($logs, function ($l) { return is_string($l) && preg_match('/^\s*(SELECT|PRAGMA|INSERT|UPDATE|DELETE)/i', $l); }));
-	$repeated = array_keys(array_filter(array_count_values(preg_grep('/sqlite_master|PRAGMA/i', $queries)), function ($n) { return $n > 1; }));
+	$queries = array_values(array_filter($logs, function ($l) { return is_string($l) && preg_match('/^\s*(SELECT|PRAGMA|SHOW|DESCRIBE|INSERT|UPDATE|DELETE)/i', $l); }));
+	$repeated = array_keys(array_filter(array_count_values(preg_grep('/sqlite_master|PRAGMA|SHOW|DESCRIBE/i', $queries)), function ($n) { return $n > 1; }));
 	same(array(), $repeated, 'schema read twice');
 	same(array(), array_values(preg_grep('/count\(/i', $queries)), 'lists counted');
 	same(array(), array_keys(array_filter(array_count_values(preg_grep('/FROM `?[a-z0-9]+page`?/i', $queries)), function ($n) { return $n > 1; })), 'a page row read twice');
-	$pdo = new PDO("sqlite:$db");
-	same('wal', $pdo->query('PRAGMA journal_mode')->fetchColumn());
+	if (!on_mysql()) same('wal', test_pdo($db)->query('PRAGMA journal_mode')->fetchColumn());
 });
 test('a site under a path: RASTER_URL with a folder', function () use ($root, $db) {
 	$port = free_port();
@@ -634,7 +679,7 @@ test('pagination follows filters', function () use ($base) {
 	check(strpos($body, 'news_page/2') === false, 'filtered list shows extra pages');
 });
 test('frozen database: accounts and newsletter after schema --apply', function () use ($root) {
-	$db = sys_get_temp_dir().'/raster-frozen-'.getmypid().'.sqlite';
+	$db = test_db(sys_get_temp_dir().'/raster-frozen-'.getmypid().'.sqlite');
 	$env = 'RASTER_ENV=production RASTER_DB='.escapeshellarg($db).' RASTER_URL=http://example.test/';
 	$raster = escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster");
 	try {
@@ -941,6 +986,22 @@ test('reads give PHP types; templates print text with the mock-up\'s decimals', 
 
 // ## RedBean loads without a MySQL driver
 
+test('RASTER_DB takes a MySQL address', function () {
+	same(array('dsn' => 'mysql:host=db.example;port=3307;dbname=shop;charset=utf8mb4', 'user' => 'shop', 'password' => 'p@ss:w/rd'), database::mysql_url('mysql://shop:p%40ss%3Aw%2Frd@db.example:3307/shop'));
+	same(array('dsn' => 'mysql:host=127.0.0.1;dbname=raster;charset=utf8mb4', 'user' => 'root', 'password' => null), database::mysql_url('mysql://root@127.0.0.1/raster'));
+	same(null, database::mysql_url('/tmp/site.sqlite'));
+	try {
+		database::mysql_url('mysql://root@127.0.0.1');
+		check(false, 'an address without a database');
+	} catch (InvalidArgumentException $e) {
+		check(strpos($e->getMessage(), 'mysql://user:password@host:3306/database') !== false, $e->getMessage());
+	}
+	// a site whose config reads RASTER_DB as a file is on MySQL all the same
+	// (nothing listens on port 1; on SQLite this would be a file named so)
+	$code = 'require "'.dirname(__DIR__).'/system/boot.php"; boot::$appname = "application"; boot::cli(); database::instance(); try { R::inspect(); } catch (Exception $e) { echo $e->getMessage(); }';
+	$out = (string)shell_exec('RASTER_DB=mysql://nobody@127.0.0.1:1/none '.escapeshellarg(PHP_BINARY).' -r '.escapeshellarg($code).' 2>&1');
+	same('Could not connect to database (none).', $out);
+});
 test('the ORM does not need pdo_mysql for an SQLite site', function () {
 	check(defined('RB_PDO_MYSQL_ATTR_INIT_COMMAND'), 'rb.php defines it whatever drivers PHP has');
 	check(in_array('sqlite', PDO::getAvailableDrivers()), 'and SQLite is enough to get here');
@@ -1143,9 +1204,8 @@ test('a tracking link does not leave its parameters in the page every visitor ge
 
 test('in production, made-up URLs of a list with no items are not cached', function () use ($db) {
 	cache_empty();
-	$empty = sys_get_temp_dir().'/raster-test-empty-'.getmypid().'.sqlite';
-	copy($db, $empty);
-	$pdo = new PDO("sqlite:$empty");
+	$empty = test_db_copy($db, sys_get_temp_dir().'/raster-test-empty-'.getmypid().'.sqlite');
+	$pdo = test_pdo($empty);
 	$pdo->exec('DELETE FROM newsdata');
 	$pdo = null;
 	try {
@@ -1163,9 +1223,8 @@ test('in production, made-up URLs of a list with no items are not cached', funct
 
 test('in production, made-up URLs of a list with no table yet are not cached', function () use ($db) {
 	cache_empty();
-	$bare = sys_get_temp_dir().'/raster-test-bare-'.getmypid().'.sqlite';
-	copy($db, $bare);
-	$pdo = new PDO("sqlite:$bare");
+	$bare = test_db_copy($db, sys_get_temp_dir().'/raster-test-bare-'.getmypid().'.sqlite');
+	$pdo = test_pdo($bare);
 	$pdo->exec('DROP TABLE newsdata');
 	$pdo = null;
 	try {
@@ -1254,7 +1313,7 @@ function b_with_boom($fn) {
 		."}\n");
 	try { $fn(); } finally { @unlink("$dir/zzboom.php"); @rmdir($dir); }
 }
-$b_db = sys_get_temp_dir().'/raster-b-'.getmypid().'.sqlite';
+$b_db = test_db(sys_get_temp_dir().'/raster-b-'.getmypid().'.sqlite');
 shell_exec('RASTER_ENV=production RASTER_DB='.escapeshellarg($b_db).' '.escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' schema --apply 2>&1');
 register_shutdown_function(function () use ($b_db) { array_map('unlink', glob("$b_db*") ?: array()); });
 
@@ -1364,8 +1423,8 @@ test('doctor warns when PHP shows errors in production; the command line keeps t
 test('a database that can\'t be reached answers 503 outside development, logged, never cached (#65)', function () use ($b_db, $root) {
 	$cache = "$root/application/data/cache";
 	$had_cache = is_dir($cache);
-	$bad = sys_get_temp_dir().'/raster-b-down-'.getmypid().'.sqlite';
-	file_put_contents($bad, str_repeat('this is not a database ', 100));
+	$bad = test_db(sys_get_temp_dir().'/raster-b-down-'.getmypid().'.sqlite');
+	test_db_break($bad);
 	list($prod, $log) = b_server(array('RASTER_ENV' => 'production', 'RASTER_DB' => $bad));
 	try {
 		foreach (array(1, 2) as $time) {
@@ -1386,7 +1445,7 @@ test('a database that can\'t be reached answers 503 outside development, logged,
 		});
 		check(strpos((string)@file_get_contents($log), 'database') !== false, 'logged');
 		// back up: the real page, at once
-		copy($b_db, $bad);
+		test_db_copy($b_db, sys_get_temp_dir().'/raster-b-down-'.getmypid().'.sqlite');
 		list($status, $body, $headers) = http('GET', "$prod/about");
 		same(200, $status);
 		same('miss', b_header($headers, 'X-Raster-Cache'));
@@ -1396,8 +1455,8 @@ test('a database that can\'t be reached answers 503 outside development, logged,
 		if (!$had_cache) exec('rm -rf '.escapeshellarg($cache));
 	}
 	// a database that is there but has no tables yet still shows the template
-	$empty = sys_get_temp_dir().'/raster-b-empty-'.getmypid().'.sqlite';
-	touch($empty);
+	$empty = test_db(sys_get_temp_dir().'/raster-b-empty-'.getmypid().'.sqlite');
+	if (!on_mysql()) touch($empty);
 	list($prod) = b_server(array('RASTER_ENV' => 'production', 'RASTER_DB' => $empty, 'RASTER_URL' => 'http://example.test/'));
 	try {
 		list($status, $body) = http('GET', "$prod/");
@@ -1408,8 +1467,8 @@ test('a database that can\'t be reached answers 503 outside development, logged,
 		if (!$had_cache) exec('rm -rf '.escapeshellarg($cache));
 	}
 	// development says so plainly instead
-	$bad = sys_get_temp_dir().'/raster-b-down-dev-'.getmypid().'.sqlite';
-	file_put_contents($bad, str_repeat('this is not a database ', 100));
+	$bad = test_db(sys_get_temp_dir().'/raster-b-down-dev-'.getmypid().'.sqlite');
+	test_db_break($bad);
 	list($dev) = b_server(array('RASTER_ENV' => 'development', 'RASTER_DB' => $bad));
 	try {
 		list($status, $body) = http('GET', "$dev/about");
@@ -1419,7 +1478,7 @@ test('a database that can\'t be reached answers 503 outside development, logged,
 			list($status, $body) = http('GET', "$dev/api/zzboom/needs/x/y");
 			same(503, $status, $body);
 			$json = json_decode($body, true);
-			check(isset($json['exception']) && strpos($json['exception'], 'not a database') !== false, $body);
+			check(isset($json['exception']) && strpos($json['exception'], on_mysql() ? 'Could not connect to database' : 'not a database') !== false, $body);
 		});
 	} finally {
 		array_map('unlink', glob("$bad*") ?: array());
@@ -1575,7 +1634,7 @@ test('published_at is compared with an empty string only while it is text', func
 	cms_store::connect();
 	$future = date('Y-m-d H:i:s', time() + 86400);
 	$past = date('Y-m-d H:i:s', time() - 86400);
-	R::getDatabaseAdapter()->exec('CREATE TABLE zzoldpubdata (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, published_at TEXT, updated_at TEXT)');
+	R::getDatabaseAdapter()->exec('CREATE TABLE zzoldpubdata (id INTEGER PRIMARY KEY '.(on_mysql() ? 'AUTO_INCREMENT' : 'AUTOINCREMENT').', title TEXT, published_at TEXT, updated_at TEXT)');
 	cms_types::ensure('zznewpubdata', array('title' => 'text', 'published_at' => 'datetime', 'updated_at' => 'datetime'));
 	try {
 		foreach (array('zzoldpubdata' => array('Empty' => '', 'Never' => null, 'Past' => $past, 'Future' => $future), 'zznewpubdata' => array('Never' => null, 'Past' => $past, 'Future' => $future)) as $table => $rows) {
@@ -1599,7 +1658,7 @@ test('a time reads without seconds, as MySQL gives it', function () {
 // ## 2.1.8 batch D: accounts
 
 test('raster user keeps the role and password it is not given (#71)', function () use ($root) {
-	$db = sys_get_temp_dir().'/raster-user-'.getmypid().'.sqlite';
+	$db = test_db(sys_get_temp_dir().'/raster-user-'.getmypid().'.sqlite');
 	$env = 'RASTER_ENV=development RASTER_DB='.escapeshellarg($db);
 	$raster = function ($args) use ($env, $root) {
 		exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' '.$args.' 2>&1', $out, $code);
@@ -1936,7 +1995,7 @@ function test_newsletter_subscribed($payload) {
 	$subscribed_seen[] = $payload['email'].' '.$payload['status'];
 }
 
-test('many sign-ups at once with the same addresses leave one subscriber each (on SQLite)', function () use ($maildir) {
+test('many sign-ups at once with the same addresses leave one subscriber each', function () use ($maildir) {
 	reconnect();
 	newsletter::subscribe('race-seed@example.com');
 	$dir = "$maildir-race";
@@ -2056,11 +2115,11 @@ function reconnect() {
 $changed_seen = array();
 function test_content_changed() {
 	global $changed_seen, $db;
-	$other = new PDO("sqlite:$db");
+	$other = test_pdo($db);
 	$changed_seen[] = (int)$other->query('SELECT COUNT(*) FROM wavetwodata')->fetchColumn();
 }
 
-test('items created at once with one title all get their own slug (on SQLite)', function () {
+test('items created at once with one title all get their own slug', function () {
 	reconnect();
 	cms_store::save_item('wavetwodata', 0, array('title' => 'Seed'), array('title'));
 	$out = race_php('for ($i = 0; $i < 15; $i++) cms_store::save_item("wavetwodata", 0, array("title" => "Harvest supper"), array("title"));', 6);
@@ -2070,7 +2129,29 @@ test('items created at once with one title all get their own slug (on SQLite)', 
 	same(90, count(array_unique($slugs)), 'distinct slugs of 90:');
 });
 
-test('two page saves at once, each changing its own field, keep both changes (on SQLite)', function () {
+test('a collection table has an index on slug, and a new item finds a free slug in one query', function () {
+	reconnect();
+	// as the CMS makes a collection's table on its first render
+	cms_types::ensure('slugindexdata', array('title' => 'text') + array_intersect_key(cms_types::$system, array_flip(array('slug', 'enabled', 'published_at', 'updated_at'))));
+	same(false, cms_types::index_slug('slugindexdata'), 'the new table already has its index');
+	cms_store::save_item('slugindexdata', 0, array('title' => 'Same'), array('title'));
+	for ($i = 2; $i <= 60; $i++) R::exec("INSERT INTO slugindexdata (title, slug) VALUES ('Same', ?)", array("same-$i"));
+	R::exec("INSERT INTO slugindexdata (title, slug) VALUES ('Other', 'same-thing')");
+	cms_store::columns('slugindexdata');
+	R::startLogging();
+	$slug = cms_store::unique_slug('slugindexdata', 'Same', 0);
+	$queries = array_filter(R::getLogs(), function ($line) { return is_string($line) && stripos($line, 'slugindexdata') !== false && stripos($line, 'slug') !== false && stripos($line, 'select') !== false; });
+	R::stopLogging();
+	same('same-61', $slug);
+	same(1, count($queries), 'queries for one slug: '.implode(' | ', $queries));
+	same('same-thing-2', cms_store::unique_slug('slugindexdata', 'Same thing', 0), 'a slug that starts like another is its own');
+	R::exec('CREATE TABLE slugoldindexdata (id INTEGER PRIMARY KEY '.(on_mysql() ? 'AUTO_INCREMENT' : 'AUTOINCREMENT').', title TEXT, slug TEXT)');
+	cms_store::forget();
+	same(true, cms_types::index_slug('slugoldindexdata'), 'a table made before has none');
+	same(false, cms_types::index_slug('slugoldindexdata'), 'and has it once made');
+});
+
+test('two page saves at once, each changing its own field, keep both changes', function () {
 	cms_store::connect();
 	cms_store::update_page('wavetwopage', '/wave-two', array('a' => 'a-0', 'b' => 'b-0'), array('a', 'b'));
 	$out = race_php('$field = $n ? "b" : "a"; for ($i = 1; $i <= 40; $i++) cms_store::update_page("wavetwopage", "/wave-two", array($field => "$field-$i"), array("a", "b"));', 2);
@@ -2154,6 +2235,7 @@ test('after a commit, content_changed comes once and its listeners see the new r
 	}
 });
 
-echo "\n\n$passed passed, ".count($failed)." failed\n";
+echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";
+foreach ($skipped as $skip) echo "  - $skip\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";
 exit($failed ? 1 : 0);

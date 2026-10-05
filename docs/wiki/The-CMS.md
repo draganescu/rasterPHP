@@ -17,7 +17,7 @@ A `print.cms.<name>` annotation declares a **page field**:
 - Values are stored **per page URL**: `headline` on `/about` and `headline` on `/team` are separate fields.
 - Values can contain HTML.
 - An empty value shows the template's default again.
-- Every save stores a new **revision** of the page, so nothing is lost. On SQLite, two people saving different fields at the same moment both keep their change. The editor shows the history and can bring back an older version.
+- Every save stores a new **revision** of the page, so nothing is lost. Two people saving different fields at the same moment both keep their change. The editor shows the history and can bring back an older version.
 
 A field with no default (`<!-- print.cms.subtitle /-->`) works, but `lint` warns about it: an empty field is invisible in the editor, so give it some starting text.
 
@@ -160,7 +160,7 @@ Items relate **by value**: two news items with the same `author` text are "by th
 
 ## Slugs
 
-Every item gets a **slug**, a readable id for its URL, made from its `title`, `headline` or `name` field (or else its first text field). Accents are turned into plain letters: *Café crème* becomes `cafe-creme`. If the slug is taken, `-2`, `-3` and so on are added; on SQLite that holds even for items saved at the same moment. Editors can change it in the item's details.
+Every item gets a **slug**, a readable id for its URL, made from its `title`, `headline` or `name` field (or else its first text field). Accents are turned into plain letters: *Café crème* becomes `cafe-creme`. If the slug is taken, `-2`, `-3` and so on are added, even for items saved at the same moment. Editors can change it in the item's details.
 
 ## Drafts and scheduled items
 

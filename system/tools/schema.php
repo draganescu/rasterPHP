@@ -64,8 +64,9 @@ class raster_schema {
 		foreach ($this->system_tables() as $name => $fields) {
 			$columns = cms_store::table_exists($name) ? cms_store::columns($name) : array();
 			$missing = array_values(array_diff(array_keys($fields), array_keys($columns)));
-			$system[] = array('table' => $name, 'exists' => (bool)$columns, 'missing' => $missing);
-			if ($missing && database::$frozen) $drift = true;
+			$narrow = $this->narrow($fields, $columns);
+			$system[] = array('table' => $name, 'exists' => (bool)$columns, 'missing' => $missing, 'narrow' => $narrow);
+			if (($missing || $narrow) && database::$frozen) $drift = true;
 		}
 
 		return array(
@@ -91,6 +92,23 @@ class raster_schema {
 			if (class_exists($model) && method_exists($model, 'schema')) $tables += $model::schema();
 		}
 		return $tables;
+	}
+
+	// Columns of a bundled or model-declared table that MySQL sized by the
+	// row 2.1.9 and earlier stored to make the table (varchar(191) for text,
+	// tinyint for a number), and that frozen would never grow: field => the
+	// type it should be. SQLite's columns take any length.
+	protected function narrow($fields, $columns) {
+		if (!$columns || R::getDatabaseAdapter()->getDatabase()->getDatabaseType() !== 'mysql') return array();
+		$narrow = array();
+		foreach ($fields as $field => $default) {
+			if (!isset($columns[$field])) continue;
+			$type = cms_types::of_default($default);
+			$declared = strtolower((string)$columns[$field]);
+			if ($type === 'text' && preg_match('/^(varchar|char|tinytext)\b/', $declared)) $narrow[$field] = 'text';
+			if ($type === 'int' && preg_match('/^(tinyint|smallint|mediumint)\b/', $declared)) $narrow[$field] = 'int';
+		}
+		return $narrow;
 	}
 
 	protected function compare($kind, $type, $fields, $meta) {
@@ -213,14 +231,23 @@ class raster_schema {
 				$bean->updated_at = R::isoDateTime();
 				R::store($bean);
 			}
-			// bundled model tables: a row with every column, then removed
+			// every table with slugs gets its index, new or made before 2.1.10
+			foreach ($status['tables'] as $table) {
+				if (!cms_store::table_exists($table['table']) || !array_key_exists('slug', cms_store::columns($table['table']))) continue;
+				if (cms_types::index_slug($table['table'])) $changes[] = "indexed {$table['table']}.slug";
+			}
+			// bundled and model-declared tables: each column declared as the
+			// type of its default (TEXT, INT), with no row written. A stored
+			// row would size MySQL's columns by its values (varchar(191),
+			// tinyint) and frozen, they'd never grow.
 			foreach ($status['system_tables'] as $table) {
+				foreach ($table['narrow'] as $field => $type) {
+					R::getDatabaseAdapter()->exec("ALTER TABLE `{$table['table']}` MODIFY `$field` ".cms_types::sql($type));
+					$changes[] = "widened {$table['table']}.$field to ".cms_types::sql($type);
+				}
+				if ($table['narrow']) cms_store::forget();
 				if (!$table['missing']) continue;
-				$fields = $this->system_tables()[$table['table']];
-				$bean = R::dispense($table['table']);
-				foreach ($fields as $name => $default) $bean->$name = $default;
-				R::store($bean);
-				R::trash($bean);
+				cms_types::ensure($table['table'], array_map(array('cms_types', 'of_default'), $this->system_tables()[$table['table']]));
 				$changes[] = $table['exists'] ? "added {$table['table']}.".implode(", {$table['table']}.", $table['missing']) : "created table {$table['table']}";
 			}
 		} finally {

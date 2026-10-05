@@ -3,14 +3,16 @@
 //
 // Drives the demo app (demo/) over HTTP, the command line, MCP and a fake
 // SMTP server. Every feature has an ID in demo/README.md; the run fails
-// when an ID there has no passing test here.
+// when an ID there has no passing test here. On MySQL:
+//   RASTER_DB=mysql://root@127.0.0.1:3306/raster php tests/demo.php
 
 if (PHP_SAPI !== 'cli') exit;
 
 $root = dirname(__DIR__);
+require __DIR__.'/db.php';
 $tmp = sys_get_temp_dir().'/raster-demo-'.getmypid();
 @mkdir($tmp, 0775, true);
-$db = "$tmp/cafe.sqlite";
+$db = test_db("$tmp/cafe.sqlite");
 $maildir = "$tmp/mail";
 putenv('RASTER_APP=demo');
 putenv("RASTER_DB=$db");
@@ -25,14 +27,18 @@ require_once BASE.'tools/schema.php';
 
 // ## Harness
 
-$passed = 0; $failed = array(); $covered = array();
+$passed = 0; $failed = array(); $skipped = array(); $covered = array();
 function test($ids, $name, $fn) {
-	global $passed, $failed, $covered;
+	global $passed, $failed, $skipped, $covered;
 	try {
 		$fn();
 		$passed++;
 		foreach ((array)$ids as $id) $covered[$id] = true;
 		echo ".";
+	} catch (test_skipped $e) {
+		$skipped[] = implode(',', (array)$ids)." $name: ".$e->getMessage();
+		foreach ((array)$ids as $id) $covered[$id] = true;
+		echo "s";
 	} catch (Throwable $e) {
 		$failed[] = implode(',', (array)$ids)." $name: ".$e->getMessage().' (line '.$e->getLine().')';
 		echo "F";
@@ -694,7 +700,7 @@ test('G17', 'accounts from older versions', function () use ($root, $db) {
 		.' $u = R::dispense("user"); $u->username = "oldtimer"; $u->email = ""; $u->password = md5("old password"); $u->role = "admin"; R::store($u);'
 		.' echo authentication::check_login("oldtimer", "old password") ? "ok " : "fail "; echo substr(R::findOne("user", " username = ? ", array("oldtimer"))->password, 0, 4);';
 	same('ok $2y$', shell_exec(escapeshellarg(PHP_BINARY).' -r '.escapeshellarg($code).' 2>&1'));
-	$legacy = sys_get_temp_dir().'/raster-legacy-'.getmypid().'.sqlite';
+	$legacy = test_db(sys_get_temp_dir().'/raster-legacy-'.getmypid().'.sqlite');
 	$code = 'require "'.$root.'/system/boot.php"; boot::$appname = "demo"; boot::cli(); database::instance();'
 		.' $o = R::dispense("usersdata"); $o->username = "admin"; $o->password = md5("admin pass"); R::store($o);'
 		.' authentication::connect(); echo authentication::check_login("admin", "admin pass") ? "migrated" : "no";';
@@ -1802,7 +1808,7 @@ test(array('L1', 'L2'), 'environments', function () use ($root) {
 	same('staging', shell_exec('RASTER_ENV=staging '.escapeshellarg(PHP_BINARY).' -r '.escapeshellarg($code)));
 });
 test(array('F3', 'F6', 'I5', 'L3', 'L4', 'L5', 'E13', 'J6'), 'production: frozen schema, trusted address, page cache', function () use ($root, $tmp, $maildir) {
-	$prod_db = "$tmp/prod.sqlite";
+	$prod_db = test_db("$tmp/prod.sqlite");
 	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => $prod_db, 'RASTER_URL' => 'https://cafe.example/');
 	same(1, raster(array('schema', '--check'), $env)[0], 'a new database differs from the templates');
 	list($code, $out) = raster(array('schema', '--apply'), $env);
@@ -1860,7 +1866,7 @@ test(array('F3', 'F6', 'I5', 'L3', 'L4', 'L5', 'E13', 'J6'), 'production: frozen
 });
 
 test(array('L7', 'L3'), 'page cache: skipped paths, time to live, turned off', function () use ($tmp, $maildir) {
-	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => "$tmp/prod.sqlite", 'RASTER_URL' => 'https://cafe.example/', 'RASTER_MAIL' => "log://$maildir");
+	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => test_db("$tmp/prod.sqlite"), 'RASTER_URL' => 'https://cafe.example/', 'RASTER_MAIL' => "log://$maildir");
 	$short = server(free_port(), array_merge($env, array('CAFE_CACHE_TTL' => '1')));
 	http('GET', "$short/lab");
 	same(null, header_value(http('GET', "$short/lab")[2], 'X-Raster-Cache'), 'page_cache_skip');
@@ -1876,7 +1882,7 @@ test(array('L7', 'L3'), 'page cache: skipped paths, time to live, turned off', f
 });
 
 test('L8', 'page cache: cleared by hand after editing files directly', function () use ($root, $tmp, $maildir) {
-	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => "$tmp/prod.sqlite", 'RASTER_URL' => 'https://cafe.example/', 'RASTER_MAIL' => "log://$maildir", 'RASTER_MCP_TOKEN' => 'demo-token');
+	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => test_db("$tmp/prod.sqlite"), 'RASTER_URL' => 'https://cafe.example/', 'RASTER_MAIL' => "log://$maildir", 'RASTER_MCP_TOKEN' => 'demo-token');
 	$prod = server(free_port(), $env);
 	$faq = "$root/demo/views/cafe/faq.html";
 	with_file($faq, str_replace('</body>', '<p>Edited by hand</p></body>', file_get_contents($faq)), function () use ($prod, $env) {
@@ -2346,13 +2352,13 @@ test(array('R7', 'R9', 'R10', 'R11'), 'hidden fields, lists, transactions and li
 });
 
 test(array('R12', 'R13'), 'schema --apply creates record tables in production; make model writes a model from a form', function () use ($tmp, $root) {
-	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => "$tmp/records-prod.sqlite");
+	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => test_db("$tmp/records-prod.sqlite"));
 	list($code, $out) = raster(array('schema', '--apply'), $env);
 	same(0, $code, $out);
 	has($out, 'created table reservationdata');
-	$pdo = new PDO("sqlite:$tmp/records-prod.sqlite");
+	$pdo = test_pdo($env['RASTER_DB']);
 	same(0, (int)$pdo->query('SELECT COUNT(*) FROM reservationdata')->fetchColumn(), 'no row left behind');
-	$columns = array_map(function ($c) { return $c['name']; }, $pdo->query('PRAGMA table_info(reservationdata)')->fetchAll(PDO::FETCH_ASSOC));
+	$columns = test_columns($pdo, 'reservationdata');
 	foreach (array('status', 'guests', 'owner', 'created_at', 'enabled', 'slug') as $column) check(in_array($column, $columns), "column $column");
 	list($code, $out) = raster(array('schema', '--check'), $env);
 	same(0, $code, $out);
@@ -2453,7 +2459,7 @@ test('T1', 'a template field is of its mock-up\'s type, a record field of its de
 	same(array('int', 'bool', 'date', 'text'), array($types['reservation']['guests'], $types['reservation']['newsletter'], $types['reservation']['date'], $types['reservation']['name']));
 	database::instance('cms');
 	cms_store::forget();
-	same(array('REAL', 'DATE', 'TIME', 'BOOLEAN'), array(cms_store::columns('menudata')['price'], cms_store::columns('eventsdata')['date'], cms_store::columns('eventsdata')['starts'], cms_store::columns('menudata')['enabled']), 'the columns are declared as their types');
+	same(on_mysql() ? array('DOUBLE', 'DATE', 'TIME', 'TINYINT(1)') : array('REAL', 'DATE', 'TIME', 'BOOLEAN'), array_map('strtoupper', array(cms_store::columns('menudata')['price'], cms_store::columns('eventsdata')['date'], cms_store::columns('eventsdata')['starts'], cms_store::columns('menudata')['enabled'])), 'the columns are declared as their types');
 	$overview = mcp($base, 'site_overview');
 	foreach ($overview['collections'] as $c) $listed[$c['name']] = isset($c['types']) ? $c['types'] : array();
 	same(array('price' => 'number', 'featured' => 'int'), $listed['menu'], 'only the fields that aren\'t text');
@@ -2586,7 +2592,7 @@ test('T6', 'schema --apply converts a column whose type changed when every value
 	with_file($view, $markup('5'), function () use ($base, $view, $markup) {
 		http('GET', "$base/zz-retype");
 		cms_store::forget();
-		same('INT', cms_store::columns('zzretypedata')['n']);
+		same('INT', strtoupper(cms_store::columns('zzretypedata')['n']));
 		file_put_contents($view, $markup('five'));
 		list(, $out) = raster(array('schema'));
 		has($out, 'n (int in the database, text in the templates; --apply converts it)');
@@ -2596,10 +2602,19 @@ test('T6', 'schema --apply converts a column whose type changed when every value
 		list(, $out) = raster(array('schema', '--apply'));
 		has($out, 'kept zzretypedata.n as text: "lots" can\'t be int; change them and run --apply again');
 		cms_store::forget();
-		same('TEXT', cms_store::columns('zzretypedata')['n']);
-		// a column SQLite won't drop (it has an index) stays as it was, with
-		// nothing half done
-		mcp($base, 'delete_item', array('collection' => 'zzretype', 'id' => $lots['id']));
+		same('TEXT', strtoupper(cms_store::columns('zzretypedata')['n']));
+	});
+	raster(array('schema', '--drop=zzretypedata', '--force'));
+});
+test('T6', 'schema --apply leaves a column SQLite won\'t drop as it was, with nothing half done', function () use ($base) {
+	sqlite_only('SQLite refuses to drop a column with an index; MySQL drops it, and its TEXT columns take no plain index');
+	$view = dirname(__DIR__).'/demo/views/cafe/zz-retype.html';
+	$markup = function ($mock) { return "<!-- render.cms.zzretype --><p><!-- print.n -->$mock<!-- /print.n --></p><!-- /render.cms.zzretype -->"; };
+	with_file($view, $markup('five'), function () use ($base, $view, $markup) {
+		http('GET', "$base/zz-retype");
+		// every value would fit an int: only the index is in the way
+		R::exec('DELETE FROM zzretypedata');
+		file_put_contents($view, $markup('5'));
 		R::exec('CREATE INDEX zz_n ON zzretypedata (n)');
 		has(raster(array('schema', '--apply'))[1], 'kept zzretypedata.n as it was:');
 		cms_store::forget();
@@ -2612,7 +2627,7 @@ test('T6', 'schema --apply converts a column whose type changed when every value
 // ## 2.1.8 batch A: page cache
 
 test(array('L9', 'L10'), 'page cache: made-up list URLs are not kept, a change deletes old pages, tracking links are hits', function () use ($root, $tmp, $maildir) {
-	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => "$tmp/prod.sqlite", 'RASTER_URL' => 'https://cafe.example/', 'RASTER_MAIL' => "log://$maildir", 'RASTER_MCP_TOKEN' => 'demo-token');
+	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => test_db("$tmp/prod.sqlite"), 'RASTER_URL' => 'https://cafe.example/', 'RASTER_MAIL' => "log://$maildir", 'RASTER_MCP_TOKEN' => 'demo-token');
 	$prod = server(free_port(), $env);
 	$cache = function ($path) use ($prod) {
 		list($status, , $headers) = http('GET', "$prod$path");
@@ -2705,7 +2720,7 @@ test('C51', 'cms offers over /api only what its api() lists: the editor endpoint
 });
 
 test('C50', '/api errors answer JSON: 500 logged with the URL, 503 when the database is down, 400 for missing arguments; development adds the trace', function () use ($base, $root, $tmp, $maildir) {
-	$prod_db = "$tmp/b-prod.sqlite";
+	$prod_db = test_db("$tmp/b-prod.sqlite");
 	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => $prod_db, 'RASTER_URL' => 'https://cafe.example/');
 	raster(array('schema', '--apply'), $env);
 	$prod = server(free_port(), array_merge($env, array('RASTER_MAIL' => "log://$maildir")));
@@ -2742,11 +2757,11 @@ test('C50', '/api errors answer JSON: 500 logged with the URL, 503 when the data
 });
 
 test('L11', 'a database that can\'t be reached answers 503 outside development, with error_document_503, logged and never cached', function () use ($tmp, $maildir) {
-	$prod_db = "$tmp/b-prod.sqlite";
-	$down = "$tmp/b-down.sqlite";
+	$prod_db = test_db("$tmp/b-prod.sqlite");
+	$down = test_db("$tmp/b-down.sqlite");
 	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => $prod_db, 'RASTER_URL' => 'https://cafe.example/');
 	raster(array('schema', '--apply'), $env);
-	file_put_contents($down, str_repeat('not a database ', 200));
+	test_db_break($down);
 	// no RASTER_URL: this server's own address keeps its pages apart in the cache
 	$prod = server(free_port(), array('RASTER_ENV' => 'production', 'RASTER_DB' => $down, 'RASTER_MAIL' => "log://$maildir"));
 	foreach (array(1, 2) as $time) {
@@ -2764,13 +2779,13 @@ test('L11', 'a database that can\'t be reached answers 503 outside development, 
 	same('{"error":"database unavailable"}', $body);
 	has(file_get_contents("$tmp/php-errors.log"), 'Raster error: the database can\'t be reached');
 	// back up: the real menu at once, nothing stale in the cache
-	copy($prod_db, $down);
+	test_db_copy($prod_db, "$tmp/b-down.sqlite");
 	list($status, $body, $headers) = http('GET', "$prod/menu");
 	same(200, $status);
 	same('miss', header_value($headers, 'X-Raster-Cache'));
 	lacks($body, '<!-- print.');
 	// raster render answers the same, and exits 1
-	file_put_contents($down, str_repeat('not a database ', 200));
+	test_db_break($down);
 	list($code, $out) = raster(array('render', '/menu'), array_merge($env, array('RASTER_DB' => $down)));
 	same(1, $code);
 	has($out, 'HTTP 503');
@@ -2818,7 +2833,7 @@ test('T7', 'a time prints 19:00 whatever the database gives back; lists hide dra
 		mcp($base, 'delete_item', array('collection' => 'events', 'id' => $show['id']));
 	}
 	// a table made before 2.1.7 keeps a text published_at, empty for "now"
-	R::exec('CREATE TABLE zzolddata (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, slug TEXT, enabled TEXT, published_at TEXT, updated_at TEXT)');
+	R::exec('CREATE TABLE zzolddata (id INTEGER PRIMARY KEY '.(on_mysql() ? 'AUTO_INCREMENT' : 'AUTOINCREMENT').', title TEXT, slug TEXT, enabled TEXT, published_at TEXT, updated_at TEXT)');
 	try {
 		foreach (array('Empty' => '', 'Past' => date('Y-m-d H:i:s', time() - 86400), 'Future' => '2099-01-01 10:00:00') as $title => $published) {
 			R::exec('INSERT INTO zzolddata (title, slug, enabled, published_at, updated_at) VALUES (?, ?, ?, ?, ?)', array($title, strtolower($title), '1', $published, '2026-01-01 10:00:00'));
@@ -3176,7 +3191,7 @@ function mcp_at_once($bases, $calls) {
 	return $answers;
 }
 
-test('E33', 'items saved at once with one title each get their own slug and page, and page saves at once keep each other\'s fields (on SQLite, #77)', function () use ($base, $db, $maildir) {
+test('E33', 'items saved at once with one title each get their own slug and page, and page saves at once keep each other\'s fields (#77)', function () use ($base, $db, $maildir) {
 	$second = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'RASTER_MCP_TOKEN' => 'demo-token'));
 	$about = mcp($base, 'get_page', array('page' => '/about'))['fields'];
 	$ids = array();
@@ -3214,7 +3229,7 @@ test('E33', 'items saved at once with one title each get their own slug and page
 $changed_seen = array();
 function demo_content_changed() {
 	global $changed_seen, $db;
-	$other = new PDO("sqlite:$db");
+	$other = test_pdo($db);
 	$changed_seen[] = (int)$other->query('SELECT COUNT(*) FROM journaldata')->fetchColumn();
 }
 test('L12', 'content_changed and the page cache wait for the commit: a rolled back write leaves cached pages and sends nothing, a committed one clears them once (#81)', function () use ($db, $maildir) {
@@ -3270,7 +3285,8 @@ preg_match_all('/^\| ([A-Z]\d+) \|/m', $readme, $ids);
 $missing = array_diff($ids[1], array_keys($covered));
 $unknown = array_diff(array_keys($covered), $ids[1]);
 if ($unknown) $failed[] = 'tests name features that demo/README.md does not list: '.implode(', ', $unknown);
-echo "\n\n$passed passed, ".count($failed)." failed; ".(count($ids[1]) - count($missing))."/".count($ids[1])." features covered\n";
+echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."; ".(count($ids[1]) - count($missing))."/".count($ids[1])." features covered\n";
+foreach ($skipped as $skip) echo "  - $skip\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";
 if ($missing) echo "  Not covered: ".implode(', ', $missing)."\n";
 exit($failed || $missing ? 1 : 0);

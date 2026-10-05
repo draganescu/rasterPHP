@@ -3,6 +3,42 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.1.10
+
+MySQL catches up with SQLite. On a MySQL site, run
+`RASTER_ENV=production php bin/raster schema --apply` once after updating:
+it widens the columns earlier versions made too small and adds the slug
+indexes. On SQLite, run it once too, for the indexes.
+
+- **Transactions lock on MySQL too.** `cms_records::transaction()` takes a
+  named lock per database before it starts, and lets go when it ends, as
+  SQLite's lock does. So on MySQL as on SQLite, two checkouts at once
+  can't both take the last item, two sign-ups with one email make one
+  account, sign-ups at once leave one subscriber, items saved at once get
+  their own slugs, and two editors saving one page both keep their
+  change. A write that waits more than 5 seconds for the lock fails with
+  "database is locked". (#78, #77, #83)
+- **Tables your models declare get real column types.** `schema --apply`
+  declares each column of a `schema()` table, and of the accounts and
+  newsletter tables, as the type of its default (`''` TEXT, `0` INT),
+  without storing and deleting a row. On MySQL those columns used to be
+  sized by that row (`varchar(191)`, `tinyint`), so in production a long
+  message or 300 guests gave a 500. Columns made that way by an earlier
+  version are widened by `schema --apply`, and `schema --check` reports
+  them until then. (#79)
+- **Password reset works on MySQL in development.** Finishing a reset
+  failed once development had made the expiry column a date. (#154)
+- **Slugs are indexed.** Every table with slugs gets an index on them, so
+  opening an item stays quick in a big collection, and a new item finds
+  its free slug in one query, however many items share its title. Tables
+  made before get the index from `schema --apply`. (#129)
+- **The tests run on MySQL.** `RASTER_DB=mysql://user:password@host/name`
+  points a site, or a test suite, at a MySQL database (write the password
+  as `rawurlencode()` does). Each suite then makes its own empty databases
+  beside that one and drops them at the end; tests that only mean
+  something on SQLite are counted as skipped. CI runs the suites on
+  MySQL 8.4, and a release waits for them. (#113)
+
 ## 2.1.9
 
 Nothing to do on a site: `php bin/raster update` brings the change.

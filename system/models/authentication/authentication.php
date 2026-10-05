@@ -90,7 +90,7 @@ class authentication
 
 	// The password is hashed first, since that is slow. Looking for the
 	// account and storing it then happen in one transaction, so two at once
-	// can't both find nothing and both make one (on SQLite).
+	// can't both find nothing and both make one.
 	protected static function store_user($login, $password, $role, $name, $create_only) {
 		self::connect();
 		if ($role !== null && !isset(self::$roles[$role])) throw new InvalidArgumentException("Role must be one of: ".implode(', ', array_keys(self::$roles)));
@@ -401,7 +401,8 @@ class authentication
 		}
 		$user->password = password_hash($password, PASSWORD_DEFAULT);
 		$user->reset_hash = '';
-		$user->reset_expires = '';
+		// null, not '': in development MySQL has made the column a DATETIME
+		$user->reset_expires = null;
 		$user->failed_count = 0;
 		R::store($user);
 		self::log_in($user->id);
@@ -440,7 +441,7 @@ class authentication
 		}
 		if (util::post('name') !== false) $bean->name = trim((string)util::post('name'));
 		// the email is looked for again with the store, so two members can't
-		// both take one (on SQLite)
+		// both take one
 		$saved = cms_records::transaction(function () use ($bean, $email, $new_email) {
 			if ($new_email) {
 				$taken = self::find($email);

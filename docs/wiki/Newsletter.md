@@ -23,7 +23,7 @@ Emails go out through the `mail` model, so set up [Sending email](Sending-Email)
 - With double opt-in (the default), the visitor gets the email `_email/newsletter_confirm.html`, which must contain the confirmation link `<!-- print.self.confirm_url /-->`. They are subscribed only after clicking it. The alert is `check_email`.
 - Someone who's already subscribed sees the same `check_email` answer, so the form can't reveal who is on the list.
 - Someone who signs up again before confirming gets the same link again, so whichever email they open, the link works.
-- On SQLite, the same address sent twice at once (a double click) is stored once.
+- The same address sent twice at once (a double click) is stored once.
 - Also possible: `email_invalid`.
 
 The starter site puts this form in the footer of `_layout.html`.
