@@ -90,7 +90,7 @@ Templates pass literal values only (numbers, strings, `true`, `false`, `null`). 
 | `util::done('saved')` | redirects back to the same page with `?done=saved`, so reloading doesn't post twice, and shows the `alert('saved')` block. Stops the request. |
 | `util::done('saved', '/thanks')` | the same, to another address |
 | `util::redirect('account')` | redirects to a path on the site and stops |
-| `util::content_changed()` | tells Raster that content changed, so the page cache is thrown away. Call it after your model writes data visitors see. |
+| `util::content_changed()` | tells Raster that content changed, so the page cache is thrown away. Call it after your model writes data visitors see. Inside `cms_records::transaction()` it waits for the commit, and is dropped if the transaction is rolled back. |
 
 ### Settings and the template
 
