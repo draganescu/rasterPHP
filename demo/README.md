@@ -194,6 +194,7 @@ php tests/demo.php                        # the whole matrix
 | G21 | `raster user` defaults for a new account: admin, random password |
 | G22 | `raster user` on an existing account keeps the role and password it isn't given |
 | G23 | once a lock runs out, wrong passwords are counted from zero |
+| G24 | two sign-ups or email changes at once with one email: one account gets it, the other is told it is taken (on SQLite) |
 | H1 | newsletter sign up sends a confirmation |
 | H2 | the same answer for people already subscribed |
 | H3 | confirm |

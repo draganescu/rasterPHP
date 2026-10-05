@@ -329,12 +329,12 @@ class cms_records {
 		self::$changed = false;
 		try {
 			$result = $work();
-			$sqlite ? $pdo->exec('COMMIT') : $pdo->commit();
+			self::finish($pdo, $sqlite, 'COMMIT');
 		} catch (Throwable $e) {
 			self::$depth = 0;
 			self::$queued = array();
 			self::$changed = false;
-			$sqlite ? $pdo->exec('ROLLBACK') : $pdo->rollBack();
+			self::finish($pdo, $sqlite, 'ROLLBACK');
 			throw $e;
 		}
 		self::$depth = 0;
@@ -345,6 +345,15 @@ class cms_records {
 		if ($changed) util::content_changed();
 		foreach ($queued as $event) event::dispatch($event[0], $event[1]);
 		return $result;
+	}
+
+	// MySQL commits by itself when the work changes the schema (a new table
+	// or column in development), and then there is nothing left to commit or
+	// roll back. SQLite changes its schema inside the transaction.
+	protected static function finish($pdo, $sqlite, $how) {
+		if ($sqlite) return $pdo->exec($how);
+		if (!$pdo->inTransaction()) return;
+		$how === 'COMMIT' ? $pdo->commit() : $pdo->rollBack();
 	}
 
 	// what the store calls instead of event::dispatch

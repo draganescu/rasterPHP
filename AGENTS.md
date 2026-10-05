@@ -660,7 +660,9 @@ class reservation {
   markup collection's item and every page save: on SQLite two items saved
   at once with one title get different slugs, and two page saves at once
   (one field each) keep each other's change. A transaction started inside
-  another joins it.
+  another joins it. On MySQL a write that adds a table or column
+  (development) commits what came before it, as MySQL does on any schema
+  change.
 - **Starting from a form:** `php bin/raster make model inquiry --from=contact.html`
   writes `models/inquiry/inquiry.php` with the type (fields from the form's
   inputs, passwords left out), an empty `check()` and the handler.
@@ -705,6 +707,14 @@ class reservation {
   `password_min_length` (8).
 - Five wrong passwords lock an account for 15 minutes. Once 15 minutes have
   passed since the last wrong one, counting starts again from zero.
+- One email, one account: two sign-ups at once with one email (a double
+  click) make one account, and the other answers `email_taken`; so do two
+  members changing to one email at once, or a member changing to the email
+  someone is signing up with. On SQLite, looking for the email
+  and storing the account happen in one transaction. From code,
+  `authentication::create_user($login, $password, $role, $name)` makes an
+  account, or returns null when the login is taken; `save_user(…)` creates
+  or updates.
 - Command line: `php bin/raster user <email|name> [--role=…] [--password=…]`
   and `php bin/raster users`. A new account is an admin with a random
   password unless the options say otherwise; an existing one keeps the role
