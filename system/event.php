@@ -19,8 +19,10 @@
 //
 //   event::bind('reservation.booked')->to('cafe', 'subscribe_guest');
 //
-// Listeners run in the order they were bound: config/the_events.php first,
-// then models' listens(), then the framework's own ("core") bindings. Each
+// Listeners run in the order they were bound: the framework's own bindings
+// in system/config/events.php first, then config/the_events.php, then
+// models' listens(), then the framework's core() bindings (controller, log),
+// which always run last. Each
 // gets the payload array. A listener that returns false makes dispatch()
 // return false; the code that dispatched decides what that means (for
 // loading_model_<name> it stops the model from loading).

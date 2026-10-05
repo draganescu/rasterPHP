@@ -3042,6 +3042,216 @@ test('C53', 'a print inside a render block fills every row of a long list: 1,500
 	}
 });
 
+// ## 2.1.8 wave 2: sign-up, account email change
+
+// posts each request at the same moment and answers [code, body, location] for each
+function posts_at_once($requests) {
+	$multi = curl_multi_init();
+	$handles = array();
+	foreach ($requests as $r) {
+		$handle = curl_init($r[0]);
+		curl_setopt_array($handle, array(CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true, CURLOPT_HEADER => true, CURLOPT_TIMEOUT => 30,
+			CURLOPT_HTTPHEADER => isset($r[2]) ? array('Cookie: '.$r[2]) : array(), CURLOPT_POSTFIELDS => http_build_query($r[1])));
+		curl_multi_add_handle($multi, $handle);
+		$handles[] = $handle;
+	}
+	do { curl_multi_exec($multi, $running); curl_multi_select($multi, 0.05); } while ($running);
+	$answers = array();
+	foreach ($handles as $handle) {
+		$raw = curl_multi_getcontent($handle);
+		$size = curl_getinfo($handle, CURLINFO_HEADER_SIZE);
+		$location = preg_match('/^Location:\s*(\S+)/mi', substr($raw, 0, $size), $m) ? $m[1] : null;
+		$answers[] = array(curl_getinfo($handle, CURLINFO_HTTP_CODE), substr($raw, $size), $location);
+		curl_multi_remove_handle($multi, $handle);
+	}
+	curl_multi_close($multi);
+	return $answers;
+}
+
+test('G24', 'two sign-ups at once with one email make one account (#77)', function () use ($base, $db, $maildir) {
+	cms_store::connect();
+	// a second server on the same database, so the two posts really overlap
+	$other = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir"));
+	for ($round = 1; $round <= 3; $round++) {
+		$email = "twice$round@example.com";
+		$form = array('raster_form' => 'authentication.register', 'email' => $email, 'password' => 'long password', 'password_again' => 'long password');
+		$answers = posts_at_once(array(array("$base/register", $form + array('name' => 'First')), array("$other/register", $form + array('name' => 'Second'))));
+		usort($answers, function ($a, $b) { return $a[0] - $b[0]; });
+		same(1, (int)R::count('user', ' LOWER(email) = ? ', array($email)), "round $round: accounts with $email");
+		same(array(200, 303), array($answers[0][0], $answers[1][0]), "round $round: one sign-up wins");
+		has($answers[0][1], 'There is already an account with that email.', "round $round: the other is told");
+		has($answers[1][2], '?done=registered', "round $round");
+		$winner = R::findOne('user', ' LOWER(email) = ? ', array($email));
+		check(password_verify('long password', $winner->password), "round $round: the account keeps its password");
+	}
+});
+test('G24', 'two members changing to one email at once: one gets it (#77)', function () use ($base, $db, $maildir) {
+	cms_store::connect();
+	$other = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir"));
+	for ($round = 1; $round <= 2; $round++) {
+		$wanted = "shared$round@example.com";
+		$requests = array();
+		foreach (array(array('a', $base), array('b', $other)) as $who) {
+			$email = "mover{$who[0]}$round@example.com";
+			same(0, raster(array('user', $email, '--role=member', '--password=old password'))[0]);
+			$cookie = login($who[1], $email, 'old password');
+			$token = token_in(http('GET', "$who[1]/account", null, array("Cookie: $cookie"))[1]);
+			// a new password too, so each save hashes one, as a member changing both would
+			$requests[] = array("$who[1]/account", array('raster_form' => 'authentication.account', 'name' => 'Mover', 'email' => $wanted, 'password' => 'new password', 'current_password' => 'old password', 'csrf' => $token), $cookie);
+		}
+		$answers = posts_at_once($requests);
+		usort($answers, function ($a, $b) { return $a[0] - $b[0]; });
+		same(1, (int)R::count('user', ' LOWER(email) = ? ', array($wanted)), "round $round: accounts with $wanted");
+		same(array(200, 303), array($answers[0][0], $answers[1][0]), "round $round: one change wins");
+		has($answers[0][1], 'Another account uses that email.', "round $round: the other is told");
+	}
+});
+test('G24', 'a member changing to an email while someone signs up with it, in other letters: one account has it (#77)', function () use ($base, $db, $maildir) {
+	cms_store::connect();
+	$other = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir"));
+	for ($round = 1; $round <= 3; $round++) {
+		$wanted = "contested$round@example.com";
+		$member = "changer$round@example.com";
+		same(0, raster(array('user', $member, '--role=member', '--password=old password'))[0]);
+		$cookie = login($base, $member, 'old password');
+		$token = token_in(http('GET', "$base/account", null, array("Cookie: $cookie"))[1]);
+		$change = array('raster_form' => 'authentication.account', 'name' => 'Changer', 'email' => $wanted, 'password' => 'new password', 'current_password' => 'old password', 'csrf' => $token);
+		$signup = array('raster_form' => 'authentication.register', 'name' => 'Newcomer', 'email' => strtoupper($wanted), 'password' => 'long password', 'password_again' => 'long password');
+		$answers = posts_at_once(array(array("$base/account", $change, $cookie), array("$other/register", $signup)));
+		same(1, (int)R::count('user', ' LOWER(email) = ? ', array($wanted)), "round $round: accounts with $wanted");
+		$codes = array($answers[0][0], $answers[1][0]);
+		sort($codes);
+		same(array(200, 303), $codes, "round $round: one wins");
+		$loser = $answers[0][0] === 200 ? $answers[0][1] : $answers[1][1];
+		check(strpos($loser, 'Another account uses that email.') !== false || strpos($loser, 'There is already an account with that email.') !== false, "round $round: the other is told");
+	}
+});
+
+// ## 2.1.8 wave 2: newsletter sign-ups
+
+test('H13', 'signing up twice: one subscriber, the same link again, mailed by a listener', function () use ($base) {
+	$before = count(mails());
+	foreach (array('Again@example.com', 'again@example.com ') as $email) {
+		same("$base/journal?done=check_email", header_value(http('POST', "$base/journal", array('raster_form' => 'newsletter.signup', 'email' => $email))[2], 'Location'));
+	}
+	database::instance('cms');
+	same(1, (int)R::getCell('SELECT COUNT(*) FROM subscriber WHERE email = ?', array('again@example.com')), 'subscribers:');
+	$sent = array_slice(mails(), $before);
+	same(array('again@example.com', 'again@example.com'), array_column($sent, 'to'));
+	$links = array();
+	foreach ($sent as $mail) $links[] = preg_match('/token=([a-f0-9]{40})/', $mail['text'], $t) ? $t[1] : '';
+	same(array_fill(0, 2, R::getCell('SELECT token FROM subscriber WHERE email = ?', array('again@example.com'))), $links, 'both mails carry the link that works:');
+	has(http('GET', "$base/letters/confirm?token={$links[0]}")[1], '<h1>You are subscribed</h1>');
+	same(array('newsletter.confirmation_mail'), mcp($base, 'site_overview')['events']['newsletter.subscribed'], 'who sends the confirmation:');
+});
+
+// ## 2.1.8 wave 2: content saves and the cache bump
+
+// MCP calls sent all at once, spread over $bases (each its own server on the
+// demo's database, as two PHP workers are); the answers in the same order
+function mcp_at_once($bases, $calls) {
+	$multi = curl_multi_init();
+	$handles = array();
+	foreach ($calls as $i => $call) {
+		$handle = curl_init($bases[$i % count($bases)].'/mcp');
+		curl_setopt_array($handle, array(CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_HTTPHEADER => array('Authorization: Bearer demo-token', 'Content-Type: application/json'),
+			CURLOPT_POSTFIELDS => json_encode(array('jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => array('name' => $call[0], 'arguments' => $call[1])))));
+		curl_multi_add_handle($multi, $handle);
+		$handles[] = $handle;
+	}
+	do { curl_multi_exec($multi, $running); curl_multi_select($multi, 0.05); } while ($running);
+	$answers = array();
+	foreach ($handles as $handle) {
+		$answer = json_decode(curl_multi_getcontent($handle), true);
+		if (!isset($answer['result']) || !empty($answer['result']['isError'])) throw new Exception('mcp: '.curl_multi_getcontent($handle));
+		$answers[] = $answer['result']['structuredContent'];
+		curl_multi_remove_handle($multi, $handle);
+	}
+	curl_multi_close($multi);
+	return $answers;
+}
+
+test('E33', 'items saved at once with one title each get their own slug and page, and page saves at once keep each other\'s fields (on SQLite, #77)', function () use ($base, $db, $maildir) {
+	$second = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'RASTER_MCP_TOKEN' => 'demo-token'));
+	$about = mcp($base, 'get_page', array('page' => '/about'))['fields'];
+	$ids = array();
+	try {
+		$slugs = array();
+		for ($round = 0; $round < 4; $round++) {
+			$calls = array();
+			for ($i = 0; $i < 4; $i++) $calls[] = array('create_item', array('collection' => 'journal', 'fields' => array('title' => 'Harvest supper', 'author' => 'Ana', 'summary' => "<p>Round $round, editor $i</p>")));
+			foreach (mcp_at_once(array($base, $second), $calls) as $item) {
+				$ids[] = $item['id'];
+				$slugs[] = $item['slug'];
+			}
+		}
+		same(16, count(array_unique($slugs)), 'distinct slugs of 16:');
+		foreach (array_slice($slugs, -4) as $slug) {
+			list($status, $body) = http('GET', "$base/journal/journal_item/$slug");
+			same(200, $status);
+			same(1, substr_count($body, '<article'), "/journal/journal_item/$slug shows one article:");
+		}
+		// two editors on one page, one field each
+		for ($round = 1; $round <= 4; $round++) {
+			mcp_at_once(array($base, $second), array(
+				array('update_page', array('page' => '/about', 'fields' => array('heading' => "Heading $round"))),
+				array('update_page', array('page' => '/about', 'fields' => array('body' => "<p>Body $round</p>"))),
+			));
+			$fields = mcp($base, 'get_page', array('page' => '/about'))['fields'];
+			same(array("Heading $round", "<p>Body $round</p>"), array($fields['heading'], $fields['body']), "round $round:");
+		}
+	} finally {
+		foreach ($ids as $id) mcp($base, 'delete_item', array('collection' => 'journal', 'id' => $id));
+		mcp($base, 'update_page', array('page' => '/about', 'fields' => array('heading' => $about['heading'], 'body' => $about['body'])));
+	}
+});
+
+$changed_seen = array();
+function demo_content_changed() {
+	global $changed_seen, $db;
+	$other = new PDO("sqlite:$db");
+	$changed_seen[] = (int)$other->query('SELECT COUNT(*) FROM journaldata')->fetchColumn();
+}
+test('L12', 'content_changed and the page cache wait for the commit: a rolled back write leaves cached pages and sends nothing, a committed one clears them once (#81)', function () use ($db, $maildir) {
+	global $changed_seen;
+	$cached = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'CAFE_PAGE_CACHE' => 'on'));
+	http('GET', "$cached/journal");
+	same('hit', header_value(http('GET', "$cached/journal")[2], 'X-Raster-Cache'));
+	cms_store::connect();
+	$changed_seen = array();
+	event::bind('content_changed')->to(null, 'demo_content_changed');
+	$kept = array();
+	try {
+		$rows = R::count('journaldata');
+		try {
+			cms_records::transaction(function () {
+				cms_store::save_item('journaldata', 0, array('title' => 'Never printed', 'author' => 'Ana'), array('title', 'author'));
+				cms_records::create('reservation', array('name' => 'Rolled back', 'date' => '2026-12-24', 'guests' => 2));
+				cms_records::refuse('changed_my_mind');
+			});
+			check(false, 'refused');
+		} catch (cms_refused $e) {
+			same(array('changed_my_mind'), $e->problems);
+		}
+		same(array(), $changed_seen, 'content_changed after a rollback:');
+		list(, $body, $headers) = http('GET', "$cached/journal");
+		same('hit', header_value($headers, 'X-Raster-Cache'), 'the cached page stays');
+		lacks($body, 'Never printed');
+		cms_records::transaction(function () use (&$kept) {
+			$kept[] = cms_store::save_item('journaldata', 0, array('title' => 'Printed after the commit', 'author' => 'Ana'), array('title', 'author'))['id'];
+			$kept[] = cms_store::save_item('journaldata', 0, array('title' => 'Printed too', 'author' => 'Ana'), array('title', 'author'))['id'];
+		});
+		same(array($rows + 2), $changed_seen, 'content_changed once, its listener seeing the rows:');
+		list(, $body, $headers) = http('GET', "$cached/journal");
+		same('miss', header_value($headers, 'X-Raster-Cache'));
+		has($body, 'Printed after the commit');
+	} finally {
+		event::unbind('content_changed')->from(null, 'demo_content_changed');
+		foreach ($kept as $id) cms_store::delete_item('journaldata', $id);
+	}
+});
+
 // ## No PHP warnings, notices or deprecations on any request
 
 $log = is_file("$tmp/php-errors.log") ? file_get_contents("$tmp/php-errors.log") : '';

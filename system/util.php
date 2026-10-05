@@ -76,9 +76,15 @@ class util {
 		return (bool)config::get('trusted_url') || config::get('environment') === 'development' || PHP_SAPI === 'cli';
 	}
 
-	// call after changing content so cached pages are rebuilt
+	// call after changing content so cached pages are rebuilt. Inside
+	// cms_records::transaction() it waits for the commit, and comes once
+	// however many writes there were; after a rollback it doesn't come
 	static function content_changed()
 	{
+		if (class_exists('cms_records', false) && cms_records::$depth > 0) {
+			cms_records::$changed = true;
+			return;
+		}
 		raster_cache::bump();
 		event::dispatch('content_changed');
 	}

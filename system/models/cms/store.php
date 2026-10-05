@@ -268,6 +268,15 @@ class cms_store {
 				throw new InvalidArgumentException("Unknown field '$field'. Fields come from the templates; known fields: ".implode(', ', $allowed));
 			}
 		}
+		// the newest revision is read and the next one stored together, so
+		// two saves at once (one field each) never lose one of them (on SQLite,
+		// which locks the database for the transaction)
+		return cms_records::transaction(function () use ($type, $slug, $values) {
+			return cms_store::store_page($type, $slug, $values);
+		});
+	}
+
+	static function store_page($type, $slug, $values) {
 		$latest = self::latest($type);
 		if ($latest) {
 			$page = R::duplicate($latest);
@@ -334,10 +343,10 @@ class cms_store {
 	// model's check() first.
 	static function save_item($type, $id, $values, $allowed, $who = 'editor') {
 		$info = cms_records::for_table($type);
-		if (!$info) return self::store_item($type, $id, $values, $allowed, $who, null);
-		cms_records::ensure($info);
-		// the check and the write happen together, so two bookings can't both
-		// take the last seats
+		if ($info) cms_records::ensure($info);
+		// the checks and the write happen together, so two bookings can't
+		// both take the last seats, and two items with one title can't both
+		// take its slug (on SQLite)
 		return cms_records::transaction(function () use ($type, $id, $values, $allowed, $who, $info) {
 			return cms_store::store_item($type, $id, $values, $allowed, $who, $info);
 		});
@@ -413,11 +422,7 @@ class cms_store {
 	}
 
 	static function delete_item($type, $id) {
-		$info = cms_records::for_table($type);
-		if ($info) {
-			return cms_records::transaction(function () use ($type, $id) { return cms_store::remove_item($type, $id); });
-		}
-		return self::remove_item($type, $id);
+		return cms_records::transaction(function () use ($type, $id) { return cms_store::remove_item($type, $id); });
 	}
 
 	static function remove_item($type, $id) {

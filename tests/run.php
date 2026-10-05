@@ -1857,6 +1857,280 @@ test('a print in each of 2,000 rows fills every row, each copy decided on its ow
 	check($took < 2, "rendered in {$took}s");
 });
 
+// ## 2.1.8 wave 2: sign-up, account email change
+
+test('create_user never changes an account that has the login; save_user still does (#77)', function () {
+	authentication::connect();
+	$id = authentication::create_user('only-once@example.test', 'first password', 'member', 'First');
+	check($id > 0, 'a new account');
+	same(null, authentication::create_user('ONLY-ONCE@example.test', 'second password', 'admin', 'Second'), 'the same email, in other letters');
+	$user = R::load('user', $id);
+	same(array('member', 'First'), array((string)$user->role, (string)$user->name), 'nothing changed');
+	check(password_verify('first password', $user->password), 'the password is kept');
+	same(1, (int)R::count('user', ' LOWER(email) = ? ', array('only-once@example.test')));
+	same($id, authentication::save_user('only-once@example.test', 'second password', null), 'raster user updates it');
+	check(password_verify('second password', R::load('user', $id)->password));
+	same('member', (string)R::load('user', $id)->role, 'and keeps the role it is not given');
+});
+test('a transaction ends quietly when MySQL already committed it, as it does on a new table (#77)', function () {
+	$finish = new ReflectionMethod('cms_records', 'finish');
+	$finish->setAccessible(true);
+	// a driver that isn't SQLite, after its implicit commit: nothing is open
+	$pdo = new PDO('sqlite::memory:', null, null, array(PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION));
+	$pdo->exec('CREATE TABLE t (n INTEGER)');
+	$pdo->beginTransaction();
+	$pdo->exec('INSERT INTO t VALUES (1)');
+	$pdo->commit();
+	$finish->invoke(null, $pdo, false, 'COMMIT');
+	$finish->invoke(null, $pdo, false, 'ROLLBACK');
+	// one still open is committed, or rolled back
+	$pdo->beginTransaction();
+	$pdo->exec('INSERT INTO t VALUES (2)');
+	$finish->invoke(null, $pdo, false, 'COMMIT');
+	$pdo->beginTransaction();
+	$pdo->exec('INSERT INTO t VALUES (3)');
+	$finish->invoke(null, $pdo, false, 'ROLLBACK');
+	same(false, $pdo->inTransaction());
+	same(array('1', '2'), array_map('strval', $pdo->query('SELECT n FROM t ORDER BY n')->fetchAll(PDO::FETCH_COLUMN)));
+});
+
+// ## 2.1.8 wave 2: newsletter sign-ups
+
+// the confirmation mails logged in $dir: address => the tokens their links carry
+function confirmation_links($dir) {
+	$links = array();
+	foreach (glob("$dir/*.eml") ?: array() as $file) {
+		$raw = file_get_contents($file);
+		if (!preg_match('/^To: (.*)$/m', $raw, $to)) continue;
+		$text = preg_match('/Content-Type: text\/plain; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n(.*?)\r\n--/s', $raw, $m) ? base64_decode($m[1]) : '';
+		$links[trim($to[1])][] = preg_match('/token=([a-f0-9]{40})/', $text, $t) ? $t[1] : '';
+	}
+	return $links;
+}
+$subscribed_seen = array();
+function test_newsletter_subscribed($payload) {
+	global $subscribed_seen;
+	$subscribed_seen[] = $payload['email'].' '.$payload['status'];
+}
+
+test('many sign-ups at once with the same addresses leave one subscriber each (on SQLite)', function () use ($maildir) {
+	reconnect();
+	newsletter::subscribe('race-seed@example.com');
+	$dir = "$maildir-race";
+	array_map('unlink', glob("$dir/*.eml") ?: array());
+	$out = race_php('for ($i = 0; $i < 25; $i++) newsletter::subscribe("race$i@example.com", "Reader $n", "/race");', 8, array('RASTER_MAIL' => "log://$dir"));
+	same('', implode('', $out), 'the processes said:');
+	$counts = array();
+	foreach (R::getAll("SELECT email, COUNT(*) AS n FROM subscriber WHERE email LIKE 'race%@example.com' AND email != 'race-seed@example.com' GROUP BY email") as $row) $counts[$row['email']] = (int)$row['n'];
+	same(25, count($counts), 'addresses:');
+	same(array(), array_filter($counts, function ($n) { return $n > 1; }), 'addresses stored more than once:');
+	// every confirmation an address got carries the one link that works
+	$links = confirmation_links($dir);
+	same(25, count($links), 'addresses that got a confirmation:');
+	foreach ($links as $email => $tokens) {
+		same(array(R::getCell('SELECT token FROM subscriber WHERE email = ?', array($email))), array_values(array_unique($tokens)), "the links $email got:");
+	}
+	echo '['.array_sum(array_map('count', $links)).' confirmations for 25 addresses] ';
+});
+
+test('signing up again while pending sends the same link again (#77)', function () use ($maildir) {
+	cms_store::connect();
+	$before = count(glob("$maildir/*.eml"));
+	same('pending', newsletter::subscribe('twice@example.com', 'Twice'));
+	$token = R::getCell('SELECT token FROM subscriber WHERE email = ?', array('twice@example.com'));
+	same('pending', newsletter::subscribe('Twice@Example.com ', 'Twice again'));
+	same($token, R::getCell('SELECT token FROM subscriber WHERE email = ?', array('twice@example.com')), 'the token after the second sign-up:');
+	same(1, (int)R::getCell('SELECT COUNT(*) FROM subscriber WHERE email = ?', array('twice@example.com')));
+	same($before + 2, count(glob("$maildir/*.eml")), 'mails:');
+	same(array($token, $token), confirmation_links($maildir)['twice@example.com'], 'the links the two mails carry:');
+});
+
+test('a sign-up inside a transaction is mailed after the commit, and not at all after a rollback (#77)', function () use ($maildir) {
+	global $subscribed_seen;
+	cms_store::connect();
+	$subscribed_seen = array();
+	event::bind('newsletter.subscribed')->to(null, 'test_newsletter_subscribed');
+	try {
+		$before = count(glob("$maildir/*.eml"));
+		try {
+			cms_records::transaction(function () {
+				same('pending', newsletter::subscribe('rolled@example.com', 'Rolled'));
+				cms_records::refuse('changed_my_mind');
+			});
+		} catch (cms_refused $e) {}
+		same(0, (int)R::getCell('SELECT COUNT(*) FROM subscriber WHERE email = ?', array('rolled@example.com')), 'subscribers after the rollback:');
+		same($before, count(glob("$maildir/*.eml")), 'mails after the rollback:');
+		same(array(), $subscribed_seen, 'newsletter.subscribed after the rollback:');
+		$inside = null;
+		cms_records::transaction(function () use (&$inside, $maildir) {
+			same('pending', newsletter::subscribe('kept@example.com', 'Kept'));
+			$inside = array(count(glob("$maildir/*.eml")), $GLOBALS['subscribed_seen']);
+		});
+		same(array($before, array()), $inside, 'mails and events before the commit:');
+		same(array('kept@example.com pending'), $subscribed_seen, 'newsletter.subscribed after the commit:');
+		same($before + 1, count(glob("$maildir/*.eml")), 'mails after the commit:');
+		same(array(R::getCell('SELECT token FROM subscriber WHERE email = ?', array('kept@example.com'))), confirmation_links($maildir)['kept@example.com']);
+	} finally {
+		event::unbind('newsletter.subscribed')->from(null, 'test_newsletter_subscribed');
+	}
+});
+
+test('the confirmation mail comes from a listener a site can unbind (#77)', function () use ($maildir) {
+	cms_store::connect();
+	$bindings = event::bindings();
+	$listeners = isset($bindings['newsletter.subscribed']) ? $bindings['newsletter.subscribed'] : array();
+	check(in_array('newsletter.confirmation_mail', $listeners, true), 'newsletter.subscribed listeners: '.json_encode($listeners));
+	$before = count(glob("$maildir/*.eml"));
+	event::unbind('newsletter.subscribed')->from('newsletter', 'confirmation_mail');
+	try {
+		same('pending', newsletter::subscribe('own-mail@example.com'));
+		same($before, count(glob("$maildir/*.eml")), 'mails with the listener unbound:');
+	} finally {
+		event::bind('newsletter.subscribed')->to('newsletter', 'confirmation_mail');
+	}
+	// confirmed or unknown addresses get nothing, whoever sends the event
+	event::dispatch('newsletter.subscribed', array('email' => 'nobody@example.com', 'name' => '', 'status' => 'pending', 'source' => ''));
+	event::dispatch('newsletter.subscribed', array('email' => 'own-mail@example.com', 'name' => '', 'status' => 'confirmed', 'source' => ''));
+	same($before, count(glob("$maildir/*.eml")), 'mails for events that ask for none:');
+});
+
+// ## 2.1.8 wave 2: content saves and the cache bump
+
+// Several PHP processes running $code at the same moment on the test
+// database, the way requests that arrive together reach one SQLite file.
+// Each boots the app, waits for one start time (so none is done before the
+// last has booted), then runs $code with $n set to its number, from 0.
+// Returns what each printed, errors included.
+function race_php($code, $count = 4, $env = array()) {
+	global $root, $db, $maildir;
+	reconnect();
+	$start = sprintf('%.6F', microtime(true) + 0.5 + 0.1 * $count);
+	$env = array_merge(array('RASTER_DB' => $db, 'RASTER_ENV' => 'development', 'RASTER_MAIL' => "log://$maildir", 'PATH' => getenv('PATH')), $env);
+	$processes = array();
+	for ($n = 0; $n < $count; $n++) {
+		$script = 'require "'.$root.'/system/boot.php"; boot::$appname = "application"; boot::cli(); cms_store::connect(); $n = '.$n.';'
+			.' while (microtime(true) < '.$start.') usleep(100); '.$code;
+		$process = proc_open(array(PHP_BINARY, '-r', $script), array(1 => array('pipe', 'w'), 2 => array('redirect', 1)), $pipes, $root, $env);
+		$processes[$n] = array($process, $pipes[1]);
+	}
+	$out = array();
+	foreach ($processes as $n => $process) {
+		$out[$n] = stream_get_contents($process[1]);
+		proc_close($process[0]);
+	}
+	return $out;
+}
+// This process opens the test database again. Tests above copy() the file,
+// and closing any handle on it drops SQLite's locks in this process: other
+// processes then take this one for gone and delete the WAL index (-shm)
+// under it ("disk I/O error").
+function reconnect() {
+	cms_store::connect();
+	R::getDatabaseAdapter()->getDatabase()->close();
+}
+// a content_changed listener: what another connection to the database sees
+// when it runs
+$changed_seen = array();
+function test_content_changed() {
+	global $changed_seen, $db;
+	$other = new PDO("sqlite:$db");
+	$changed_seen[] = (int)$other->query('SELECT COUNT(*) FROM wavetwodata')->fetchColumn();
+}
+
+test('items created at once with one title all get their own slug (on SQLite)', function () {
+	reconnect();
+	cms_store::save_item('wavetwodata', 0, array('title' => 'Seed'), array('title'));
+	$out = race_php('for ($i = 0; $i < 15; $i++) cms_store::save_item("wavetwodata", 0, array("title" => "Harvest supper"), array("title"));', 6);
+	same('', implode('', $out), 'the processes said:');
+	$slugs = R::getCol('SELECT slug FROM wavetwodata WHERE title = ?', array('Harvest supper'));
+	same(90, count($slugs), 'items:');
+	same(90, count(array_unique($slugs)), 'distinct slugs of 90:');
+});
+
+test('two page saves at once, each changing its own field, keep both changes (on SQLite)', function () {
+	cms_store::connect();
+	cms_store::update_page('wavetwopage', '/wave-two', array('a' => 'a-0', 'b' => 'b-0'), array('a', 'b'));
+	$out = race_php('$field = $n ? "b" : "a"; for ($i = 1; $i <= 40; $i++) cms_store::update_page("wavetwopage", "/wave-two", array($field => "$field-$i"), array("a", "b"));', 2);
+	same('', implode('', $out), 'the processes said:');
+	// each revision starts from the one before: a field never goes back to
+	// an older value
+	$last = array('a' => 0, 'b' => 0);
+	$lost = 0;
+	foreach (R::getAll('SELECT a, b FROM wavetwopage ORDER BY id') as $row) {
+		foreach ($last as $field => $seen) {
+			$value = (int)substr($row[$field], 2);
+			if ($value < $seen) $lost++;
+			$last[$field] = max($seen, $value);
+		}
+	}
+	$newest = cms_store::page_values('wavetwopage');
+	same(array('a' => 'a-40', 'b' => 'b-40'), array('a' => $newest['fields']['a'], 'b' => $newest['fields']['b']), 'the newest revision:');
+	same(0, $lost, 'revisions that lost the other save:');
+});
+
+test('a rolled back transaction neither throws the page cache away nor sends content_changed (#81)', function () {
+	global $changed_seen;
+	cms_store::connect();
+	$changed_seen = array();
+	event::bind('content_changed')->to(null, 'test_content_changed');
+	try {
+		raster_cache::bump();
+		$version = raster_cache::version();
+		$rows = R::count('wavetwodata');
+		$refused = null;
+		try {
+			cms_records::transaction(function () {
+				cms_store::save_item('wavetwodata', 0, array('title' => 'Never kept'), array('title'));
+				cms_store::update_page('wavetwopage', '/wave-two', array('a' => 'a-never'), array('a', 'b'));
+				cms_records::refuse('changed_my_mind');
+			});
+		} catch (cms_refused $e) {
+			$refused = $e->problems;
+		}
+		same(array('changed_my_mind'), $refused);
+		same($rows, R::count('wavetwodata'), 'rows:');
+		same(array(), $changed_seen, 'content_changed listeners ran, seeing rows:');
+		same($version, raster_cache::version(), 'the cache version moved:');
+	} finally {
+		event::unbind('content_changed')->from(null, 'test_content_changed');
+	}
+});
+
+test('after a commit, content_changed comes once and its listeners see the new rows (#81)', function () {
+	global $changed_seen;
+	cms_store::connect();
+	$changed_seen = array();
+	event::bind('content_changed')->to(null, 'test_content_changed');
+	try {
+		$version = raster_cache::version();
+		$rows = R::count('wavetwodata');
+		cms_records::transaction(function () {
+			$item = cms_store::save_item('wavetwodata', 0, array('title' => 'Kept'), array('title'));
+			cms_store::save_item('wavetwodata', 0, array('title' => 'Kept too'), array('title'));
+			cms_store::save_item('wavetwodata', $item['id'], array('title' => 'Kept, renamed'), array('title'));
+			cms_store::update_page('wavetwopage', '/wave-two', array('a' => 'a-kept'), array('a', 'b'));
+		});
+		same(array($rows + 2), $changed_seen, 'content_changed, with the rows another connection saw:');
+		check($version !== raster_cache::version(), 'the cache version moved');
+		// a markup item deleted inside a rolled back transaction stays
+		$changed_seen = array();
+		$item = R::findOne('wavetwodata', ' title = ? ', array('Kept too'));
+		try {
+			cms_records::transaction(function () use ($item) {
+				cms_store::delete_item('wavetwodata', $item->id);
+				throw new RuntimeException('stop');
+			});
+		} catch (RuntimeException $e) {}
+		check(R::findOne('wavetwodata', ' title = ? ', array('Kept too')) !== null, 'the item is still there');
+		same(array(), $changed_seen, 'content_changed after the delete was rolled back:');
+		// outside a transaction it comes at once, as before
+		util::content_changed();
+		same(array($rows + 2), $changed_seen);
+	} finally {
+		event::unbind('content_changed')->from(null, 'test_content_changed');
+	}
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";
 exit($failed ? 1 : 0);

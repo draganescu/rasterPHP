@@ -177,7 +177,9 @@ cms_records::transaction(function () use ($cart) {
 });
 ```
 
-If any write is refused (say `check()` finds stock would go below zero), none of them happen. Emails and other event listeners run only after the transaction commits.
+If any write is refused (say `check()` finds stock would go below zero), none of them happen. Emails and other event listeners run only after the transaction commits. The page cache is thrown away, and `content_changed` sent, once after the commit too, so a page rendered while the transaction runs is never kept as fresh with the old rows, and nothing hears about a write that is rolled back. On MySQL, a write that adds a table or column (in development) commits what came before it, as MySQL does on any schema change.
+
+The CMS saves its own content the same way: every save or delete of an item and every page save is a transaction of its own (or joins yours). On SQLite this means two items saved at once with one title get different slugs, and two editors saving different fields of one page at once both keep their change. A newsletter sign-up is one too: on SQLite, one address sent twice at once is stored once, and its confirmation email waits for the commit.
 
 ## Starting from a form you already have
 

@@ -254,8 +254,11 @@ class cafe {
 - Or bind in `config/the_events.php`:
   `event::bind('reservation.booked')->to('cafe', 'subscribe_guest');`, and
   `event::unbind(…)->from(…)`.
-- Listeners get the payload array and run in order: `the_events.php`, then
-  `listens()`, then the framework's own. A listener returning `false` makes
+- Listeners get the payload array and run in order: the framework's own
+  bindings in `system/config/events.php` (routing, the CMS and account
+  checks, the newsletter's confirmation email), then `the_events.php`, then
+  `listens()`, then the framework's core handlers (controller and log). A
+  listener returning `false` makes
   `event::dispatch()` return `false`; the sender decides what that means.
 - Name your events `<model>.<what happened>`, in the past tense.
 - `lint` reports bindings to models or methods that don't exist, and events
@@ -268,12 +271,12 @@ alike:
 |---|---|
 | `authentication.registered`, `logged_in`, `logged_out`, `password_changed`, `account_saved` | `id`, `email`, `name`, `role` |
 | `authentication.login_failed` | `login` |
-| `newsletter.subscribed` | `email`, `name`, `status` (`pending` or `confirmed`), `source` |
+| `newsletter.subscribed` | `email`, `name`, `status` (`pending` or `confirmed`), `source` (after the commit; the framework's listener `newsletter.confirmation_mail` emails a pending address) |
 | `newsletter.confirmed`, `newsletter.unsubscribed` | `email`, `name` |
 | `cms.item_saved` | `collection`, `created` (true for new items), `item` |
 | `cms.item_deleted` | `collection`, `item` |
 | `cms.page_saved` | `type`, `slug`, `changed` (field names), `fields` |
-| `content_changed` | none (sent by `util::content_changed()`) |
+| `content_changed` | none (sent by `util::content_changed()`; inside a transaction, once after the commit) |
 | `mail.sent` / `mail.failed` | `to`, `subject` / and `error` |
 
 The request sends `launch`, `finding_route`, `route_set`, `route_found`,
@@ -653,8 +656,17 @@ class reservation {
   back. On SQLite the database is locked for writing from the start, so two
   checkouts can't both take the last item. Events (`cms.item_saved` and the
   rest) wait for the commit, so nothing is emailed about a write that was
-  rolled back. Every single write of a record is already one (its `check()`
-  and the write together); a transaction started inside another joins it.
+  rolled back. So does `util::content_changed()`: the page cache is thrown
+  away and `content_changed` sent once, after the commit, and not at all
+  after a rollback. Every single write of a record is already one (its
+  `check()` and the write together), and so is every save or delete of a
+  markup collection's item and every page save: on SQLite two items saved
+  at once with one title get different slugs, and two page saves at once
+  (one field each) keep each other's change. So is a newsletter sign-up
+  (`newsletter::subscribe()`): on SQLite, sign-ups at once with one address
+  leave one subscriber. A transaction started inside another joins it. On
+  MySQL a write that adds a table or column (development) commits what
+  came before it, as MySQL does on any schema change.
 - **Starting from a form:** `php bin/raster make model inquiry --from=contact.html`
   writes `models/inquiry/inquiry.php` with the type (fields from the form's
   inputs, passwords left out), an empty `check()` and the handler.
@@ -699,6 +711,14 @@ class reservation {
   `password_min_length` (8).
 - Five wrong passwords lock an account for 15 minutes. Once 15 minutes have
   passed since the last wrong one, counting starts again from zero.
+- One email, one account: two sign-ups at once with one email (a double
+  click) make one account, and the other answers `email_taken`; so do two
+  members changing to one email at once, or a member changing to the email
+  someone is signing up with. On SQLite, looking for the email
+  and storing the account happen in one transaction. From code,
+  `authentication::create_user($login, $password, $role, $name)` makes an
+  account, or returns null when the login is taken; `save_user(…)` creates
+  or updates.
 - Command line: `php bin/raster user <email|name> [--role=…] [--password=…]`
   and `php bin/raster users`. A new account is an admin with a random
   password unless the options say otherwise; an existing one keeps the role
@@ -714,7 +734,15 @@ class reservation {
   - `print.newsletter.count`.
   - From code: `newsletter::subscribe($email, $name, $source)` does what the
     form does (and sends the confirmation) and returns `pending`,
-    `confirmed`, `already` or false.
+    `confirmed`, `already` or false. It looks the address up and stores it
+    in one transaction, so on SQLite sign-ups at once leave one subscriber;
+    inside another transaction it joins it.
+  - The confirmation email is sent after the commit by the framework's
+    listener on `newsletter.subscribed` (status `pending`); a site that
+    sends its own unbinds it in `config/the_events.php`:
+    `event::unbind('newsletter.subscribed')->from('newsletter', 'confirmation_mail');`.
+    Signing up again while pending sends the same link again: every
+    confirmation email sent still works.
 - Alerts: `check_email`, `subscribed`, `confirmed`, `confirm_invalid`,
   `unsubscribed`, `unsubscribe_invalid`.
 - **Sending an issue:** `php bin/raster send /news/news_item/my-post
@@ -818,8 +846,9 @@ use `'model.method'`: `method(true)` returns
     `fbclid`, `gclid`, `msclkid`) is served the cached `/about`, and is
     made as `/about` is, without them (models don't see them in `$_GET`).
   - Any content change throws the cache away and deletes the cached files
-    (`util::content_changed()` in your own models), and so does the moment
-    a scheduled item is published. A page whose render overlapped the
+    (`util::content_changed()` in your own models; inside a transaction
+    when it commits), and so does the moment a scheduled item is
+    published. A page whose render overlapped the
     change is not kept.
   - A filter page with no items (`/news/news_items/tag/nothing`), a page
     past the last one and a filter on a field the list doesn't have answer
