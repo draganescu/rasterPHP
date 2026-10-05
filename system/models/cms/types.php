@@ -109,6 +109,26 @@ class cms_types {
 			R::getDatabaseAdapter()->exec("ALTER TABLE `$table` ADD `$field` ".self::sql($type));
 		}
 		cms_store::forget();
+		if (isset($types['slug']) && !array_key_exists('slug', $have)) self::index_slug($table);
+	}
+
+	// An index on the slug, so opening an item and picking a free slug don't
+	// read the whole table. Made with a new table, and by schema --apply for
+	// tables made before 2.1.9. True when it was missing and is made now.
+	static function index_slug($table) {
+		if (!preg_match('/^[a-z0-9_]+$/', $table)) throw new InvalidArgumentException("Invalid table '$table'");
+		$adapter = R::getDatabaseAdapter();
+		if ($adapter->getDatabase()->getDatabaseType() !== 'mysql') {
+			if ($adapter->getCell("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?", array("{$table}_slug"))) return false;
+			$adapter->exec("CREATE INDEX IF NOT EXISTS `{$table}_slug` ON `$table` (slug)");
+			return true;
+		}
+		$where = 'table_schema = DATABASE() AND table_name = ? AND column_name = ?';
+		if ($adapter->getCell("SELECT COUNT(*) FROM information_schema.statistics WHERE $where", array($table, 'slug'))) return false;
+		// MySQL indexes a TEXT column by its start; a slug is at most 80 characters
+		$kind = strtolower((string)$adapter->getCell("SELECT data_type FROM information_schema.columns WHERE $where", array($table, 'slug')));
+		$adapter->exec("CREATE INDEX `{$table}_slug` ON `$table` (slug".(strpos($kind, 'text') !== false ? '(191)' : '').')');
+		return true;
 	}
 
 	// Changes the type of a column whose stored values all convert; returns

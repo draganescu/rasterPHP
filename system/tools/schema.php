@@ -213,6 +213,11 @@ class raster_schema {
 				$bean->updated_at = R::isoDateTime();
 				R::store($bean);
 			}
+			// every table with slugs gets its index, new or made before 2.1.9
+			foreach ($status['tables'] as $table) {
+				if (!cms_store::table_exists($table['table']) || !array_key_exists('slug', cms_store::columns($table['table']))) continue;
+				if (cms_types::index_slug($table['table'])) $changes[] = "indexed {$table['table']}.slug";
+			}
 			// bundled and model-declared tables: each column declared as the
 			// type of its default (TEXT, INT), with no row written. A stored
 			// row would size MySQL's columns by its values (varchar(191),

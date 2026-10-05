@@ -2084,6 +2084,28 @@ test('items created at once with one title all get their own slug', function () 
 	same(90, count(array_unique($slugs)), 'distinct slugs of 90:');
 });
 
+test('a collection table has an index on slug, and a new item finds a free slug in one query', function () {
+	reconnect();
+	// as the CMS makes a collection's table on its first render
+	cms_types::ensure('slugindexdata', array('title' => 'text') + array_intersect_key(cms_types::$system, array_flip(array('slug', 'enabled', 'published_at', 'updated_at'))));
+	same(false, cms_types::index_slug('slugindexdata'), 'the new table already has its index');
+	cms_store::save_item('slugindexdata', 0, array('title' => 'Same'), array('title'));
+	for ($i = 2; $i <= 60; $i++) R::exec("INSERT INTO slugindexdata (title, slug) VALUES ('Same', ?)", array("same-$i"));
+	R::exec("INSERT INTO slugindexdata (title, slug) VALUES ('Other', 'same-thing')");
+	cms_store::columns('slugindexdata');
+	R::startLogging();
+	$slug = cms_store::unique_slug('slugindexdata', 'Same', 0);
+	$queries = array_filter(R::getLogs(), function ($line) { return is_string($line) && stripos($line, 'slugindexdata') !== false && stripos($line, 'slug') !== false && stripos($line, 'select') !== false; });
+	R::stopLogging();
+	same('same-61', $slug);
+	same(1, count($queries), 'queries for one slug: '.implode(' | ', $queries));
+	same('same-thing-2', cms_store::unique_slug('slugindexdata', 'Same thing', 0), 'a slug that starts like another is its own');
+	R::exec('CREATE TABLE slugoldindexdata (id INTEGER PRIMARY KEY '.(on_mysql() ? 'AUTO_INCREMENT' : 'AUTOINCREMENT').', title TEXT, slug TEXT)');
+	cms_store::forget();
+	same(true, cms_types::index_slug('slugoldindexdata'), 'a table made before has none');
+	same(false, cms_types::index_slug('slugoldindexdata'), 'and has it once made');
+});
+
 test('two page saves at once, each changing its own field, keep both changes', function () {
 	cms_store::connect();
 	cms_store::update_page('wavetwopage', '/wave-two', array('a' => 'a-0', 'b' => 'b-0'), array('a', 'b'));

@@ -42,10 +42,12 @@ class cms_store {
 
 	static function unique_slug($type, $text, $id) {
 		$base = self::slugify($text);
+		if (!preg_match('/^[a-z0-9_]+$/', $type) || !self::table_exists($type) || !array_key_exists('slug', self::columns($type))) return $base;
+		// every slug taken by another row, in one query: the base and base-<n>
+		// (a slug holds only a-z, 0-9 and -, so nothing in it is a wildcard)
+		$taken = array_flip(R::getCol("SELECT slug FROM `$type` WHERE (slug = ? OR slug LIKE ?) AND id != ?", array($base, "$base-%", (int)$id)));
 		$slug = $base;
-		for ($i = 2; self::table_exists($type) && array_key_exists('slug', self::columns($type)) && R::count($type, ' slug = ? AND id != ? ', array($slug, (int)$id)) > 0; $i++) {
-			$slug = $base.'-'.$i;
-		}
+		for ($i = 2; isset($taken[$slug]); $i++) $slug = $base.'-'.$i;
 		return $slug;
 	}
 
