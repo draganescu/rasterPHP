@@ -1861,7 +1861,104 @@ test('a print in each of 2,000 rows fills every row, each copy decided on its ow
 // (wave 2 sign-up part adds its tests here)
 
 // ## 2.1.8 wave 2: newsletter sign-ups
-// (wave 2 newsletter part adds its tests here)
+
+// the confirmation mails logged in $dir: address => the tokens their links carry
+function confirmation_links($dir) {
+	$links = array();
+	foreach (glob("$dir/*.eml") ?: array() as $file) {
+		$raw = file_get_contents($file);
+		if (!preg_match('/^To: (.*)$/m', $raw, $to)) continue;
+		$text = preg_match('/Content-Type: text\/plain; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n(.*?)\r\n--/s', $raw, $m) ? base64_decode($m[1]) : '';
+		$links[trim($to[1])][] = preg_match('/token=([a-f0-9]{40})/', $text, $t) ? $t[1] : '';
+	}
+	return $links;
+}
+$subscribed_seen = array();
+function test_newsletter_subscribed($payload) {
+	global $subscribed_seen;
+	$subscribed_seen[] = $payload['email'].' '.$payload['status'];
+}
+
+test('many sign-ups at once with the same addresses leave one subscriber each (on SQLite)', function () use ($maildir) {
+	reconnect();
+	newsletter::subscribe('race-seed@example.com');
+	$dir = "$maildir-race";
+	array_map('unlink', glob("$dir/*.eml") ?: array());
+	$out = race_php('for ($i = 0; $i < 25; $i++) newsletter::subscribe("race$i@example.com", "Reader $n", "/race");', 8, array('RASTER_MAIL' => "log://$dir"));
+	same('', implode('', $out), 'the processes said:');
+	$counts = array();
+	foreach (R::getAll("SELECT email, COUNT(*) AS n FROM subscriber WHERE email LIKE 'race%@example.com' AND email != 'race-seed@example.com' GROUP BY email") as $row) $counts[$row['email']] = (int)$row['n'];
+	same(25, count($counts), 'addresses:');
+	same(array(), array_filter($counts, function ($n) { return $n > 1; }), 'addresses stored more than once:');
+	// every confirmation an address got carries the one link that works
+	$links = confirmation_links($dir);
+	same(25, count($links), 'addresses that got a confirmation:');
+	foreach ($links as $email => $tokens) {
+		same(array(R::getCell('SELECT token FROM subscriber WHERE email = ?', array($email))), array_values(array_unique($tokens)), "the links $email got:");
+	}
+	echo '['.array_sum(array_map('count', $links)).' confirmations for 25 addresses] ';
+});
+
+test('signing up again while pending sends the same link again (#77)', function () use ($maildir) {
+	cms_store::connect();
+	$before = count(glob("$maildir/*.eml"));
+	same('pending', newsletter::subscribe('twice@example.com', 'Twice'));
+	$token = R::getCell('SELECT token FROM subscriber WHERE email = ?', array('twice@example.com'));
+	same('pending', newsletter::subscribe('Twice@Example.com ', 'Twice again'));
+	same($token, R::getCell('SELECT token FROM subscriber WHERE email = ?', array('twice@example.com')), 'the token after the second sign-up:');
+	same(1, (int)R::getCell('SELECT COUNT(*) FROM subscriber WHERE email = ?', array('twice@example.com')));
+	same($before + 2, count(glob("$maildir/*.eml")), 'mails:');
+	same(array($token, $token), confirmation_links($maildir)['twice@example.com'], 'the links the two mails carry:');
+});
+
+test('a sign-up inside a transaction is mailed after the commit, and not at all after a rollback (#77)', function () use ($maildir) {
+	global $subscribed_seen;
+	cms_store::connect();
+	$subscribed_seen = array();
+	event::bind('newsletter.subscribed')->to(null, 'test_newsletter_subscribed');
+	try {
+		$before = count(glob("$maildir/*.eml"));
+		try {
+			cms_records::transaction(function () {
+				same('pending', newsletter::subscribe('rolled@example.com', 'Rolled'));
+				cms_records::refuse('changed_my_mind');
+			});
+		} catch (cms_refused $e) {}
+		same(0, (int)R::getCell('SELECT COUNT(*) FROM subscriber WHERE email = ?', array('rolled@example.com')), 'subscribers after the rollback:');
+		same($before, count(glob("$maildir/*.eml")), 'mails after the rollback:');
+		same(array(), $subscribed_seen, 'newsletter.subscribed after the rollback:');
+		$inside = null;
+		cms_records::transaction(function () use (&$inside, $maildir) {
+			same('pending', newsletter::subscribe('kept@example.com', 'Kept'));
+			$inside = array(count(glob("$maildir/*.eml")), $GLOBALS['subscribed_seen']);
+		});
+		same(array($before, array()), $inside, 'mails and events before the commit:');
+		same(array('kept@example.com pending'), $subscribed_seen, 'newsletter.subscribed after the commit:');
+		same($before + 1, count(glob("$maildir/*.eml")), 'mails after the commit:');
+		same(array(R::getCell('SELECT token FROM subscriber WHERE email = ?', array('kept@example.com'))), confirmation_links($maildir)['kept@example.com']);
+	} finally {
+		event::unbind('newsletter.subscribed')->from(null, 'test_newsletter_subscribed');
+	}
+});
+
+test('the confirmation mail comes from a listener a site can unbind (#77)', function () use ($maildir) {
+	cms_store::connect();
+	$bindings = event::bindings();
+	$listeners = isset($bindings['newsletter.subscribed']) ? $bindings['newsletter.subscribed'] : array();
+	check(in_array('newsletter.confirmation_mail', $listeners, true), 'newsletter.subscribed listeners: '.json_encode($listeners));
+	$before = count(glob("$maildir/*.eml"));
+	event::unbind('newsletter.subscribed')->from('newsletter', 'confirmation_mail');
+	try {
+		same('pending', newsletter::subscribe('own-mail@example.com'));
+		same($before, count(glob("$maildir/*.eml")), 'mails with the listener unbound:');
+	} finally {
+		event::bind('newsletter.subscribed')->to('newsletter', 'confirmation_mail');
+	}
+	// confirmed or unknown addresses get nothing, whoever sends the event
+	event::dispatch('newsletter.subscribed', array('email' => 'nobody@example.com', 'name' => '', 'status' => 'pending', 'source' => ''));
+	event::dispatch('newsletter.subscribed', array('email' => 'own-mail@example.com', 'name' => '', 'status' => 'confirmed', 'source' => ''));
+	same($before, count(glob("$maildir/*.eml")), 'mails for events that ask for none:');
+});
 
 // ## 2.1.8 wave 2: content saves and the cache bump
 

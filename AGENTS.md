@@ -268,7 +268,7 @@ alike:
 |---|---|
 | `authentication.registered`, `logged_in`, `logged_out`, `password_changed`, `account_saved` | `id`, `email`, `name`, `role` |
 | `authentication.login_failed` | `login` |
-| `newsletter.subscribed` | `email`, `name`, `status` (`pending` or `confirmed`), `source` |
+| `newsletter.subscribed` | `email`, `name`, `status` (`pending` or `confirmed`), `source` (after the commit; the framework's listener `newsletter.confirmation_mail` emails a pending address) |
 | `newsletter.confirmed`, `newsletter.unsubscribed` | `email`, `name` |
 | `cms.item_saved` | `collection`, `created` (true for new items), `item` |
 | `cms.item_deleted` | `collection`, `item` |
@@ -659,8 +659,9 @@ class reservation {
   `check()` and the write together), and so is every save or delete of a
   markup collection's item and every page save: on SQLite two items saved
   at once with one title get different slugs, and two page saves at once
-  (one field each) keep each other's change. A transaction started inside
-  another joins it.
+  (one field each) keep each other's change. So is a newsletter sign-up
+  (`newsletter::subscribe()`): on SQLite, sign-ups at once with one address
+  leave one subscriber. A transaction started inside another joins it.
 - **Starting from a form:** `php bin/raster make model inquiry --from=contact.html`
   writes `models/inquiry/inquiry.php` with the type (fields from the form's
   inputs, passwords left out), an empty `check()` and the handler.
@@ -720,7 +721,15 @@ class reservation {
   - `print.newsletter.count`.
   - From code: `newsletter::subscribe($email, $name, $source)` does what the
     form does (and sends the confirmation) and returns `pending`,
-    `confirmed`, `already` or false.
+    `confirmed`, `already` or false. It looks the address up and stores it
+    in one transaction, so on SQLite sign-ups at once leave one subscriber;
+    inside another transaction it joins it.
+  - The confirmation email is sent after the commit by the framework's
+    listener on `newsletter.subscribed` (status `pending`); a site that
+    sends its own unbinds it in `config/the_events.php`:
+    `event::unbind('newsletter.subscribed')->from('newsletter', 'confirmation_mail');`.
+    Signing up again while pending sends the same link again: every
+    confirmation email sent still works.
 - Alerts: `check_email`, `subscribed`, `confirmed`, `confirm_invalid`,
   `unsubscribed`, `unsubscribe_invalid`.
 - **Sending an issue:** `php bin/raster send /news/news_item/my-post

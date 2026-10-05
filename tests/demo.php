@@ -3046,7 +3046,22 @@ test('C53', 'a print inside a render block fills every row of a long list: 1,500
 // (wave 2 sign-up part adds its tests here)
 
 // ## 2.1.8 wave 2: newsletter sign-ups
-// (wave 2 newsletter part adds its tests here)
+
+test('H13', 'signing up twice: one subscriber, the same link again, mailed by a listener', function () use ($base) {
+	$before = count(mails());
+	foreach (array('Again@example.com', 'again@example.com ') as $email) {
+		same("$base/journal?done=check_email", header_value(http('POST', "$base/journal", array('raster_form' => 'newsletter.signup', 'email' => $email))[2], 'Location'));
+	}
+	database::instance('cms');
+	same(1, (int)R::getCell('SELECT COUNT(*) FROM subscriber WHERE email = ?', array('again@example.com')), 'subscribers:');
+	$sent = array_slice(mails(), $before);
+	same(array('again@example.com', 'again@example.com'), array_column($sent, 'to'));
+	$links = array();
+	foreach ($sent as $mail) $links[] = preg_match('/token=([a-f0-9]{40})/', $mail['text'], $t) ? $t[1] : '';
+	same(array_fill(0, 2, R::getCell('SELECT token FROM subscriber WHERE email = ?', array('again@example.com'))), $links, 'both mails carry the link that works:');
+	has(http('GET', "$base/letters/confirm?token={$links[0]}")[1], '<h1>You are subscribed</h1>');
+	same(array('newsletter.confirmation_mail'), mcp($base, 'site_overview')['events']['newsletter.subscribed'], 'who sends the confirmation:');
+});
 
 // ## 2.1.8 wave 2: content saves and the cache bump
 
