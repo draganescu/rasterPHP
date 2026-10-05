@@ -343,7 +343,9 @@ class cms_records {
 				throw $e;
 			}
 		} finally {
-			if ($lock) $pdo->query('SELECT RELEASE_LOCK('.$pdo->quote($lock).')');
+			// a connection that died has let go of the lock already, and its
+			// error is the one to report, not this one
+			if ($lock) try { $pdo->query('SELECT RELEASE_LOCK('.$pdo->quote($lock).')'); } catch (PDOException $e) {}
 		}
 		self::$depth = 0;
 		$queued = self::$queued;

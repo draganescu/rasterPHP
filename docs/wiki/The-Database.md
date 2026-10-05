@@ -38,7 +38,7 @@ $password = getenv('DB_PASSWORD');
 
 `RASTER_DB=/path/to/other.sqlite` points the SQLite connections at another file without editing anything, which is handy for tests and servers.
 
-`RASTER_DB=mysql://user:password@host:3306/name` points the site at a MySQL database instead, whatever the connection files say. Write any `@`, `:` or `/` in the password %-encoded (`%40`, `%3A`, `%2F`). The test suites take the same address: `RASTER_DB=mysql://root@127.0.0.1:3306/raster php tests/demo.php` runs the demo's tests on a new, empty database made beside `raster` and dropped at the end.
+`RASTER_DB=mysql://user:password@host:3306/name` points the site at a MySQL database instead, whatever the connection files say. It replaces every connection in `config/db/`. Write the password encoded the way PHP's `rawurlencode()` does it, so `@`, `:`, `/`, `#`, `?` and `%` become `%40`, `%3A`, `%2F`, `%23`, `%3F` and `%25`. The test suites take the same address: `RASTER_DB=mysql://root@127.0.0.1:3306/raster php tests/demo.php` runs the demo's tests on a new, empty database made beside `raster` and dropped at the end.
 
 `APPBASE` is a constant holding the path of your app folder, with a trailing slash.
 

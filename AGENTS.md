@@ -828,8 +828,8 @@ use `'model.method'`: `method(true)` returns
   file. SQLite runs in WAL mode, so `-wal` and `-shm` files sit beside it;
   copy all three together, or back up with `sqlite3 <file> .backup`.
   `RASTER_DB=mysql://user:password@host:3306/name` uses that MySQL database
-  instead, whatever `config/db/` says (%-encode `@`, `:` or `/` in the
-  password).
+  instead, whatever `config/db/` says, for every connection there
+  (encode the password as PHP's `rawurlencode()` does).
 - **What the server must never serve.** A Raster site is one folder, and most
   of it is private: the framework, the app's code and config, the SQLite file,
   the view files themselves. The rules are in one list,

@@ -381,6 +381,28 @@ test('schema --apply declares model tables by their types, and a long text or bi
 	same(array($long, '300'), array_map('strval', $pdo->query("SELECT name, failed_count FROM user WHERE email = 'long@example.com'")->fetch(PDO::FETCH_NUM)));
 	same($long, $pdo->query("SELECT name FROM subscriber WHERE email = 'long@example.com'")->fetchColumn());
 });
+test('schema --apply widens the small MySQL columns that 2.1.8 made for model tables', function () use ($root) {
+	if (!on_mysql()) throw new test_skipped('MySQL only: SQLite columns take any length');
+	$db = test_db(sys_get_temp_dir().'/raster-narrow-tables-'.getmypid().'.sqlite');
+	// the way 2.1.8 made them: a row of the defaults, stored and deleted
+	$code = 'require '.var_export("$root/system/boot.php", true).'; boot::$appname = "application"; boot::cli(); authentication::connect();'
+		.' foreach (authentication::schema() as $t => $fields) { $b = R::dispense($t); foreach ($fields as $f => $v) $b->$f = $v; R::store($b); R::trash($b); }';
+	same('', trim((string)shell_exec('RASTER_DB='.escapeshellarg($db).' '.escapeshellarg(PHP_BINARY).' -r '.escapeshellarg($code).' 2>&1')), 'making the old tables');
+	$pdo = test_pdo($db);
+	check(stripos($pdo->query("SHOW COLUMNS FROM user LIKE 'name'")->fetch(PDO::FETCH_ASSOC)['Type'], 'varchar') === 0, 'the old name column is a varchar');
+	$raster = 'RASTER_ENV=production RASTER_DB='.escapeshellarg($db).' '.escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster");
+	exec("$raster schema --check 2>&1", $out, $code);
+	same(1, $code, 'schema --check reports the small columns');
+	$out = array();
+	exec("$raster schema --apply 2>&1", $out, $code);
+	same(0, $code, 'schema --apply: '.implode("\n", $out));
+	check(strpos(implode("\n", $out), 'widened user.name to TEXT') !== false, implode("\n", $out));
+	same('text', strtolower($pdo->query("SHOW COLUMNS FROM user LIKE 'name'")->fetch(PDO::FETCH_ASSOC)['Type']));
+	same('int', strtolower($pdo->query("SHOW COLUMNS FROM user LIKE 'failed_count'")->fetch(PDO::FETCH_ASSOC)['Type']));
+	$out = array();
+	exec("$raster schema --check 2>&1", $out, $code);
+	same(0, $code, 'no drift after --apply: '.implode("\n", $out));
+});
 test('mcp over stdio', function () use ($root, $db) {
 	$input = json_encode(array('jsonrpc' => '2.0', 'id' => 7, 'method' => 'tools/call', 'params' => array('name' => 'get_page', 'arguments' => array('page' => '/about'))))."\n";
 	$process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'PATH' => getenv('PATH')));

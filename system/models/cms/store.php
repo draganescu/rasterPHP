@@ -43,9 +43,13 @@ class cms_store {
 	static function unique_slug($type, $text, $id) {
 		$base = self::slugify($text);
 		if (!preg_match('/^[a-z0-9_]+$/', $type) || !self::table_exists($type) || !array_key_exists('slug', self::columns($type))) return $base;
-		// every slug taken by another row, in one query: the base and base-<n>
-		// (a slug holds only a-z, 0-9 and -, so nothing in it is a wildcard)
-		$taken = array_flip(R::getCol("SELECT slug FROM `$type` WHERE (slug = ? OR slug LIKE ?) AND id != ?", array($base, "$base-%", (int)$id)));
+		// every slug taken by another row, in one query that the slug index
+		// answers: the base and base-<n>. SQLite uses an index for GLOB, not
+		// for its LIKE, which ignores case. A slug holds only a-z, 0-9 and -,
+		// so nothing in it is a wildcard. MySQL compares without case.
+		$sqlite = R::getDatabaseAdapter()->getDatabase()->getDatabaseType() !== 'mysql';
+		$rows = R::getCol("SELECT slug FROM `$type` WHERE (slug = ? OR slug ".($sqlite ? 'GLOB' : 'LIKE').' ?) AND id != ?', array($base, $sqlite ? "$base-*" : "$base-%", (int)$id));
+		$taken = array_flip(array_map('strtolower', $rows));
 		$slug = $base;
 		for ($i = 2; isset($taken[$slug]); $i++) $slug = $base.'-'.$i;
 		return $slug;
@@ -271,8 +275,8 @@ class cms_store {
 			}
 		}
 		// the newest revision is read and the next one stored together, so
-		// two saves at once (one field each) never lose one of them (on SQLite,
-		// which locks the database for the transaction)
+		// two saves at once (one field each) never lose one of them: the
+		// transaction locks the database for writing
 		return cms_records::transaction(function () use ($type, $slug, $values) {
 			return cms_store::store_page($type, $slug, $values);
 		});
@@ -348,7 +352,7 @@ class cms_store {
 		if ($info) cms_records::ensure($info);
 		// the checks and the write happen together, so two bookings can't
 		// both take the last seats, and two items with one title can't both
-		// take its slug (on SQLite)
+		// take its slug
 		return cms_records::transaction(function () use ($type, $id, $values, $allowed, $who, $info) {
 			return cms_store::store_item($type, $id, $values, $allowed, $who, $info);
 		});
