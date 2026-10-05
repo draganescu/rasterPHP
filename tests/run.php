@@ -1857,6 +1857,15 @@ test('a print in each of 2,000 rows fills every row, each copy decided on its ow
 	check($took < 2, "rendered in {$took}s");
 });
 
+// ## 2.1.8 wave 2: sign-up, account email change
+// (wave 2 sign-up part adds its tests here)
+
+// ## 2.1.8 wave 2: newsletter sign-ups
+// (wave 2 newsletter part adds its tests here)
+
+// ## 2.1.8 wave 2: content saves and the cache bump
+// (wave 2 content part adds its tests here)
+
 echo "\n\n$passed passed, ".count($failed)." failed\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";
 exit($failed ? 1 : 0);

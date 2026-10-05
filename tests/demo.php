@@ -3042,6 +3042,15 @@ test('C53', 'a print inside a render block fills every row of a long list: 1,500
 	}
 });
 
+// ## 2.1.8 wave 2: sign-up, account email change
+// (wave 2 sign-up part adds its tests here)
+
+// ## 2.1.8 wave 2: newsletter sign-ups
+// (wave 2 newsletter part adds its tests here)
+
+// ## 2.1.8 wave 2: content saves and the cache bump
+// (wave 2 content part adds its tests here)
+
 // ## No PHP warnings, notices or deprecations on any request
 
 $log = is_file("$tmp/php-errors.log") ? file_get_contents("$tmp/php-errors.log") : '';
