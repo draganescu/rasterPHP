@@ -55,7 +55,10 @@ function test_db_break($db) {
 
 // a copy of a database, as copy() makes of an SQLite file
 function test_db_copy($from, $file) {
-	if (strpos($from, 'mysql://') !== 0) return copy($from, $file);
+	if (strpos($from, 'mysql://') !== 0) {
+		copy($from, $file);
+		return $file;
+	}
 	$to = test_db($file);
 	$pdo = test_pdo($from);
 	$pdo->exec('CREATE DATABASE IF NOT EXISTS `'.basename($to).'` CHARACTER SET utf8mb4');
