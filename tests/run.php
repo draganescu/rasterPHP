@@ -1872,6 +1872,27 @@ test('create_user never changes an account that has the login; save_user still d
 	check(password_verify('second password', R::load('user', $id)->password));
 	same('member', (string)R::load('user', $id)->role, 'and keeps the role it is not given');
 });
+test('a transaction ends quietly when MySQL already committed it, as it does on a new table (#77)', function () {
+	$finish = new ReflectionMethod('cms_records', 'finish');
+	$finish->setAccessible(true);
+	// a driver that isn't SQLite, after its implicit commit: nothing is open
+	$pdo = new PDO('sqlite::memory:', null, null, array(PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION));
+	$pdo->exec('CREATE TABLE t (n INTEGER)');
+	$pdo->beginTransaction();
+	$pdo->exec('INSERT INTO t VALUES (1)');
+	$pdo->commit();
+	$finish->invoke(null, $pdo, false, 'COMMIT');
+	$finish->invoke(null, $pdo, false, 'ROLLBACK');
+	// one still open is committed, or rolled back
+	$pdo->beginTransaction();
+	$pdo->exec('INSERT INTO t VALUES (2)');
+	$finish->invoke(null, $pdo, false, 'COMMIT');
+	$pdo->beginTransaction();
+	$pdo->exec('INSERT INTO t VALUES (3)');
+	$finish->invoke(null, $pdo, false, 'ROLLBACK');
+	same(false, $pdo->inTransaction());
+	same(array('1', '2'), array_map('strval', $pdo->query('SELECT n FROM t ORDER BY n')->fetchAll(PDO::FETCH_COLUMN)));
+});
 
 // ## 2.1.8 wave 2: newsletter sign-ups
 // (wave 2 newsletter part adds its tests here)

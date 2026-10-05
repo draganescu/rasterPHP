@@ -3106,6 +3106,26 @@ test('G24', 'two members changing to one email at once: one gets it (#77)', func
 		has($answers[0][1], 'Another account uses that email.', "round $round: the other is told");
 	}
 });
+test('G24', 'a member changing to an email while someone signs up with it, in other letters: one account has it (#77)', function () use ($base, $db, $maildir) {
+	cms_store::connect();
+	$other = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir"));
+	for ($round = 1; $round <= 3; $round++) {
+		$wanted = "contested$round@example.com";
+		$member = "changer$round@example.com";
+		same(0, raster(array('user', $member, '--role=member', '--password=old password'))[0]);
+		$cookie = login($base, $member, 'old password');
+		$token = token_in(http('GET', "$base/account", null, array("Cookie: $cookie"))[1]);
+		$change = array('raster_form' => 'authentication.account', 'name' => 'Changer', 'email' => $wanted, 'password' => 'new password', 'current_password' => 'old password', 'csrf' => $token);
+		$signup = array('raster_form' => 'authentication.register', 'name' => 'Newcomer', 'email' => strtoupper($wanted), 'password' => 'long password', 'password_again' => 'long password');
+		$answers = posts_at_once(array(array("$base/account", $change, $cookie), array("$other/register", $signup)));
+		same(1, (int)R::count('user', ' LOWER(email) = ? ', array($wanted)), "round $round: accounts with $wanted");
+		$codes = array($answers[0][0], $answers[1][0]);
+		sort($codes);
+		same(array(200, 303), $codes, "round $round: one wins");
+		$loser = $answers[0][0] === 200 ? $answers[0][1] : $answers[1][1];
+		check(strpos($loser, 'Another account uses that email.') !== false || strpos($loser, 'There is already an account with that email.') !== false, "round $round: the other is told");
+	}
+});
 
 // ## 2.1.8 wave 2: newsletter sign-ups
 // (wave 2 newsletter part adds its tests here)

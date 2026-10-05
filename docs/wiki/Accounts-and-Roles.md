@@ -78,7 +78,7 @@ Each page is a form inside a `render.authentication.<name>` block, with messages
 - Alerts: `account_saved`, `current_password_wrong`, `email_taken`, `email_invalid`, `password_short`.
 - The form is pre-filled with the user's name and email.
 - Changing the password logs out every other session of that account.
-- When two members change to the same email at once, one gets it and the other sees `email_taken` (on SQLite).
+- When two members change to the same email at once, or a member changes to the email someone is signing up with, one gets it and the other sees `email_taken` (on SQLite).
 
 ### Log out: `render.authentication.logout`
 

@@ -177,7 +177,7 @@ cms_records::transaction(function () use ($cart) {
 });
 ```
 
-If any write is refused (say `check()` finds stock would go below zero), none of them happen. Emails and other event listeners run only after the transaction commits.
+If any write is refused (say `check()` finds stock would go below zero), none of them happen. Emails and other event listeners run only after the transaction commits. On MySQL, a write that adds a table or column (in development) commits what came before it, as MySQL does on any schema change.
 
 ## Starting from a form you already have
 
