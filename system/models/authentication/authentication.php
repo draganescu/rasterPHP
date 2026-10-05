@@ -401,7 +401,8 @@ class authentication
 		}
 		$user->password = password_hash($password, PASSWORD_DEFAULT);
 		$user->reset_hash = '';
-		$user->reset_expires = '';
+		// null, not '': in development MySQL has made the column a DATETIME
+		$user->reset_expires = null;
 		$user->failed_count = 0;
 		R::store($user);
 		self::log_in($user->id);
