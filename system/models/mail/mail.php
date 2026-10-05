@@ -123,7 +123,8 @@ class mail
 		// log:// writes to application/data/mail/, log:///some/dir to that folder
 		$path = substr(self::transport(), strlen('log://'));
 		$dir = $path !== '' ? rtrim($path, '/').'/' : APPBASE.'data/mail/';
-		if (!is_dir($dir)) mkdir($dir, 0775, true);
+		// two mails at once may both find no folder
+		if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) throw new RuntimeException('Can\'t create the mail folder '.$dir);
 		// names sort in the order the mails were sent
 		list($usec, $sec) = explode(' ', microtime());
 		$file = $dir.date('Ymd-His', (int)$sec).'-'.substr($usec, 2, 6).'-'.bin2hex(random_bytes(2)).'.eml';

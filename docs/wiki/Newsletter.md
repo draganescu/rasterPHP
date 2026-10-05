@@ -22,6 +22,8 @@ Emails go out through the `mail` model, so set up [Sending email](Sending-Email)
 - Fields: `email`, and optionally `name`.
 - With double opt-in (the default), the visitor gets the email `_email/newsletter_confirm.html`, which must contain the confirmation link `<!-- print.self.confirm_url /-->`. They are subscribed only after clicking it. The alert is `check_email`.
 - Someone who's already subscribed sees the same `check_email` answer, so the form can't reveal who is on the list.
+- Someone who signs up again before confirming gets the same link again, so whichever email they open, the link works.
+- On SQLite, the same address sent twice at once (a double click) is stored once.
 - Also possible: `email_invalid`.
 
 The starter site puts this form in the footer of `_layout.html`.
@@ -116,6 +118,14 @@ $status = newsletter::subscribe($email, $name, '/visit');   // the last argument
 It does what the form does, confirmation email included, and returns `'pending'`, `'confirmed'`, `'already'`, or `false` for an invalid address. Better still, have the form's model send an event and let another model subscribe the guest; see [Events](Events).
 
 Events sent: `newsletter.subscribed` (with `email`, `name`, `status`, `source`), `newsletter.confirmed` and `newsletter.unsubscribed`.
+
+`newsletter::subscribe()` looks the address up and stores it in one transaction (see [Records](Records)). Called inside a transaction of your own, it joins it: `newsletter.subscribed` and the confirmation email wait for your commit, and a rollback leaves no subscriber and sends nothing.
+
+The confirmation email itself is sent by the framework's listener on `newsletter.subscribed`, `newsletter.confirmation_mail`, for a `pending` address. To send your own instead (through a mailing service, say), unbind it in `application/config/the_events.php` and listen yourself:
+
+```php
+event::unbind('newsletter.subscribed')->from('newsletter', 'confirmation_mail');
+```
 
 ## Settings
 

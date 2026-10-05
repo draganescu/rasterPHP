@@ -207,6 +207,7 @@ php tests/demo.php                        # the whole matrix
 | H10 | single opt-in |
 | H11 | `newsletter_confirm_page`, and the name is stored |
 | H12 | `raster send` refuses a page without a title |
+| H13 | on SQLite, sign-ups at once leave one subscriber; signing up again while pending resends the same link; the confirmation email comes from a listener on `newsletter.subscribed`, after the commit |
 | I1 | emails are views; subject from the title; text version |
 | I2 | values escaped in emails; images absolute |
 | I3 | SMTP: AUTH, sender, recipient |

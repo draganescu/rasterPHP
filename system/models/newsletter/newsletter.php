@@ -72,37 +72,55 @@ class newsletter
 	}
 
 	// Subscribes an address from anywhere (a form, another model, a
-	// listener). With double opt-in it sends the confirmation email.
-	// Returns 'pending', 'confirmed', 'already' or false for a bad address.
+	// listener). Returns 'pending', 'confirmed', 'already' or false for a
+	// bad address. The address is looked up and stored in one transaction,
+	// so on SQLite two sign-ups at once leave one subscriber. Signing up
+	// again while pending keeps the token, so every link sent still works.
+	// newsletter.subscribed waits for the commit (also inside someone
+	// else's transaction), and the confirmation email is sent by its
+	// listener, confirmation_mail.
 	static function subscribe($email, $name = '', $source = '') {
 		$email = strtolower(trim((string)$email));
 		if (!filter_var($email, FILTER_VALIDATE_EMAIL)) return false;
 		self::connect();
-		$subscriber = self::table_ready() ? R::findOne('subscriber', ' email = ? ', array($email)) : null;
-		if ($subscriber && $subscriber->status === 'confirmed') return 'already';
-		if (!$subscriber) {
-			$subscriber = R::dispense('subscriber');
-			$subscriber->email = $email;
-			$subscriber->created_at = R::isoDateTime();
-		}
-		$subscriber->name = trim((string)$name);
-		$subscriber->token = bin2hex(random_bytes(20));
-		$subscriber->source = (string)$source;
-		if (config::get('newsletter_double_opt_in', true)) {
-			$subscriber->status = 'pending';
+		$double = config::get('newsletter_double_opt_in', true);
+		return cms_records::transaction(function () use ($email, $name, $source, $double) {
+			$subscriber = self::table_ready() ? R::findOne('subscriber', ' email = ? ', array($email)) : null;
+			if ($subscriber && $subscriber->status === 'confirmed') return 'already';
+			if (!$subscriber) {
+				$subscriber = R::dispense('subscriber');
+				$subscriber->email = $email;
+				$subscriber->created_at = R::isoDateTime();
+			}
+			$subscriber->name = trim((string)$name);
+			if ($subscriber->status !== 'pending' || !$subscriber->token) $subscriber->token = bin2hex(random_bytes(20));
+			$subscriber->source = (string)$source;
+			if ($double) {
+				$subscriber->status = 'pending';
+			} else {
+				$subscriber->status = 'confirmed';
+				$subscriber->confirmed_at = R::isoDateTime();
+			}
 			R::store($subscriber);
-			$sent = mail::send_view('_email/newsletter_confirm', $email, array(
-				'confirm_url' => self::page_url('newsletter_confirm_page', 'newsletter-confirm', $subscriber->token),
-				'name' => $subscriber->name,
-			));
-			if (!$sent) log::error('Newsletter confirmation email failed: '.mail::$last_error);
-		} else {
-			$subscriber->status = 'confirmed';
-			$subscriber->confirmed_at = R::isoDateTime();
-			R::store($subscriber);
-		}
-		event::dispatch('newsletter.subscribed', array('email' => $email, 'name' => $subscriber->name, 'status' => $subscriber->status, 'source' => $subscriber->source));
-		return $subscriber->status;
+			cms_records::dispatch('newsletter.subscribed', array('email' => $email, 'name' => $subscriber->name, 'status' => $subscriber->status, 'source' => $subscriber->source));
+			return $subscriber->status;
+		});
+	}
+
+	// listens to newsletter.subscribed (system/config/events.php): a pending
+	// address gets the link to confirm. A site that sends its own unbinds it:
+	//   event::unbind('newsletter.subscribed')->from('newsletter', 'confirmation_mail');
+	function confirmation_mail($subscribed) {
+		if (!is_array($subscribed) || !isset($subscribed['email'], $subscribed['status']) || $subscribed['status'] !== 'pending') return null;
+		self::connect();
+		$subscriber = self::table_ready() ? R::findOne('subscriber', ' email = ? ', array(strtolower(trim((string)$subscribed['email'])))) : null;
+		if (!$subscriber || $subscriber->status !== 'pending' || !$subscriber->token) return null;
+		$sent = mail::send_view('_email/newsletter_confirm', $subscriber->email, array(
+			'confirm_url' => self::page_url('newsletter_confirm_page', 'newsletter-confirm', $subscriber->token),
+			'name' => (string)$subscriber->name,
+		));
+		if (!$sent) log::error('Newsletter confirmation email failed: '.mail::$last_error);
+		return null;
 	}
 
 	// the page behind the confirmation link (?token=...)

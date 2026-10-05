@@ -13,6 +13,8 @@ event::bind('finding_route')->to('cms','route');
 event::bind('route_set')->to('cms','setup');
 // Accounts: print.if.logged_in and friends, protected pages
 event::bind('route_set')->to('authentication','setup');
+// A newsletter sign-up waiting for confirmation gets its email, after the commit
+event::bind('newsletter.subscribed')->to('newsletter', 'confirmation_mail');
 // The CMS editing toolbar for logged in editors
 event::bind('before_output')->to('cms','inject_toolbar');
 // Alerts (<!-- print.validation.alert('name') -->) show or hide at the end
