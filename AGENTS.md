@@ -822,6 +822,9 @@ use `'model.method'`: `method(true)` returns
 - **Database file:** `RASTER_DB=/path.sqlite` points at another database
   file. SQLite runs in WAL mode, so `-wal` and `-shm` files sit beside it;
   copy all three together, or back up with `sqlite3 <file> .backup`.
+  `RASTER_DB=mysql://user:password@host:3306/name` uses that MySQL database
+  instead, whatever `config/db/` says (%-encode `@`, `:` or `/` in the
+  password).
 - **What the server must never serve.** A Raster site is one folder, and most
   of it is private: the framework, the app's code and config, the SQLite file,
   the view files themselves. The rules are in one list,
@@ -1103,6 +1106,11 @@ php tests/update.php              # new, update, upgrade, doctor
 php tests/shop.php                # the example shop in shop/: records, checkout, payments
 node tests/editor-browser.js      # the in-page editor in Chromium (needs Playwright)
 ```
+
+Run, demo and shop also run on MySQL: `RASTER_DB=mysql://root@127.0.0.1:3306/raster
+php tests/demo.php`. Each run makes new, empty databases beside the one named
+and drops them at the end. Tests that only mean something on SQLite say why
+and count as skipped on MySQL. `update.php` is SQLite only: it tests files.
 
 `php tests/mutate.php` is not one of the tests. It checks the tests: each
 entry in `tests/mutations.json` breaks the framework on purpose and the demo

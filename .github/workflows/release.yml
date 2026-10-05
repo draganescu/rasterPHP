@@ -43,8 +43,45 @@ jobs:
           php bin/raster lint
           RASTER_APP=demo php bin/raster lint --all-themes
 
+  # The same suites on MySQL: RASTER_DB names the server, and each suite
+  # makes its own databases there and drops them at the end.
+  mysql:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
+          MYSQL_DATABASE: raster
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -uroot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    env:
+      RASTER_DB: mysql://root@127.0.0.1:3306/raster
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: pdo_sqlite, sqlite3, pdo_mysql, mbstring, openssl, gd, zlib, phar
+          ini-values: phar.readonly=0
+          coverage: none
+      - name: Framework on MySQL
+        run: php tests/run.php
+      # each suite runs even when the one before failed
+      - name: Demo café on MySQL
+        if: success() || failure()
+        run: php tests/demo.php
+      - name: Example shop on MySQL
+        if: success() || failure()
+        run: php tests/shop.php
+
   release:
-    needs: test
+    needs: [test, mysql]
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     permissions:

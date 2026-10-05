@@ -150,7 +150,7 @@ Environment variables win over the settings above. Set them in your server's con
 |---|---|
 | `RASTER_ENV` | the environment: `production`, `development`, … |
 | `RASTER_URL` | the site's address, e.g. `https://example.com/` |
-| `RASTER_DB` | path of the SQLite file to use |
+| `RASTER_DB` | path of the SQLite file to use, or a MySQL database: `mysql://user:password@host:3306/name` |
 | `RASTER_APP` | the app folder, `application` by default |
 | `RASTER_MAIL` | the mail transport: `log://`, `mail://`, `smtp://…`, `smtps://…` |
 | `RASTER_MAIL_FROM` | the sender, e.g. `My Site <hello@example.com>` |

@@ -133,6 +133,10 @@ class database {
     		})(APPBASE.'config/db/'.$file);
     		$key = basename($file, ".php");
     		if( !$settings['active'] || !$settings['dsn'] ) continue;
+    		// RASTER_DB=mysql://user:password@host:port/name wins over the file,
+    		// as RASTER_DB=/path.sqlite does in the files Raster ships
+    		$mysql = database::mysql_url(getenv('RASTER_DB'));
+    		if ($mysql) $settings = array_merge($settings, $mysql);
     		// make sure the folder of an sqlite database exists
     		if (strpos($settings['dsn'], 'sqlite:') === 0) {
     			$path = substr($settings['dsn'], 7);
@@ -178,6 +182,24 @@ class database {
 		self::$connection = $env;
 		self::$frozen = $frozen_connections[$env];
     	return true;
+    }
+
+    // the connection a mysql:// address names, or null for anything else:
+    //   mysql://shop:secret@db.example:3306/shop
+    // Characters with a meaning in a URL (@ : / in a password) are %-encoded.
+    static function mysql_url($url) {
+    	if (strpos((string)$url, 'mysql://') !== 0) return null;
+    	$parts = parse_url($url);
+    	$name = isset($parts['path']) ? trim($parts['path'], '/') : '';
+    	if (!$parts || empty($parts['host']) || $name === '') {
+    		throw new InvalidArgumentException('RASTER_DB should look like mysql://user:password@host:3306/database');
+    	}
+    	$dsn = 'mysql:host='.$parts['host'].(isset($parts['port']) ? ';port='.$parts['port'] : '').';dbname='.rawurldecode($name).';charset=utf8mb4';
+    	return array(
+    		'dsn' => $dsn,
+    		'user' => isset($parts['user']) ? rawurldecode($parts['user']) : null,
+    		'password' => isset($parts['pass']) ? rawurldecode($parts['pass']) : null,
+    	);
     }
 
     // the database config loader looks up all the files in APPBASE.'config/db/'
