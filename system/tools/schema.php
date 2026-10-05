@@ -95,7 +95,7 @@ class raster_schema {
 	}
 
 	// Columns of a bundled or model-declared table that MySQL sized by the
-	// row 2.1.8 and earlier stored to make the table (varchar(191) for text,
+	// row 2.1.9 and earlier stored to make the table (varchar(191) for text,
 	// tinyint for a number), and that frozen would never grow: field => the
 	// type it should be. SQLite's columns take any length.
 	protected function narrow($fields, $columns) {
