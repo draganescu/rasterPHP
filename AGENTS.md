@@ -254,8 +254,11 @@ class cafe {
 - Or bind in `config/the_events.php`:
   `event::bind('reservation.booked')->to('cafe', 'subscribe_guest');`, and
   `event::unbind(…)->from(…)`.
-- Listeners get the payload array and run in order: `the_events.php`, then
-  `listens()`, then the framework's own. A listener returning `false` makes
+- Listeners get the payload array and run in order: the framework's own
+  bindings in `system/config/events.php` (routing, the CMS and account
+  checks, the newsletter's confirmation email), then `the_events.php`, then
+  `listens()`, then the framework's core handlers (controller and log). A
+  listener returning `false` makes
   `event::dispatch()` return `false`; the sender decides what that means.
 - Name your events `<model>.<what happened>`, in the past tense.
 - `lint` reports bindings to models or methods that don't exist, and events
