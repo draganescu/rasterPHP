@@ -3043,7 +3043,69 @@ test('C53', 'a print inside a render block fills every row of a long list: 1,500
 });
 
 // ## 2.1.8 wave 2: sign-up, account email change
-// (wave 2 sign-up part adds its tests here)
+
+// posts each request at the same moment and answers [code, body, location] for each
+function posts_at_once($requests) {
+	$multi = curl_multi_init();
+	$handles = array();
+	foreach ($requests as $r) {
+		$handle = curl_init($r[0]);
+		curl_setopt_array($handle, array(CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true, CURLOPT_HEADER => true, CURLOPT_TIMEOUT => 30,
+			CURLOPT_HTTPHEADER => isset($r[2]) ? array('Cookie: '.$r[2]) : array(), CURLOPT_POSTFIELDS => http_build_query($r[1])));
+		curl_multi_add_handle($multi, $handle);
+		$handles[] = $handle;
+	}
+	do { curl_multi_exec($multi, $running); curl_multi_select($multi, 0.05); } while ($running);
+	$answers = array();
+	foreach ($handles as $handle) {
+		$raw = curl_multi_getcontent($handle);
+		$size = curl_getinfo($handle, CURLINFO_HEADER_SIZE);
+		$location = preg_match('/^Location:\s*(\S+)/mi', substr($raw, 0, $size), $m) ? $m[1] : null;
+		$answers[] = array(curl_getinfo($handle, CURLINFO_HTTP_CODE), substr($raw, $size), $location);
+		curl_multi_remove_handle($multi, $handle);
+	}
+	curl_multi_close($multi);
+	return $answers;
+}
+
+test('G24', 'two sign-ups at once with one email make one account (#77)', function () use ($base, $db, $maildir) {
+	cms_store::connect();
+	// a second server on the same database, so the two posts really overlap
+	$other = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir"));
+	for ($round = 1; $round <= 3; $round++) {
+		$email = "twice$round@example.com";
+		$form = array('raster_form' => 'authentication.register', 'email' => $email, 'password' => 'long password', 'password_again' => 'long password');
+		$answers = posts_at_once(array(array("$base/register", $form + array('name' => 'First')), array("$other/register", $form + array('name' => 'Second'))));
+		usort($answers, function ($a, $b) { return $a[0] - $b[0]; });
+		same(1, (int)R::count('user', ' LOWER(email) = ? ', array($email)), "round $round: accounts with $email");
+		same(array(200, 303), array($answers[0][0], $answers[1][0]), "round $round: one sign-up wins");
+		has($answers[0][1], 'There is already an account with that email.', "round $round: the other is told");
+		has($answers[1][2], '?done=registered', "round $round");
+		$winner = R::findOne('user', ' LOWER(email) = ? ', array($email));
+		check(password_verify('long password', $winner->password), "round $round: the account keeps its password");
+	}
+});
+test('G24', 'two members changing to one email at once: one gets it (#77)', function () use ($base, $db, $maildir) {
+	cms_store::connect();
+	$other = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir"));
+	for ($round = 1; $round <= 2; $round++) {
+		$wanted = "shared$round@example.com";
+		$requests = array();
+		foreach (array(array('a', $base), array('b', $other)) as $who) {
+			$email = "mover{$who[0]}$round@example.com";
+			same(0, raster(array('user', $email, '--role=member', '--password=old password'))[0]);
+			$cookie = login($who[1], $email, 'old password');
+			$token = token_in(http('GET', "$who[1]/account", null, array("Cookie: $cookie"))[1]);
+			// a new password too, so each save hashes one, as a member changing both would
+			$requests[] = array("$who[1]/account", array('raster_form' => 'authentication.account', 'name' => 'Mover', 'email' => $wanted, 'password' => 'new password', 'current_password' => 'old password', 'csrf' => $token), $cookie);
+		}
+		$answers = posts_at_once($requests);
+		usort($answers, function ($a, $b) { return $a[0] - $b[0]; });
+		same(1, (int)R::count('user', ' LOWER(email) = ? ', array($wanted)), "round $round: accounts with $wanted");
+		same(array(200, 303), array($answers[0][0], $answers[1][0]), "round $round: one change wins");
+		has($answers[0][1], 'Another account uses that email.', "round $round: the other is told");
+	}
+});
 
 // ## 2.1.8 wave 2: newsletter sign-ups
 // (wave 2 newsletter part adds its tests here)
