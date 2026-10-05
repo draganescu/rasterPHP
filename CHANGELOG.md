@@ -3,6 +3,21 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.1.9
+
+Nothing to do on a site: `php bin/raster update` brings the change.
+
+- **Pictures keep working when a site moves to another folder.** An
+  uploaded picture's address is now stored from the site's root
+  (`/media/<file>`), without the folder the site happened to run under,
+  and shown under the folder it runs in now. Until now the folder was
+  saved with it: a picture uploaded while the site ran under `/preview/abc/`
+  kept that address after the site and its database moved to a domain's
+  root, and did not load there. Addresses already saved that way are
+  shown right without being saved again. Only a value that is a whole
+  address of a file in `media/` changes; links, text and other sites'
+  addresses are left as they are.
+
 ## 2.1.8
 
 Run `php bin/raster update`; `php bin/raster doctor` shows what is left.
