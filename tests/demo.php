@@ -3187,7 +3187,7 @@ function mcp_at_once($bases, $calls) {
 	return $answers;
 }
 
-test('E33', 'items saved at once with one title each get their own slug and page, and page saves at once keep each other\'s fields (on SQLite, #77)', function () use ($base, $db, $maildir) {
+test('E33', 'items saved at once with one title each get their own slug and page, and page saves at once keep each other\'s fields (#77)', function () use ($base, $db, $maildir) {
 	$second = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'RASTER_MCP_TOKEN' => 'demo-token'));
 	$about = mcp($base, 'get_page', array('page' => '/about'))['fields'];
 	$ids = array();

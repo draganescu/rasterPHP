@@ -1950,7 +1950,7 @@ function test_newsletter_subscribed($payload) {
 	$subscribed_seen[] = $payload['email'].' '.$payload['status'];
 }
 
-test('many sign-ups at once with the same addresses leave one subscriber each (on SQLite)', function () use ($maildir) {
+test('many sign-ups at once with the same addresses leave one subscriber each', function () use ($maildir) {
 	reconnect();
 	newsletter::subscribe('race-seed@example.com');
 	$dir = "$maildir-race";
@@ -2074,7 +2074,7 @@ function test_content_changed() {
 	$changed_seen[] = (int)$other->query('SELECT COUNT(*) FROM wavetwodata')->fetchColumn();
 }
 
-test('items created at once with one title all get their own slug (on SQLite)', function () {
+test('items created at once with one title all get their own slug', function () {
 	reconnect();
 	cms_store::save_item('wavetwodata', 0, array('title' => 'Seed'), array('title'));
 	$out = race_php('for ($i = 0; $i < 15; $i++) cms_store::save_item("wavetwodata", 0, array("title" => "Harvest supper"), array("title"));', 6);
@@ -2084,7 +2084,7 @@ test('items created at once with one title all get their own slug (on SQLite)', 
 	same(90, count(array_unique($slugs)), 'distinct slugs of 90:');
 });
 
-test('two page saves at once, each changing its own field, keep both changes (on SQLite)', function () {
+test('two page saves at once, each changing its own field, keep both changes', function () {
 	cms_store::connect();
 	cms_store::update_page('wavetwopage', '/wave-two', array('a' => 'a-0', 'b' => 'b-0'), array('a', 'b'));
 	$out = race_php('$field = $n ? "b" : "a"; for ($i = 1; $i <= 40; $i++) cms_store::update_page("wavetwopage", "/wave-two", array($field => "$field-$i"), array("a", "b"));', 2);

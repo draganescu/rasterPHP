@@ -656,17 +656,19 @@ class reservation {
   any nested rows.
 - **Transactions.** `cms_records::transaction(function () { … })` makes every
   write in it happen, or none: an exception or a refusal rolls all of them
-  back. On SQLite the database is locked for writing from the start, so two
-  checkouts can't both take the last item. Events (`cms.item_saved` and the
+  back. The database is locked for writing from the start (SQLite with
+  `BEGIN IMMEDIATE`, MySQL with a named lock per database), so two
+  checkouts can't both take the last item. A write that waits more than 5
+  seconds for the lock fails with "database is locked". Events (`cms.item_saved` and the
   rest) wait for the commit, so nothing is emailed about a write that was
   rolled back. So does `util::content_changed()`: the page cache is thrown
   away and `content_changed` sent once, after the commit, and not at all
   after a rollback. Every single write of a record is already one (its
   `check()` and the write together), and so is every save or delete of a
-  markup collection's item and every page save: on SQLite two items saved
+  markup collection's item and every page save: two items saved
   at once with one title get different slugs, and two page saves at once
   (one field each) keep each other's change. So is a newsletter sign-up
-  (`newsletter::subscribe()`): on SQLite, sign-ups at once with one address
+  (`newsletter::subscribe()`): sign-ups at once with one address
   leave one subscriber. A transaction started inside another joins it. On
   MySQL a write that adds a table or column (development) commits what
   came before it, as MySQL does on any schema change.
@@ -717,8 +719,8 @@ class reservation {
 - One email, one account: two sign-ups at once with one email (a double
   click) make one account, and the other answers `email_taken`; so do two
   members changing to one email at once, or a member changing to the email
-  someone is signing up with. On SQLite, looking for the email
-  and storing the account happen in one transaction. From code,
+  someone is signing up with. Looking for the email and storing the
+  account happen in one transaction. From code,
   `authentication::create_user($login, $password, $role, $name)` makes an
   account, or returns null when the login is taken; `save_user(…)` creates
   or updates.
@@ -738,7 +740,7 @@ class reservation {
   - From code: `newsletter::subscribe($email, $name, $source)` does what the
     form does (and sends the confirmation) and returns `pending`,
     `confirmed`, `already` or false. It looks the address up and stores it
-    in one transaction, so on SQLite sign-ups at once leave one subscriber;
+    in one transaction, so sign-ups at once leave one subscriber;
     inside another transaction it joins it.
   - The confirmation email is sent after the commit by the framework's
     listener on `newsletter.subscribed` (status `pending`); a site that
