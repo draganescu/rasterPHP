@@ -221,40 +221,157 @@ test('a new site can keep code out of the web', function () use ($site) {
 	has(raster($site, array('doctor'))[1], '.htaccess is missing');
 });
 
-test('2.1.1 closes /api, and keeps it open for older sites until they list', function () use ($repo, $tmp) {
-	$site = "$tmp/site211";
+// ## 2.1.8 batch A: page cache
+// (batch A adds its tests here)
+
+// ## 2.1.8 batch B: errors and /api
+
+test('an older site upgrades with /api closed: api_open is gone (#24)', function () use ($repo, $tmp) {
+	$site = "$tmp/siteb";
 	same(0, raster($repo, array('new', $site))[0]);
-	same(array(), array_values(array_filter(explode("\n", raster($site, array('upgrade', '--dry-run'))[1]), function ($l) { return strpos($l, 'api-open') !== false; })), 'a new site starts closed');
-	lacks(file_get_contents("$site/application/config/the_app.php"), 'api_open');
-	// a site made before 2.1.1, with a model that lists nothing
+	// a site from before 2.1.1, with a model that lists nothing
 	file_put_contents("$site/application/config/raster-version", "2.1.0\n");
 	mkdir("$site/application/models/orders");
-	file_put_contents("$site/application/models/orders/orders.php", "<?php\nclass orders { function all() { return array(); } }\n");
+	file_put_contents("$site/application/models/orders/orders.php", "<?php\nclass orders { function all() { return array('secret order'); } }\n");
 	list($code, $out) = raster($site, array('upgrade'));
 	same(0, $code, $out);
-	has($out, 'api-open');
-	has(file_get_contents("$site/application/config/the_app.php"), "config::set('api_open')->to(true);");
+	lacks($out, 'api-open');
+	lacks(file_get_contents("$site/application/config/the_app.php"), 'api_open');
 	same(file_get_contents("$repo/system/VERSION"), file_get_contents("$site/application/config/raster-version"));
-	has(raster($site, array('doctor'))[1], 'api_open keeps every public method');
-	// once the model lists what it offers and the line is gone, doctor is quiet
-	file_put_contents("$site/application/models/orders/orders.php", "<?php\nclass orders {\n\tstatic function api() { return array('all' => 'editor'); }\n\tfunction all() { return array(); }\n}\n");
-	$config = "$site/application/config/the_app.php";
-	file_put_contents($config, preg_replace("/\n\/\/ Added by `raster upgrade` for Raster 2\.1\.1.*$/s", "\n", file_get_contents($config)));
-	lacks(raster($site, array('doctor'))[1], 'api_open');
-	// a config that ends with a closing tag still gets a working line
-	file_put_contents("$site/application/config/raster-version", "2.1.0\n");
-	file_put_contents("$site/application/models/orders/orders.php", "<?php\nclass orders { function all() { return array(); } }\n");
-	file_put_contents($config, rtrim(file_get_contents($config))."\n?>\n");
-	same(0, raster($site, array('upgrade'))[0]);
-	lacks(file_get_contents($config), '?>');
-	same(0, raster($site, array('render', '/'))[0], 'the page still renders');
-	lacks(raster($site, array('render', '/'))[1], 'Added by `raster upgrade`', 'and prints nothing from the config');
-	file_put_contents($config, preg_replace("/\n\/\/ Added by `raster upgrade` for Raster 2\.1\.1.*$/s", "\n", file_get_contents($config)));
-	file_put_contents("$site/application/models/orders/orders.php", "<?php\nclass orders {\n\tstatic function api() { return array('all' => 'editor'); }\n\tfunction all() { return array(); }\n}\n");
-	// an older site whose models already list theirs needs nothing
-	file_put_contents("$site/application/config/raster-version", "2.1.0\n");
-	lacks(raster($site, array('upgrade'))[1], 'api-open');
+	// a config that still sets it opens nothing
+	append("$site/application/config/the_app.php", "\nconfig::set('api_open')->to(true);\n");
+	list($code, $out) = raster($site, array('render', '/api/orders/all'));
+	lacks($out, 'secret order');
+	has($out, 'unknown method');
+	lacks(raster($site, array('vocabulary'))[1], 'every public method');
 });
+
+// ## 2.1.8 batch C: list SQL
+// (batch C adds its tests here)
+
+// ## 2.1.8 batch D: accounts
+// (batch D adds its tests here)
+
+// ## 2.1.8 batch E: template output
+// (batch E adds its tests here)
+
+// ## 2.1.8 batch F: upgrade tooling
+
+test('a hand-made second app is taken as current, not as 1.x (#75)', function () use ($repo, $tmp) {
+	$site = "$tmp/site-blog";
+	same(0, raster($repo, array('new', $site))[0]);
+	$version = trim(file_get_contents("$repo/system/VERSION"));
+	// a second app made by copying the first, without its version file, and a
+	// model that offers nothing at /api
+	exec('cp -R '.escapeshellarg("$site/application").' '.escapeshellarg("$site/blog"));
+	unlink("$site/blog/config/raster-version");
+	mkdir("$site/blog/models/posts");
+	file_put_contents("$site/blog/models/posts/posts.php", "<?php\nclass posts { function wipe() { return 'all posts deleted'; } }\n");
+	$config = file_get_contents("$site/blog/config/the_app.php");
+	$blog = array('RASTER_APP' => 'blog', 'RASTER_DB' => "$site/blog/data/test.sqlite");
+	// doctor and the dry run have nothing for it to do
+	list($code, $out) = raster($site, array('upgrade', '--dry-run'), $blog);
+	same(0, $code, $out);
+	has($out, 'blog/ has no config/raster-version');
+	lacks($out, '2.0.0 ');
+	lacks($out, '2.1.1 ');
+	check(!is_file("$site/blog/config/raster-version"), 'a dry run writes nothing');
+	list($code, $out) = raster($site, array('doctor'), $blog);
+	lacks($out, 'upgrade step(s) to run', $out);
+	has($out, "✓ Raster $version");
+	// updating the project upgrades every app: blog/ gets today's version and
+	// no old steps
+	list($code, $out) = raster($site, array('update', $repo));
+	same(0, $code, $out);
+	has($out, "blog/ had no config/raster-version: taken as Raster $version, no upgrade steps run");
+	lacks($out, '✓ 2.', 'no old steps');
+	same("$version\n", file_get_contents("$site/blog/config/raster-version"));
+	same($config, file_get_contents("$site/blog/config/the_app.php"), 'its config is left alone');
+	lacks(file_get_contents("$site/blog/config/the_app.php"), 'api_open');
+	list($code, $out) = raster($site, array('render', '/api/posts/wipe'), $blog);
+	has($out, 'HTTP 404', $out);
+	lacks($out, 'all posts deleted', '/api stays closed');
+	// from then on it upgrades like any other app
+	list($code, $out) = raster($site, array('upgrade'), $blog);
+	same(0, $code, $out);
+	has($out, "blog/ is at Raster $version, nothing to change");
+	lacks($out, 'no config/raster-version');
+	list($code, $out) = raster($site, array('version'));
+	has($out, "blog/ is at $version");
+	// an app really from Raster 1.x says so in its version file, and gets
+	// every step again
+	unlink("$site/blog/data/.gitignore");
+	lacks(raster($site, array('upgrade', '--dry-run'), $blog)[1], '2.0.0 private-folders', 'not while it is current');
+	file_put_contents("$site/blog/config/raster-version", "1.0.0\n");
+	has(raster($site, array('upgrade', '--dry-run'), $blog)[1], '2.0.0 private-folders');
+});
+
+test('upgrade refuses an app folder that is missing or not an app', function () use ($repo, $tmp) {
+	$site = "$tmp/site-noapp";
+	same(0, raster($repo, array('new', $site))[0]);
+	// a misspelled RASTER_APP, a folder that is not an app (no config/), and
+	// the framework's own folder, which has a config/ but is no app
+	foreach (array('nope', 'media', 'system', 'application/../system') as $app) {
+		foreach (array(array('upgrade'), array('upgrade', '--dry-run')) as $args) {
+			list($code, $out) = raster($site, $args, array('RASTER_APP' => $app));
+			check($code !== 0, implode(' ', $args)." with $app/ exits non-zero: $out");
+			has($out, "$app/ is not a Raster app folder");
+			lacks($out, 'taken as', 'no success line');
+			lacks($out, 'Warning', 'no PHP warning');
+		}
+	}
+	check(!file_exists("$site/nope"), 'nothing is created');
+	check(!file_exists("$site/media/config"), 'nothing is written into media/');
+	check(!file_exists("$site/system/config/raster-version"), 'nothing is written into system/');
+	list($code, $out) = raster($site, array('doctor'));
+	lacks($out, 'raster-version', 'doctor finds no framework file added');
+	// an app whose version file can't be written says so, and not that it was
+	// taken as current
+	unlink("$site/application/config/raster-version");
+	chmod("$site/application/config", 0555);
+	list($code, $out) = raster($site, array('upgrade'));
+	chmod("$site/application/config", 0775);
+	check($code !== 0, "exits non-zero: $out");
+	has($out, "Could not write application/config/raster-version");
+	lacks($out, 'taken as', 'no success line');
+	lacks($out, 'Warning', 'no PHP warning');
+	// when steps ran before the write failed, the error names them
+	file_put_contents("$site/application/config/raster-version", "1.0.0\n");
+	@unlink("$site/CLAUDE.md");
+	chmod("$site/application/config/raster-version", 0444);
+	list($code, $out) = raster($site, array('upgrade'));
+	chmod("$site/application/config/raster-version", 0664);
+	check($code !== 0, "exits non-zero: $out");
+	has($out, "Could not write application/config/raster-version");
+	has($out, '2.0.0 agent-files');
+	has($out, 'upgrade checks them again next time');
+	lacks($out, 'the steps above ran', 'no steps are printed above');
+});
+
+test('new sites get no old .htaccess below the root (#76)', function () use ($repo, $tmp) {
+	check(!file_exists("$repo/application/.htaccess"), 'application/.htaccess is not in the repository');
+	check(!file_exists("$repo/system/.htaccess"), 'system/.htaccess is not in the repository');
+	$site = "$tmp/site-htaccess";
+	same(0, raster($repo, array('new', $site))[0]);
+	check(!file_exists("$site/application/.htaccess"), 'raster new copies no application/.htaccess');
+	check(!file_exists("$site/system/.htaccess"), 'raster new copies no system/.htaccess');
+	check(is_file("$site/.htaccess"), 'the root .htaccess is still there');
+	// the root rules still refuse config, data, models and system
+	require_once "$repo/system/private_paths.php";
+	foreach (array('/application/config/the_app.php', '/application/config/servers', '/application/data/raster.sqlite', '/application/data/mail/x.eml', '/application/models/x/x.php', '/application/models/x/sql/q', '/system/boot.php', '/system/VERSION') as $path) {
+		check(private_paths::blocked($path), "$path is refused");
+	}
+	foreach (array('logo.svg', 'photo.webp', 'font.woff2', 'favicon.ico', 'menu.pdf', 'style.css') as $file) {
+		check(!private_paths::blocked("/application/views/default/$file"), "theme file $file is served");
+	}
+	has(raster($site, array('doctor'))[1], '✓ .htaccess has every rule');
+});
+
+// ## 2.1.8 batch G: MCP themes
+// (batch G adds its tests here)
+
+// ## 2.1.8 batch H: row loop
+// (batch H adds its tests here)
 
 echo "\n\n$passed passed, ".count($failed)." failed\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";

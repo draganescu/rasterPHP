@@ -113,6 +113,12 @@ class validation
 	protected function check_field($field, $rules) {
 		$value = self::value($field);
 		$failed = array();
+		// a list for a field the form doesn't name field[], or bytes that
+		// aren't UTF-8: browsers send neither, and no rule below can check them
+		if (is_array($value) && empty($rules['list'])) return array('required');
+		foreach ((array)$value as $one) {
+			if (is_array($one) || !mb_check_encoding((string)$one, 'UTF-8')) return array('required');
+		}
 		if (!empty($rules['required']) && self::is_empty($value)) return array('required');
 		if (self::is_empty($value) || is_array($value)) return $failed;
 		$value = trim((string)$value);
@@ -138,7 +144,8 @@ class validation
 		if (isset($rules['maxlength']) && mb_strlen($value) > (int)$rules['maxlength']) $failed[] = 'maxlength';
 		if (!empty($rules['pattern']) && is_string($rules['pattern'])) {
 			$regex = '/^(?:'.str_replace('/', '\\/', $rules['pattern']).')$/u';
-			if (@preg_match($regex, $value) === 0) $failed[] = 'pattern';
+			// a pattern that can't run (a bad regex, too much backtracking) fails too
+			if (@preg_match($regex, $value) !== 1) $failed[] = 'pattern';
 		}
 		return $failed;
 	}
@@ -184,7 +191,8 @@ class validation
 	}
 
 	function cant_be($field, $forbidden) {
-		return $this->region(self::is_empty(self::value($field)) || trim((string)self::value($field)) !== (string)$forbidden, $field, 'cant_be');
+		$value = self::value($field);
+		return $this->region(self::is_empty($value) || is_array($value) || trim((string)$value) !== (string)$forbidden, $field, 'cant_be');
 	}
 
 	function accepted($field) {
@@ -193,7 +201,7 @@ class validation
 
 	// the names used by older Raster sites
 	function not_empty($field) { return $this->region(!self::is_empty(self::value($field)), $field, 'required'); }
-	function email_format($field) { $v = self::value($field); return $this->region(self::is_empty($v) || filter_var(trim((string)$v), FILTER_VALIDATE_EMAIL), $field, 'email'); }
+	function email_format($field) { $v = self::value($field); return $this->region(self::is_empty($v) || !is_array($v) && filter_var(trim((string)$v), FILTER_VALIDATE_EMAIL), $field, 'email'); }
 	function are_the_same($a, $b) { return $this->matches($a, $b); }
 
 	// application rules: application/models/validation/rules/<rule>.php

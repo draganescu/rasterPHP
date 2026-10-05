@@ -90,7 +90,7 @@ Templates pass literal values only (numbers, strings, `true`, `false`, `null`). 
 | `util::done('saved')` | redirects back to the same page with `?done=saved`, so reloading doesn't post twice, and shows the `alert('saved')` block. Stops the request. |
 | `util::done('saved', '/thanks')` | the same, to another address |
 | `util::redirect('account')` | redirects to a path on the site and stops |
-| `util::content_changed()` | tells Raster that content changed, so the page cache is thrown away. Call it after your model writes data visitors see. |
+| `util::content_changed()` | tells Raster that content changed, so the page cache is thrown away. Call it after your model writes data visitors see. Inside `cms_records::transaction()` it waits for the commit, and is dropped if the transaction is rolled back. |
 
 ### Settings and the template
 
@@ -191,13 +191,13 @@ class shop {
 What is never reachable:
 
 - methods that are static, not public, or whose name starts with `_`
-- the bundled models, except `cms` (whose editor endpoints check for an editor and a security token). Allow others with `config::set('api_system_models')->to(array('cms', 'feed'))`.
+- the bundled models, except `cms`, and of `cms` only what its own `api()` lists: the in-page editor's endpoints (which check for an editor and a security token), `style` and `logout`. A public method added in a `the_cms` override answers 404 unless the override lists it. The override's `api()` adds to what `cms` lists, so the in-page editor keeps working. `config::set('api_system_models')->to(array('cms', 'feed'))` lets another bundled model through, for what its `api()` lists.
 
 Posts to `/api` pass the same cross-site check as forms. When the visitor is logged in, the post must also include the session token as a `csrf` field, as forms do; your page's scripts can read it from a hidden `csrf` input of any post form on the page. Posts to `/api` don't count as form submissions, though: `validation::get()->submitted()` is `false`, so form handlers written as shown in [Forms and validation](Forms-and-Validation) do nothing over `/api`.
 
 A method you list for visitors can be called by anyone, so one that changes data still checks what it's given (the shop's payment webhook verifies the provider's signature, for example). `php bin/raster lint` reports an `api()` that names a method the model doesn't have, one `/api` can't call, or a role that doesn't exist. `php bin/raster vocabulary` shows what each model offers.
 
-**Sites made before Raster 2.1.1.** Until then every public method of every model was reachable, by anyone. `raster update` keeps that for sites that had models without `api()`, by adding `config::set('api_open')->to(true)` to `config/the_app.php`: models that don't list their methods then answer as before, and models that do keep their list. `raster doctor` warns while it's there. List what each model offers, then remove the line; it stops working in 2.2.0.
+**When a method fails.** A method that throws answers `{"error":"server error"}` with status 500, and the error goes to PHP's error log with the URL, so a payment provider sees the failure and sends the webhook again. Anything the method printed before it threw is dropped. When the database can't be reached the call answers 503 before the method runs, so a webhook is never told "no such order" during an outage and the provider sends it again; a bad query on a database that is there is a 500 like any other error. A call without an argument the method needs gets 400. In development the answer also carries `exception` and `trace`, to find the mistake.
 
 ## Overriding a bundled model
 

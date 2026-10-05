@@ -960,8 +960,11 @@ test(array('I3', 'I4', 'I8', 'I9'), 'SMTP: plain on localhost, STARTTLS and smtp
 		$port = free_port();
 		$transcript = "$tmp/smtp-$mode-$host.log";
 		$process = proc_open(array(PHP_BINARY, "$root/tests/fake_smtp.php", (string)$port, $transcript, $mode, $cert, $host), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes);
-		for ($i = 0; $i < 100 && !@fsockopen($host, $port); $i++) usleep(50000);
+		// a short timeout: on macOS an address like 127.0.0.2 that lo0 doesn't
+		// have never answers, and the default timeout stalls the whole run
+		for ($up = false, $i = 0; $i < 100 && !($up = @fsockopen($host, $port, $errno, $errstr, 0.2)); $i++) usleep(50000);
 		$GLOBALS['servers'][] = $process;
+		if (!$up) throw new Exception("the fake SMTP server did not answer on $host:$port".($host === '127.0.0.1' ? '' : "; on macOS add the address with `sudo ifconfig lo0 alias $host up`"));
 		return array($port, $transcript);
 	};
 	$send = function ($dsn, $from = true) use ($root, $cert) {
@@ -2094,7 +2097,7 @@ test(array('R15', 'D26'), 'list options: filters from the URL, dates, several or
 	$list = cms_store::list_options('status!=cancelled&date<today&guests>=2&seating=?seating&order=-date,name&limit=5');
 	same(array(array('status', '!=', 'cancelled'), array('date', '<', $day(0)), array('guests', '>=', '2')), $list['conditions'], 'no ?seating in the URL here');
 	same(array('order' => '-date,name', 'limit' => '5'), $list['options']);
-	same('date DESC, name ASC, id ASC', cms_store::order_sql('-date,name', array('date' => 1, 'name' => 1)));
+	same('`date` DESC, `name` ASC, id ASC', cms_store::order_sql('-date,name', array('date' => 1, 'name' => 1)));
 	same('id ASC', cms_store::order_sql('nope,-nope', array('date' => 1)));
 	// pages of a list filtered from the URL keep the query
 	has(http('GET', "$base/menu?category=cakes")[1], 'menu_page/2?category=cakes', 'pagination keeps the query');
@@ -2392,22 +2395,17 @@ test('C48', '/api answers only what a model lists, for the roles it names', func
 	$vocabulary = json_decode(raster(array('vocabulary', '--json'))[1], true);
 	same(array('day' => 'editor'), $vocabulary['models']['reservation']['api']);
 	same(array(), $vocabulary['models']['secret']['api'], 'a model that lists nothing offers nothing');
-	check(!isset($vocabulary['models']['cms']['api']) && !isset($vocabulary['models']['feed']['api']), 'bundled models, overridden or not, guard themselves');
+	same('visitor', $vocabulary['models']['cms']['api']['editor_save_field'], 'the vocabulary lists what cms offers');
+	check(!isset($vocabulary['models']['cms']['api']['setup']), 'and nothing it doesn\'t list');
+	check(!isset($vocabulary['models']['feed']['api']), 'bundled models /api doesn\'t reach list nothing');
 	has(raster(array('vocabulary'))[1], '/api: day (editor)');
-	// api_open, which the 2.1.1 upgrade writes for older sites: models that
-	// list nothing answer as before, models that list keep their list
+	// a model that lists nothing offers nothing
 	$dir = "$root/demo/models/zzopen";
 	@mkdir($dir);
 	try {
 		with_file("$dir/zzopen.php", "<?php\nclass zzopen { function ping() { return 'pong'; } }\n", function () use ($base) {
-			$open = array('CAFE_API_OPEN' => 'on', 'RASTER_APP' => 'demo');
-			lacks(raster(array('render', '/api/zzopen/ping'))[1], 'pong', 'closed by default');
-			same('"pong"', trim(raster(array('render', '/api/zzopen/ping'), $open)[1]), 'open with api_open');
-			has(raster(array('render', '/api/cafe/stamp'), $open)[1], 'unknown method', 'a model that lists keeps its list');
-			has(raster(array('render', '/api/reservation/day/2026-12-01'), $open)[1], 'not allowed', 'and its roles');
-			has(raster(array('render', '/api/the_feed/generator'), $open)[1], 'unknown model', 'an override is still never addressed directly');
-			same('open', json_decode(raster(array('vocabulary', '--json'), $open)[1], true)['models']['zzopen']['api']);
-			has(raster(array('vocabulary'), $open)[1], '/api: every public method, to anyone');
+			lacks(raster(array('render', '/api/zzopen/ping'))[1], 'pong', 'closed');
+			same(404, http('GET', "$base/api/zzopen/ping")[0]);
 			// a member method: members yes, visitors asked to log in
 			file_put_contents(__DIR__.'/../demo/models/zzopen/zzopen.php', "<?php\nclass zzopen {\n\tstatic function api() { return array('ping' => 'member'); }\n\tfunction ping() { return 'pong'; }\n}\n");
 			same(401, http('GET', "$base/api/zzopen/ping")[0]);
@@ -2605,6 +2603,653 @@ test('T6', 'schema --apply converts a column whose type changed when every value
 		R::exec('DROP INDEX zz_n');
 	});
 	raster(array('schema', '--drop=zzretypedata', '--force'));
+});
+
+// ## 2.1.8 batch A: page cache
+
+test(array('L9', 'L10'), 'page cache: made-up list URLs are not kept, a change deletes old pages, tracking links are hits', function () use ($root, $tmp, $maildir) {
+	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => "$tmp/prod.sqlite", 'RASTER_URL' => 'https://cafe.example/', 'RASTER_MAIL' => "log://$maildir", 'RASTER_MCP_TOKEN' => 'demo-token');
+	$prod = server(free_port(), $env);
+	$cache = function ($path) use ($prod) {
+		list($status, , $headers) = http('GET', "$prod$path");
+		return $status.' '.(header_value($headers, 'X-Raster-Cache') ?: 'not kept');
+	};
+	$pages = function () use ($root) { return count(preg_grep('#/[0-9a-f]{40}$#', glob("$root/demo/data/cache/*") ?: array())); };
+	mcp($prod, 'create_item', array('collection' => 'journal', 'fields' => array('title' => 'Notes on caching', 'author' => 'Mara')));
+	raster(array('cache', 'clear'), $env);
+	same('200 miss', $cache('/journal/journal_items/author/Mara'));
+	same('200 hit', $cache('/journal/journal_items/author/Mara'));
+	// L9: a filter nothing matches, a page past the last one and a field the
+	// list doesn't have all answer, and none of them is kept
+	// nor are other spellings of a list's own URLs
+	foreach (array('/journal/journal_items/author/nobody-1', '/journal/journal_items/author/nobody-2', '/journal/journal_page/99999', '/journal/journal_items/flavour/x',
+		'/journal/journal_page/-1', '/journal/journal_page/1', '/journal/journal_items/author/Mara/junk', '/journal/journal_items/author/Mara/journal_page/-5') as $path) {
+		same('200 not kept', $cache($path), $path);
+		same('200 not kept', $cache($path), $path);
+	}
+	same(1, $pages(), 'only the real list is cached');
+	// nor a typed filter spelled another way than the site prints it
+	mcp($prod, 'create_item', array('collection' => 'events', 'fields' => array('title' => 'Pi day', 'date' => '2027-03-14', 'summary' => 'x')));
+	raster(array('cache', 'clear'), $env);
+	same('200 miss', $cache('/events/events_items/date/2027-03-14'));
+	same('200 hit', $cache('/events/events_items/date/2027-03-14'));
+	foreach (array('/events/events_items/date/14%20Mar%202027', '/events/events_items/date/2027-03-14%2000:00') as $path) {
+		same('200 not kept', $cache($path), $path);
+		same('200 not kept', $cache($path), $path);
+	}
+	same(1, $pages(), 'only the date as the site prints it is cached');
+	// a number is spelled with its mock-up's decimals (3.50, not 3.5), also when
+	// another list on the page doesn't print it
+	mcp($prod, 'create_item', array('collection' => 'menu', 'fields' => array('name' => 'Pi tart', 'price' => 3.5, 'category' => 'cake')));
+	$menu = "$root/demo/views/cafe/menu.html";
+	$view = file_get_contents($menu);
+	try {
+		file_put_contents($menu, str_replace("<!-- render.cms.menu('order=name') -->", "<!-- render.cms.menu('limit=1') --><i><!-- print.name -->Dish<!-- /print.name --></i><!-- /render.cms.menu('limit=1') -->\n<!-- render.cms.menu('order=name') -->", $view));
+		raster(array('cache', 'clear'), $env);
+		same('200 miss', $cache('/menu/menu_items/price/3.50'));
+		same('200 hit', $cache('/menu/menu_items/price/3.50'));
+		foreach (array('/menu/menu_items/price/3.5', '/menu/menu_items/price/3.500', '/menu/menu_items/price/+3.50', '/menu/menu_items/price/03.50') as $path) {
+			has(http('GET', "$prod$path")[1], 'Pi tart', $path);
+			same('200 not kept', $cache($path), $path);
+		}
+		same(1, $pages(), 'only the price as the site prints it is cached');
+	} finally {
+		file_put_contents($menu, $view);
+	}
+	raster(array('cache', 'clear'), $env);
+	$cache('/journal/journal_items/author/Mara');
+	// L10: links with only tracking parameters are the same page
+	foreach (array('utm_source=newsletter&utm_medium=email&utm_campaign=october', 'fbclid=IwAR0x', 'gclid=Cj0K', 'msclkid=5a2b') as $query) {
+		same('200 hit', $cache("/journal/journal_items/author/Mara?$query"), $query);
+	}
+	same('200 not kept', $cache('/journal/journal_items/author/Mara?utm_source=x&page=2'), 'any other parameter still skips the cache');
+	// and the page every visitor then gets doesn't carry the tracking values
+	list($status, $body, $headers) = http('GET', "$prod/journal?utm_source=attacker");
+	same('200 miss', $status.' '.header_value($headers, 'X-Raster-Cache'));
+	list($status, $body, $headers) = http('GET', "$prod/journal");
+	same('200 hit', $status.' '.header_value($headers, 'X-Raster-Cache'));
+	check(strpos($body, 'attacker') === false, 'the cached /journal carries a tracking link\'s values');
+	// L9: a content change deletes the pages cached before it
+	mcp($prod, 'create_item', array('collection' => 'journal', 'fields' => array('title' => 'More notes', 'author' => 'Mara')));
+	same(0, $pages(), 'pages cached before a content change are deleted');
+	same('200 miss', $cache('/journal/journal_items/author/Mara'));
+});
+
+// ## 2.1.8 batch B: errors and /api
+
+test('C51', 'cms offers over /api only what its api() lists: the editor endpoints, style and logout; an override adds nothing unlisted', function () use ($base, $root) {
+	foreach (array('setup', 'route', 'inject_toolbar', 'login', 'login_message') as $method) {
+		list($status, $body) = http('GET', "$base/api/cms/$method");
+		same(404, $status, "/api/cms/$method");
+		lacks($body, 'There are no users');
+	}
+	same(403, http('POST', "$base/api/cms/editor_save_item", array('collection' => 'menu'))[0], 'editor endpoints check the caller themselves');
+	same(200, http('GET', "$base/api/cms/style")[0]);
+	same(200, http('GET', "$base/api/cms/editor_script")[0]);
+	$dir = "$root/demo/models/the_cms";
+	@mkdir($dir);
+	try {
+		with_file("$dir/the_cms.php", "<?php\nclass the_cms extends cms\n{\n\tfunction takings() { return 'today: 1200 lei'; }\n}\n", function () use ($base) {
+			list($status, $body) = http('GET', "$base/api/cms/takings");
+			same(404, $status, 'a public method of the_cms');
+			lacks($body, 'lei');
+			same(200, http('GET', "$base/api/cms/style")[0], 'what cms lists still answers');
+		});
+	} finally {
+		@rmdir($dir);
+	}
+});
+
+test('C50', '/api errors answer JSON: 500 logged with the URL, 503 when the database is down, 400 for missing arguments; development adds the trace', function () use ($base, $root, $tmp, $maildir) {
+	$prod_db = "$tmp/b-prod.sqlite";
+	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => $prod_db, 'RASTER_URL' => 'https://cafe.example/');
+	raster(array('schema', '--apply'), $env);
+	$prod = server(free_port(), array_merge($env, array('RASTER_MAIL' => "log://$maildir")));
+	$dir = "$root/demo/models/zzwebhook";
+	@mkdir($dir);
+	try {
+		with_file("$dir/zzwebhook.php", "<?php\nclass zzwebhook\n{\n\tstatic function api() { return array('paid' => 'visitor', 'down' => 'visitor'); }\n"
+			."\tfunction paid(\$order, \$amount) { throw new RuntimeException('signature mismatch for sk_live_123'); }\n"
+			."\tfunction down() { throw new PDOException('SQLSTATE[HY000] [2002] Connection refused'); }\n}\n", function () use ($base, $prod, $tmp) {
+			list($status, $body, $headers) = http('POST', "$prod/api/zzwebhook/paid/7/120", '{}', array('Content-Type: application/json'));
+			same(500, $status, $body);
+			same('{"error":"server error"}', $body);
+			has(header_value($headers, 'Content-Type'), 'application/json');
+			$log = file_get_contents("$tmp/php-errors.log");
+			has($log, 'signature mismatch for sk_live_123');
+			has($log, '/api/zzwebhook/paid/7/120', 'logged with the URL');
+			list($status, $body) = http('POST', "$prod/api/zzwebhook/paid/7", '{}', array('Content-Type: application/json'));
+			same(400, $status, $body);
+			lacks($body, 'sk_live');
+			// a database error while the database is there is a bug: 500, not 503
+			list($status, $body) = http('GET', "$prod/api/zzwebhook/down");
+			same(500, $status, $body);
+			lacks($body, 'Connection refused');
+			// development: the trace, for whoever is writing the model
+			list($status, $body) = http('POST', "$base/api/zzwebhook/paid/7/120", '{}', array('Content-Type: application/json'));
+			same(500, $status);
+			$json = json_decode($body, true);
+			has($json['exception'], 'signature mismatch');
+			check(count($json['trace']) > 0, 'a trace');
+		});
+	} finally {
+		@rmdir($dir);
+	}
+});
+
+test('L11', 'a database that can\'t be reached answers 503 outside development, with error_document_503, logged and never cached', function () use ($tmp, $maildir) {
+	$prod_db = "$tmp/b-prod.sqlite";
+	$down = "$tmp/b-down.sqlite";
+	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => $prod_db, 'RASTER_URL' => 'https://cafe.example/');
+	raster(array('schema', '--apply'), $env);
+	file_put_contents($down, str_repeat('not a database ', 200));
+	// no RASTER_URL: this server's own address keeps its pages apart in the cache
+	$prod = server(free_port(), array('RASTER_ENV' => 'production', 'RASTER_DB' => $down, 'RASTER_MAIL' => "log://$maildir"));
+	foreach (array(1, 2) as $time) {
+		list($status, $body, $headers) = http('GET', "$prod/menu");
+		same(503, $status, "request $time");
+		has($body, 'Back in a moment', 'the site\'s own 503 page');
+		lacks($body, '<!-- print.');
+		lacks($body, 'Flat white', 'no mock-up');
+		same(null, header_value($headers, 'X-Raster-Cache'), 'not cached');
+	}
+	same(503, http('GET', "$prod/journal.rss")[0], 'feeds too');
+	// /api too, before the method runs: the provider tries again later
+	list($status, $body) = http('GET', "$prod/api/cafe/category_count/coffee");
+	same(503, $status, $body);
+	same('{"error":"database unavailable"}', $body);
+	has(file_get_contents("$tmp/php-errors.log"), 'Raster error: the database can\'t be reached');
+	// back up: the real menu at once, nothing stale in the cache
+	copy($prod_db, $down);
+	list($status, $body, $headers) = http('GET', "$prod/menu");
+	same(200, $status);
+	same('miss', header_value($headers, 'X-Raster-Cache'));
+	lacks($body, '<!-- print.');
+	// raster render answers the same, and exits 1
+	file_put_contents($down, str_repeat('not a database ', 200));
+	list($code, $out) = raster(array('render', '/menu'), array_merge($env, array('RASTER_DB' => $down)));
+	same(1, $code);
+	has($out, 'HTTP 503');
+});
+
+// ## 2.1.8 batch C: list SQL
+
+test('E31', 'fields named like SQL words (when, from, group) sort, filter and link to their filter pages', function () use ($base) {
+	$row = '<li><!-- print.@href.raster_filter@from --><a href="#"><!-- print.title -->Rome<!-- /print.title --> from <!-- print.from -->Paris<!-- /print.from --></a><!-- /print.@href.raster_filter@from --> <!-- print.when -->2026-12-01<!-- /print.when --> <!-- print.group -->3<!-- /print.group --></li>';
+	$list = function ($options) use ($row) { return "<!-- render.cms.zztrips('$options') -->$row<!-- /render.cms.zztrips('$options') -->"; };
+	$titles = function ($html, $class) {
+		preg_match('#<(ul|ol) class="'.$class.'">(.*?)</\1>#s', $html, $m);
+		preg_match_all('#>(\w+) from #', isset($m[2]) ? $m[2] : '', $t);
+		return $t[1];
+	};
+	try {
+		with_file(dirname(__DIR__).'/demo/views/cafe/zztrips.html', '<ul class="by-when">'.$list('order=when').'</ul><ol class="big">'.$list('group>2&order=-group').'</ol>', function () use ($base, $titles) {
+			http('GET', "$base/zztrips");
+			mcp($base, 'create_item', array('collection' => 'zztrips', 'fields' => array('title' => 'Oslo', 'when' => '2026-10-01', 'from' => 'Berlin', 'group' => '1')));
+			mcp($base, 'create_item', array('collection' => 'zztrips', 'fields' => array('title' => 'Lima', 'when' => '2026-11-01', 'from' => 'Paris', 'group' => '5')));
+			list($status, $html) = http('GET', "$base/zztrips");
+			same(200, $status);
+			same(array('Oslo', 'Lima', 'Rome'), $titles($html, 'by-when'), 'order=when');
+			same(array('Lima', 'Rome'), $titles($html, 'big'), 'group>2&order=-group');
+			has($html, 'href="'.$base.'/zztrips/zztrips_items/from/Paris/"');
+			list($status, $html) = http('GET', "$base/zztrips/zztrips_items/from/Paris");
+			same(200, $status);
+			same(array('Lima', 'Rome'), $titles($html, 'by-when'), 'the filter page');
+		});
+	} finally {
+		raster(array('schema', '--drop=zztripsdata', '--force'));
+	}
+});
+
+test('T7', 'a time prints 19:00 whatever the database gives back; lists hide drafts and order by newest whether published_at is typed or still text', function () use ($base) {
+	$show = mcp($base, 'create_item', array('collection' => 'events', 'fields' => array('title' => 'Seconds show', 'date' => '2026-10-10', 'starts' => '19:00', 'summary' => 'x')));
+	cms_store::connect();
+	try {
+		// MySQL hands a TIME back with its seconds
+		R::exec('UPDATE eventsdata SET starts = ? WHERE id = ?', array('19:00:00', $show['id']));
+		$events = http('GET', "$base/events")[1];
+		check(preg_match('#Seconds show.*?2026-10-10</span>\s*at\s*<span[^>]*>19:00<|Seconds show.*?2026-10-10 at 19:00<#s', $events), 'prints 19:00');
+		lacks($events, '19:00:00');
+	} finally {
+		mcp($base, 'delete_item', array('collection' => 'events', 'id' => $show['id']));
+	}
+	// a table made before 2.1.7 keeps a text published_at, empty for "now"
+	R::exec('CREATE TABLE zzolddata (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, slug TEXT, enabled TEXT, published_at TEXT, updated_at TEXT)');
+	try {
+		foreach (array('Empty' => '', 'Past' => date('Y-m-d H:i:s', time() - 86400), 'Future' => '2099-01-01 10:00:00') as $title => $published) {
+			R::exec('INSERT INTO zzolddata (title, slug, enabled, published_at, updated_at) VALUES (?, ?, ?, ?, ?)', array($title, strtolower($title), '1', $published, '2026-01-01 10:00:00'));
+		}
+		with_file(dirname(__DIR__).'/demo/views/cafe/zzold.html', "<ul><!-- render.cms.zzold('order=newest') --><li><!-- print.title -->Old<!-- /print.title --></li><!-- /render.cms.zzold('order=newest') --></ul>", function () use ($base) {
+			list($status, $html) = http('GET', "$base/zzold");
+			same(200, $status);
+			check(preg_match('#<li>Past</li>\s*<li>Empty</li>\s*</ul>#', $html), 'newest first, nothing scheduled: '.$html);
+		});
+	} finally {
+		raster(array('schema', '--drop=zzolddata', '--force'));
+	}
+});
+
+// ## 2.1.8 batch D: accounts
+
+test('G22', 'raster user changes only what it is given (#71)', function () use ($base) {
+	same(0, raster(array('user', 'keeper@cafe.test', '--role=member', '--password=first password'))[0]);
+	list($code, $out) = raster(array('user', 'keeper@cafe.test', '--password=second password'));
+	same(0, $code, $out);
+	has($out, "saved as member (role kept)");
+	has(raster(array('users'))[1], 'member   keeper@cafe.test', 'a password reset made them');
+	login($base, 'keeper@cafe.test', 'second password');
+	list($code, $out) = raster(array('user', 'keeper@cafe.test', '--role=editor'));
+	same(0, $code, $out);
+	has($out, 'saved as editor (password kept)');
+	lacks($out, 'Password:');
+	has(raster(array('users'))[1], 'editor   keeper@cafe.test');
+	login($base, 'keeper@cafe.test', 'second password');
+});
+test('G23', 'once a lock runs out, five new wrong passwords lock again (#73)', function () use ($base) {
+	raster(array('user', 'relock@cafe.test', '--role=member', '--password=right password'));
+	$wrong = function ($times) use ($base) {
+		for ($i = 0; $i < $times; $i++) http('POST', "$base/login", array('raster_form' => 'authentication.login', 'login' => 'relock@cafe.test', 'password' => 'wrong'));
+	};
+	$expire = function () {
+		database::instance('cms');
+		R::exec("UPDATE user SET failed_at = ? WHERE email = 'relock@cafe.test'", array(date('Y-m-d H:i:s', time() - 16 * 60)));
+	};
+	$wrong(5);
+	$expire();
+	$wrong(1);
+	login($base, 'relock@cafe.test', 'right password');
+	$wrong(5);
+	has(http('POST', "$base/login", array('raster_form' => 'authentication.login', 'login' => 'relock@cafe.test', 'password' => 'right password'))[1], 'Wrong email or password.', 'locked again');
+	$expire();
+	$wrong(4);
+	login($base, 'relock@cafe.test', 'right password');
+});
+
+// ## 2.1.8 batch E: template output
+test('D27', 'a form shown again keeps $100, \\1 and $0 exactly as typed (#66)', function () use ($base) {
+	$name = 'Table for $20 a head, not $100 \\1';
+	list($status, $body) = http('POST', "$base/visit", array('raster_form' => 'reservation.book', 'name' => $name, 'email' => '', 'phone' => '\\1 $0', 'date' => '2026-10-07', 'guests' => '2', 'notes' => 'US$12.50 \\2', 'terms' => '1'));
+	same(200, $status);
+	has($body, 'We need a valid email to confirm.');
+	has($body, 'value="Table for $20 a head, not $100 \\1"', 'the name');
+	has($body, 'name="phone" pattern="\\+?[0-9 ]{6,15}" value="\\1 $0"', 'the phone');
+	has($body, '>US$12.50 \\2</textarea>', 'the notes');
+});
+test('E32', 'the editor gets stored text with $5 and backslashes as it is (#66)', function () use ($base) {
+	$staff = login($base, 'staff@cafe.test', 'staff password');
+	$before = mcp($base, 'get_page', array('page' => '/about'))['fields']['heading'];
+	try {
+		foreach (array('Only $5 today, was $12. Path C:\\new', 'Say \\"hello\\" for $5 \\1') as $text) {
+			mcp($base, 'update_page', array('page' => '/about', 'fields' => array('heading' => $text)));
+			$page = http('GET', "$base/about", null, array("Cookie: $staff"))[1];
+			$config = editor_config($page);
+			check(is_array($config), 'the editor config is valid JSON for '.$text);
+			list(, $mark) = mark_of($config, 'field', function ($m) { return $m['field'] === 'heading'; });
+			same($text, $mark['value'], 'what the editor shows, and Duplicate copies');
+		}
+	} finally { mcp($base, 'update_page', array('page' => '/about', 'fields' => array('heading' => $before))); }
+});
+test('C52', 'a link a visitor typed is no script, whatever hides the scheme (#67)', function () use ($base, $views) {
+	$links = array("java\tscript:alert(1)", "java\nscript:alert(2)", "\x01javascript:alert(3)", "&#106avascript:alert(4)", "vbscript:msgbox(5)", "data:text/html,6", "&#1;javascript:alert(7)", "java&#13;script:alert(8)", "&#x1F;javascript:alert(9)");
+	$ids = array();
+	foreach ($links as $i => $link) $ids[] = cms_records::create('reservation', array('name' => "Zz link $i", 'email' => 'zz-links@example.com', 'date' => '2030-03-06', 'guests' => 1, 'notes' => $link))['id'];
+	$ids[] = cms_records::create('reservation', array('name' => 'Zz link ok', 'email' => 'zz-links@example.com', 'date' => '2030-03-06', 'guests' => 1, 'notes' => 'https://example.com/menu'))['id'];
+	try {
+		with_file("$views/zz-links.html", "<html><body><!-- render.cms.reservation('email=zz-links@example.com&order=oldest') --><!-- print.@href.notes --><a class=\"zz\" href=\"#\">x</a><!-- /print.@href.notes --><!-- /render.cms.reservation('email=zz-links@example.com&order=oldest') --></body></html>", function () use ($base) {
+			$staff = login($base, 'staff@cafe.test', 'staff password');
+			$page = http('GET', "$base/zz-links", null, array("Cookie: $staff"))[1];
+			same(9, substr_count($page, '<a class="zz">'), 'every script link is dropped');
+			same(1, substr_count($page, '<a class="zz" href="https://example.com/menu">'), 'the web address keeps its link');
+			has($page, 'href="https://example.com/menu"');
+			// the editor's config carries the text as data, for its Details panel
+			$links = preg_replace('#<script id="raster-editor-config".*?</script>#s', '', $page);
+			foreach (array('script:', 'data:', 'alert') as $bad) lacks($links, $bad);
+		});
+	} finally { foreach ($ids as $id) cms_records::delete('reservation', $id); }
+});
+test('D28', 'a field sent as name[] or with a bad byte fails required; a field named tags[] takes a list (#70)', function () use ($base, $views) {
+	database::instance('cms');
+	$count = (int)R::count('reservationdata');
+	$good = array('raster_form' => 'reservation.book', 'name' => 'Zz Ana', 'email' => 'zz@example.com', 'date' => '2026-10-08', 'guests' => '2', 'terms' => '1');
+	$body = http('POST', "$base/visit", http_build_query(array_merge($good, array('name' => array('x'), 'email' => array('not-an-email')))), array('Content-Type: application/x-www-form-urlencoded'))[1];
+	has($body, 'Tell us your name (2 to 80 letters).', 'name[] fails required');
+	has($body, 'We need a valid email to confirm.', 'email[] too');
+	list($status, $body) = http('POST', "$base/visit", http_build_query($good).'&phone=%FFnot+a+phone', array('Content-Type: application/x-www-form-urlencoded'));
+	same(200, $status, 'a bad byte is refused');
+	has($body, 'Digits and spaces only', 'like a value without it');
+	list($status, $body) = http('POST', "$base/visit", http_build_query($good).'&notes=caf%C3', array('Content-Type: application/x-www-form-urlencoded'));
+	has($body, 'Keep notes under 300 characters.', 'on a field with no pattern too');
+	same($count, (int)R::count('reservationdata'), 'nothing was stored');
+	$form = '<html><body><!-- render.reservation.contact --><form method="post"><input type="email" name="email" required><label><input type="checkbox" name="tags[]" value="cakes" required> Cakes</label><label><input type="checkbox" name="tags[]" value="coffee"> Coffee</label><!-- render.validation.field(\'tags\') --><p class="error">Pick a topic.</p><!-- /render.validation.field(\'tags\') --><textarea name="message" required></textarea><!-- render.validation.field(\'message\') --><p class="error">Write a message.</p><!-- /render.validation.field(\'message\') --><button>Send</button></form><!-- /render.reservation.contact --></body></html>';
+	with_file("$views/zz-topics.html", $form, function () use ($base) {
+		$send = function ($extra) use ($base) { return http('POST', "$base/zz-topics", 'raster_form=reservation.contact&email=zz%40example.com'.$extra, array('Content-Type: application/x-www-form-urlencoded')); };
+		list($status, , $headers) = $send('&tags%5B%5D=cakes&tags%5B%5D=coffee&message=Hi');
+		same(303, $status, 'tags[] is a list the form asked for');
+		has(header_value($headers, 'Location'), 'done=contacted');
+		list($status, $body) = $send('&message=Hi');
+		same(200, $status);
+		has($body, 'Pick a topic.', 'and still required');
+		list($status, $body) = $send('&tags%5B%5D=cakes&message%5B%5D=Hi');
+		same(200, $status, 'message[] is not');
+		has($body, 'Write a message.');
+		lacks($body, 'Pick a topic.');
+	});
+});
+
+// ## 2.1.8 batch F: upgrade tooling
+
+test('A17', 'theme files of every kind are served: no old .htaccess below the root', function () use ($base, $root, $views) {
+	// application/.htaccess and system/.htaccess once allowed only a few
+	// extensions on Apache; the root .htaccess has every rule on its own
+	exec('git -C '.escapeshellarg($root).' ls-files', $files);
+	same(array('.htaccess'), array_values(preg_grep('#(^|/)\.htaccess$#', $files)), 'only the root .htaccess');
+	foreach (array('a17.webp', 'a17.woff2', 'a17.ico', 'a17.pdf') as $file) {
+		with_file("$views/img/$file", "x", function () use ($base, $file) {
+			same(200, http('GET', "$base/demo/views/cafe/img/$file")[0], $file);
+		});
+	}
+	same(200, http('GET', "$base/demo/views/cafe/img/logo.svg")[0]);
+	foreach (array('/demo/config/the_app.php', '/demo/data/x', '/demo/models/cafe/cafe.php', '/system/VERSION') as $path) {
+		same(403, http('GET', $base.$path)[0], $path);
+	}
+});
+
+test('N15', 'raster upgrade takes an app with no version file as current', function () use ($root) {
+	// a second app made by hand: a copy of the demo's settings, no version file
+	$app = "$root/zzn15";
+	mkdir("$app/models", 0775, true);
+	exec('cp -R '.escapeshellarg("$root/demo/config").' '.escapeshellarg("$app/config"));
+	@unlink("$app/config/raster-version");
+	try {
+		$version = trim(file_get_contents("$root/system/VERSION"));
+		$env = array('RASTER_APP' => 'zzn15');
+		has(raster(array('upgrade', '--dry-run'), $env)[1], 'zzn15/ has no config/raster-version: upgrade takes it as Raster '.$version.' and runs no steps');
+		check(!is_file("$app/config/raster-version"));
+		list($code, $out) = raster(array('upgrade'), $env);
+		same(0, $code, $out);
+		same("zzn15/ had no config/raster-version: taken as Raster $version, no upgrade steps run (for an app from Raster 1.x, write 1.0.0 in that file and run upgrade again)", trim($out));
+		same("$version\n", file_get_contents("$app/config/raster-version"));
+		has(raster(array('upgrade'), $env)[1], "zzn15/ is at Raster $version, nothing to change");
+	} finally {
+		exec('rm -rf '.escapeshellarg($app));
+	}
+});
+
+// ## 2.1.8 batch G: MCP themes
+
+test('M19', 'the MCP view tools take a theme only as a folder directly under views/', function () use ($base, $root, $views) {
+	$themes = dirname($views);
+	$outside = sys_get_temp_dir().'/raster-demo-theme-'.getmypid();
+	@mkdir($outside);
+	file_put_contents("$outside/secret.json", '{"secret":"sk-live-123"}');
+	symlink($outside, "$themes/zzlinked");
+	try {
+		// over HTTP with the content token, the site's .mcp.json and files
+		// outside the site stay out of reach
+		foreach (array(
+			array('read_view', array('view' => '.mcp.json', 'theme' => '../..')),
+			array('read_view', array('view' => 'secret.json', 'theme' => 'zzlinked')),
+			array('read_view', array('view' => 'secret.json', 'theme' => $outside)),
+			array('list_views', array('theme' => '../../..')),
+			array('list_views', array('theme' => 'cafe/docs')),
+			array('check_view', array('content' => '<!-- dry._layout.head /-->', 'theme' => '../views/cafe')),
+		) as $call) {
+			$error = null;
+			try { mcp($base, $call[0], $call[1]); } catch (Exception $e) { $error = $e->getMessage(); }
+			check($error !== null, "{$call[0]} accepted theme '{$call[1]['theme']}'");
+			has($error, 'theme', 'a clear error');
+			lacks($error, 'sk-live-123');
+		}
+		// the site's other theme is still there to read
+		same('print', mcp($base, 'read_view', array('view' => mcp($base, 'list_views', array('theme' => 'print'))['views'][0], 'theme' => 'print'))['theme']);
+		// over stdio, write_view writes nowhere but a theme
+		$answers = mcp_stdio(array(
+			array('write_view', array('view' => 'zz-pwned.html', 'content' => '<p>x</p>', 'theme' => '../../media')),
+			array('write_view', array('view' => 'zz-pwned.html', 'content' => '<p>x</p>', 'theme' => 'zzlinked')),
+		));
+		check(isset($answers[0]['error']) && isset($answers[1]['error']), 'write_view is refused');
+		check(!file_exists("$root/media/zz-pwned.html"), 'nothing in media/');
+		check(!file_exists("$outside/zz-pwned.html"), 'nothing through the link');
+	} finally {
+		@unlink("$themes/zzlinked");
+		@unlink("$root/media/zz-pwned.html");
+		foreach (glob("$outside/*") as $file) unlink($file);
+		@rmdir($outside);
+	}
+});
+
+// ## 2.1.8 batch H: row loop
+test('C53', 'a print inside a render block fills every row of a long list: 1,500 rows, staff-only blocks hidden in all of them (#54)', function () use ($base, $views, $root) {
+	$dir = "$root/demo/models/zzmany";
+	@mkdir($dir);
+	$row = '<li><!-- print.n -->r0<!-- /print.n --> <!-- print.feed.site_url -->SITE<!-- /print.feed.site_url -->'
+		.'<!-- print.if.is_editor --><b>STAFF</b><!-- /print.if.is_editor --><!-- print.if.logged_out --><i>guest</i><!-- /print.if.logged_out --></li>';
+	try {
+		with_file("$dir/zzmany.php", "<?php\nclass zzmany {\n\tfunction rows() { \$rows = array(); for (\$i = 1; \$i <= 1500; \$i++) \$rows[] = array('n' => \"r\$i\"); return \$rows; }\n}\n", function () use ($base, $views, $row) {
+			with_file("$views/zz-many.html", "<!doctype html>\n<html>\n<body>\n<ul><!-- render.zzmany.rows -->$row<!-- /render.zzmany.rows --></ul>\n</body>\n</html>\n", function () use ($base) {
+				list($code, $body) = http('GET', "$base/zz-many");
+				same(200, $code, $body);
+				same(1500, substr_count($body, '<li>'), 'rows:');
+				has($body, '<li>r1500 ');
+				lacks($body, '<!-- print.', 'every copy is filled');
+				lacks($body, 'SITE', 'the site address is in every row');
+				lacks($body, 'STAFF', 'a staff-only block shows in no row');
+				same(1500, substr_count($body, '<i>guest</i>'));
+			});
+		});
+	} finally {
+		@rmdir($dir);
+	}
+});
+
+// ## 2.1.8 wave 2: sign-up, account email change
+
+// posts each request at the same moment and answers [code, body, location] for each
+function posts_at_once($requests) {
+	$multi = curl_multi_init();
+	$handles = array();
+	foreach ($requests as $r) {
+		$handle = curl_init($r[0]);
+		curl_setopt_array($handle, array(CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true, CURLOPT_HEADER => true, CURLOPT_TIMEOUT => 30,
+			CURLOPT_HTTPHEADER => isset($r[2]) ? array('Cookie: '.$r[2]) : array(), CURLOPT_POSTFIELDS => http_build_query($r[1])));
+		curl_multi_add_handle($multi, $handle);
+		$handles[] = $handle;
+	}
+	do { curl_multi_exec($multi, $running); curl_multi_select($multi, 0.05); } while ($running);
+	$answers = array();
+	foreach ($handles as $handle) {
+		$raw = curl_multi_getcontent($handle);
+		$size = curl_getinfo($handle, CURLINFO_HEADER_SIZE);
+		$location = preg_match('/^Location:\s*(\S+)/mi', substr($raw, 0, $size), $m) ? $m[1] : null;
+		$answers[] = array(curl_getinfo($handle, CURLINFO_HTTP_CODE), substr($raw, $size), $location);
+		curl_multi_remove_handle($multi, $handle);
+	}
+	curl_multi_close($multi);
+	return $answers;
+}
+
+test('G24', 'two sign-ups at once with one email make one account (#77)', function () use ($base, $db, $maildir) {
+	cms_store::connect();
+	// a second server on the same database, so the two posts really overlap
+	$other = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir"));
+	for ($round = 1; $round <= 3; $round++) {
+		$email = "twice$round@example.com";
+		$form = array('raster_form' => 'authentication.register', 'email' => $email, 'password' => 'long password', 'password_again' => 'long password');
+		$answers = posts_at_once(array(array("$base/register", $form + array('name' => 'First')), array("$other/register", $form + array('name' => 'Second'))));
+		usort($answers, function ($a, $b) { return $a[0] - $b[0]; });
+		same(1, (int)R::count('user', ' LOWER(email) = ? ', array($email)), "round $round: accounts with $email");
+		same(array(200, 303), array($answers[0][0], $answers[1][0]), "round $round: one sign-up wins");
+		has($answers[0][1], 'There is already an account with that email.', "round $round: the other is told");
+		has($answers[1][2], '?done=registered', "round $round");
+		$winner = R::findOne('user', ' LOWER(email) = ? ', array($email));
+		check(password_verify('long password', $winner->password), "round $round: the account keeps its password");
+	}
+});
+test('G24', 'two members changing to one email at once: one gets it (#77)', function () use ($base, $db, $maildir) {
+	cms_store::connect();
+	$other = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir"));
+	for ($round = 1; $round <= 2; $round++) {
+		$wanted = "shared$round@example.com";
+		$requests = array();
+		foreach (array(array('a', $base), array('b', $other)) as $who) {
+			$email = "mover{$who[0]}$round@example.com";
+			same(0, raster(array('user', $email, '--role=member', '--password=old password'))[0]);
+			$cookie = login($who[1], $email, 'old password');
+			$token = token_in(http('GET', "$who[1]/account", null, array("Cookie: $cookie"))[1]);
+			// a new password too, so each save hashes one, as a member changing both would
+			$requests[] = array("$who[1]/account", array('raster_form' => 'authentication.account', 'name' => 'Mover', 'email' => $wanted, 'password' => 'new password', 'current_password' => 'old password', 'csrf' => $token), $cookie);
+		}
+		$answers = posts_at_once($requests);
+		usort($answers, function ($a, $b) { return $a[0] - $b[0]; });
+		same(1, (int)R::count('user', ' LOWER(email) = ? ', array($wanted)), "round $round: accounts with $wanted");
+		same(array(200, 303), array($answers[0][0], $answers[1][0]), "round $round: one change wins");
+		has($answers[0][1], 'Another account uses that email.', "round $round: the other is told");
+	}
+});
+test('G24', 'a member changing to an email while someone signs up with it, in other letters: one account has it (#77)', function () use ($base, $db, $maildir) {
+	cms_store::connect();
+	$other = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir"));
+	for ($round = 1; $round <= 3; $round++) {
+		$wanted = "contested$round@example.com";
+		$member = "changer$round@example.com";
+		same(0, raster(array('user', $member, '--role=member', '--password=old password'))[0]);
+		$cookie = login($base, $member, 'old password');
+		$token = token_in(http('GET', "$base/account", null, array("Cookie: $cookie"))[1]);
+		$change = array('raster_form' => 'authentication.account', 'name' => 'Changer', 'email' => $wanted, 'password' => 'new password', 'current_password' => 'old password', 'csrf' => $token);
+		$signup = array('raster_form' => 'authentication.register', 'name' => 'Newcomer', 'email' => strtoupper($wanted), 'password' => 'long password', 'password_again' => 'long password');
+		$answers = posts_at_once(array(array("$base/account", $change, $cookie), array("$other/register", $signup)));
+		same(1, (int)R::count('user', ' LOWER(email) = ? ', array($wanted)), "round $round: accounts with $wanted");
+		$codes = array($answers[0][0], $answers[1][0]);
+		sort($codes);
+		same(array(200, 303), $codes, "round $round: one wins");
+		$loser = $answers[0][0] === 200 ? $answers[0][1] : $answers[1][1];
+		check(strpos($loser, 'Another account uses that email.') !== false || strpos($loser, 'There is already an account with that email.') !== false, "round $round: the other is told");
+	}
+});
+
+// ## 2.1.8 wave 2: newsletter sign-ups
+
+test('H13', 'signing up twice: one subscriber, the same link again, mailed by a listener', function () use ($base) {
+	$before = count(mails());
+	foreach (array('Again@example.com', 'again@example.com ') as $email) {
+		same("$base/journal?done=check_email", header_value(http('POST', "$base/journal", array('raster_form' => 'newsletter.signup', 'email' => $email))[2], 'Location'));
+	}
+	database::instance('cms');
+	same(1, (int)R::getCell('SELECT COUNT(*) FROM subscriber WHERE email = ?', array('again@example.com')), 'subscribers:');
+	$sent = array_slice(mails(), $before);
+	same(array('again@example.com', 'again@example.com'), array_column($sent, 'to'));
+	$links = array();
+	foreach ($sent as $mail) $links[] = preg_match('/token=([a-f0-9]{40})/', $mail['text'], $t) ? $t[1] : '';
+	same(array_fill(0, 2, R::getCell('SELECT token FROM subscriber WHERE email = ?', array('again@example.com'))), $links, 'both mails carry the link that works:');
+	has(http('GET', "$base/letters/confirm?token={$links[0]}")[1], '<h1>You are subscribed</h1>');
+	same(array('newsletter.confirmation_mail'), mcp($base, 'site_overview')['events']['newsletter.subscribed'], 'who sends the confirmation:');
+});
+
+// ## 2.1.8 wave 2: content saves and the cache bump
+
+// MCP calls sent all at once, spread over $bases (each its own server on the
+// demo's database, as two PHP workers are); the answers in the same order
+function mcp_at_once($bases, $calls) {
+	$multi = curl_multi_init();
+	$handles = array();
+	foreach ($calls as $i => $call) {
+		$handle = curl_init($bases[$i % count($bases)].'/mcp');
+		curl_setopt_array($handle, array(CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_HTTPHEADER => array('Authorization: Bearer demo-token', 'Content-Type: application/json'),
+			CURLOPT_POSTFIELDS => json_encode(array('jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => array('name' => $call[0], 'arguments' => $call[1])))));
+		curl_multi_add_handle($multi, $handle);
+		$handles[] = $handle;
+	}
+	do { curl_multi_exec($multi, $running); curl_multi_select($multi, 0.05); } while ($running);
+	$answers = array();
+	foreach ($handles as $handle) {
+		$answer = json_decode(curl_multi_getcontent($handle), true);
+		if (!isset($answer['result']) || !empty($answer['result']['isError'])) throw new Exception('mcp: '.curl_multi_getcontent($handle));
+		$answers[] = $answer['result']['structuredContent'];
+		curl_multi_remove_handle($multi, $handle);
+	}
+	curl_multi_close($multi);
+	return $answers;
+}
+
+test('E33', 'items saved at once with one title each get their own slug and page, and page saves at once keep each other\'s fields (on SQLite, #77)', function () use ($base, $db, $maildir) {
+	$second = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'RASTER_MCP_TOKEN' => 'demo-token'));
+	$about = mcp($base, 'get_page', array('page' => '/about'))['fields'];
+	$ids = array();
+	try {
+		$slugs = array();
+		for ($round = 0; $round < 4; $round++) {
+			$calls = array();
+			for ($i = 0; $i < 4; $i++) $calls[] = array('create_item', array('collection' => 'journal', 'fields' => array('title' => 'Harvest supper', 'author' => 'Ana', 'summary' => "<p>Round $round, editor $i</p>")));
+			foreach (mcp_at_once(array($base, $second), $calls) as $item) {
+				$ids[] = $item['id'];
+				$slugs[] = $item['slug'];
+			}
+		}
+		same(16, count(array_unique($slugs)), 'distinct slugs of 16:');
+		foreach (array_slice($slugs, -4) as $slug) {
+			list($status, $body) = http('GET', "$base/journal/journal_item/$slug");
+			same(200, $status);
+			same(1, substr_count($body, '<article'), "/journal/journal_item/$slug shows one article:");
+		}
+		// two editors on one page, one field each
+		for ($round = 1; $round <= 4; $round++) {
+			mcp_at_once(array($base, $second), array(
+				array('update_page', array('page' => '/about', 'fields' => array('heading' => "Heading $round"))),
+				array('update_page', array('page' => '/about', 'fields' => array('body' => "<p>Body $round</p>"))),
+			));
+			$fields = mcp($base, 'get_page', array('page' => '/about'))['fields'];
+			same(array("Heading $round", "<p>Body $round</p>"), array($fields['heading'], $fields['body']), "round $round:");
+		}
+	} finally {
+		foreach ($ids as $id) mcp($base, 'delete_item', array('collection' => 'journal', 'id' => $id));
+		mcp($base, 'update_page', array('page' => '/about', 'fields' => array('heading' => $about['heading'], 'body' => $about['body'])));
+	}
+});
+
+$changed_seen = array();
+function demo_content_changed() {
+	global $changed_seen, $db;
+	$other = new PDO("sqlite:$db");
+	$changed_seen[] = (int)$other->query('SELECT COUNT(*) FROM journaldata')->fetchColumn();
+}
+test('L12', 'content_changed and the page cache wait for the commit: a rolled back write leaves cached pages and sends nothing, a committed one clears them once (#81)', function () use ($db, $maildir) {
+	global $changed_seen;
+	$cached = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'CAFE_PAGE_CACHE' => 'on'));
+	http('GET', "$cached/journal");
+	same('hit', header_value(http('GET', "$cached/journal")[2], 'X-Raster-Cache'));
+	cms_store::connect();
+	$changed_seen = array();
+	event::bind('content_changed')->to(null, 'demo_content_changed');
+	$kept = array();
+	try {
+		$rows = R::count('journaldata');
+		try {
+			cms_records::transaction(function () {
+				cms_store::save_item('journaldata', 0, array('title' => 'Never printed', 'author' => 'Ana'), array('title', 'author'));
+				cms_records::create('reservation', array('name' => 'Rolled back', 'date' => '2026-12-24', 'guests' => 2));
+				cms_records::refuse('changed_my_mind');
+			});
+			check(false, 'refused');
+		} catch (cms_refused $e) {
+			same(array('changed_my_mind'), $e->problems);
+		}
+		same(array(), $changed_seen, 'content_changed after a rollback:');
+		list(, $body, $headers) = http('GET', "$cached/journal");
+		same('hit', header_value($headers, 'X-Raster-Cache'), 'the cached page stays');
+		lacks($body, 'Never printed');
+		cms_records::transaction(function () use (&$kept) {
+			$kept[] = cms_store::save_item('journaldata', 0, array('title' => 'Printed after the commit', 'author' => 'Ana'), array('title', 'author'))['id'];
+			$kept[] = cms_store::save_item('journaldata', 0, array('title' => 'Printed too', 'author' => 'Ana'), array('title', 'author'))['id'];
+		});
+		same(array($rows + 2), $changed_seen, 'content_changed once, its listener seeing the rows:');
+		list(, $body, $headers) = http('GET', "$cached/journal");
+		same('miss', header_value($headers, 'X-Raster-Cache'));
+		has($body, 'Printed after the commit');
+	} finally {
+		event::unbind('content_changed')->from(null, 'demo_content_changed');
+		foreach ($kept as $id) cms_store::delete_item('journaldata', $id);
+	}
 });
 
 // ## No PHP warnings, notices or deprecations on any request

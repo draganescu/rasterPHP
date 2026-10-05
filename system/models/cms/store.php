@@ -56,10 +56,17 @@ class cms_store {
 		if ($include_drafts) return array($sql, $bindings);
 		if (array_key_exists('enabled', $columns)) $sql .= " AND (enabled IS NULL OR enabled != '0') ";
 		if (array_key_exists('published_at', $columns)) {
-			$sql .= " AND (published_at IS NULL OR published_at = '' OR published_at <= :raster_now) ";
+			$sql .= " AND (published_at IS NULL".self::empty_text_sql($columns)." OR published_at <= :raster_now) ";
 			$bindings[':raster_now'] = date('Y-m-d H:i:s');
 		}
 		return array($sql, $bindings);
+	}
+
+	// " OR published_at = ''" while the column is still text (a table made
+	// before 2.1.7). A typed column holds NULL for an empty value, and MySQL
+	// refuses to compare a DATETIME with ''
+	static function empty_text_sql($columns) {
+		return cms_types::of_column($columns['published_at']) === 'text' ? " OR published_at = ''" : '';
 	}
 
 	static function count_published($type, $filters = array(), $conditions = array()) {
@@ -148,12 +155,12 @@ class cms_store {
 				continue;
 			}
 			if ($value === null) {
-				$sql .= $operator === '=' ? " AND $field IS NULL " : ($operator === '!=' ? " AND $field IS NOT NULL " : ' AND 1 = 0 ');
+				$sql .= $operator === '=' ? " AND `$field` IS NULL " : ($operator === '!=' ? " AND `$field` IS NOT NULL " : ' AND 1 = 0 ');
 				continue;
 			}
 			$name = ':'.$prefix.$i.'_'.$field;
 			// a field nobody filled is not equal to anything
-			$sql .= $operator === '!=' ? " AND ($field IS NULL OR $field != $name) " : " AND $field $operator $name ";
+			$sql .= $operator === '!=' ? " AND (`$field` IS NULL OR `$field` != $name) " : " AND `$field` $operator $name ";
 			$bindings[$name] = $value;
 		}
 		return array($sql, $bindings);
@@ -166,7 +173,7 @@ class cms_store {
 		foreach (explode(',', (string)$order) as $part) {
 			$part = trim($part);
 			if ($part === 'newest') {
-				$parts[] = array_key_exists('published_at', $columns) ? "CASE WHEN published_at IS NULL OR published_at = '' THEN updated_at ELSE published_at END DESC, id DESC" : 'id DESC';
+				$parts[] = array_key_exists('published_at', $columns) ? "CASE WHEN published_at IS NULL".self::empty_text_sql($columns)." THEN updated_at ELSE published_at END DESC, id DESC" : 'id DESC';
 				continue;
 			}
 			if ($part === 'oldest') { $parts[] = 'id ASC'; continue; }
@@ -174,11 +181,11 @@ class cms_store {
 			$desc = $part[0] === '-';
 			$field = ltrim($part, '-');
 			if (!preg_match('/^[a-z0-9_]+$/', $field) || !array_key_exists($field, $columns)) continue;
-			$parts[] = $field.($desc ? ' DESC' : ' ASC');
+			$parts[] = "`$field`".($desc ? ' DESC' : ' ASC');
 		}
 		if (!$parts) return 'id ASC';
 		$sql = implode(', ', $parts);
-		return preg_match('/\bid (ASC|DESC)$/', $sql) ? $sql : $sql.', id ASC';
+		return preg_match('/\bid`? (ASC|DESC)$/', $sql) ? $sql : $sql.', id ASC';
 	}
 
 	static function connect() {
@@ -198,6 +205,19 @@ class cms_store {
 		self::$tables = null;
 		self::$columns = array();
 		cms_types::forget();
+	}
+
+	// Why the database doesn't answer, or null when it does. table_exists()
+	// can't tell a missing table from a database that is down; this asks
+	// once, at the start of the request (cms::setup).
+	static function unreachable() {
+		try {
+			$tables = R::inspect();
+		} catch (Exception $e) {
+			return $e->getMessage();
+		}
+		if (R::getRedBean()->isFrozen()) self::$tables = $tables;
+		return null;
 	}
 
 	static function table_exists($type) {
@@ -248,6 +268,15 @@ class cms_store {
 				throw new InvalidArgumentException("Unknown field '$field'. Fields come from the templates; known fields: ".implode(', ', $allowed));
 			}
 		}
+		// the newest revision is read and the next one stored together, so
+		// two saves at once (one field each) never lose one of them (on SQLite,
+		// which locks the database for the transaction)
+		return cms_records::transaction(function () use ($type, $slug, $values) {
+			return cms_store::store_page($type, $slug, $values);
+		});
+	}
+
+	static function store_page($type, $slug, $values) {
 		$latest = self::latest($type);
 		if ($latest) {
 			$page = R::duplicate($latest);
@@ -314,10 +343,10 @@ class cms_store {
 	// model's check() first.
 	static function save_item($type, $id, $values, $allowed, $who = 'editor') {
 		$info = cms_records::for_table($type);
-		if (!$info) return self::store_item($type, $id, $values, $allowed, $who, null);
-		cms_records::ensure($info);
-		// the check and the write happen together, so two bookings can't both
-		// take the last seats
+		if ($info) cms_records::ensure($info);
+		// the checks and the write happen together, so two bookings can't
+		// both take the last seats, and two items with one title can't both
+		// take its slug (on SQLite)
 		return cms_records::transaction(function () use ($type, $id, $values, $allowed, $who, $info) {
 			return cms_store::store_item($type, $id, $values, $allowed, $who, $info);
 		});
@@ -329,7 +358,8 @@ class cms_store {
 		}
 		// slug, enabled (0 = draft) and published_at can always be set, except by visitors
 		if ($who !== 'visitor') $allowed = array_merge($allowed, array('slug', 'enabled', 'published_at'));
-		if (isset($values['slug'])) $values['slug'] = self::unique_slug($type, $values['slug'] ?: 'item', (int)$id);
+		// one value, like every other field: slug[]=x is refused, not 'array'
+		if (isset($values['slug'])) $values['slug'] = self::unique_slug($type, cms_types::clean('text', $values['slug'], 'slug') ?: 'item', (int)$id);
 		$types = cms_types::of_table($type);
 		foreach ($values as $field => $value) {
 			if (!in_array($field, $allowed, true)) {
@@ -392,11 +422,7 @@ class cms_store {
 	}
 
 	static function delete_item($type, $id) {
-		$info = cms_records::for_table($type);
-		if ($info) {
-			return cms_records::transaction(function () use ($type, $id) { return cms_store::remove_item($type, $id); });
-		}
-		return self::remove_item($type, $id);
+		return cms_records::transaction(function () use ($type, $id) { return cms_store::remove_item($type, $id); });
 	}
 
 	static function remove_item($type, $id) {

@@ -228,6 +228,8 @@ class cms_types {
 			case 'int': return (int)$value;
 			case 'number': return (float)$value;
 			case 'bool': return (bool)(int)$value;
+			// MySQL gives 19:00:00 for what SQLite keeps as 19:00
+			case 'time': return substr((string)$value, 0, 5);
 			default: return (string)$value;
 		}
 	}

@@ -82,6 +82,62 @@ class cms
 		util::session($force);
 	}
 
+	// Is the URL spelled the way the list's own links spell it?
+	// /news/news_page/2, /news/news_items/tag/php, /news/news_item/7. Other
+	// spellings of the same page (/news/news_page/02, /news/news_page/1, a
+	// segment left over, an id with zeros in front) still answer, but are
+	// not kept, since there is no end to them.
+	static function canonical_uri($name) {
+		$segments = (array)config::get('uri_segments');
+		// /news/news_page/2.rss is page 2 of the feed
+		$segments[count($segments) - 1] = preg_replace('/\.(rss|atom|xml|json|txt)$/', '', (string)end($segments));
+		$page = function ($value) { return (bool)preg_match('/^[1-9][0-9]*$/', $value) && $value !== '1'; };
+		foreach ($segments as $i => $segment) {
+			$rest = array_slice($segments, $i + 1);
+			if ($segment === $name.'_page') return count($rest) === 1 && $page($rest[0]);
+			if ($segment === $name.'_item') return count($rest) === 1 && (!ctype_digit($rest[0]) || $rest[0] === (string)(int)$rest[0]);
+			if ($segment === $name.'_items') {
+				if (count($rest) % 2) return false;
+				$seen = array();
+				for ($j = 0; $j < count($rest); $j += 2) {
+					if (isset($seen[$rest[$j]])) return false;
+					$seen[$rest[$j]] = true;
+					// the page comes last: /news/news_items/tag/php/news_page/2
+					if ($rest[$j] === $name.'_page') return $j + 2 === count($rest) && $page($rest[$j + 1]);
+				}
+				return true;
+			}
+		}
+		return true;
+	}
+
+	// Is a URL filter's value spelled the way the template prints it? Text
+	// is as it is; 14.50 for a number whose mock-up is 14.50, 2026-10-10 for
+	// a date, 1 for a bool.
+	static function canonical_value($column, $value, $example) {
+		$type = cms_types::of_column($column);
+		if ($type === 'text') return true;
+		try {
+			$clean = cms_types::clean($type, $value, 'filter');
+		} catch (InvalidArgumentException $e) {
+			// it matches nothing, and an empty list is not kept anyway
+			return true;
+		}
+		return cms_types::show(cms_types::read($type, $clean), $example) === (string)$value;
+	}
+
+	// A field's mock-up in the collection's own view, for a list that doesn't
+	// print it (a sidebar of names): the site's links spell 14.50 from there.
+	static function collection_example($name, $field) {
+		static $defaults = array();
+		if (!isset($defaults[$name])) {
+			require_once BASE.'tools/inspector.php';
+			$inspector = new raster_inspector();
+			$defaults[$name] = (array)$inspector->collection_defaults($name);
+		}
+		return isset($defaults[$name][$field]) ? $defaults[$name][$field] : null;
+	}
+
 	// custom cms routes for admin panels and collection URLs
 	public function route() {
 		include 'routes.php';
@@ -119,6 +175,10 @@ class cms
 		if (!database::configured()) {
 			return;
 		}
+		// a database that can't be reached is an outage, not a missing
+		// table: never the mock-up as if it were the page
+		$down = cms_store::unreachable();
+		if ($down !== null) controller::unavailable($down);
 
 		$uri_string = config::get('uri_string');
 		$index_file = config::get('index_file');
@@ -249,6 +309,8 @@ class cms
 
 		$page = (int)util::param($name.'_page', 0);
 		$roffset = $page > 1 ? ($page-1)*$page_size : 0;
+		// /news/news_page/02 shows page 2, but is not a page worth keeping
+		if (!cms::canonical_uri($name)) raster_cache::skip();
 
 		// one item: /news/news_item/3 or /news/news_item/raster-runs-on-php-8
 		if (util::param($name) == $name.'_item') {
@@ -258,16 +320,18 @@ class cms
 		}
 
 		// uri filters: /news/news_items/tag/php
+		$uri_filters = array();
 		if (util::param($name) == $name.'_items') {
 			$uri_segments = config::get('uri_segments');
 			$start_key = array_search($name.'_items', $uri_segments);
 			foreach ($uri_segments as $key => $value) {
 				if ($key > $start_key && ($key - $start_key)%2 == 0) {
-					$filters[$uri_segments[$key-1]] = $value;
+					$uri_filters[$uri_segments[$key-1]] = $value;
 				}
 			}
+			unset($uri_filters[$name.'_page']);
+			$filters = $uri_filters + $filters;
 		}
-		unset($filters[$name.'_page']);
 
 		// param filters: render.cms.news('featured=1&order=newest&limit=3'),
 		// render.cms.booking('stylist=?stylist&date>=today&order=date,time')
@@ -305,8 +369,12 @@ class cms
 			// nothing to seed or add: the model declares the fields
 		} elseif (database::$frozen) {
 			// production seeds nothing, and a list with no table keeps the
-			// mock-up (an empty table too, checked once the list is read)
-			if (!$exists) return false;
+			// mock-up (an empty table too, checked once the list is read);
+			// until schema --apply, its filter and page URLs are not kept
+			if (!$exists) {
+				if ($uri_filters || $page > 1) raster_cache::skip();
+				return false;
+			}
 		} elseif (!$exists || R::count($this->data_name) == 0) {
 			// the first item is the placeholder content from the template
 			require_once BASE.'tools/inspector.php';
@@ -359,14 +427,25 @@ class cms
 		// "did this email book?")
 		if ($record && !cms::loggedin()) {
 			$secret = array_merge($record['hidden'], array('owner'));
-			foreach ($secret as $hidden) unset($filters[$hidden]);
+			foreach ($secret as $hidden) {
+				// a filter the URL asks for and the list ignores
+				if (isset($uri_filters[$hidden])) raster_cache::skip();
+				unset($filters[$hidden]);
+			}
 			$compare = array_filter($compare, function ($c) use ($secret) { return !in_array($c[0], $secret, true); });
 		}
 		foreach ($filters as $key => $value) {
 			if (!array_key_exists($key, $fields) || !preg_match('/^[a-z0-9_]+$/', $key)) {
 				if ($key === 'id' || $key === 'slug') return array();
+				// /news/news_items/nonsense/x lists everything; it answers,
+				// but every made-up field would be a page of its own
+				if (array_key_exists($key, $uri_filters)) raster_cache::skip();
 				continue;
 			}
+			// /menu/menu_items/price/14.500 and /events/events_items/date/10 Oct 2026
+			// find what the site's own links (14.50, 2026-10-10) find; they
+			// answer, but there is no end to the spellings
+			if (array_key_exists($key, $uri_filters) && !cms::canonical_value($fields[$key], $value, isset($expected_properties[$key]) ? $expected_properties[$key] : cms::collection_example($name, $key))) raster_cache::skip();
 			$compare[] = array($key, '=', $value);
 		}
 		// featured=1, date>=today, guests>4, each as its field's type
@@ -375,6 +454,10 @@ class cms
 		$bindings += $more_bindings;
 		$sql .= ' ORDER BY '.cms_store::order_sql(isset($options['order']) ? $options['order'] : '', $fields).' LIMIT '.(int)$page_size.' OFFSET '.(int)$roffset;
 		$data = array_values(array_map(array('cms_store', 'export_item'), R::find($this->data_name, $sql, $bindings)));
+		// a filter nothing matches and a page past the last one answer, empty
+		// (or with the mock-up, while the list has no items); they are not
+		// kept, so made-up URLs don't fill the page cache
+		if (!$data && ($page > 1 || $uri_filters)) raster_cache::skip();
 		if (!$data && !$record && database::$frozen && R::count($this->data_name) == 0) return false;
 		// the template prints text: 4.5 as its mock-up 4.50 does
 		foreach ($data as $key => $row) $data[$key] = cms_types::show_row($row, $expected_properties);
@@ -427,6 +510,15 @@ class cms
 			exit('Forbidden');
 		}
 		database::instance('cms');
+	}
+
+	// What /api offers, like any model: the editor's endpoints, its style
+	// and logout. They check the caller themselves (require_admin answers
+	// 403), so they are listed for anyone; nothing else of cms, or of an
+	// override of it, answers there.
+	static function api() {
+		return array_fill_keys(array('editor_save_field', 'editor_save_item', 'editor_delete_item', 'editor_history', 'editor_restore',
+			'editor_upload', 'editor_action', 'editor_script', 'style', 'logout'), 'visitor');
 	}
 
 	// ##The in-page editor (see editor.php): POST /api/cms/editor_… with csrf

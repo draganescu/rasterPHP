@@ -35,6 +35,8 @@ An **environment** is a name for where the site is running. Raster uses two:
 |---|---|---|
 | Database | fluid: tables and columns are created as templates change | frozen: changes only through `raster schema --apply` |
 | Template errors | the page shows a list of problems (HTTP 500) | a plain "This page could not be shown", details go to the PHP error log |
+| PHP's own errors | shown as php.ini says | never shown to visitors (`display_errors` off, `log_errors` on, whatever php.ini says); `/api` answers `{"error":"server error"}` |
+| Database can't be reached | the page says why (HTTP 500) | every page answers 503 (the view `error_document_503`, if set) and `/api` a JSON 503, logged, nothing cached |
 | Page cache | off | on |
 | Email | written to files in `data/mail/` | sent with PHP's `mail()` unless you set `RASTER_MAIL` |
 | Email links | allowed without a configured address | need `RASTER_URL` |
@@ -78,7 +80,9 @@ or `config::set('site_url')->to('https://example.com/')`. With it, every link Ra
 In production, whole pages are saved and sent again to the next visitor without running any PHP models. This makes the site fast on small servers.
 
 - Only pages for visitors **without a session** (not logged in) and **without a query string** are cached. `/api`, `/mcp` and `/login` never are.
-- **Any content change clears the whole cache**: a save in the editor, over MCP or from the command line. When a scheduled item's publish time arrives, the cache is cleared too.
+- **Tracking parameters don't count as a query string.** A link shared as `/about?utm_source=newsletter` (any `utm_*`, or the click ids `fbclid`, `gclid` and `msclkid`) gets the cached `/about`, and is made the way `/about` is: the tracking values are left out of `$_GET`, so they never end up in the page other visitors get (in a pagination link, say). Any other parameter skips the cache.
+- **Any content change clears the whole cache**: a save in the editor, over MCP or from the command line. The cached files are deleted then, so the folder only holds pages for the current content. When a scheduled item's publish time arrives, the cache is cleared too. A page that was being made while the content changed is not kept.
+- **Lists nobody can fill aren't cached.** A filter page with no items (`/news/news_items/tag/nothing`), a page number past the last one (`/news/news_page/999`) and a filter on a field the list doesn't have still answer 200, but are never kept. Neither is a list or item address spelled other than the way the site's own links spell it: `/news/news_page/1` or `/news/news_page/02` for a page, `/news/news_item/007` for item 7, or a segment left over at the end. The same goes for a filter on a number, date or yes/no field written another way than the page prints it: `/menu/menu_items/price/14.500` when the price shows as `14.50`, or `/events/events_items/date/10 Oct 2026` for `2026-10-10`. Nor is a view name in other letter case: on a disk that ignores case (macOS, Windows) `/ABOUT` or `/News/news_page/2` finds `about.html` or `news.html` and answers, but only the file's own spelling is kept. All of them are kept out so a crawler trying made-up addresses can't fill the disk. A model of your own that knows its page shouldn't be kept calls `raster_cache::skip()`.
 - If your own model changes data that pages show, call `util::content_changed()` afterwards.
 - **Changes made outside Raster don't clear it**: a view, theme file, model or config edited in a text editor (or by an agent with plain file tools), or the database changed directly. Visitors who aren't logged in keep seeing the old page until the cache is cleared or `page_cache_ttl` runs out. Clear it with `php bin/raster cache clear`, or the MCP tool `clear_cache`. `raster render` and MCP `render_url` never read the cache, so they show the change before visitors do.
 - Responses carry an `X-Raster-Cache: hit` or `miss` header, so you can check what happened.
@@ -106,6 +110,7 @@ Set with `config::set('name')->to(value)` in `config/the_app.php`.
 | `rewrite` | `true` | `false` puts `index.php/` in every link, for servers that can't rewrite URLs |
 | `strict_templates` | `true` in development | template errors stop the page with a list (HTTP 500) |
 | `error_document_404` | none | a view for 404 pages |
+| `error_document_503` | none | a view for when the database can't be reached, outside development; use no model that needs the database in it |
 | `site_url` | none | the site's address (same as `RASTER_URL`) |
 | `cms_enabled` | `true` | the CMS and the editor |
 | `raster_page_size` | `10` | items per page in every collection |
@@ -133,8 +138,7 @@ Set with `config::set('name')->to(value)` in `config/the_app.php`.
 | `export_skip` | none | paths or `#regex#` patterns left out of `raster export` |
 | `mcp_token` | none | turns on MCP over HTTP (same as `RASTER_MCP_TOKEN`) |
 | `mcp_write_views` | `false` | lets MCP over HTTP rewrite templates |
-| `api_system_models` | `cms` | bundled models reachable at `/api` |
-| `api_open` | `false` | for sites made before 2.1.1: models without `api()` offer every public method at `/api`, to anyone. `doctor` warns; removed in 2.2.0 |
+| `api_system_models` | `cms` | bundled models reachable at `/api`, for what their `api()` lists |
 | `api_blocked` | `mcp`, `api` | models never reachable at `/api`. Setting it replaces the list, so keep `mcp` and `api` in it: `array('mcp', 'api', 'billing')` |
 | `allow_deprecated` | none | deprecated features this site keeps on purpose, so `doctor` doesn't warn |
 

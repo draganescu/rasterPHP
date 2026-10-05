@@ -129,7 +129,7 @@ class raster_schema {
 			// a column added after the others is NULL in the older rows
 			$added_later = array();
 			foreach ($fresh as $name) {
-				if (!in_array($name, $missing) && R::getCell("SELECT COUNT(*) FROM $type WHERE $name IS NULL") > 0) $added_later[] = $name;
+				if (!in_array($name, $missing) && R::getCell("SELECT COUNT(*) FROM `$type` WHERE `$name` IS NULL") > 0) $added_later[] = $name;
 			}
 			if (count($orphans) === 1 && count($missing) === 0 && count($added_later) === 1) {
 				$renames[] = array('from' => $orphans[0], 'to' => $added_later[0]);
@@ -237,13 +237,13 @@ class raster_schema {
 		cms_store::connect();
 		if (!array_key_exists($from, cms_store::columns($table))) throw new InvalidArgumentException("$table has no column $from");
 		if (!array_key_exists($to, cms_store::columns($table))) {
-			R::exec("ALTER TABLE $table RENAME COLUMN $from TO $to");
+			R::exec("ALTER TABLE `$table` RENAME COLUMN `$from` TO `$to`");
 			return "renamed $table.$from to $to";
 		}
 		// the new column already exists (created with the template default by a
 		// request in development): move the content over, then drop the old one
-		R::exec("UPDATE $table SET $to = $from WHERE $from IS NOT NULL");
-		R::exec("ALTER TABLE $table DROP COLUMN $from");
+		R::exec("UPDATE `$table` SET `$to` = `$from` WHERE `$from` IS NOT NULL");
+		R::exec("ALTER TABLE `$table` DROP COLUMN `$from`");
 		return "moved $table.$from into $to";
 	}
 
@@ -262,7 +262,7 @@ class raster_schema {
 			}
 			cms_store::connect();
 			if (!cms_store::table_exists($table)) throw new InvalidArgumentException("There is no table $table");
-			R::exec("DROP TABLE $table");
+			R::exec("DROP TABLE `$table`");
 			return "dropped table $table";
 		}
 		foreach (array($table, $column) as $name) {
@@ -271,7 +271,7 @@ class raster_schema {
 		if (in_array($column, cms_store::$system_fields)) throw new InvalidArgumentException("$column is managed by Raster");
 		cms_store::connect();
 		if (!array_key_exists($column, cms_store::columns($table))) throw new InvalidArgumentException("$table has no column $column");
-		R::exec("ALTER TABLE $table DROP COLUMN $column");
+		R::exec("ALTER TABLE `$table` DROP COLUMN `$column`");
 		return "dropped $table.$column";
 	}
 }

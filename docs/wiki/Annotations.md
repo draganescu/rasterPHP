@@ -114,7 +114,7 @@ Rows can also be objects; they are turned into arrays.
 - `print.key` is replaced by the row's `key`. A key the row doesn't have keeps its sample text.
 - A value of `false` for a key keeps its sample text.
 - The same key can appear several times; every copy is filled.
-- `print.model.method` (with a model name) can still be used inside a render block. It's called once, and every copy gets the same value.
+- `print.model.method` (with a model name) can still be used inside a render block. It's called once, and every copy gets the same value, however long the list: a `print.if.flag` hides its block in every row.
 
 **Lists inside rows.** If a row's value is itself a list of rows, the block for that key repeats once per inner row:
 

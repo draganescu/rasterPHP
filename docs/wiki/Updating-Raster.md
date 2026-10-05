@@ -49,6 +49,10 @@ php bin/raster upgrade             # apply them
 
 `update` already does this for you. Each step checks first whether it's needed, so running it twice is harmless. The version an app has been upgraded to is in `config/raster-version`.
 
+An app without that file, such as a second app you made by copying the first, is taken as current: `raster upgrade` writes today's version into it, runs no old steps and says so in one line. From then on it updates like any other app.
+
+`raster upgrade` works on the app `RASTER_APP` names (`application` by default). A name that isn't an app folder (misspelled, without a `config/` folder inside, or a framework folder such as `system/`) is refused with an error and exit code 1, and nothing is written. When `config/raster-version` can't be written, upgrade says so, names the steps that ran (it checks them again next time), and exits 1.
+
 Upgrade steps only change files. Database changes are always yours to apply, with `php bin/raster schema --apply` in production.
 
 ## Deprecated features
@@ -79,6 +83,8 @@ php bin/raster version
 prints the framework's version and the version each app has been upgraded to.
 
 ## Upgrading from Raster 1.x
+
+An app from Raster 1.x has no `config/raster-version`, and `raster upgrade` would take it as current. Write `1.0.0` into that file first, then run `php bin/raster upgrade`.
 
 `raster upgrade` handles the file changes: it adds `CLAUDE.md` and `.mcp.json`, adds `.gitignore` files to `data/` and `media/`, renames `render.cms.login` and `$querries`. Old accounts (the `usersdata` table and MD5 passwords) are moved to the new `user` table automatically on a fluid (development) connection, so open the site once that way before freezing it for production. MD5 passwords are re-hashed at the next log in. See the 2.0.0 section of `CHANGELOG.md` for everything else.
 

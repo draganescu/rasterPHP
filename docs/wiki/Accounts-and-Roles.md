@@ -17,13 +17,13 @@ Roles are ordered: an admin counts as an editor and a member too.
 **From the command line** (the way to create the first editor):
 
 ```sh
-php bin/raster user ada@example.com                       # role admin, random password printed
+php bin/raster user ada@example.com                       # a new account: role admin, random password printed
 php bin/raster user ada@example.com --role=editor --password=… --name="Ada Lovelace"
 php bin/raster user ada                                   # a username instead of an email works too
 php bin/raster users                                      # list accounts
 ```
 
-Running `user` for an existing account updates its role and password.
+Running `user` for an existing account changes only what you give it: `--password=…` resets the password and keeps the role, `--role=…` changes the role and keeps the password. The command says what it kept.
 
 **From the site**: visitors sign up on your registration page and get the `member` role. Turn sign-up off with:
 
@@ -50,13 +50,14 @@ Each page is a form inside a `render.authentication.<name>` block, with messages
 
 - Fields: `login` (an email or a username; `email` or `username` also work) and `password`.
 - After logging in, the visitor goes to `?next=/path` if the URL has one (only paths on your own site are accepted), else to the `after_login` page, else to the home page.
-- **Five wrong passwords lock the account for 15 minutes.** Each failed attempt also waits a moment before answering, which slows down guessing.
+- **Five wrong passwords lock the account for 15 minutes.** Once 15 minutes have passed since the last wrong password, counting starts again from zero. Each failed attempt also waits a moment before answering, which slows down guessing.
 
 ### Sign up: `render.authentication.register`
 
 - Fields: `name` (optional), `email`, `password`. Add a `password_again` field with a `validation.matches('password', 'password_again')` block if you want the password typed twice.
 - Alerts: `email_taken`, `email_invalid`, `password_short`, and `registered` after success.
 - New accounts are members and are logged in right away.
+- Two sign-ups at once with one email (a double click, or two tabs) make one account: the first is logged in, the other is answered with `email_taken`. On SQLite, looking for the email and storing the account happen in one transaction.
 
 ### Forgot password: `render.authentication.forgot`
 
@@ -77,6 +78,7 @@ Each page is a form inside a `render.authentication.<name>` block, with messages
 - Alerts: `account_saved`, `current_password_wrong`, `email_taken`, `email_invalid`, `password_short`.
 - The form is pre-filled with the user's name and email.
 - Changing the password logs out every other session of that account.
+- When two members change to the same email at once, or a member changes to the email someone is signing up with, one gets it and the other sees `email_taken` (on SQLite).
 
 ### Log out: `render.authentication.logout`
 
@@ -134,6 +136,7 @@ authentication::user();          // array('id', 'name', 'email', 'username', 'ro
 authentication::can('member');   // true when logged in with at least that role
 authentication::can('editor');
 authentication::save_user('ada@example.com', $password, 'member', 'Ada');  // create or update
+authentication::create_user('ada@example.com', $password, 'member', 'Ada'); // create only: null when the email has an account
 ```
 
 To react when someone signs up or logs in (a welcome email, adding them to a CRM), listen to the [events](Events) `authentication.registered`, `logged_in`, `logged_out`, `login_failed`, `password_changed` and `account_saved`.

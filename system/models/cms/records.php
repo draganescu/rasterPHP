@@ -35,6 +35,9 @@ class cms_records {
 	// events held back until the transaction they happened in commits
 	static $depth = 0;
 	static $queued = array();
+	// content changed in the transaction: the page cache is thrown away and
+	// content_changed sent once, after the commit (util::content_changed)
+	static $changed = false;
 
 	// ##Declarations
 
@@ -271,7 +274,7 @@ class cms_records {
 		foreach ($filters as $field => $value) {
 			if (!preg_match('/^[a-z0-9_]+$/', $field) || !array_key_exists($field, $columns)) throw new InvalidArgumentException("$collection has no field '$field'");
 			$value = cms_types::clean(cms_types::of_column($columns[$field]), $value, $field);
-			$sql .= $value === null ? " AND $field IS NULL " : " AND $field = :f_$field ";
+			$sql .= $value === null ? " AND `$field` IS NULL " : " AND `$field` = :f_$field ";
 			if ($value !== null) $bindings[":f_$field"] = $value;
 		}
 		$sql .= ' ORDER BY '.cms_store::order_sql($order, $columns).' LIMIT '.max(1, (int)$limit);
@@ -311,8 +314,10 @@ class cms_records {
 
 	// Runs $work so that every write in it happens, or none does. On SQLite
 	// the database is locked for writing from the start, so two checkouts
-	// can't both take the last mug. Events wait for the commit: nothing is
-	// emailed about a write that was rolled back.
+	// can't both take the last mug, and two items saved at once can't both
+	// take one slug. Events wait for the commit: nothing is emailed about a
+	// write that was rolled back, and the page cache is thrown away (and
+	// content_changed sent) once, when the new rows can be read.
 	static function transaction($work) {
 		cms_store::connect();
 		if (self::$depth > 0) return $work();
@@ -321,20 +326,34 @@ class cms_records {
 		$sqlite ? $pdo->exec('BEGIN IMMEDIATE') : $pdo->beginTransaction();
 		self::$depth = 1;
 		self::$queued = array();
+		self::$changed = false;
 		try {
 			$result = $work();
-			$sqlite ? $pdo->exec('COMMIT') : $pdo->commit();
+			self::finish($pdo, $sqlite, 'COMMIT');
 		} catch (Throwable $e) {
 			self::$depth = 0;
 			self::$queued = array();
-			$sqlite ? $pdo->exec('ROLLBACK') : $pdo->rollBack();
+			self::$changed = false;
+			self::finish($pdo, $sqlite, 'ROLLBACK');
 			throw $e;
 		}
 		self::$depth = 0;
 		$queued = self::$queued;
+		$changed = self::$changed;
 		self::$queued = array();
+		self::$changed = false;
+		if ($changed) util::content_changed();
 		foreach ($queued as $event) event::dispatch($event[0], $event[1]);
 		return $result;
+	}
+
+	// MySQL commits by itself when the work changes the schema (a new table
+	// or column in development), and then there is nothing left to commit or
+	// roll back. SQLite changes its schema inside the transaction.
+	protected static function finish($pdo, $sqlite, $how) {
+		if ($sqlite) return $pdo->exec($how);
+		if (!$pdo->inTransaction()) return;
+		$how === 'COMMIT' ? $pdo->commit() : $pdo->rollBack();
 	}
 
 	// what the store calls instead of event::dispatch

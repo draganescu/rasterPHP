@@ -25,10 +25,14 @@ config::set('reservation_page_size')->to(50);
 config::set('feed_limit')->to(5);
 
 // the sitemap leaves out private and utility pages
-config::set('sitemap_skip')->to(array('login', 'account', 'register', 'forgot', 'password/new', 'letters/confirm', 'letters/stop', 'lab', '404', 'reservation'));
+config::set('sitemap_skip')->to(array('login', 'account', 'register', 'forgot', 'password/new', 'letters/confirm', 'letters/stop', 'lab', '404', '503', 'reservation'));
 
 // a friendlier 404 page (views/cafe/404.html)
 config::set('error_document_404')->to('404');
+
+// what visitors see when the database can't be reached (views/cafe/503.html);
+// it uses no model that needs the database
+config::set('error_document_503')->to('503');
 
 // the lab changes on every visit, so it is never cached
 config::set('page_cache_skip')->to(array('lab'));
@@ -41,8 +45,6 @@ config::set('cafe_staff_email')->to('staff@cafe.test');
 // the suite still covers them (D14). doctor counts them apart instead of warning.
 config::set('allow_deprecated')->to(array(
 	'legacy-validation-regions' => '#^views/cafe/(visit|password/new)\.html$#',
-	// the knob below that turns the old open /api back on, for C40
-	'api-open' => '#^config/the_app\.php$#',
 ));
 
 // text replaced in pages under /lab only (template::replace)
@@ -59,7 +61,6 @@ if ($knob('CAFE_PAGE_CACHE')) config::set('page_cache')->to($knob('CAFE_PAGE_CAC
 if ($knob('CAFE_CACHE_TTL')) config::set('page_cache_ttl')->to((int)$knob('CAFE_CACHE_TTL'));
 if ($knob('CAFE_STRICT') === 'off') config::set('strict_templates')->to(false);
 if ($knob('CAFE_REWRITE') === 'off') config::set('rewrite')->to(false);
-if ($knob('CAFE_API_OPEN') === 'on') config::set('api_open')->to(true);
 if ($knob('CAFE_API_FEED') === 'on') config::set('api_system_models')->to(array('cms', 'feed'));
 if ($knob('CAFE_LOG') === 'on') log::enable();
 if ($knob('CAFE_ADMIN_PAGE')) config::set('protected')->to(config::get('protected') + array($knob('CAFE_ADMIN_PAGE') => 'admin'));

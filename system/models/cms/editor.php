@@ -90,7 +90,10 @@ class cms_editor {
 		$script = '<script id="raster-editor-config" type="application/json">'
 			.json_encode($config, JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR)
 			.'</script><script src="'.config::get('link_uri').'api/cms/editor_script?v='.urlencode(self::version()).'" defer></script>';
-		$template->output = preg_replace('#</body>#i', $script."\n</body>", $template->output, 1);
+		// the config holds stored text: put it in as it is, not as a
+		// replacement pattern that would read $5 or \1 as a group
+		$at = stripos($template->output, '</body>');
+		if ($at !== false) $template->output = substr_replace($template->output, $script."\n", $at, 0);
 	}
 
 	// What the in-page editor can do on a rendered page, read back from its
@@ -151,10 +154,27 @@ class cms_editor {
 		return array('error' => $message);
 	}
 
+	// a mistake in the code (a TypeError, not a refusal): logged, and a plain
+	// 500 for the editor to show
+	protected static function broken($e) {
+		log::error('editor: '.get_class($e).': '.$e->getMessage().' in '.$e->getFile().':'.$e->getLine());
+		return self::fail('Something went wrong; it is in the error log', 500);
+	}
+
 	// a check() or an action said no: the names, and a line to show
 	protected static function refused($e) {
 		http_response_code(422);
 		return array('error' => $e->getMessage(), 'problems' => $e->problems);
+	}
+
+	// Each name the editor posts holds one value (lists come only under
+	// fields, examples and input): id[]=99 would be read as item 1, and
+	// value[]=x stored as 'Array'. Every endpoint that reads one of these refuses that first.
+	protected static function one_value() {
+		foreach (array('type', 'slug', 'field', 'value', 'example', 'collection', 'id', 'action', 'revision') as $name) {
+			if (is_array(util::post($name))) return self::fail("'$name' takes one value");
+		}
+		return null;
 	}
 
 	protected static function page_type() {
@@ -166,6 +186,7 @@ class cms_editor {
 	// type, slug, field, value
 	static function save_field() {
 		cms::require_admin(true);
+		if ($bad = self::one_value()) return $bad;
 		$type = self::page_type();
 		$field = (string)util::post('field');
 		if (!$type) return self::fail('Unknown page');
@@ -177,6 +198,8 @@ class cms_editor {
 			$saved = cms_store::update_page($type, $slug, array($field => (string)util::post('value')), array($field));
 		} catch (Exception $e) {
 			return self::fail($e->getMessage());
+		} catch (Throwable $e) {
+			return self::broken($e);
 		}
 		// printed the way the page prints it (4.50 for a 14.50 mock-up), so the
 		// editor shows what was stored, not what was typed
@@ -192,6 +215,7 @@ class cms_editor {
 	// collection, id (0 for a new item), fields[name]=value
 	static function save_item() {
 		cms::require_admin(true);
+		if ($bad = self::one_value()) return $bad;
 		$collection = (string)util::post('collection');
 		if (!preg_match('/^[a-z][a-z0-9_]*$/', $collection) || cms::reserved($collection, 'collection')) return self::fail('Unknown collection');
 		$type = cms::collection_type($collection);
@@ -210,12 +234,15 @@ class cms_editor {
 			return self::refused($e);
 		} catch (Exception $e) {
 			return self::fail($e->getMessage());
+		} catch (Throwable $e) {
+			return self::broken($e);
 		}
 	}
 
 	// collection, id: answers with the item, so the editor can bring it back
 	static function delete_item() {
 		cms::require_admin(true);
+		if ($bad = self::one_value()) return $bad;
 		$collection = (string)util::post('collection');
 		if (!preg_match('/^[a-z][a-z0-9_]*$/', $collection)) return self::fail('Unknown collection');
 		$type = cms::collection_type($collection);
@@ -225,6 +252,8 @@ class cms_editor {
 			cms_store::delete_item($type, (int)util::post('id'));
 		} catch (cms_refused $e) {
 			return self::refused($e);
+		} catch (Throwable $e) {
+			return self::broken($e);
 		}
 		return array('deleted' => true, 'item' => cms_types::show_row($item, self::examples()));
 	}
@@ -233,6 +262,7 @@ class cms_editor {
 	// record's type declares, if the editor's role allows it
 	static function action() {
 		cms::require_admin(true);
+		if ($bad = self::one_value()) return $bad;
 		$collection = (string)util::post('collection');
 		if (!cms_records::info($collection)) return self::fail('Unknown collection');
 		$input = util::post('input');
@@ -243,12 +273,15 @@ class cms_editor {
 			return self::refused($e);
 		} catch (Exception $e) {
 			return self::fail($e->getMessage());
+		} catch (Throwable $e) {
+			return self::broken($e);
 		}
 	}
 
 	// type: the page's revisions, newest first
 	static function history() {
 		cms::require_admin(true);
+		if ($bad = self::one_value()) return $bad;
 		$type = self::page_type();
 		if (!$type) return self::fail('Unknown page');
 		$revisions = cms_store::page_history($type, 30);
@@ -264,6 +297,7 @@ class cms_editor {
 	// type, slug, revision: a new revision with the old one's values
 	static function restore() {
 		cms::require_admin(true);
+		if ($bad = self::one_value()) return $bad;
 		$type = self::page_type();
 		if (!$type) return self::fail('Unknown page');
 		$old = R::findOne($type, ' id = ? ', array((int)util::post('revision')));
@@ -277,6 +311,8 @@ class cms_editor {
 			return $saved;
 		} catch (Exception $e) {
 			return self::fail($e->getMessage());
+		} catch (Throwable $e) {
+			return self::broken($e);
 		}
 	}
 

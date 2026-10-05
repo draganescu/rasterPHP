@@ -10,9 +10,11 @@ This page lists the protections Raster applies for you, and the few things that 
 
 **Spam bots are fooled.** Every post form has a hidden honeypot field. Posts that fill it get a fake success and nothing is done.
 
-**Validation runs on the server.** The rules in your HTML (`required`, `type`, `maxlength`, `pattern`…) are enforced on the server as well as in the browser.
+**Validation runs on the server.** The rules in your HTML (`required`, `type`, `maxlength`, `pattern`…) are enforced on the server as well as in the browser. A field sent as a list the form didn't ask for (`name[]=x`), or with bytes that aren't UTF-8, fails `required` instead of slipping past the rules.
 
-**Passwords** are hashed with PHP's `password_hash`. Five wrong passwords lock an account for 15 minutes, and failed attempts are slowed down. Changing a password logs out other sessions. The password-reset form answers the same whether or not an account exists, and reset links expire after an hour and work once.
+**Links visitors type can't run script.** A record field a visitor wrote and a view prints as a link (`print.@href.website`) is dropped when it is a `javascript:`, `data:` or `vbscript:` URL, also when an HTML entity, a tab, a newline or a control byte hides the scheme. The in-page editor applies the same rule to links editors type.
+
+**Passwords** are hashed with PHP's `password_hash`. Five wrong passwords lock an account for 15 minutes (once 15 minutes pass after the last one, counting starts again), and failed attempts are slowed down. Changing a password logs out other sessions. The password-reset form answers the same whether or not an account exists, and reset links expire after an hour and work once.
 
 **Sessions** start only at log in; visitors get no session cookie (only a language cookie, if they pick a language). The session cookie is `HttpOnly` (scripts can't read it), `SameSite=Lax`, and `Secure` over HTTPS. Log-out is a POST.
 
@@ -44,7 +46,9 @@ Values in feeds, JSON views, attributes set with `@`/`+`, and `print.self` are e
 
 **Offer over `/api` only what you mean to.** A model's methods are reachable at `/api/<model>/<method>` only when it lists them in `static function api()`, each with the least role that may call it (`visitor`, `member`, `editor`, `admin`). Everything else answers 404. A method listed for visitors can be called by anyone, so if it writes, deletes or sends something it checks what it's given. See [Models](Models#a-models-json-api).
 
-Sites made before Raster 2.1.1 may still have `config::set('api_open')->to(true)` in `config/the_app.php`, which keeps every public method of models without `api()` reachable by anyone. `raster doctor` warns about it; list what your models offer and remove it.
+The same holds for the bundled models: `cms` offers only its editor endpoints, `style` and `logout`, and a public method you add in a `the_cms` override answers 404 unless your override's `api()` lists it (that list adds to what `cms` lists). The `api_open` setting of earlier versions, which kept every public method reachable, is gone: setting it does nothing.
+
+**Errors stay in the log.** Outside development Raster turns PHP's `display_errors` off for every request, so an error shows visitors no paths or arguments: a page answers a plain 500, an `/api` method `{"error":"server error"}`, and the details go to the error log with the URL. `raster doctor` warns when php.ini still has `display_errors` on in production, because an error before Raster starts would still show; set it off there too.
 
 **Protect private pages on the server side.** `print.if.is_editor` only hides markup. To keep a whole page private, list it in `config::set('protected')`. See [Accounts and roles](Accounts-and-Roles#protected-pages).
 

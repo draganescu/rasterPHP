@@ -30,14 +30,24 @@ class raster_project
 		return is_file($file) ? trim(file_get_contents($file)) : '1.0.0';
 	}
 
-	// the version an app was last upgraded to; apps from before 2.0 have none
+	// the version an app was last upgraded to, or null when it has no
+	// config/raster-version (an app made by hand). `raster upgrade` takes such
+	// an app as current: it writes today's version and runs no old steps. An
+	// app from Raster 1.x says so with 1.0.0 in that file.
 	static function app_version($app_dir) {
 		$file = $app_dir.'/config/raster-version';
-		return is_file($file) ? trim(file_get_contents($file)) : '1.0.0';
+		return is_file($file) ? trim(file_get_contents($file)) : null;
 	}
 
 	static function set_app_version($app_dir, $version) {
-		file_put_contents($app_dir.'/config/raster-version', $version."\n");
+		return @file_put_contents($app_dir.'/config/raster-version', $version."\n") !== false;
+	}
+
+	// an app folder is one of apps(): a top-level folder with a config/
+	// inside that isn't the framework's; `raster upgrade` refuses anything
+	// else (a misspelled RASTER_APP, system/) rather than say it upgraded it
+	static function is_app($root, $app) {
+		return in_array($app, self::apps($root), true);
 	}
 
 	// app folders: top-level folders with a config/ inside
@@ -240,7 +250,9 @@ class raster_project
 		$app_dir = $root.'/'.$app;
 		$context = array('root' => $root, 'app' => $app_dir, 'name' => $app);
 		$pending = array();
-		foreach (self::upgrade_files($root, self::app_version($app_dir), self::version($root)) as $version => $file) {
+		$from = self::app_version($app_dir);
+		if ($from === null) return $pending;
+		foreach (self::upgrade_files($root, $from, self::version($root)) as $version => $file) {
 			$steps = include $file;
 			foreach ($steps as $id => $step) {
 				if (call_user_func($step['needed'], $context)) {
@@ -257,7 +269,11 @@ class raster_project
 			$result = call_user_func($step['apply'], $step['context']);
 			$done[] = array('version' => $step['version'], 'id' => $step['id'], 'description' => $step['description'], 'result' => is_string($result) ? $result : '');
 		}
-		self::set_app_version($root.'/'.$app, self::version($root));
+		if (!self::set_app_version($root.'/'.$app, self::version($root))) {
+			$ran = array();
+			foreach ($done as $step) $ran[] = $step['version'].' '.$step['id'];
+			throw new RuntimeException("Could not write $app/config/raster-version".($ran ? '. These steps ran: '.implode(', ', $ran).'; upgrade checks them again next time' : ''));
+		}
 		return $done;
 	}
 
@@ -441,6 +457,10 @@ class raster_project
 			$token = getenv('RASTER_MCP_TOKEN') ?: config::get('mcp_token');
 			if ($token && strlen($token) < 32) $add('fail', 'The MCP token is short', 'Use at least 32 random characters');
 			if (!getenv('RASTER_ENV')) $add('warn', 'RASTER_ENV is not set', 'Production is picked from the host name; set RASTER_ENV=production on the server');
+			// PHP without a php.ini shows its errors, paths and all
+			if (!in_array(strtolower((string)ini_get('display_errors')), array('', '0', 'off', 'false', 'no'), true)) {
+				$add('warn', 'display_errors is on in PHP\'s settings', "Raster turns it off for each request, but an error before that (a mistake in config/) still reaches visitors.\nSet display_errors = Off and log_errors = On in php.ini, as php.ini-production does");
+			}
 		}
 		return $checks;
 	}

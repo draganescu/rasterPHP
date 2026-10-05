@@ -77,12 +77,12 @@ These are sent whatever caused the change: a form, the in-page editor, the JSON 
 | `authentication.logged_in`, `logged_out` | `id`, `email`, `name`, `role` |
 | `authentication.password_changed`, `account_saved` | `id`, `email`, `name`, `role` |
 | `authentication.login_failed` | `login` (what was typed) |
-| `newsletter.subscribed` | `email`, `name`, `status` (`pending` or `confirmed`), `source` |
+| `newsletter.subscribed` | `email`, `name`, `status` (`pending` or `confirmed`), `source`. Sent after the commit; the framework's listener `newsletter.confirmation_mail` sends a pending address its confirmation email |
 | `newsletter.confirmed`, `newsletter.unsubscribed` | `email`, `name` |
 | `cms.item_saved` | `collection`, `created` (`true` for a new item), `item` (all its fields) |
 | `cms.item_deleted` | `collection`, `item` |
 | `cms.page_saved` | `type` (the page's table), `slug`, `changed` (names of changed fields), `fields` (the saved page: `revision`, `updated_at`, and `fields` with the values, so `$payload['fields']['fields']['headline']`) |
-| `content_changed` | none (sent by `util::content_changed()`) |
+| `content_changed` | none (sent by `util::content_changed()`; inside a transaction, once after the commit) |
 | `mail.sent` | `to`, `subject` |
 | `mail.failed` | `to`, `subject`, `error` |
 

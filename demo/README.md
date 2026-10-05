@@ -41,6 +41,7 @@ php tests/demo.php                        # the whole matrix
 | A14 | a route to a view in another theme (`->from('print')`) |
 | A15 | `rewrite` off: every link goes through index.php |
 | A16 | the private extensions are 403, `composer.phar` too (system/private_paths.php) |
+| A17 | theme files of every kind (svg, webp, woff2, ico, pdf) are served; the root `.htaccess` is the only one |
 | B1 | RSS: content type, well-formed, escaped |
 | B2 | Atom |
 | B3 | JSON views: rows become a list |
@@ -96,8 +97,12 @@ php tests/demo.php                        # the whole matrix
 | C45 | a short closing tag (`<!-- /render -->`) is a lint error that names the full closing tag |
 | C46 | lint checks how many arguments a method takes, and names the nearest real method |
 | C47 | a relative link inside a `print.validation.alert()` block goes to the route, not the view file |
-| C48 | /api answers only what a model lists in `api()`, for the roles it names; overrides are never addressed as `the_<model>`; `api_open` keeps the old open /api; lint checks `api()` |
+| C48 | /api answers only what a model lists in `api()`, for the roles it names; a model that lists nothing offers nothing; the vocabulary shows each list, cms's included; overrides are never addressed as `the_<model>`; lint checks `api()` |
 | C49 | in production (strict templates off) any exception (a missing named query too) shows the plain error page and goes to the error log; `log::warning` and `log::error` always reach the error log |
+| C50 | an /api method that throws answers JSON: 500 `{"error":"server error"}` logged with the URL (a bad query too), 503 when the database is down, 400 for missing arguments; development adds the trace |
+| C51 | `cms` offers over /api only what its `api()` lists (the editor endpoints, `style`, `logout`); a public method of a `the_cms` override answers 404 unless listed |
+| C52 | a link a visitor typed can't run script, even with a tab, newline, control byte or HTML entity hiding `javascript:`, `data:` or `vbscript:` |
+| C53 | a `print.model.method` or `print.if.flag` inside a render block fills every row of a list of any length (no limit at 1,000 rows), so a staff-only block stays hidden in all of them |
 | D1 | raster_form and honeypot on every post form |
 | D2 | the session token on forms for logged in users |
 | D3 | posts from other sites refused (Origin, Sec-Fetch-Site, Referer, /api too) |
@@ -124,6 +129,8 @@ php tests/demo.php                        # the whole matrix
 | D24 | `field('guests', 'max')` shows only when that rule fails |
 | D25 | validation::errors() lists what failed |
 | D26 | a form with `method="get"` shows what the URL asked (the staff page's filters) |
+| D27 | a form shown again keeps what was typed exactly, `$100`, `\1` and `$0` included |
+| D28 | a field sent as a list (`name[]`) when the form doesn't name it so, or with bytes that aren't UTF-8, fails `required`; a field named `tags[]` takes a list |
 | E1 | page fields with defaults from the markup |
 | E2 | site_ fields shared by every page |
 | E3 | collections seeded from the mock-up |
@@ -154,6 +161,9 @@ php tests/demo.php                        # the whole matrix
 | E28 | page history and restoring a revision from the editor |
 | E29 | photos: page and item image fields; an empty value keeps the template's picture |
 | E30 | admin pages: views `protected` keeps for editors or admins are listed in the editor's Admin menu, by title, for whoever may open them; `describe` lists them |
+| E31 | fields named like SQL words (`when`, `from`, `group`) sort, filter (`group>2`) and link to their filter pages (`/trips/trips_items/from/Paris`) like any other field |
+| E32 | the in-page editor gets stored text as it is: `$5`, `\1` and backslashes, so Duplicate copies it unchanged |
+| E33 | on SQLite, items saved at once with one title each get their own slug, and page saves at once (one field each) keep each other's changes: item and page saves run in a transaction |
 | F1 | schema status as JSON |
 | F2 | schema --check |
 | F3 | schema --apply in production, including model tables |
@@ -181,7 +191,10 @@ php tests/demo.php                        # the whole matrix
 | G18 | visitors get no cookies |
 | G19 | `login_page` |
 | G20 | log in with a username |
-| G21 | `raster user` defaults: admin, random password |
+| G21 | `raster user` defaults for a new account: admin, random password |
+| G22 | `raster user` on an existing account keeps the role and password it isn't given |
+| G23 | once a lock runs out, wrong passwords are counted from zero |
+| G24 | two sign-ups or email changes at once with one email: one account gets it, the other is told it is taken (on SQLite) |
 | H1 | newsletter sign up sends a confirmation |
 | H2 | the same answer for people already subscribed |
 | H3 | confirm |
@@ -194,6 +207,7 @@ php tests/demo.php                        # the whole matrix
 | H10 | single opt-in |
 | H11 | `newsletter_confirm_page`, and the name is stored |
 | H12 | `raster send` refuses a page without a title |
+| H13 | on SQLite, sign-ups at once leave one subscriber; signing up again while pending resends the same link; the confirmation email comes from a listener on `newsletter.subscribed`, after the commit |
 | I1 | emails are views; subject from the title; text version |
 | I2 | values escaped in emails; images absolute |
 | I3 | SMTP: AUTH, sender, recipient |
@@ -220,6 +234,10 @@ php tests/demo.php                        # the whole matrix
 | L6 | `site_url` in config |
 | L7 | `page_cache_skip`, `page_cache_ttl`, `page_cache` off |
 | L8 | `raster cache clear` and MCP `clear_cache` for changes made outside Raster; `describe` says whether the cache is on |
+| L9 | page cache: empty filter pages, pages past the last one, unknown filter fields and other spellings of a list's URLs (`journal_page/1`, a segment left over) answer 200 but aren't kept; a content change deletes the old cached pages |
+| L10 | page cache: links with only tracking parameters (`utm_*`, `fbclid`, `gclid`, `msclkid`) are cache hits, and their values never reach the cached page |
+| L11 | a database that can't be reached answers 503 outside development (`error_document_503`, views/cafe/503.html; `/api` as JSON, before the method runs), logged, never cached |
+| L12 | the page cache is thrown away and `content_changed` sent once a transaction commits, and not at all when it is rolled back |
 | M1 | MCP needs its token; GET is refused |
 | M2 | initialize, ping, tools/list, batches, errors |
 | M3 | notifications get 202 |
@@ -238,6 +256,7 @@ php tests/demo.php                        # the whole matrix
 | M16 | `render_url` renders a page without a web server, in its own process |
 | M17 | `render_url` with `as`: the page as an editor, with what the in-page editor marks |
 | M18 | a PHP error in site code answers the MCP call over stdio with its file and line, and the server goes on |
+| M19 | the view tools take `theme` only as a folder directly under `views/`; a path or a link out of `views/` is refused |
 | N1 | raster help and unknown commands |
 | N2 | raster lint and --json, --all-themes |
 | N3 | raster render and its exit codes |
@@ -252,6 +271,7 @@ php tests/demo.php                        # the whole matrix
 | N12 | raster vocabulary, and --json |
 | N13 | raster describe, and --sections |
 | N14 | `raster render <url> --as=<account or role>`, and a query string in the URL |
+| N15 | `raster upgrade` takes an app with no `config/raster-version` as current: writes the version, runs no old steps |
 | O1 | the sitemap skips private pages and lists items |
 | R1 | a model declares a type (`types()`): a collection with the model's fields and no mock-up row, in site_overview, describe and schema |
 | R2 | `cms_records::submit`: a form stores a record with only the fields people may write; what visitors typed prints as text |
@@ -278,3 +298,4 @@ php tests/demo.php                        # the whole matrix
 | T4 | models, MCP and /api read ints, floats and bools, so the reservation model has no casts |
 | T5 | templates print text: a number with as many decimals as its mock-up, nothing for an empty value; a form value of the wrong type raises `<field>_invalid` |
 | T6 | `schema --apply` converts a column whose type changed when every value fits, and names the values that don't |
+| T7 | a time prints `19:00` whatever the database gives back (MySQL's `19:00:00`); lists hide drafts and scheduled items and sort by `newest` whether `published_at` is a typed column or still text from before 2.1.7 (only a text one is compared with `''`, which MySQL refuses for a date) |

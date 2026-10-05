@@ -137,6 +137,9 @@ in, so write the short form if it is quicker and let the fix finish it.
 ```
 
 - `print.key` is replaced by the row's value.
+- `print.model.method` and `print.if.flag` work inside a render block too:
+  the method is called once and every row gets the same value (or hides
+  the block), however long the list.
 - `print.@attr.key` wraps a tag and sets its `attr` to the value (escaped).
   `print.+attr.key` appends the value to the attribute instead. The attribute
   must already exist on the tag.
@@ -251,8 +254,11 @@ class cafe {
 - Or bind in `config/the_events.php`:
   `event::bind('reservation.booked')->to('cafe', 'subscribe_guest');`, and
   `event::unbind(…)->from(…)`.
-- Listeners get the payload array and run in order: `the_events.php`, then
-  `listens()`, then the framework's own. A listener returning `false` makes
+- Listeners get the payload array and run in order: the framework's own
+  bindings in `system/config/events.php` (routing, the CMS and account
+  checks, the newsletter's confirmation email), then `the_events.php`, then
+  `listens()`, then the framework's core handlers (controller and log). A
+  listener returning `false` makes
   `event::dispatch()` return `false`; the sender decides what that means.
 - Name your events `<model>.<what happened>`, in the past tense.
 - `lint` reports bindings to models or methods that don't exist, and events
@@ -265,12 +271,12 @@ alike:
 |---|---|
 | `authentication.registered`, `logged_in`, `logged_out`, `password_changed`, `account_saved` | `id`, `email`, `name`, `role` |
 | `authentication.login_failed` | `login` |
-| `newsletter.subscribed` | `email`, `name`, `status` (`pending` or `confirmed`), `source` |
+| `newsletter.subscribed` | `email`, `name`, `status` (`pending` or `confirmed`), `source` (after the commit; the framework's listener `newsletter.confirmation_mail` emails a pending address) |
 | `newsletter.confirmed`, `newsletter.unsubscribed` | `email`, `name` |
 | `cms.item_saved` | `collection`, `created` (true for new items), `item` |
 | `cms.item_deleted` | `collection`, `item` |
 | `cms.page_saved` | `type`, `slug`, `changed` (field names), `fields` |
-| `content_changed` | none (sent by `util::content_changed()`) |
+| `content_changed` | none (sent by `util::content_changed()`; inside a transaction, once after the commit) |
 | `mail.sent` / `mail.failed` | `to`, `subject` / and `error` |
 
 The request sends `launch`, `finding_route`, `route_set`, `route_found`,
@@ -299,15 +305,26 @@ Anything not listed answers 404, public or not: the methods templates call,
 form handlers, listeners. A model without `api()` offers nothing. A role the
 caller lacks answers 401 (not logged in) or 403. Static methods are never
 reachable, even listed. Of the system models, only `cms` is reachable, and
-an override (`the_feed`) only by the name it overrides. Posts
+only for what its own `api()` lists: the in-page editor's endpoints, `style`
+and `logout`, which check the caller themselves. An override (`the_feed`)
+is reached only by the name it overrides, and a public method it adds
+answers 404 unless its `api()` lists it; that list adds to the bundled
+model's, so the editor's endpoints stay. Posts
 there pass the same site check as forms, but they are not form submissions:
 `validation::get()->submitted()` is false, so form models do nothing over
 `/api`. A method listed for visitors can be called by anyone: if it changes
 data, it checks what it is given. `lint` reports an `api()` naming a method
 that doesn't exist or can't be called, or a role that doesn't exist, and
-`vocabulary` shows what each model offers. Sites made before 2.1.1 may have
-config `api_open`, which keeps every public method of models without `api()`
-reachable, as before; `doctor` warns, and 2.2.0 removes it.
+`vocabulary` shows what each model offers.
+
+A method that throws answers `{"error":"server error"}` with status 500,
+and the error goes to the log with the URL, so a payment provider sees a
+failure and tries again. Output the method printed before it threw is
+dropped. A database that can't be reached answers 503 before the method
+runs, so a webhook is never told "no such order" during an outage; a bad
+query on a database that is there is a 500 like any other error. A call
+with too few arguments answers 400 (`/api/reservation/day` for
+`day($date)`). In development the answer also has `exception` and `trace`.
 
 The database is RedBeanPHP (`R::dispense`, `R::store`, `R::load`) for rows
 as objects, and named queries in `sql/` files for everything you would write
@@ -346,7 +363,12 @@ class contact {
 
 - **Rules live in the HTML.** `required`, `type` (email, url, number, date),
   `minlength`, `maxlength`, `min`, `max` and `pattern` are enforced on the
-  server too.
+  server too. A field sent as a list (`name[]=x`) when the form doesn't name
+  it `name[]`, or with bytes that aren't UTF-8, fails `required`, so the
+  form's own words for an empty field show; a field named `tags[]` takes a
+  list. A `pattern` that can't run counts as not matched.
+- **What was typed comes back as typed** when the form is shown again:
+  `$100`, `\1` and `$0` included.
 - **`validation.field('name')`** shows its block when that field breaks a rule.
   Other regions: `matches('password', 'password_again')`, `cant_be('name',
   'admin')`, `accepted('terms')`. For your own rules, add
@@ -384,7 +406,9 @@ item of a collection is the mock-up content.
 - **Names:** lowercase letters, digits and `_`, starting with a letter.
   Reserved: CMS method names (`style`, `login`, …), `slug`, `id`,
   `updated_at`, `enabled` and `published_at` for fields; `users` and `raster`
-  for collections. `lint` reports these.
+  for collections. `lint` reports these. Words SQL keeps for itself
+  (`when`, `from`, `group`, `order`) are fine: lists sort and filter by them
+  like any other field.
 - **Site-wide fields:** a field whose name starts with `site_`
   (`print.cms.site_name`) is shared by every page. Put these in `_layout.html`.
 - **Collection URLs** are routed to views that render that collection:
@@ -523,7 +547,8 @@ class reservation {
   what they made, editors included, and visitors nothing. Records print what
   visitors typed as text: every field is escaped unless the type lists it in
   `html`, and a link a visitor typed (`print.@href.website`) can't be a
-  `javascript:` URL. Visitors can't filter a public type by its hidden fields
+  `javascript:`, `data:` or `vbscript:` URL, also when an entity, a tab, a
+  newline or a control byte hides the scheme. Visitors can't filter a public type by its hidden fields
   (`/guestbook/guestbook_items/email/…`).
 - **Forms.** `cms_records::submit($type, $done)` is the whole handler: it
   shows the form (`false`), shows it again with the values when the HTML
@@ -631,8 +656,17 @@ class reservation {
   back. On SQLite the database is locked for writing from the start, so two
   checkouts can't both take the last item. Events (`cms.item_saved` and the
   rest) wait for the commit, so nothing is emailed about a write that was
-  rolled back. Every single write of a record is already one (its `check()`
-  and the write together); a transaction started inside another joins it.
+  rolled back. So does `util::content_changed()`: the page cache is thrown
+  away and `content_changed` sent once, after the commit, and not at all
+  after a rollback. Every single write of a record is already one (its
+  `check()` and the write together), and so is every save or delete of a
+  markup collection's item and every page save: on SQLite two items saved
+  at once with one title get different slugs, and two page saves at once
+  (one field each) keep each other's change. So is a newsletter sign-up
+  (`newsletter::subscribe()`): on SQLite, sign-ups at once with one address
+  leave one subscriber. A transaction started inside another joins it. On
+  MySQL a write that adds a table or column (development) commits what
+  came before it, as MySQL does on any schema change.
 - **Starting from a form:** `php bin/raster make model inquiry --from=contact.html`
   writes `models/inquiry/inquiry.php` with the type (fields from the form's
   inputs, passwords left out), an empty `check()` and the handler.
@@ -675,9 +709,20 @@ class reservation {
   see **Editors and agents**),
   `registration` (false turns sign-up off), `login_page`, `after_login`,
   `password_min_length` (8).
-- Five wrong passwords lock an account for 15 minutes.
+- Five wrong passwords lock an account for 15 minutes. Once 15 minutes have
+  passed since the last wrong one, counting starts again from zero.
+- One email, one account: two sign-ups at once with one email (a double
+  click) make one account, and the other answers `email_taken`; so do two
+  members changing to one email at once, or a member changing to the email
+  someone is signing up with. On SQLite, looking for the email
+  and storing the account happen in one transaction. From code,
+  `authentication::create_user($login, $password, $role, $name)` makes an
+  account, or returns null when the login is taken; `save_user(…)` creates
+  or updates.
 - Command line: `php bin/raster user <email|name> [--role=…] [--password=…]`
-  and `php bin/raster users`.
+  and `php bin/raster users`. A new account is an admin with a random
+  password unless the options say otherwise; an existing one keeps the role
+  or password the command isn't given.
 
 **newsletter**: sign-ups with double opt-in.
 - Regions:
@@ -689,7 +734,15 @@ class reservation {
   - `print.newsletter.count`.
   - From code: `newsletter::subscribe($email, $name, $source)` does what the
     form does (and sends the confirmation) and returns `pending`,
-    `confirmed`, `already` or false.
+    `confirmed`, `already` or false. It looks the address up and stores it
+    in one transaction, so on SQLite sign-ups at once leave one subscriber;
+    inside another transaction it joins it.
+  - The confirmation email is sent after the commit by the framework's
+    listener on `newsletter.subscribed` (status `pending`); a site that
+    sends its own unbinds it in `config/the_events.php`:
+    `event::unbind('newsletter.subscribed')->from('newsletter', 'confirmation_mail');`.
+    Signing up again while pending sends the same link again: every
+    confirmation email sent still works.
 - Alerts: `check_email`, `subscribed`, `confirmed`, `confirm_invalid`,
   `unsubscribed`, `unsubscribe_invalid`.
 - **Sending an issue:** `php bin/raster send /news/news_item/my-post
@@ -745,6 +798,17 @@ use `'model.method'`: `method(true)` returns
 - **Production** is frozen: the schema only changes through
   `schema --apply`, which also creates the tables the bundled models use
   (accounts, subscribers). Missing columns show the template default.
+- **Errors.** Outside development PHP's own messages go to the error log,
+  never to visitors: Raster turns `display_errors` off and `log_errors` on
+  for every request, whatever php.ini says (the command line keeps them).
+  `doctor` warns in production when php.ini has `display_errors` on, since
+  an error before Raster starts would still show.
+- **A database that can't be reached** (MySQL down, an SQLite file the web
+  server can't read) is not a missing table: outside development every page
+  answers 503 (`/api` too, as JSON), as the view `error_document_503` when the site sets one, or a
+  plain line. The error is logged and nothing is cached, so the real pages
+  show as soon as the database is back. Development shows the error
+  instead.
 - **The site's address:** set `RASTER_URL=https://example.com/` (or
   `config::set('site_url')`). Links in pages and emails then never depend on
   the visitor's `Host` header. In production, emails with links (password
@@ -762,7 +826,8 @@ use `'model.method'`: `method(true)` returns
   of it is private: the framework, the app's code and config, the SQLite file,
   the view files themselves. The rules are in one list,
   `system/private_paths.php`, and everything comes from it — the router in
-  `index.php` for `php -S`, the `.htaccess` that ships with Raster, and:
+  `index.php` for `php -S`, the `.htaccess` that ships with Raster (the only
+  one: there is none inside the app or `system/` folders), and:
 
   ```sh
   php bin/raster deploy --config=apache          # the .htaccess itself
@@ -777,8 +842,25 @@ use `'model.method'`: `method(true)` returns
   `security.txt`).
 - **Page cache**, on by default in production (config `page_cache`):
   - Whole pages are cached for visitors without a session or a query string.
-  - Any content change throws the cache away (`util::content_changed()` in
-    your own models), and so does the moment a scheduled item is published.
+    Tracking parameters don't count: `/about?utm_source=x` (any `utm_*`,
+    `fbclid`, `gclid`, `msclkid`) is served the cached `/about`, and is
+    made as `/about` is, without them (models don't see them in `$_GET`).
+  - Any content change throws the cache away and deletes the cached files
+    (`util::content_changed()` in your own models; inside a transaction
+    when it commits), and so does the moment a scheduled item is
+    published. A page whose render overlapped the
+    change is not kept.
+  - A filter page with no items (`/news/news_items/tag/nothing`), a page
+    past the last one and a filter on a field the list doesn't have answer
+    200 but are never cached, so made-up URLs don't fill the disk. Neither
+    is a list or item URL spelled other than the way its links spell it
+    (`/news/news_page/1`, `/news/news_page/02`, `/news/news_item/007`, a
+    segment left over at the end), or a typed filter spelled other than the
+    way the page prints it (`/menu/menu_items/price/14.500` for `14.50`,
+    `/events/events_items/date/10 Oct 2026`), or a view name in other
+    letter case (`/ABOUT` finds `about.html` on a disk that ignores case,
+    as on macOS and Windows). A model that decides the same calls
+    `raster_cache::skip()`.
   - Settings: `page_cache_ttl` (3600 seconds) and `page_cache_skip` (path
     patterns). Responses carry `X-Raster-Cache: hit|miss`. `describe` says
     whether the cache is on (`site.page_cache`).
@@ -877,6 +959,11 @@ of lists and filter pages come along; drafts and the editor don't.
   - `write_view` — write a view, but only if it lints: on an error the file is
     left alone and the problems come back. The answer says what the change
     does to the content model.
+  - The four view tools take an optional `theme`: the name of a folder
+    directly under `views/` (letters, digits, `_` and `-`), the site's theme
+    when left out. A path, or a folder that links out of `views/`, is
+    refused, and so is a view file that links out of the theme
+    (`list_views` leaves it out); a link inside the theme works.
   - `render_url` — the page's status and HTML, no web server. With `as`
     (`editor`, `admin`, `member`, or an account's email) it renders the page
     as that person, outside production only, and for staff also says what the in-page editor marks:
@@ -918,6 +1005,10 @@ of lists and filter pages come along; drafts and the editor don't.
 - **A route to another theme:** `controller::route('print/menu')->to('menu')->from('print')`.
 - **A 404 page:** `config::set('error_document_404')->to('404')` renders
   `404.html` with status 404.
+- **A page for a database outage:** `config::set('error_document_503')->to('503')`
+  renders `503.html` with status 503 when the database can't be reached
+  (see **Environments and cache**). Keep it to models that don't need the
+  database: the `cms` fields show their defaults there.
 
 ## Settings
 
@@ -931,6 +1022,7 @@ Set in `config/the_app.php` with `config::set('name')->to(value)`.
 | `rewrite` | true | false puts `index.php/` in every link, for servers without rewrites |
 | `strict_templates` | true in development | template errors stop the page with a list (500) |
 | `error_document_404` | none | a view for 404s |
+| `error_document_503` | none | a view for when the database can't be reached (outside development) |
 | `site_url` | none | the site's address (same as `RASTER_URL`) |
 | `cms_enabled` | true | the CMS and the editor toolbar |
 | `raster_page_size`, `<name>_page_size` | 10 | items per page |
@@ -948,8 +1040,7 @@ Set in `config/the_app.php` with `config::set('name')->to(value)`.
 | `page_cache`, `page_cache_ttl`, `page_cache_skip` | on in production, 3600, none | |
 | `mcp_token` | none | same as `RASTER_MCP_TOKEN` |
 | `mcp_write_views` | false | lets MCP over HTTP write templates (`write_view`); over stdio it always can |
-| `api_system_models` | `cms` | system models reachable at `/api` |
-| `api_open` | false | sites made before 2.1.1: models without `api()` offer every public method at `/api`, to anyone, as before. `doctor` warns; removed in 2.2.0 |
+| `api_system_models` | `cms` | system models reachable at `/api`, for what their `api()` lists |
 | `allow_deprecated` | none | `array('<id>' => true or path pattern(s))`: uses of deprecated features this site keeps on purpose, so `doctor` counts them apart instead of warning |
 
 Environment variables: `RASTER_ENV`, `RASTER_URL`, `RASTER_DB`,
@@ -983,12 +1074,20 @@ command-line output). They win over the settings above.
 - It then runs `php bin/raster upgrade` for every app: the steps in
   `system/upgrades/<version>.php` the app still needs (renamed annotations,
   moved files). The version an app is at is in `config/raster-version`.
+  An app without that file (one made by hand) is taken as current: `upgrade`
+  writes today's version into it and runs no old steps. An app from Raster
+  1.x gets them by having `1.0.0` written there first. A `RASTER_APP`
+  that names no app folder (missing, without `config/`, or a framework
+  folder such as `system/`) is refused with an error and exit 1, and
+  nothing is written. When the version file can't be written, upgrade
+  says so, names the steps that ran, and exits 1.
   Database changes stay with `raster schema --apply`.
 - `php bin/raster doctor` checks PHP, versions, edited framework files,
   templates, the database, whether `.htaccess` still carries every rule in
   `system/private_paths.php`, uses of deprecated features
   (`system/tools/deprecations.php`, minus the ones config `allow_deprecated`
-  says are on purpose) and, in production, the site address, mail and tokens.
+  says are on purpose) and, in production, the site address, mail, tokens
+  and whether PHP shows errors (`display_errors`).
   Exit 1 when something must be fixed.
 - `php bin/raster new <folder>` starts a new site from this copy of Raster.
 - `CHANGELOG.md` in the repository lists what changed in each release.

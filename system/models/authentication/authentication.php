@@ -75,23 +75,44 @@ class authentication
 		return R::findOne('user', ' LOWER(email) = ? OR username = ? ', array(strtolower($login), $login));
 	}
 
-	// Creates or updates an account. $login is an email or a username.
+	// Creates or updates an account. $login is an email or a username. A
+	// null $role or $password keeps what an existing account has; a new
+	// account needs a password and is a member unless $role says otherwise.
 	static function save_user($login, $password, $role = 'member', $name = null) {
+		return self::store_user($login, $password, $role, $name, false);
+	}
+
+	// Creates an account, or answers null when one has that login already:
+	// it never changes an existing account. Sign-up uses it.
+	static function create_user($login, $password, $role = 'member', $name = null) {
+		return self::store_user($login, $password, $role, $name, true);
+	}
+
+	// The password is hashed first, since that is slow. Looking for the
+	// account and storing it then happen in one transaction, so two at once
+	// can't both find nothing and both make one (on SQLite).
+	protected static function store_user($login, $password, $role, $name, $create_only) {
 		self::connect();
-		if (!isset(self::$roles[$role])) throw new InvalidArgumentException("Role must be one of: ".implode(', ', array_keys(self::$roles)));
-		$user = self::find($login);
-		if (!$user) {
-			$user = R::dispense('user');
-			$is_email = filter_var($login, FILTER_VALIDATE_EMAIL);
-			$user->email = $is_email ? strtolower($login) : '';
-			$user->username = $is_email ? '' : $login;
-			$user->created_at = R::isoDateTime();
-		}
-		if ($name !== null || empty($user->name)) $user->name = $name !== null ? $name : preg_replace('/@.*$/', '', $login);
-		$user->role = $role;
-		$user->password = password_hash($password, PASSWORD_DEFAULT);
-		R::store($user);
-		return (int)$user->id;
+		if ($role !== null && !isset(self::$roles[$role])) throw new InvalidArgumentException("Role must be one of: ".implode(', ', array_keys(self::$roles)));
+		$hash = $password !== null ? password_hash($password, PASSWORD_DEFAULT) : null;
+		return cms_records::transaction(function () use ($login, $hash, $role, $name, $create_only) {
+			$user = self::find($login);
+			if ($user && $create_only) return null;
+			if (!$user) {
+				if ($hash === null) throw new InvalidArgumentException('A new account needs a password');
+				if ($role === null) $role = 'member';
+				$user = R::dispense('user');
+				$is_email = filter_var($login, FILTER_VALIDATE_EMAIL);
+				$user->email = $is_email ? strtolower($login) : '';
+				$user->username = $is_email ? '' : $login;
+				$user->created_at = R::isoDateTime();
+			}
+			if ($name !== null || empty($user->name)) $user->name = $name !== null ? $name : preg_replace('/@.*$/', '', $login);
+			if ($role !== null) $user->role = $role;
+			if ($hash !== null) $user->password = $hash;
+			R::store($user);
+			return (int)$user->id;
+		});
 	}
 
 	// bookkeeping must never block a login, even on a schema that lacks
@@ -121,7 +142,9 @@ class authentication
 	static function check_login($login, $password) {
 		$user = self::find($login);
 		if (!$user || !is_string($password) || $password === '') return false;
-		// five wrong passwords lock the account for 15 minutes
+		// five wrong passwords lock the account for 15 minutes; once 15
+		// minutes have passed since the last one, counting starts again
+		if ((int)$user->failed_count > 0 && (int)strtotime((string)$user->failed_at) <= time() - 900) $user->failed_count = 0;
 		if ((int)$user->failed_count >= 5 && strtotime((string)$user->failed_at) > time() - 900) return false;
 		$hash = (string)$user->password;
 		$ok = preg_match('/^[a-f0-9]{32}$/', $hash) ? hash_equals($hash, md5($password)) : password_verify($password, $hash);
@@ -319,7 +342,12 @@ class authentication
 			return $this->form_again();
 		}
 		$name = trim((string)util::post('name'));
-		$id = self::save_user($email, $password, 'member', $name !== '' ? $name : null);
+		// another sign-up with this email may have got there first
+		$id = self::create_user($email, $password, 'member', $name !== '' ? $name : null);
+		if (!$id) {
+			$v->raise('email_taken');
+			return $this->form_again();
+		}
 		self::log_in($id);
 		event::dispatch('authentication.registered', self::payload($id));
 		util::done('registered', config::get('after_login') ? self::url(config::get('after_login')) : config::get('link_uri'));
@@ -401,17 +429,28 @@ class authentication
 			$v->raise('current_password_wrong');
 			return $this->form_again();
 		}
-		if ($email !== '' && $email !== $bean->email) {
+		$new_email = $email !== '' && $email !== $bean->email;
+		if ($new_email) {
 			if (!filter_var($email, FILTER_VALIDATE_EMAIL)) { $v->raise('email_invalid'); return $this->form_again(); }
 			if (self::find($email)) { $v->raise('email_taken'); return $this->form_again(); }
-			$bean->email = $email;
 		}
 		if ($password !== '') {
 			if (strlen($password) < (int)config::get('password_min_length', 8)) { $v->raise('password_short'); return $this->form_again(); }
 			$bean->password = password_hash($password, PASSWORD_DEFAULT);
 		}
 		if (util::post('name') !== false) $bean->name = trim((string)util::post('name'));
-		R::store($bean);
+		// the email is looked for again with the store, so two members can't
+		// both take one (on SQLite)
+		$saved = cms_records::transaction(function () use ($bean, $email, $new_email) {
+			if ($new_email) {
+				$taken = self::find($email);
+				if ($taken && (int)$taken->id !== (int)$bean->id) return false;
+				$bean->email = $email;
+			}
+			R::store($bean);
+			return true;
+		});
+		if (!$saved) { $v->raise('email_taken'); return $this->form_again(); }
 		// a new password ends other sessions; this one continues
 		if ($password !== '') self::log_in($bean->id);
 		event::dispatch('authentication.account_saved', self::payload($bean->id));

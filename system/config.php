@@ -156,7 +156,15 @@ class config {
 
 		// determining what type of environment this runs on
 		$config->set_environment(  );
-		
+
+		// outside development PHP's own messages (paths, arguments) go to the
+		// log, never to visitors, whatever php.ini says. The command line
+		// keeps them: `raster render` boots the same way.
+		if ($config->environment !== 'development' && PHP_SAPI !== 'cli') {
+			ini_set('display_errors', '0');
+			ini_set('log_errors', '1');
+		}
+
 		return $config;
 	}
 
