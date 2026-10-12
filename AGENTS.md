@@ -728,6 +728,12 @@ class reservation {
   and `php bin/raster users`. A new account is an admin with a random
   password unless the options say otherwise; an existing one keeps the role
   or password the command isn't given.
+- `php bin/raster login-link <email|name> [--next=/path]` prints a link
+  (`<site>/?raster_login=<token>`) that logs that account in without a
+  password, once, within a minute; then the page comes again without the
+  token, or `--next` if it is a path on the site. It is for a host that runs
+  the site, such as a site builder's Log in button. Logging out stays a
+  form (`render.authentication.logout`): there is no logout link.
 
 **newsletter**: sign-ups with double opt-in.
 - Regions:
