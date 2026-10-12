@@ -3,6 +3,17 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## Unreleased
+
+Nothing for sites to do.
+
+- **MCP answers are smaller.** Tool results come back as compact JSON
+  instead of indented JSON, which was more than half their size. `describe`
+  leaves out the vocabulary unless `sections` asks for it: the vocabulary
+  is most of a full answer and has its own tool. A fresh site's `describe`
+  went from about 32,000 characters to about 2,800. `php bin/raster
+  describe` still prints everything. (#161)
+
 ## 2.1.10
 
 MySQL catches up with SQLite. On a MySQL site, run

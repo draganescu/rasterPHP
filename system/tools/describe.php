@@ -13,7 +13,8 @@
 // invocations, each paying PHP's startup again.
 //
 // Used by `php bin/raster describe` and by the MCP tools `describe` and
-// `vocabulary`.
+// `vocabulary`. The MCP `describe` leaves out the vocabulary unless asked: it
+// is most of a full answer and has its own tool.
 class raster_describe
 {
 	// The settings worth telling an agent about: they change how the site

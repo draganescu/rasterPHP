@@ -58,7 +58,7 @@ curl -s https://example.com/mcp \
 
 | Tool | Does |
 |---|---|
-| `describe` | the whole site in one answer: how URLs reach views, the pages and collections the markup declares, the vocabulary, the settings that change behaviour, whether templates lint clean. The first thing to ask. `sections` narrows it. |
+| `describe` | the whole site in one answer: how URLs reach views, the pages and collections the markup declares, the settings that change behaviour, whether templates lint clean. The first thing to ask. `sections` narrows it. The vocabulary is left out unless `sections` names it; it has its own tool. |
 | `vocabulary` | every model, its methods and their parameters; named SQL queries; events and listeners; reserved names |
 | `annotations` | the template grammar, the same data `lint` checks against |
 | `list_views`, `read_view` | list and read templates |

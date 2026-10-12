@@ -112,7 +112,7 @@ class mcp
 					'protocolVersion' => in_array($requested, self::$protocol_versions) ? $requested : self::$protocol_versions[0],
 					'capabilities' => array('tools' => array('listChanged' => false)),
 					'serverInfo' => array('name' => 'raster', 'version' => self::SERVER_VERSION),
-					'instructions' => 'This is a Raster site: views are plain HTML and the dynamic parts are HTML comments. Call describe first — it returns how URLs reach views, the content model the markup declares, every name a template may call, and whether the templates lint clean. Before writing an annotation, check vocabulary (the models and their signatures) and annotations (the grammar); both are read from the code, so neither can be out of date. To change a template use check_view then write_view, which refuses markup that does not lint, and render_url to see the result. Content edits go through get_page/update_page and the item tools: page edits keep revisions, and fields that are not in the templates cannot be written — to add a field, edit the template. In production pages are cached for visitors who are not logged in: Raster\'s own tools clear that cache, but views, theme files, models, config or the database changed any other way do not, so call clear_cache after such a change. render_url never reads the cache, so a fresh render_url does not mean visitors see the change. The in-page editor only marks what the CMS prints: keep lists staff edit on render.cms.<name>, using its options for filters from the URL (field=?param), dates (date>=today) and sorting (order=date,time); for what those cannot say (totals, grouping by day, several types), the render method of a model returns its records through cms_records::listed($type, $rows), which keeps them editable; after changing such a page, call render_url with as="editor" to see that editing still works.',
+					'instructions' => 'This is a Raster site: views are plain HTML and the dynamic parts are HTML comments. Call describe first — it returns how URLs reach views, the content model the markup declares, and whether the templates lint clean. Before writing an annotation, check vocabulary (the models and their signatures) and annotations (the grammar); both are read from the code, so neither can be out of date. To change a template use check_view then write_view, which refuses markup that does not lint, and render_url to see the result. Content edits go through get_page/update_page and the item tools: page edits keep revisions, and fields that are not in the templates cannot be written — to add a field, edit the template. In production pages are cached for visitors who are not logged in: Raster\'s own tools clear that cache, but views, theme files, models, config or the database changed any other way do not, so call clear_cache after such a change. render_url never reads the cache, so a fresh render_url does not mean visitors see the change. The in-page editor only marks what the CMS prints: keep lists staff edit on render.cms.<name>, using its options for filters from the URL (field=?param), dates (date>=today) and sorting (order=date,time); for what those cannot say (totals, grouping by day, several types), the render method of a model returns its records through cms_records::listed($type, $rows), which keeps them editable; after changing such a page, call render_url with as="editor" to see that editing still works.',
 				));
 			case 'ping':
 				return $this->result($id, new stdClass());
@@ -168,8 +168,8 @@ class mcp
 			$tool('lint_templates', 'Checks every template for annotation errors (unclosed blocks, unknown models, typos) with file:line positions.', array(), array(), $read_only),
 			$tool('schema_status', 'Compares the content model in the templates with the database: missing columns, orphaned columns, likely renames.', array(), array(), $read_only),
 			// ##Working on the site itself, not only its content
-			$tool('describe', 'The whole site in one answer: how URLs reach views, the pages and collections the markup declares, every name a template may call, the settings that change behaviour, and whether the templates lint clean. Ask this first when you meet a Raster site.',
-				array('sections' => array('type' => 'array', 'items' => array('type' => 'string', 'enum' => raster_describe::sections()), 'description' => 'Limit the answer to these sections. All of them by default.')), array(), $read_only),
+			$tool('describe', 'The whole site in one answer: how URLs reach views, the pages and collections the markup declares, the settings that change behaviour, and whether the templates lint clean. Ask this first when you meet a Raster site. The names a template may call are left out unless you ask for the vocabulary section; the vocabulary tool gives the same.',
+				array('sections' => array('type' => 'array', 'items' => array('type' => 'string', 'enum' => raster_describe::sections()), 'description' => 'Limit the answer to these sections. All but vocabulary by default.')), array(), $read_only),
 			$tool('vocabulary', 'Every name a template is allowed to call: each model with its methods and their signatures, the named SQL queries, the events and who listens, and the names the CMS keeps for itself. Read from the code, never executed. Use it before writing an annotation instead of guessing a method name.',
 				array(), array(), $read_only),
 			$tool('annotations', 'The annotation grammar as data: the exact spelling of each directive, what each keyword does, how arguments and attributes work, and how blocks nest. lint checks against this same description.',
@@ -231,7 +231,7 @@ class mcp
 			$method = 'tool_'.$name;
 			$data = $this->$method($arguments);
 			return array(
-				'content' => array(array('type' => 'text', 'text' => json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE))),
+				'content' => array(array('type' => 'text', 'text' => json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE))),
 				'structuredContent' => (object)$data,
 			);
 		} catch (Exception $e) {
@@ -447,7 +447,8 @@ class mcp
 			$unknown = array_diff($sections, raster_describe::sections());
 			if ($unknown) throw new InvalidArgumentException('Unknown section(s): '.implode(', ', $unknown).'. Sections: '.implode(', ', raster_describe::sections()));
 		}
-		return raster_describe::site($sections ?: null);
+		// the vocabulary is most of a full answer, and has its own tool
+		return raster_describe::site($sections ?: array_values(array_diff(raster_describe::sections(), array('vocabulary'))));
 	}
 
 	protected function tool_vocabulary($arguments) {
