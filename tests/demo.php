@@ -1097,7 +1097,8 @@ test('M6', 'MCP over stdio', function () use ($root) {
 
 test('M10', 'describe: the site in one call', function () use ($base) {
 	$all = mcp($base, 'describe');
-	same(array('site', 'routing', 'pages', 'admin_pages', 'collections', 'vocabulary', 'settings', 'lint', 'schema', 'views'), array_keys($all));
+	// all but the vocabulary, which is most of a full answer and has its own tool
+	same(array('site', 'routing', 'pages', 'admin_pages', 'collections', 'settings', 'lint', 'schema', 'views'), array_keys($all));
 	same('demo', $all['site']['app']);
 	same('cafe', $all['site']['theme']);
 	check(in_array('/menu', array_map(function ($p) { return $p['url']; }, $all['pages'])), 'the pages are there');
@@ -1116,6 +1117,9 @@ test('M10', 'describe: the site in one call', function () use ($base) {
 	// by section, and an unknown section is an error
 	$some = mcp($base, 'describe', array('sections' => array('site', 'lint')));
 	same(array('site', 'lint'), array_keys($some));
+	same(array('vocabulary'), array_keys(mcp($base, 'describe', array('sections' => array('vocabulary')))), 'the vocabulary when asked for');
+	list(, $body) = http('POST', "$base/mcp", json_encode(array('jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => array('name' => 'describe', 'arguments' => array('sections' => array('site'))))), array('Authorization: Bearer demo-token', 'Content-Type: application/json'));
+	check(strpos(json_decode($body, true)['result']['content'][0]['text'], "\n") === false, 'the text is compact JSON');
 	list(, $body) = http('POST', "$base/mcp", json_encode(array('jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => array('name' => 'describe', 'arguments' => array('sections' => array('nope'))))), array('Authorization: Bearer demo-token', 'Content-Type: application/json'));
 	has(json_decode($body, true)['result']['content'][0]['text'], 'Unknown section');
 });

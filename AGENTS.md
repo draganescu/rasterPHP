@@ -955,8 +955,11 @@ of lists and filter pages come along; drafts and the editor don't.
     It's off until that token is set.
 - **Tools for the site itself:**
   - `describe` — how URLs reach views, the pages and collections the markup
-    declares, the admin pages, the vocabulary, the settings that change behaviour, and whether
-    the templates lint clean. Ask this first. `sections` narrows it.
+    declares, the admin pages, the settings that change behaviour, and whether
+    the templates lint clean. Ask this first. `sections` narrows it. The
+    vocabulary is left out unless `sections` names it; it is most of a full
+    answer and has its own tool. (`php bin/raster describe` still prints
+    everything.)
   - `vocabulary` — every model with its methods and their signatures, the
     named SQL queries, the events and who listens, the names the CMS keeps.
     Read from the code, so it cannot be out of date. Check it before writing
@@ -994,6 +997,7 @@ of lists and filter pages come along; drafts and the editor don't.
   model. Over stdio the agent is already on the machine with the files, so it
   is available. Over HTTP it is not offered until the site sets
   `config::set('mcp_write_views')->to(true)`.
+- Results come back as compact JSON, in `structuredContent` and as text.
 - `describe` leaves out anything that could be a secret: the MCP token and the
   mail transport are never in its settings.
 
