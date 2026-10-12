@@ -3,6 +3,18 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.0
+
+Nothing for sites to do.
+
+- **The editor's dock moves out of the way.** On a phone it sat at the
+  bottom of the screen and covered whatever was under it, so links and
+  buttons there couldn't be tapped. Flick it up and it moves to the top;
+  flick it down and it comes back. A finger, a mouse dragged and let go,
+  and two fingers on a trackpad all do it. A quick flick goes where it was
+  thrown, a slow drag to the nearer edge, and a small wobble is still a
+  tap. It stays where it was left, page after page.
+
 ## 2.1.13
 
 Nothing for sites to do.
