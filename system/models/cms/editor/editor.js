@@ -351,8 +351,15 @@
 			'svg{width:18px;height:18px;display:block;flex:none}',
 			'.surface{background:' + look.surface + ';color:' + look.fg + ';border:1px solid ' + look.line + ';box-shadow:' + look.shadow + ';border-radius:' + look.radius + '}',
 			// the dock
-			'.dock{position:absolute;left:50%;bottom:calc(18px + env(safe-area-inset-bottom));transform:translateX(-50%);display:flex;align-items:center;gap:4px;padding:5px;border-radius:999px;pointer-events:auto;transition:transform .5s cubic-bezier(.2,.9,.3,1.25),opacity .3s;white-space:nowrap}',
+			'.dock{position:absolute;left:50%;bottom:calc(18px + env(safe-area-inset-bottom));transform:translate(-50%,var(--dy,0px));display:flex;align-items:center;gap:4px;padding:5px;border-radius:999px;pointer-events:auto;transition:transform .5s cubic-bezier(.2,.9,.3,1.25),opacity .3s;white-space:nowrap;touch-action:none;-webkit-user-select:none;user-select:none}',
 			'.dock.hidden{transform:translate(-50%,140%);opacity:0}',
+			'.dock.dragging{transition:none;cursor:grabbing}',
+			// flicked to the top: the dock, and what hangs off it, come down from there
+			'.layer.top .dock{bottom:auto;top:calc(18px + env(safe-area-inset-top))}',
+			'.layer.top .dock.hidden{transform:translate(-50%,-140%)}',
+			'.layer.top .menu{bottom:auto;top:calc(70px + env(safe-area-inset-top))}',
+			'.layer.top .bubble{bottom:auto;top:calc(76px + env(safe-area-inset-top))}',
+			'.layer.top .bubble:after{bottom:auto;top:-7px;border-top:inherit;border-left:inherit;border-bottom:0;border-right:0}',
 			'.who{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:' + look.accentSoft + ';color:' + look.accent + ';font-weight:700;font-size:13px;margin-right:2px}',
 			'.pill{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 14px;border-radius:999px;transition:background .2s,color .2s,transform .15s}',
 			'.pill:hover{background:' + look.accentSoft + '}',
@@ -442,7 +449,7 @@
 			'.muted{color:' + look.muted + '}',
 			'.close{width:34px;height:34px;border-radius:50%;display:grid;place-items:center}',
 			'.close:hover{background:' + look.accentSoft + '}',
-			'@media (max-width:600px){.dock{left:10px;right:10px;transform:none;justify-content:space-between}.dock.hidden{transform:translateY(140%)}.bubble{bottom:calc(72px + env(safe-area-inset-bottom))}.toasts{left:10px;right:10px;bottom:calc(70px + env(safe-area-inset-bottom))}.panel{top:auto;left:8px;right:8px;width:auto;max-height:80vh;animation-name:up}}',
+			'@media (max-width:600px){.dock{left:10px;right:10px;transform:translateY(var(--dy,0px));justify-content:space-between}.dock.hidden{transform:translateY(140%)}.layer.top .dock.hidden{transform:translateY(-140%)}.bubble{bottom:calc(72px + env(safe-area-inset-bottom))}.layer.top .bubble{top:calc(72px + env(safe-area-inset-top))}.toasts{left:10px;right:10px;bottom:calc(70px + env(safe-area-inset-bottom))}.layer.top .toasts{bottom:calc(18px + env(safe-area-inset-bottom))}.panel{top:auto;left:8px;right:8px;width:auto;max-height:80vh;animation-name:up}}',
 			'@keyframes up{from{opacity:0;transform:translateY(30px)}to{opacity:1;transform:none}}',
 			reduceMotion ? '*,*:before,*:after{animation-duration:.01ms!important;animation-delay:0s!important;transition-duration:.01ms!important}' : ''
 		].join('\n');
@@ -470,8 +477,82 @@
 		ui.adminButton = (C.admin || []).length ? h('button', { class: 'pill', 'aria-haspopup': 'menu', 'aria-expanded': 'false', onclick: toggleAdminMenu, html: icon('grid') + '<span>' + t('admin') + '</span>' }) : null;
 		ui.dock = h('div', { class: 'dock surface hidden', role: 'toolbar', 'aria-label': 'Raster' }, [ui.who, ui.status, ui.adminButton, ui.pageButton, ui.editButton]);
 		ui.layer.appendChild(ui.dock);
+		dockMoves();
 		setTimeout(function () { ui.dock.classList.remove('hidden'); }, 60);
 		updateDock();
+	}
+
+	// ##The dock moves
+	// It covers whatever is under it, so it can be flicked to the top of the
+	// screen and back: with a finger, a mouse dragged and let go, or two fingers
+	// on a trackpad. It stays where it was left.
+	function dockMoves() {
+		var dock = ui.dock, start = null, trail = [], dragged = false;
+		try { ui.layer.classList.toggle('top', localStorage.getItem('raster-dock') === 'top'); } catch (e) {}
+		// put it at the top or the bottom, sliding from wherever it is now
+		function settle(top) {
+			var before = dock.getBoundingClientRect().top;
+			dock.classList.add('dragging');
+			ui.layer.classList.toggle('top', top);
+			dock.style.setProperty('--dy', '0px');
+			dock.style.setProperty('--dy', before - dock.getBoundingClientRect().top + 'px');
+			void dock.offsetWidth;
+			dock.classList.remove('dragging');
+			dock.style.setProperty('--dy', '0px');
+			try { localStorage.setItem('raster-dock', top ? 'top' : 'bottom'); } catch (e) {}
+		}
+		dock.addEventListener('pointerdown', function (e) {
+			if (e.button) return;
+			start = { x: e.clientX, y: e.clientY, id: e.pointerId, moving: false };
+			trail = [];
+		});
+		// on the window: a mouse leaves the dock before the drag is a drag
+		window.addEventListener('pointermove', function (e) {
+			if (!start || e.pointerId !== start.id) return;
+			var dy = e.clientY - start.y;
+			// a few pixels of wobble is still a tap on a button
+			if (!start.moving) {
+				if (Math.abs(dy) < 8 || Math.abs(dy) < Math.abs(e.clientX - start.x)) return;
+				start.moving = true;
+				dock.setPointerCapture(e.pointerId);
+				dock.classList.add('dragging');
+				closeAdminMenu();
+				closeBubble();
+			}
+			dock.style.setProperty('--dy', dy + 'px');
+			trail.push({ y: e.clientY, t: e.timeStamp });
+		});
+		function release(e) {
+			if (!start || e.pointerId !== start.id) return;
+			var moving = start.moving;
+			start = null;
+			if (!moving) return;
+			dragged = true;
+			setTimeout(function () { dragged = false; }, 0);
+			// a flick goes where it was thrown; a slow drag goes to the nearer edge
+			var recent = trail.filter(function (p) { return e.timeStamp - p.t < 100; }), speed = 0;
+			if (recent.length > 1) speed = (recent[recent.length - 1].y - recent[0].y) / Math.max(1, recent[recent.length - 1].t - recent[0].t);
+			var r = dock.getBoundingClientRect();
+			settle(Math.abs(speed) > 0.3 ? speed < 0 : r.top + r.height / 2 < window.innerHeight / 2);
+		}
+		window.addEventListener('pointerup', release);
+		window.addEventListener('pointercancel', release);
+		// letting go after a drag is not a click on the button under the pointer
+		dock.addEventListener('click', function (e) { if (dragged) { e.stopPropagation(); e.preventDefault(); } }, true);
+		// two fingers on a trackpad: pushing up sends it up, as on a phone
+		var swept = 0, still, rest = 0;
+		dock.addEventListener('wheel', function (e) {
+			e.preventDefault();
+			clearTimeout(still);
+			still = setTimeout(function () { swept = 0; }, 200);
+			if (e.timeStamp < rest) return;
+			swept += e.deltaY;
+			if (Math.abs(swept) < 40) return;
+			var top = swept > 0;
+			swept = 0;
+			rest = e.timeStamp + 600;
+			if (top !== ui.layer.classList.contains('top')) { closeAdminMenu(); closeBubble(); settle(top); }
+		}, { passive: false });
 	}
 
 	// ##Status, ticks and toasts

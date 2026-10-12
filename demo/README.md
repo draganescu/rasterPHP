@@ -164,6 +164,7 @@ php tests/demo.php                        # the whole matrix
 | E31 | fields named like SQL words (`when`, `from`, `group`) sort, filter (`group>2`) and link to their filter pages (`/trips/trips_items/from/Paris`) like any other field |
 | E32 | the in-page editor gets stored text as it is: `$5`, `\1` and backslashes, so Duplicate copies it unchanged |
 | E33 | items saved at once with one title each get their own slug, and page saves at once (one field each) keep each other's changes: item and page saves run in a transaction |
+| E34 | the editor's dock is flicked to the top of the screen and back (a finger, a mouse drag, two fingers on a trackpad), so it never hides what is under it; it stays where it was left |
 | F1 | schema status as JSON |
 | F2 | schema --check |
 | F3 | schema --apply in production, including model tables |

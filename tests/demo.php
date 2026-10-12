@@ -767,6 +767,13 @@ test(array('E17', 'E20', 'E27'), 'the editor: only for editors, marks where the 
 	has(header_value($headers, 'Content-Type'), 'application/javascript');
 	has($js, 'raster-editor-config');
 });
+test('E34', 'the editor\'s dock moves to the top and back, and remembers where', function () use ($base) {
+	// the flick itself is tried in a browser: tests/editor-browser.js
+	$js = http('GET', "$base/api/cms/editor_script")[1];
+	has($js, "localStorage.getItem('raster-dock')");
+	has($js, "addEventListener('wheel'");
+	has($js, '.layer.top .dock{');
+});
 test(array('E30'), 'the editor lists the admin pages protected lets this person open', function () use ($base, $db, $maildir, $views) {
 	$staff = login($base, 'staff@cafe.test', 'staff password');
 	$config = editor_config(http('GET', "$base/about", null, array("Cookie: $staff"))[1]);
