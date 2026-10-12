@@ -3,6 +3,18 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.1.13
+
+Nothing for sites to do.
+
+- **Logging out clears the session cookie on HTTPS sites.** The expired
+  cookie is now sent with the session cookie's own settings (Secure,
+  HttpOnly, SameSite, path, domain). Before, a browser ignored it when the
+  session cookie was Secure, so the old cookie stayed after logging out:
+  the session was over on the server, but that visitor got a new empty
+  session on every page and missed the page cache. Sites that name their
+  session cookie `__Host-…` were always affected.
+
 ## 2.1.12
 
 Nothing for sites to do. On a frozen database, `php bin/raster schema
