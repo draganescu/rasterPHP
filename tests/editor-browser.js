@@ -171,10 +171,32 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 		check((await (await fetch(base + '/api/reservation/confirm')).status) === 404, 'actions are not reachable over /api');
 		await page.screenshot({ path: path.join(screens, 'records.png') });
 
-		// the page panel
+		// the dock is flicked to the top, stays there, and comes back down with two fingers
 		await page.goto(base + '/about');
+		await page.waitForTimeout(700);
+		const dockBox = () => inShadow(page, h => { const r = h.shadowRoot.querySelector('.dock').getBoundingClientRect(); return { x: r.left + 20, y: r.top + r.height / 2, top: r.top }; });
+		const atTop = () => inShadow(page, h => h.shadowRoot.querySelector('.layer').classList.contains('top'));
+		let d = await dockBox();
+		await page.mouse.move(d.x, d.y);
+		await page.mouse.down();
+		for (let i = 1; i <= 4; i++) { await page.mouse.move(d.x, d.y - i * 40); await page.waitForTimeout(16); }
+		await page.mouse.up();
+		await page.waitForTimeout(700);
+		check(await atTop() && (await dockBox()).top < 100, 'a flick up sends the dock to the top');
+		check(!(await inShadow(page, h => !!h.shadowRoot.querySelector('.panel'))), 'letting go of the dock is not a click');
+		await page.screenshot({ path: path.join(screens, 'dock-top.png') });
+		await page.reload();
+		await page.waitForTimeout(700);
+		check(await atTop(), 'the dock stays at the top on the next page');
+		d = await dockBox();
+		await page.mouse.move(d.x, d.y);
+		await page.mouse.wheel(0, -120);
+		await page.waitForTimeout(700);
+		check(!(await atTop()) && (await dockBox()).top > 600, 'two fingers down on a trackpad bring it back');
+
+		// the page panel
 		await page.waitForTimeout(400);
-		await inShadow(page, h => h.shadowRoot.querySelector('.dock .pill:not(.primary)').click());
+		await inShadow(page, h => h.shadowRoot.querySelector('.dock .pill:not(.primary):not([aria-haspopup])').click());
 		await page.waitForTimeout(1000);
 		const panel = await inShadow(page, h => h.shadowRoot.querySelector('.panel').innerText);
 		check(/Description/i.test(panel) && /not shown in the page/i.test(panel), 'the panel offers fields the page can\'t show');

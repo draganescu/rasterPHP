@@ -928,7 +928,10 @@ of lists and filter pages come along; drafts and the editor don't.
   a card for a new item, made from the template's mock-up. Photos (`print.@src`)
   are replaced by choosing or dropping a picture, framed in the browser. The
   Page panel lists fields the page can't show (in `<head>`, in attributes),
-  the lists, and the page's history. Nothing is added for visitors.
+  the lists, and the page's history. The dock sits at the bottom of the
+  screen; flick it up (a finger, a mouse dragged and let go, or two fingers
+  on a trackpad) and it moves to the top, so nothing under it is out of
+  reach. It stays where it was left. Nothing is added for visitors.
 - **Admin pages.** Every view that `protected` keeps for `editor` or `admin`
   (`config::set('protected')->to(array('bookings' => 'editor'))`) is an
   admin page: the editor's dock has an **Admin** menu listing the ones the
