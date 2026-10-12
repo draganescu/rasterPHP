@@ -195,6 +195,7 @@ php tests/demo.php                        # the whole matrix
 | G22 | `raster user` on an existing account keeps the role and password it isn't given |
 | G23 | once a lock runs out, wrong passwords are counted from zero |
 | G24 | two sign-ups or email changes at once with one email: one account gets it, the other is told it is taken |
+| G25 | `raster login-link`: a link that logs an account in once, within a minute; `--next` |
 | H1 | newsletter sign up sends a confirmation |
 | H2 | the same answer for people already subscribed |
 | H3 | confirm |

@@ -3,6 +3,21 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.1.12
+
+Nothing for sites to do. On a frozen database, `php bin/raster schema
+--apply` adds the two new account columns; `login-link` adds them itself
+when it runs.
+
+- **Login links from the command line.** `php bin/raster login-link
+  <email|username> [--next=/path]` prints a link that logs that account in
+  without a password. It works once, within a minute, and only its hash is
+  kept, as with password reset links. Opening it logs in and then asks for
+  the page again without the token (or for `--next`); an old or used link
+  only does the redirect. It is for a site builder that runs the site and
+  wants a Log in button. The page cache never answers or keeps those
+  requests. It finds an account; it never makes one (`raster user` does).
+
 ## 2.1.11
 
 Nothing for sites to do.

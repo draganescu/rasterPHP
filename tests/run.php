@@ -660,6 +660,54 @@ test('a password reset ends other sessions', function () use ($base, $maildir) {
 	form_post("$base/reset?token={$t[1]}", array('raster_form' => 'authentication.reset', 'token' => $t[1], 'password' => 'third password', 'password_again' => 'third password'));
 	same(303, http('GET', "$base/account", null, array("Cookie: $cookie"))[0], 'old session still logged in');
 });
+test('accounts: login links from the command line', function () use ($base, $root, $db) {
+	$raster = 'RASTER_DB='.escapeshellarg($db).' RASTER_URL='.escapeshellarg("$base/").' '.escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster");
+	exec("$raster user link@example.test --role=member --password=link-pass-1 2>&1", $out, $code);
+	same(0, $code, implode("\n", $out));
+	$link = function ($args) use ($raster) { return trim((string)shell_exec("$raster login-link $args 2>/dev/null")); };
+	$cookie_of = function ($headers) {
+		$set = preg_grep('/^Set-Cookie/i', $headers);
+		return $set ? preg_replace('/^Set-Cookie:\s*([^;]+).*$/i', '$1', current($set)) : null;
+	};
+	// the link logs in, and the page comes again without the token
+	$url = $link('link@example.test');
+	check(preg_match('#^'.preg_quote("$base/", '#').'\?raster_login=[a-f0-9]{48}$#', $url), "link: $url");
+	list($status, , $headers) = http('GET', $url);
+	same(303, $status);
+	same("$base/", location($headers));
+	$cookie = $cookie_of($headers);
+	check($cookie && strpos(http('GET', "$base/account", null, array("Cookie: $cookie"))[1], 'Logged in as') !== false, 'link did not log in');
+	// once only
+	list($status, , $headers) = http('GET', $url);
+	same(303, $status);
+	same(null, $cookie_of($headers), 'link used twice');
+	// a bad token only drops the parameters; others stay
+	list($status, , $headers) = http('GET', "$base/about?raster_login=nope&lang=en&next=%2Faccount");
+	same(303, $status);
+	same("$base/about?lang=en", location($headers));
+	same(null, $cookie_of($headers), 'bad token logged in');
+	// next goes to a page on the site, and nowhere else
+	$url = $link('link@example.test --next=/account');
+	check(strpos($url, '&next=%2Faccount') !== false, "next: $url");
+	list(, , $headers) = http('GET', $url);
+	same("$base/account", location($headers));
+	check($cookie_of($headers) !== null, 'link with next did not log in');
+	check(strpos($link('link@example.test --next=//evil.example'), 'next=') === false, 'unsafe next in the link');
+	foreach (array('//evil.example', 'https://evil.example/') as $evil) {
+		list(, , $headers) = http('GET', $link('link@example.test').'&next='.rawurlencode($evil));
+		same("$base/", location($headers), $evil);
+	}
+	// a link more than a minute old does nothing
+	$url = $link('link@example.test');
+	authentication::connect();
+	R::exec('UPDATE user SET login_expires = ? WHERE email = ?', array(date('Y-m-d H:i:s', time() - 1), 'link@example.test'));
+	list($status, , $headers) = http('GET', $url);
+	same("$base/", location($headers));
+	same(null, $cookie_of($headers), 'expired link logged in');
+	// accounts are made by `raster user`, never by a link
+	exec("$raster login-link nobody@example.test 2>&1", $out, $code);
+	same(2, $code);
+});
 test('feed links, raw views and json lists', function () use ($base, $root) {
 	check(strpos(http('GET', "$base/")[1], 'href="'.$base.'/news.rss"') !== false, 'rss link rewritten');
 	same(403, http('GET', "$base/application/views/default/news.rss")[0]);

@@ -25,6 +25,9 @@
 * Admin pages are the views 'protected' keeps for editors or admins. The
 * in-page editor lists them, so they need no hidden menu.
 * Emails: views _email/password_reset.html (print.self.reset_url, print.self.name).
+* Login links: `php bin/raster login-link <email|username> [--next=/path]`
+* prints a link that logs that account in once, within a minute, without
+* a password (for a host that runs the site, such as a site builder).
 */
 class authentication
 {
@@ -130,7 +133,7 @@ class authentication
 		return array('user' => array(
 			'email' => '', 'username' => '', 'name' => '', 'password' => '', 'role' => 'member',
 			'created_at' => '', 'last_login' => '', 'failed_count' => 0, 'failed_at' => '',
-			'reset_hash' => '', 'reset_expires' => '',
+			'reset_hash' => '', 'reset_expires' => '', 'login_hash' => '', 'login_expires' => '',
 		));
 	}
 
@@ -262,10 +265,74 @@ class authentication
 		return preg_match('#^/(?!/)[^\s\\\\]*$#', $next) ? $next : '';
 	}
 
+	// ##Login links
+
+	// A link that logs $login in, for `raster login-link`: the site's
+	// address with ?raster_login=<token>, and &next= when $next is a path on
+	// the site. It works once, within a minute. Like reset links, only the
+	// token's sha256 is kept; a new link replaces one not used yet. Null when
+	// there is no such account.
+	static function login_link($login, $next = '') {
+		self::connect();
+		$user = self::find($login);
+		if (!$user) return null;
+		$token = bin2hex(random_bytes(24));
+		$user->login_hash = hash('sha256', $token);
+		$user->login_expires = date('Y-m-d H:i:s', time() + 60);
+		R::store($user);
+		$next = self::safe_next($next);
+		return config::get('link_uri').'?raster_login='.$token.($next !== '' ? '&next='.rawurlencode($next) : '');
+	}
+
+	// The id of the account a login link's token is for, or false. Finding
+	// the token and clearing it happen in one transaction, so two requests
+	// with one link can't both log in.
+	protected static function use_login_token($token) {
+		if (!is_string($token) || !preg_match('/^[a-f0-9]{48}$/', $token)) return false;
+		try {
+			self::connect();
+			if (!self::table_ready()) return false;
+			return cms_records::transaction(function () use ($token) {
+				$user = R::findOne('user', ' login_hash = ? ', array(hash('sha256', $token)));
+				if (!$user || strtotime((string)$user->login_expires) < time()) return false;
+				$user->login_hash = '';
+				// null, not '': in development MySQL has made the column a DATETIME
+				$user->login_expires = null;
+				$user->failed_count = 0;
+				$user->last_login = R::isoDateTime();
+				R::store($user);
+				return (int)$user->id;
+			});
+		} catch (Exception $e) {
+			log::warning('authentication: '.$e->getMessage());
+			return false;
+		}
+	}
+
+	// ?raster_login=<token>: logs in when the token is good, then asks for
+	// the page again without it (or for ?next=), so the token leaves the
+	// address bar. A bad or used token only does the redirect. The query
+	// string keeps the page out of the page cache, both ways.
+	protected function redeem_login_link() {
+		$id = self::use_login_token($_GET['raster_login']);
+		$next = '';
+		if ($id) {
+			self::log_in($id);
+			event::dispatch('authentication.logged_in', self::payload($id));
+			$next = self::safe_next(isset($_GET['next']) ? $_GET['next'] : '');
+		}
+		if ($next !== '') $this->redirect(rtrim(config::get('link_uri'), '/').$next);
+		$query = $_GET;
+		unset($query['raster_login'], $query['next']);
+		$this->redirect(config::get('link_uri').ltrim(strtok((string)config::get('uri_string'), '?'), '/').($query ? '?'.http_build_query($query) : ''));
+	}
+
 	// ##Request hooks
 
-	// bound to route_set: template flags and protected pages
+	// bound to route_set: login links, template flags and protected pages
 	function setup() {
+		// the command line renders pages without a session to log in to
+		if (isset($_GET['raster_login']) && PHP_SAPI !== 'cli') $this->redeem_login_link();
 		$user = self::user();
 		foreach (array('logged_in' => (bool)$user, 'logged_out' => !$user, 'is_member' => self::can('member'), 'is_editor' => self::can('editor'), 'is_admin' => self::can('admin')) as $flag => $value) {
 			template::set($flag)->to($value);

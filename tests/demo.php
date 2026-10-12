@@ -3275,6 +3275,33 @@ test('L12', 'content_changed and the page cache wait for the commit: a rolled ba
 	}
 });
 
+// ## Login links
+
+test('G25', 'raster login-link logs in once, in production too, never from the page cache', function () use ($tmp, $maildir) {
+	$port = free_port();
+	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => test_db("$tmp/login-link.sqlite"), 'RASTER_URL' => "http://127.0.0.1:$port/");
+	same(0, raster(array('schema', '--apply'), $env)[0]);
+	raster(array('user', 'owner@cafe.example', '--role=editor', '--password=owner password'), $env);
+	$site = server($port, array_merge($env, array('RASTER_MAIL' => "log://$maildir")));
+	http('GET', "$site/");
+	same('hit', header_value(http('GET', "$site/")[2], 'X-Raster-Cache'));
+	list($code, $link) = raster(array('login-link', 'owner@cafe.example'), $env);
+	same(0, $code, $link);
+	list($status, , $headers) = http('GET', trim($link));
+	same(303, $status);
+	same(null, header_value($headers, 'X-Raster-Cache'), 'the link was answered from the page cache');
+	same("$site/", header_value($headers, 'Location'));
+	check(cookie_from($headers) !== '', 'the link did not log in');
+	list(, $link) = raster(array('login-link', 'owner@cafe.example', '--next=/staff'), $env);
+	list(, , $headers) = http('GET', trim($link));
+	same("$site/staff", header_value($headers, 'Location'));
+	same(200, http('GET', "$site/staff", null, array('Cookie: '.cookie_from($headers)))[0], 'logged in as the editor');
+	list(, , $headers) = http('GET', trim($link));
+	same('', cookie_from($headers), 'a link works once');
+	same("$site/", header_value($headers, 'Location'));
+	same(2, raster(array('login-link', 'nobody@cafe.example'), $env)[0]);
+});
+
 // ## No PHP warnings, notices or deprecations on any request
 
 $log = is_file("$tmp/php-errors.log") ? file_get_contents("$tmp/php-errors.log") : '';
