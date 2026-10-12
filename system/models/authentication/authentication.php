@@ -195,8 +195,12 @@ class authentication
 			$_SESSION = array();
 			session_destroy();
 		}
+		// expired with the settings it was set with: a browser ignores the
+		// expiry of a Secure cookie (or any __Host- one) sent without Secure
 		if (PHP_SAPI !== 'cli' && !headers_sent()) {
-			setcookie(session_name(), '', array('expires' => time() - 3600, 'path' => '/'));
+			$params = session_get_cookie_params();
+			setcookie(session_name(), '', array('expires' => time() - 3600, 'path' => $params['path'] ?: '/', 'domain' => $params['domain'],
+				'secure' => $params['secure'], 'httponly' => $params['httponly'], 'samesite' => $params['samesite'] ?: 'Lax'));
 		}
 		self::$user = null;
 	}

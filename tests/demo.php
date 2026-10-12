@@ -667,7 +667,11 @@ test(array('G10', 'G11', 'G13'), 'account changes and logging out', function () 
 	has(http('GET', "$base/account?done=account_saved", null, array("Cookie: $a"))[1], 'Saved.');
 	same(303, http('GET', "$base/members", null, array("Cookie: $b"))[0], 'the other session ended');
 	$page = http('GET', "$base/account", null, array("Cookie: $a"))[1];
-	same(303, http('POST', "$base/account", array('raster_form' => 'authentication.logout', 'csrf' => token_in($page)), array("Cookie: $a"))[0]);
+	list($status, , $headers) = http('POST', "$base/account", array('raster_form' => 'authentication.logout', 'csrf' => token_in($page)), array("Cookie: $a"));
+	same(303, $status);
+	$expired = null;
+	foreach ($headers as $h) if (preg_match('/^Set-Cookie:\s*PHPSESSID=(deleted)?;/i', $h)) $expired = $h;
+	same(true, $expired !== null && stripos($expired, 'HttpOnly') !== false && stripos($expired, 'SameSite=Lax') !== false, "the session cookie is expired with its own settings: $expired");
 	same(303, http('GET', "$base/members", null, array("Cookie: $a"))[0], 'logged out');
 });
 test(array('G12'), 'forgot and reset by email', function () use ($base) {
