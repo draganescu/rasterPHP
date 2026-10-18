@@ -16,6 +16,9 @@ const root = path.resolve(__dirname, '..');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'raster-editor-'));
 const screens = path.join(__dirname, 'screens');
 fs.mkdirSync(screens, { recursive: true });
+// an evening a week from now, so the agenda (the coming evenings) shows it
+const soon = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+const later = new Date(Date.now() + 60 * 86400000).toISOString().slice(0, 10);
 const env = Object.assign({}, process.env, { RASTER_APP: 'demo', RASTER_DB: path.join(tmp, 'cafe.sqlite'), RASTER_MAIL: 'log://' + path.join(tmp, 'mail') });
 
 let failures = 0, passed = 0;
@@ -62,6 +65,44 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 		await page.waitForTimeout(800);
 		html = await (await fetch(base + '/')).text();
 		check(html.includes('<h1>Good coffee, slow mornings.</h1>'), 'undo puts it back');
+
+		// Enter in a rich field that is itself a paragraph is a line break,
+		// not a paragraph inside the paragraph (#114)
+		const about = path.join(root, 'demo/views/cafe/about.html');
+		const aboutView = fs.readFileSync(about, 'utf8');
+		fs.writeFileSync(about, aboutView.replace('<h2>Opening hours</h2>', '<p class="lead"><!-- print.cms.lead -->We roast <em>our own</em> beans.<!-- /print.cms.lead --></p><h2>Opening hours</h2>'));
+		try {
+			await page.goto(base + '/about');
+			await page.waitForTimeout(500);
+			const lead = page.locator('p.lead');
+			check(await lead.getAttribute('data-raster-edit') === 'rich', 'the lead is a rich field');
+			await lead.click();
+			await page.keyboard.press('Control+End');
+			await page.keyboard.press('Enter');
+			await page.keyboard.type('Second line.');
+			await page.mouse.click(5, 5);
+			await page.waitForTimeout(900);
+			html = await (await fetch(base + '/about')).text();
+			check(html.includes('<p class="lead">We roast <em>our own</em> beans.<br>Second line.</p>'), 'Enter saved a line break: ' + (html.match(/<p class="lead">[\s\S]*?<h2>/) || [''])[0]);
+			await page.reload();
+			await page.waitForTimeout(500);
+			check(await page.locator('p.lead[data-raster-field]').count() === 1 && await page.locator('main > p:empty').count() === 0, 'after a reload the lead is still one field, with no empty paragraph');
+			// a pasted paragraph is unwrapped into the line too
+			await lead.click();
+			await page.keyboard.press('Control+End');
+			await lead.evaluate(el => {
+				const data = new DataTransfer();
+				data.setData('text/html', '<p>Pasted one.</p><p>Pasted two.</p>');
+				data.setData('text/plain', 'Pasted one. Pasted two.');
+				el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+			});
+			await page.mouse.click(5, 5);
+			await page.waitForTimeout(900);
+			html = await (await fetch(base + '/about')).text();
+			check(/<p class="lead">We roast <em>our own<\/em> beans\.<br>Second line\.(<br>)?Pasted one\.<br>Pasted two\.<\/p>/.test(html), 'a pasted paragraph stays in the line: ' + (html.match(/<p class="lead">[\s\S]*?<h2>/) || [''])[0]);
+		} finally {
+			fs.writeFileSync(about, aboutView);
+		}
 
 		// a typed field shows what was stored, the way the page prints it
 		await page.goto(base + '/menu');
@@ -117,7 +158,7 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 		check((await (await fetch(base + '/menu')).text()).includes('Cortado'), 'undo brings the item back');
 
 		// a record: the model's actions are buttons, its readonly fields are not editable
-		await fetch(base + '/visit', { method: 'POST', body: new URLSearchParams({ raster_form: 'reservation.book', name: 'Ilinca', email: 'ilinca@example.com', date: '2026-10-14', guests: '2', terms: '1' }), redirect: 'manual' });
+		await fetch(base + '/visit', { method: 'POST', body: new URLSearchParams({ raster_form: 'reservation.book', name: 'Ilinca', email: 'ilinca@example.com', date: soon, guests: '2', terms: '1' }), redirect: 'manual' });
 		await page.goto(base + '/staff');
 		await page.waitForTimeout(500);
 		const booking = page.locator('[data-raster-item]', { hasText: 'Ilinca' }).first();
@@ -142,10 +183,10 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 		await page.keyboard.type('Phone Pat');
 		// a field of the new card selects its example text when it gets focus
 		await phone.locator('[data-raster-name=date]').click();
-		await page.keyboard.type('2026-12-24');
+		await page.keyboard.type(later);
 		await inShadow(page, h => [...h.shadowRoot.querySelectorAll('.handle button')].find(b => b.textContent === 'Add').click());
 		await page.waitForTimeout(900);
-		const added = (await (await fetch(base + '/api/reservation/day/2026-12-24', { headers: { cookie: (await page.context().cookies()).map(c => c.name + '=' + c.value).join('; ') } })).json());
+		const added = (await (await fetch(base + '/api/reservation/day/' + later, { headers: { cookie: (await page.context().cookies()).map(c => c.name + '=' + c.value).join('; ') } })).json());
 		check(Array.isArray(added) && added.some(b => b.name === 'Phone Pat' && b.status === 'new'), 'the phone booking is stored, as new: ' + JSON.stringify(added));
 		check(await page.locator('h3:has-text("To confirm") + table .raster-ghost').count() === 1 && await page.locator('h3:has-text("Past evenings") + table .raster-ghost').count() === 1, 'each list keeps its own card after an add');
 
@@ -165,7 +206,7 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 		await page.keyboard.type(' Pop');
 		await page.mouse.click(5, 5);
 		await page.waitForTimeout(1200);
-		const day = await (await fetch(base + '/api/reservation/day/2026-10-14', { headers: { cookie: (await page.context().cookies()).map(c => c.name + '=' + c.value).join('; ') } })).json();
+		const day = await (await fetch(base + '/api/reservation/day/' + soon, { headers: { cookie: (await page.context().cookies()).map(c => c.name + '=' + c.value).join('; ') } })).json();
 		check(day.some(b => b.name === 'Ilinca Pop'), 'an edit in the agenda is saved: ' + JSON.stringify(day.map(b => b.name)));
 		check(await page.locator('section.evening .raster-ghost').count() === 0, 'the agenda adds no cards: new bookings come from the lists');
 		check((await (await fetch(base + '/api/reservation/confirm')).status) === 404, 'actions are not reachable over /api');

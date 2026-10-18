@@ -205,6 +205,11 @@
 		inside.forEach(function (n) { wrapper.appendChild(n); });
 		return wrapper;
 	}
+	// whether a region may hold paragraphs; a <p>, a heading, an <li> or a
+	// <span> can't, so a rich field there gets line breaks instead (#114)
+	function takesBlocks(el) {
+		return /^(DIV|BLOCKQUOTE|SECTION|ARTICLE|ASIDE|MAIN|HEADER|FOOTER|NAV|FIGURE|FIGCAPTION|TD|TH|DD|FORM|FIELDSET|DETAILS)$/.test(el.tagName);
+	}
 	// whether an item sits inside a list on the page
 	function holds(list, item) {
 		return item.info.collection === list.info.collection && !!(list.start.compareDocumentPosition(item.el) & Node.DOCUMENT_POSITION_FOLLOWING) && !!(list.end.compareDocumentPosition(item.el) & Node.DOCUMENT_POSITION_PRECEDING);
@@ -255,6 +260,7 @@
 				field.kind = (info.rich || (info.kind === 'item_field' && /<[a-z][^>]*>/i.test(field.el ? field.el.innerHTML : ''))) ? 'rich' : 'text';
 			}
 			if (!field.el) return;
+			field.inline = !takesBlocks(field.el);
 			if (info.kind === 'item_field' || info.kind === 'item_attr') {
 				field.item = items[info.item];
 				if (!field.item) return;
@@ -615,7 +621,7 @@
 	// ##Saving fields
 	function fieldValue(field) {
 		if (field.kind === 'text') return field.el.innerText.replace(/ /g, ' ').replace(/\s*\n\s*/g, ' ').trim();
-		return clean(field.el.innerHTML).trim();
+		return clean(field.el.innerHTML, field.inline).trim();
 	}
 	function twins(field) { return fields.filter(function (f) { return f !== field && f.key === field.key; }); }
 	function saveValue(field, value) {
@@ -670,7 +676,9 @@
 		return /^(javascript|data|vbscript):/i.test(plain.replace(/[\x00-\x20]+/g, ''));
 	}
 
-	function clean(html) {
+	// inline: for a region that can't hold paragraphs; its top-level
+	// paragraphs become lines, so the value fits where it sits
+	function clean(html, inline) {
 		var box = document.createElement('template');
 		box.innerHTML = html;
 		(function walk(node) {
@@ -690,6 +698,15 @@
 				if (child.tagName === 'A' && scriptLink(child.getAttribute('href'))) child.removeAttribute('href');
 			});
 		})(box.content);
+		if (inline) Array.prototype.slice.call(box.content.childNodes).forEach(function (child) {
+			if (child.nodeType !== 1 || child.tagName !== 'P') return;
+			if (child.textContent.trim() || child.querySelector('*')) {
+				for (var n = child.previousSibling; n && !meaningful(n); n = n.previousSibling);
+				if (n && !(n.nodeType === 1 && n.tagName === 'BR')) child.parentNode.insertBefore(document.createElement('br'), child);
+				while (child.firstChild) child.parentNode.insertBefore(child.firstChild, child);
+			}
+			child.remove();
+		});
 		var out = document.createElement('div');
 		out.appendChild(box.content.cloneNode(true));
 		return out.innerHTML.replace(/<p><\/p>/g, '');
@@ -753,6 +770,7 @@
 				return;
 			}
 			if (e.key === 'Enter' && (e.metaKey || e.ctrlKey || field.kind === 'text')) { e.preventDefault(); field.el.blur(); return; }
+			if (e.key === 'Enter' && field.inline) { e.preventDefault(); if (!document.execCommand('insertLineBreak')) document.execCommand('insertHTML', false, '<br>'); return; }
 			return;
 		}
 		if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable || (host && e.composedPath && e.composedPath().some(function (n) { return n.tagName === 'INPUT' || n.tagName === 'TEXTAREA'; }))) return;
@@ -771,7 +789,7 @@
 		if (!field || !editing) return;
 		e.preventDefault();
 		var data = e.clipboardData;
-		if (field.kind === 'rich' && data.getData('text/html')) document.execCommand('insertHTML', false, clean(data.getData('text/html')));
+		if (field.kind === 'rich' && data.getData('text/html')) document.execCommand('insertHTML', false, clean(data.getData('text/html'), field.inline));
 		else document.execCommand('insertText', false, data.getData('text/plain'));
 	});
 	// in edit mode a click on an editable link edits it instead of leaving
@@ -800,6 +818,7 @@
 	function showFormatBar(field) {
 		hideFormatBar();
 		var commands = [['bold', 'bold'], ['italic', 'italic'], ['link', 'link'], ['list', 'insertUnorderedList'], ['clear', 'removeFormat']];
+		if (field.inline) commands = commands.filter(function (c) { return c[0] !== 'list'; });
 		formatBar = h('div', { class: 'float format surface', role: 'toolbar' });
 		commands.forEach(function (c) {
 			formatBar.appendChild(h('button', { title: t(c[0]), 'aria-label': t(c[0]), html: icon(c[0]), onmousedown: function (e) {
