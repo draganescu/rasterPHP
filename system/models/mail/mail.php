@@ -13,15 +13,42 @@
 *   smtp://user:pass@host:587     SMTP with STARTTLS
 *   smtps://user:pass@host:465    SMTP over TLS
 * The sender is RASTER_MAIL_FROM (or config mail_from), e.g. "Site <hi@example.com>".
+*
+* Many mails at once (a newsletter issue) share one SMTP connection:
+*   mail::keep_open(); ... mail::send(...) ...; mail::close();
 */
 class mail
 {
 	public static $last_error = null;
+	// between keep_open() and close(): whether to keep the connection, and
+	// the one that is open (array(dsn, command))
+	protected static $keep = false;
+	protected static $open = null;
 
 	static function transport() {
 		$dsn = getenv('RASTER_MAIL') ?: config::get('mail');
 		if (!$dsn) $dsn = config::get('environment') === 'production' ? 'mail://' : 'log://';
 		return $dsn;
+	}
+
+	// the transport without user, password or options, for printing; the
+	// user and password run to the last '@' before the path, as parse_url()
+	// (and so smtp_connect()) reads them, so an '@' in a password is cut too
+	static function destination() {
+		return preg_replace('#^([a-z]+://)[^/?\#]*@#i', '$1', strtok(self::transport(), '?'));
+	}
+
+	// the SMTP connection stays open for the mails that follow, until close()
+	static function keep_open() {
+		self::$keep = true;
+	}
+
+	static function close() {
+		self::$keep = false;
+		if (!self::$open) return;
+		$command = self::$open[1];
+		self::$open = null;
+		$command(false, 0);
 	}
 
 	static function from() {
@@ -137,6 +164,35 @@ class mail
 	}
 
 	protected static function via_smtp($dsn, $headers, $body) {
+		$command = null;
+		// a kept connection says RSET first; one the server has dropped is opened again
+		if (self::$open && self::$open[0] === $dsn) {
+			try {
+				self::$open[1]('RSET', 250);
+				$command = self::$open[1];
+			} catch (Exception $e) {
+				self::$open[1](false, 0);
+				self::$open = null;
+			}
+		}
+		if (!$command) $command = self::smtp_connect($dsn);
+		try {
+			$command('MAIL FROM:<'.self::address($headers['From']).'>', 250);
+			$command('RCPT TO:<'.self::address($headers['To']).'>', 250);
+			$command('DATA', 354);
+			$data = self::header_block($headers)."\r\n".$body;
+			$data = preg_replace('/^\./m', '..', $data);
+			$command($data."\r\n.", 250);
+		} finally {
+			if (self::$keep) self::$open = array($dsn, $command);
+			else $command(false, 0);
+		}
+		return true;
+	}
+
+	// connects, says EHLO, STARTTLS and logs in. Returns the function that
+	// sends a line and checks the answer; $command(false, 0) says QUIT and hangs up.
+	protected static function smtp_connect($dsn) {
 		$parts = parse_url($dsn);
 		$secure = $parts['scheme'] === 'smtps';
 		$port = isset($parts['port']) ? $parts['port'] : ($secure ? 465 : 587);
@@ -154,6 +210,10 @@ class mail
 			return $response;
 		};
 		$command = function ($line, $expect) use ($socket, $read) {
+			if ($line === false) {
+				@fwrite($socket, "QUIT\r\n");
+				return fclose($socket);
+			}
 			if ($line !== null) fwrite($socket, $line."\r\n");
 			$response = $read();
 			if ((int)substr($response, 0, 3) !== $expect) {
@@ -179,14 +239,6 @@ class mail
 			$command(base64_encode($user), 334);
 			$command(base64_encode((string)$pass), 235);
 		}
-		$command('MAIL FROM:<'.self::address($headers['From']).'>', 250);
-		$command('RCPT TO:<'.self::address($headers['To']).'>', 250);
-		$command('DATA', 354);
-		$data = self::header_block($headers)."\r\n".$body;
-		$data = preg_replace('/^\./m', '..', $data);
-		$command($data."\r\n.", 250);
-		fwrite($socket, "QUIT\r\n");
-		fclose($socket);
-		return true;
+		return $command;
 	}
 }

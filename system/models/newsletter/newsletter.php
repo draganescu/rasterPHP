@@ -37,7 +37,10 @@ class newsletter
 	static function schema() {
 		return array(
 			'subscriber' => array('email' => '', 'name' => '', 'status' => '', 'token' => '', 'source' => '', 'created_at' => '', 'confirmed_at' => '', 'unsubscribed_at' => ''),
-			'newsletterissue' => array('url' => '', 'subject' => '', 'recipients' => 0, 'sent_at' => ''),
+			// incomplete: 1 until every reader has the issue (rows from before it existed are complete)
+			'newsletterissue' => array('url' => '', 'subject' => '', 'recipients' => 0, 'sent_at' => '', 'incomplete' => 0),
+			// one row per address an issue was handed over to
+			'newsletterdelivery' => array('issue' => 0, 'email' => '', 'sent_at' => ''),
 		);
 	}
 
@@ -178,9 +181,82 @@ class newsletter
 
 	// ##Sending, used by `php bin/raster send`
 
+	// the last send_issue(): how many it mailed, and the addresses that failed (email => error)
+	public static $sent = 0;
+	public static $failures = array();
+
 	static function subscribers() {
 		self::connect();
 		return self::table_ready() ? R::find('subscriber', " status = 'confirmed' ORDER BY id ") : array();
+	}
+
+	// the latest issue sent from this URL, or null
+	static function issue($url) {
+		self::connect();
+		if (!cms_store::table_exists('newsletterissue')) return null;
+		return R::findOne('newsletterissue', ' url = ? ORDER BY id DESC ', array((string)$url));
+	}
+
+	// the confirmed subscribers an issue has not reached yet (all of them for null)
+	static function recipients($issue) {
+		if (!$issue || !$issue->id || !cms_store::table_exists('newsletterdelivery')) return self::subscribers();
+		if (!self::table_ready()) return array();
+		return R::find('subscriber', " status = 'confirmed' AND email NOT IN (SELECT email FROM newsletterdelivery WHERE issue = ?) ORDER BY id ", array((int)$issue->id));
+	}
+
+	// Sends a prepared issue (see prepare_issue) to the confirmed subscribers
+	// who don't have it yet, noting each address as it is handed over, so a
+	// run that stopped goes on where it stopped and failed addresses are
+	// tried again. $again starts over and mails everyone. Returns false when
+	// the issue already reached everyone, else its newsletterissue row, whose
+	// recipients counts every address it reached.
+	// A mail handed over just as the process is killed is not noted yet, so
+	// that one reader may get it twice.
+	static function send_issue($url, $html, $subject, $again = false) {
+		self::connect();
+		self::$sent = 0;
+		self::$failures = array();
+		// the tables as `raster schema --apply` makes them, also on a frozen
+		// database: missing columns added, and on MySQL the small ones that
+		// 2.2.0 and earlier made (tinyint recipients, varchar(191) subject)
+		// widened, since frozen RedBean would never grow them
+		foreach (array('newsletterissue', 'newsletterdelivery') as $table) {
+			$types = array_map(array('cms_types', 'of_default'), self::schema()[$table]);
+			cms_types::ensure($table, $types);
+			cms_types::widen($table, $types);
+		}
+		$issue = self::issue($url);
+		if ($issue && !$issue->incomplete && !$again) return false;
+		if (!$issue || $again) {
+			$issue = R::dispense('newsletterissue');
+			$issue->url = (string)$url;
+			$issue->recipients = 0;
+			$issue->sent_at = R::isoDateTime();
+		}
+		$issue->subject = (string)$subject;
+		$issue->incomplete = 1;
+		R::store($issue);
+		mail::keep_open();
+		try {
+			foreach (self::recipients($issue) as $subscriber) {
+				if (!self::deliver($html, $subject, $subscriber->email, $subscriber->token)) {
+					self::$failures[$subscriber->email] = mail::$last_error;
+					continue;
+				}
+				$delivery = R::dispense('newsletterdelivery');
+				$delivery->issue = (int)$issue->id;
+				$delivery->email = $subscriber->email;
+				$delivery->sent_at = R::isoDateTime();
+				R::store($delivery);
+				self::$sent++;
+			}
+		} finally {
+			mail::close();
+		}
+		$issue->recipients = R::count('newsletterdelivery', ' issue = ? ', array((int)$issue->id));
+		$issue->incomplete = self::$failures ? 1 : 0;
+		R::store($issue);
+		return $issue;
 	}
 
 	// turns a rendered page into an email: no scripts or <base>, absolute links

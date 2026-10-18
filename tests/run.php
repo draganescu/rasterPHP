@@ -440,6 +440,31 @@ test('schema --apply widens the small MySQL columns that 2.1.8 made for model ta
 	exec("$raster schema --check 2>&1", $out, $code);
 	same(0, $code, 'no drift after --apply: '.implode("\n", $out));
 });
+test('sending on a frozen database widens the small newsletterissue columns 2.2.0 made', function () use ($root) {
+	$db = test_db(sys_get_temp_dir().'/raster-narrow-issue-'.getmypid().'.sqlite');
+	$boot = 'require '.var_export("$root/system/boot.php", true).'; boot::$appname = "application"; boot::cli(); newsletter::connect();';
+	// the way 2.2.0 stored an issue sent to one reader: fluid, sized by its values
+	$old = ' $i = R::dispense("newsletterissue"); $i->url = "/old"; $i->subject = "Hi"; $i->recipients = 1; $i->sent_at = R::isoDateTime(); R::store($i);';
+	same('', trim((string)shell_exec('RASTER_DB='.escapeshellarg($db).' '.escapeshellarg(PHP_BINARY).' -r '.escapeshellarg($boot.$old).' 2>&1')), 'making the old table');
+	$pdo = test_pdo($db);
+	if (on_mysql()) {
+		check(stripos($pdo->query("SHOW COLUMNS FROM newsletterissue LIKE 'recipients'")->fetch(PDO::FETCH_ASSOC)['Type'], 'tinyint') === 0, 'the old recipients column is a tinyint');
+		check(stripos($pdo->query("SHOW COLUMNS FROM newsletterissue LIKE 'subject'")->fetch(PDO::FETCH_ASSOC)['Type'], 'varchar') === 0, 'the old subject column is a varchar');
+	}
+	// in production: a subject longer than 191, then 300 readers reached
+	$long = str_repeat('A long subject ', 20);
+	$send = ' $issue = newsletter::send_issue("/new", "<html></html>", '.var_export($long, true).');'
+		.' for ($n = 0; $n < 300; $n++) { $d = R::dispense("newsletterdelivery"); $d->issue = (int)$issue->id; $d->email = "r$n@example.com"; $d->sent_at = R::isoDateTime(); R::store($d); }'
+		.' $issue->incomplete = 1; R::store($issue);'
+		.' $issue = newsletter::send_issue("/new", "<html></html>", '.var_export($long, true).');'
+		.' echo $issue->recipients, " ", $issue->incomplete;';
+	same('300 0', trim((string)shell_exec('RASTER_ENV=production RASTER_DB='.escapeshellarg($db).' '.escapeshellarg(PHP_BINARY).' -r '.escapeshellarg($boot.$send).' 2>&1')));
+	same(array($long, '300'), array_map('strval', $pdo->query("SELECT subject, recipients FROM newsletterissue WHERE url = '/new'")->fetch(PDO::FETCH_NUM)));
+	if (on_mysql()) {
+		same('int', strtolower($pdo->query("SHOW COLUMNS FROM newsletterissue LIKE 'recipients'")->fetch(PDO::FETCH_ASSOC)['Type']));
+		same('text', strtolower($pdo->query("SHOW COLUMNS FROM newsletterissue LIKE 'subject'")->fetch(PDO::FETCH_ASSOC)['Type']));
+	}
+});
 test('mcp over stdio', function () use ($root, $db) {
 	$input = json_encode(array('jsonrpc' => '2.0', 'id' => 7, 'method' => 'tools/call', 'params' => array('name' => 'get_page', 'arguments' => array('page' => '/about'))))."\n";
 	$process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'PATH' => getenv('PATH')));

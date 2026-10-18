@@ -3187,6 +3187,91 @@ test('H13', 'signing up twice: one subscriber, the same link again, mailed by a 
 	same(array('newsletter.confirmation_mail'), mcp($base, 'site_overview')['events']['newsletter.subscribed'], 'who sends the confirmation:');
 });
 
+test('H14', 'an interrupted send goes on where it stopped (#86)', function () use ($base) {
+	database::instance('cms');
+	$readers = R::getCol("SELECT email FROM subscriber WHERE status = 'confirmed' ORDER BY id");
+	check(count($readers) >= 3, 'readers: '.count($readers));
+	$got = function ($since) {
+		$to = array();
+		foreach (array_slice(mails(), $since) as $mail) if ($mail['subject'] === 'Journal') $to[] = $mail['to'];
+		return array_count_values($to);
+	};
+	$before = count(mails());
+	// a model that stops the run when the second mail is handed over, as a
+	// dropped SSH session would
+	$dir = dirname(__DIR__).'/demo/models/zzstop';
+	@mkdir($dir);
+	try {
+		with_file("$dir/zzstop.php", "<?php\nclass zzstop {\n\tstatic \$n = 0;\n\tstatic function listens() { return array('mail.sent' => 'stop'); }\n\tfunction stop() { if (++self::\$n === (int)getenv('ZZ_STOP_AFTER')) exit(3); }\n}\n", function () use ($base) {
+			same(3, raster(array('send', '/journal'), array('RASTER_URL' => "$base/", 'ZZ_STOP_AFTER' => '2'))[0], 'the run was stopped');
+		});
+	} finally { @rmdir($dir); }
+	same(2, array_sum($got($before)), 'mailed before the stop');
+	list($code, $out) = raster(array('send', '/journal', '--dry-run'), array('RASTER_URL' => "$base/"));
+	has($out, 'Would send "Journal" to '.(count($readers) - 1).' subscriber(s) who don\'t have it yet');
+	list($code, $out) = raster(array('send', '/journal'), array('RASTER_URL' => "$base/"));
+	same(0, $code, $out);
+	has($out, 'Sent "Journal" to '.(count($readers) - 1).' more subscriber(s), '.count($readers).' in all');
+	$counts = $got($before);
+	same(1, $counts[$readers[0]], 'the first reader got it once:');
+	// the second was handed over as the run was stopped, before it was noted
+	same(2, $counts[$readers[1]], 'the second reader:');
+	foreach (array_slice($readers, 2) as $email) same(1, isset($counts[$email]) ? $counts[$email] : 0, "$email:");
+	list($code, $out) = raster(array('send', '/journal'), array('RASTER_URL' => "$base/"));
+	same(1, $code, $out);
+	has($out, '/journal was already sent');
+	has($out, 'to '.count($readers).' subscribers');
+});
+test('H15', 'readers a send failed get it on a plain rerun, over one SMTP connection, and no password is printed (#86)', function () use ($base, $root, $tmp) {
+	database::instance('cms');
+	$readers = R::getCol("SELECT email FROM subscriber WHERE status = 'confirmed' ORDER BY id");
+	$port = free_port();
+	$log = "$tmp/smtp-resume.log";
+	$process = proc_open(array(PHP_BINARY, "$root/tests/fake_smtp.php", (string)$port, $log, 'plain'), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes);
+	$GLOBALS['servers'][] = $process;
+	for ($up = false, $i = 0; $i < 100 && !($up = @fsockopen('127.0.0.1', $port, $errno, $errstr, 0.2)); $i++) usleep(50000);
+	check($up, 'the fake SMTP server answers');
+	// it serves one connection at a time: let this one go
+	fclose($up);
+	// an '@' in the password: SMTP takes the last one as the end of it, and
+	// so must the printed destination
+	$env = array('RASTER_URL' => "$base/", 'RASTER_MAIL' => "smtp://letters:s3cret@pass@127.0.0.1:$port");
+	// accepted deliveries per address, and SMTP sessions, in the transcript so far
+	$accepted = function () use ($log) {
+		$text = (string)@file_get_contents($log);
+		preg_match_all('/^C: RCPT TO:<([^>]+)>\nS: 250 /m', $text, $m);
+		return array(array_count_values($m[1]), substr_count($text, "C: EHLO "));
+	};
+	file_put_contents("$log.refuse", $readers[1]."\n");
+	list($code, $out) = raster(array('send', '/about', '--dry-run'), $env);
+	has($out, 'via smtp://127.0.0.1:'.$port);
+	lacks($out, 'pass@');
+	list($code, $out) = raster(array('send', '/about'), $env);
+	same(1, $code, $out);
+	has($out, $readers[1].': ');
+	has($out, 'Sent "About" to '.(count($readers) - 1).' subscriber(s), 1 failed', $out);
+	lacks($out, 'pass@');
+	list($counts, $connections) = $accepted();
+	same(1, $connections, 'one connection for the whole run:');
+	has((string)file_get_contents($log), 'C: '.base64_encode('s3cret@pass')."\n", 'the whole password is sent:');
+	same(count($readers) - 1, array_sum($counts));
+	unlink("$log.refuse");
+	list($code, $out) = raster(array('send', '/about'), $env);
+	same(0, $code, $out);
+	has($out, 'Sent "About" to 1 more subscriber(s), '.count($readers).' in all');
+	list($counts) = $accepted();
+	foreach ($readers as $email) same(1, isset($counts[$email]) ? $counts[$email] : 0, "$email:");
+	same(1, raster(array('send', '/about'), $env)[0], 'sent to everyone: once only');
+	list($code, $out) = raster(array('send', '/about', '--again'), $env);
+	same(0, $code, $out);
+	has($out, 'Sent "About" to '.count($readers).' subscriber(s)');
+	list($counts) = $accepted();
+	foreach ($readers as $email) same(2, $counts[$email], "--again mails $email again:");
+	list($code, $out) = raster(array('send', '/about', '--to=test@example.com'), $env);
+	same(0, $code, $out);
+	lacks($out, 'pass@');
+});
+
 // ## 2.1.8 wave 2: content saves and the cache bump
 
 // MCP calls sent all at once, spread over $bases (each its own server on the
