@@ -166,9 +166,11 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 		const inAgenda = page.locator('tr.agenda-booking[data-raster-item]', { hasText: 'Ilinca' }).first();
 		check(await inAgenda.count() === 1, 'the agenda\'s booking is an item the editor knows');
 		check(await inAgenda.locator('td.status').evaluate(el => !el.isContentEditable && !el.querySelector('[contenteditable]')), 'its status is not editable');
-		await inAgenda.locator('td').first().click();
+		// the name's cell: the row starts with the time
+		const nameCell = inAgenda.locator('td', { hasText: 'Ilinca' });
+		await nameCell.click();
 		// the caret at the end of the name
-		await inAgenda.locator('td').first().evaluate(td => {
+		await nameCell.evaluate(td => {
 			const el = td.isContentEditable ? td : td.querySelector('[contenteditable]');
 			const range = document.createRange(); range.selectNodeContents(el); range.collapse(false);
 			const sel = getSelection(); sel.removeAllRanges(); sel.addRange(range);
