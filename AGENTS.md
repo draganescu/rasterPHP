@@ -1222,7 +1222,8 @@ use `'model.method'`: `method(true)` returns
 
   `raster serve` is PHP's built in server, for development. In production run
   PHP-FPM behind one of those. `doctor` checks that the `.htaccess` on disk
-  still carries every rule. Matching ignores case on every server, and
+  still carries every rule, and the line that passes the `Authorization`
+  header on to PHP-FPM for MCP over HTTP. Matching ignores case on every server, and
   `/.well-known/` is the one dot folder that is served (certificates,
   `security.txt`).
 - **Page cache**, on by default in production (config `page_cache`):
@@ -1339,7 +1340,10 @@ of lists and filter pages come along; drafts and the editor don't.
     error in the site's code answers the call with its file and line
     instead of ending the server;
   - over HTTP: POST to `/mcp` with `Authorization: Bearer $RASTER_MCP_TOKEN`.
-    It's off until that token is set.
+    It's off until that token is set. Apache hands that header to PHP-FPM
+    only when told to: the shipped `.htaccess` copies it
+    (`RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]`), and
+    `doctor` reports a `.htaccess` without that line (`authorization`).
   - Both answer a batch (a list of messages) with a list. A message that
     isn't an object with a string `method` gets `-32600 Invalid request`,
     a tool that isn't offered `-32602`, and the server goes on.

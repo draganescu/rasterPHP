@@ -794,6 +794,31 @@ test('a malformed MCP message over HTTP gets JSON-RPC errors (#134)', function (
 	list($status, $body) = http('POST', "$base/mcp", '{"jsonrpc":"2.0","id":1,"method":{"a":1}}', array('Authorization: Bearer test-token'));
 	same(-32600, json_decode($body, true)['error']['code'], $body);
 });
+test('MCP over HTTP finds the token where Apache and PHP-FPM put it (#106)', function () {
+	// mod_php and php -S: the header
+	same('right', mcp::bearer(array('HTTP_AUTHORIZATION' => 'Bearer right')));
+	// PHP-FPM behind Apache with the shipped .htaccess: the rewrite sets it,
+	// and the rewrite to index.php renames it; the header's own name is empty
+	same('right', mcp::bearer(array('REDIRECT_HTTP_AUTHORIZATION' => 'Bearer right')));
+	same('right', mcp::bearer(array('HTTP_AUTHORIZATION' => '', 'REDIRECT_HTTP_AUTHORIZATION' => 'Bearer right')));
+	same('right', mcp::bearer(array('HTTP_AUTHORIZATION' => 'bearer   right ')));
+	same('', mcp::bearer(array('HTTP_AUTHORIZATION' => 'Basic cmlnaHQ=')));
+	same('', mcp::bearer(array()));
+	// the Apache config passes the header on, and doctor misses the line
+	$apache = private_paths::config('apache');
+	check(strpos((string)$apache, private_paths::APACHE_AUTHORIZATION) !== false, 'missing '.private_paths::APACHE_AUTHORIZATION);
+	$dir = sys_get_temp_dir().'/raster-htaccess-'.getmypid();
+	@mkdir($dir);
+	try {
+		file_put_contents("$dir/.htaccess", $apache);
+		same(array(), raster_project::htaccess_gaps($dir));
+		file_put_contents("$dir/.htaccess", str_replace(private_paths::APACHE_AUTHORIZATION, '', $apache));
+		same(array('authorization'), raster_project::htaccess_gaps($dir));
+	} finally {
+		@unlink("$dir/.htaccess");
+		@rmdir($dir);
+	}
+});
 
 
 // ## Forms, accounts, newsletter, feeds

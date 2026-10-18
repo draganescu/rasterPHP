@@ -30,8 +30,8 @@ class mcp
 		if ($token === '') {
 			$this->http_reply(404, array('error' => 'The MCP endpoint is disabled. Set mcp_token in application/config/the_app.php or RASTER_MCP_TOKEN.'));
 		}
-		$header = isset($_SERVER['HTTP_AUTHORIZATION']) ? $_SERVER['HTTP_AUTHORIZATION'] : (function_exists('getallheaders') ? (getallheaders()['Authorization'] ?? '') : '');
-		if (!preg_match('/^Bearer\s+(.+)$/i', trim((string)$header), $m) || !hash_equals($token, trim($m[1]))) {
+		$bearer = mcp::bearer($_SERVER);
+		if ($bearer === '' || !hash_equals($token, $bearer)) {
 			header('WWW-Authenticate: Bearer');
 			$this->http_reply(401, array('error' => 'Missing or invalid bearer token'));
 		}
@@ -47,6 +47,26 @@ class mcp
 		$response = $this->answer($body);
 		if ($response === null) $this->http_reply(202, null);
 		$this->http_reply(200, $response);
+	}
+
+	// The token a request carries. Apache hands the Authorization header to
+	// PHP-FPM only when the .htaccess copies it into the environment, and its
+	// rewrite to index.php renames that REDIRECT_HTTP_AUTHORIZATION, leaving
+	// HTTP_AUTHORIZATION empty; under mod_php only getallheaders() has it.
+	static function bearer($server) {
+		$headers = array();
+		foreach (array('HTTP_AUTHORIZATION', 'REDIRECT_HTTP_AUTHORIZATION') as $name) {
+			if (isset($server[$name])) $headers[] = $server[$name];
+		}
+		if ($server === $_SERVER && function_exists('getallheaders')) {
+			foreach ((array)getallheaders() as $name => $value) {
+				if (strtolower($name) === 'authorization') $headers[] = $value;
+			}
+		}
+		foreach ($headers as $header) {
+			if (preg_match('/^Bearer\s+(.+)$/i', trim((string)$header), $m)) return trim($m[1]);
+		}
+		return '';
 	}
 
 	protected function http_reply($status, $payload) {

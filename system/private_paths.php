@@ -109,6 +109,11 @@ class private_paths {
 	// The one path that is always allowed: the site's entry point.
 	const ENTRY = '/index.php';
 
+	// Apache hands the Authorization header to PHP-FPM (and CGI) only when
+	// told to, so MCP over HTTP would never see its token. The .htaccess
+	// copies it into the environment, where mcp::bearer() reads it.
+	const APACHE_AUTHORIZATION = 'RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]';
+
 	// ##Using the rules
 	//
 	// The app folders of a site: every top level folder with a config/ inside,
@@ -164,6 +169,10 @@ class private_paths {
 			'# this file; the rules come from system/private_paths.php.',
 			'',
 			'RewriteEngine on',
+			'',
+			'# PHP-FPM gets the Authorization header only this way (MCP over HTTP needs it)',
+			'RewriteCond %{HTTP:Authorization} .',
+			self::APACHE_AUTHORIZATION,
 			'',
 			'# Never serve code, configuration, data or tooling directly',
 		);

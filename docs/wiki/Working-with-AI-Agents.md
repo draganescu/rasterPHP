@@ -45,6 +45,8 @@ RASTER_MCP_TOKEN=a-long-random-string-of-at-least-32-characters
 
 (or `config::set('mcp_token')->to(…)`, but keep secrets out of git). Clients send it as a header: `Authorization: Bearer <token>`. Anyone with the token can edit your content, so treat it like a password; `doctor` fails in production if it's shorter than 32 characters.
 
+On Apache with PHP-FPM, Apache passes the `Authorization` header to PHP only when told to. The `.htaccess` that ships with Raster does that with one line, `RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]`; without it every call is refused as if the token were wrong. `php bin/raster doctor` reports a `.htaccess` that lacks it. nginx and Caddy pass the header already.
+
 A quick test:
 
 ```sh
