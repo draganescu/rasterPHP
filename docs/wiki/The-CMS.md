@@ -206,6 +206,7 @@ When you rename an annotation, Raster notices the likely rename and suggests the
 | `php bin/raster schema --drop=aboutpage.heading` | deletes a column no template uses |
 | `php bin/raster schema --drop=olddata` | deletes a whole table no template uses |
 | `--force` | together with `--drop`, deletes even if a template still uses it |
+| `--dry-run` | together with `--rename`, `--drop` or `--apply`, says what would change and changes nothing |
 | `php bin/raster schema --check` | exits with code 1 when templates and database differ, for automated checks |
 | `--json` | the same information as JSON |
 

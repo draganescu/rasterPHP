@@ -920,6 +920,11 @@ test(array('H1', 'H2', 'H3', 'H4', 'H5', 'H11'), 'double opt-in', function () us
 });
 test(array('H6', 'H9'), 'sending an issue', function () use ($base) {
 	same(2, raster(array('send', '/journal/journal_item/opening-day'), array('RASTER_URL' => ''))[0], 'needs RASTER_URL');
+	$before = count(mails());
+	list($code, $out) = raster(array('send', '/journal/journal_item/opening-day', '--dryrun'), array('RASTER_URL' => "$base/"));
+	same(2, $code, $out);
+	has($out, "send doesn't take --dryrun");
+	same($before, count(mails()), 'a mistyped --dry-run sent the issue');
 	list($code, $out) = raster(array('send', '/journal/journal_item/opening-day', '--dry-run'), array('RASTER_URL' => "$base/"));
 	has($out, 'Would send "Journal" to 2 subscriber(s)');
 	list($code, $out) = raster(array('send', '/journal/journal_item/opening-day', '--to=test@example.com'), array('RASTER_URL' => "$base/"));
@@ -1255,7 +1260,7 @@ test('M16', 'render_url renders without a web server', function () use ($base) {
 
 // ## F. Schema, and N. the command line
 
-test(array('F1', 'F2', 'F4', 'F5'), 'schema: status, check, rename, drop', function () use ($base, $views) {
+test(array('F1', 'F2', 'F4', 'F5', 'F8'), 'schema: status, check, rename, drop, --dry-run', function () use ($base, $views) {
 	http('GET', "$base/faq");
 	list($code, $out) = raster(array('schema', '--json'));
 	same(0, $code, $out);
@@ -1268,6 +1273,10 @@ test(array('F1', 'F2', 'F4', 'F5'), 'schema: status, check, rename, drop', funct
 		same(1, raster(array('schema', '--check'))[0], 'drift after renaming');
 		list(, $out) = raster(array('schema'));
 		has($out, '--rename=aboutpage.heading:title');
+		list($code, $out) = raster(array('schema', '--rename=aboutpage.heading:title', '--dry-run'));
+		same(0, $code, $out);
+		has($out, 'would move aboutpage.heading into title', 'the GET made the new column');
+		same(1, raster(array('schema', '--check'))[0], '--dry-run renamed it');
 		same(0, raster(array('schema', '--rename=aboutpage.heading:title'))[0]);
 		has(http('GET', "$base/about")[1], '<h1>Our story</h1>', 'the content moved');
 	});
@@ -1280,6 +1289,13 @@ test(array('F1', 'F2', 'F4', 'F5'), 'schema: status, check, rename, drop', funct
 	database::instance('cms');
 	R::exec('CREATE TABLE IF NOT EXISTS oldpage (id INTEGER PRIMARY KEY, x TEXT)');
 	has(raster(array('schema'))[1], 'table oldpage');
+	list($code, $out) = raster(array('schema', '--drop=oldpage', '--dry-run'));
+	same(0, $code, $out);
+	has($out, 'would drop table oldpage');
+	has(raster(array('schema'))[1], 'table oldpage', '--dry-run dropped it');
+	list($code, $out) = raster(array('schema', '--apply', '--dry-run'));
+	same(0, $code, $out);
+	has($out, 'nothing applied');
 	same(0, raster(array('schema', '--drop=oldpage'))[0]);
 	same(0, raster(array('schema', '--check'))[0], raster(array('schema'))[1]);
 });
@@ -1505,6 +1521,51 @@ test('N11', 'exporting again writes only what changed', function () use ($tmp, $
 	check(is_file("$out/extra.txt"), 'files the export did not write are kept');
 	$manifest = json_decode(file_get_contents("$out/.raster-export.json"), true);
 	check(isset($manifest['files']['about/index.html']) && !empty($manifest['fingerprint']));
+});
+test('N16', 'a page that answers an error stops the export, and the last export stays', function () use ($tmp, $root, $views) {
+	$out = "$tmp/failing";
+	same(0, raster(array('export', $out, '--url=https://cafe.example/'))[0]);
+	$manifest = file_get_contents("$out/.raster-export.json");
+	$original = file_get_contents("$views/about.html");
+	@mkdir("$root/demo/models/zzthrows");
+	with_file("$root/demo/models/zzthrows/zzthrows.php", "<?php\nclass zzthrows\n{\n\tfunction boom() { throw new RuntimeException('boom'); }\n}\n", function () use ($out, $views, $original) {
+		// a model that throws, on About
+		$boom = '<!-- print.zzthrows.boom -->x<!-- /print.zzthrows.boom -->';
+		with_file("$views/about.html", str_replace('<h2>Opening hours</h2>', $boom.'<h2>Opening hours</h2>', $original), function () use ($out) {
+			list($code, $output) = raster(array('export', $out, '--url=https://cafe.example/'));
+			same(1, $code, $output);
+			has($output, '/about answered 500');
+			has($output, 'Nothing was written');
+			check(is_file("$out/about/index.html"), 'the page from the last export was removed');
+			check(is_file("$out/index.html"));
+		});
+	});
+	@rmdir("$root/demo/models/zzthrows");
+	same($manifest, file_get_contents("$out/.raster-export.json"), 'the list of files is the last export\'s');
+	list($code, $output) = raster(array('export', $out, '--url=https://cafe.example/'));
+	same(0, $code, $output);
+});
+test('N17', 'commands refuse options they do not take, and say which they do', function () use ($views) {
+	list($code, $out) = raster(array('lint', '--jsn'));
+	same(2, $code, $out);
+	has($out, "lint doesn't take --jsn");
+	has($out, '--json');
+	has($out, '--all-themes');
+	list($code, $out) = raster(array('version', '--dry-run'));
+	same(2, $code, $out);
+	has($out, "version doesn't take --dry-run");
+	// what the parser can't read is refused too, not taken as a folder or a URL
+	same(2, raster(array('export', '/tmp/raster-never', '--dry_run'))[0]);
+	check(!file_exists('/tmp/raster-never'), 'the export ran');
+	// a typo of --dry-run on schema --drop drops nothing
+	database::instance('cms');
+	R::exec('CREATE TABLE IF NOT EXISTS zzkeptpage (id INTEGER PRIMARY KEY, x TEXT)');
+	same(2, raster(array('schema', '--drop=zzkeptpage', '--dryrun'))[0]);
+	check(in_array('zzkeptpage', R::inspect()), 'the table was dropped');
+	R::exec('DROP TABLE zzkeptpage');
+	// every option the help names is one the command takes
+	has(raster(array('help'))[1], '--dry-run');
+	same(0, raster(array('lint', '--theme=print', '--json'))[0]);
 });
 test('N4', 'serve', function () use ($root) {
 	$port = free_port();
