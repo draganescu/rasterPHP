@@ -259,6 +259,14 @@ class cms_records {
 		return array(' AND owner = :raster_owner ', array(':raster_owner' => (int)$user['id']));
 	}
 
+	// owner=me: the logged in person's id as a string, or null when nobody
+	// is or the type has no owner
+	static function owner_me($info) {
+		if (!$info['owner']) return null;
+		$user = authentication::user();
+		return $user && $user['id'] ? (string)$user['id'] : null;
+	}
+
 	static function get($collection, $id) {
 		$info = self::required($collection);
 		cms_store::connect();
@@ -268,18 +276,23 @@ class cms_records {
 
 	// records for model code, oldest first, all of them unless a limit is
 	// given. $filters is field => value, or list options as render.cms
-	// takes them: 'date>=today&status!=cancelled&order=date,time&limit=7'
+	// takes them: 'date>=today&status!=cancelled&order=date,time&limit=7'.
+	// Values are values: a ?x (the URL's, in a template) throws. owner=me
+	// is the logged in person's records, none when nobody is.
 	static function find($collection, $filters = array(), $order = 'oldest', $limit = 0) {
 		$info = self::required($collection);
+		$list = is_string($filters) ? cms_store::list_options($filters, false) : null;
 		cms_store::connect();
 		if (!cms_store::table_exists($info['type'])) return array();
 		$columns = cms_store::columns($info['type']);
 		$sql = ' 1 = 1 ';
 		$bindings = array();
-		if (is_string($filters)) {
-			$list = cms_store::list_options($filters);
-			foreach ($list['conditions'] as $condition) {
+		if ($list) {
+			foreach ($list['conditions'] as $i => $condition) {
 				if (!preg_match('/^[a-z0-9_]+$/', $condition[0]) || !array_key_exists($condition[0], $columns)) throw new InvalidArgumentException("$collection has no field '{$condition[0]}'");
+				if ($condition !== array('owner', '=', 'me')) continue;
+				$list['conditions'][$i][2] = self::owner_me($info);
+				if ($list['conditions'][$i][2] === null) return array();
 			}
 			list($more, $bindings) = cms_store::conditions_sql($list['conditions'], $columns);
 			$sql .= $more;
@@ -289,6 +302,10 @@ class cms_records {
 		}
 		foreach ($filters as $field => $value) {
 			if (!preg_match('/^[a-z0-9_]+$/', $field) || !array_key_exists($field, $columns)) throw new InvalidArgumentException("$collection has no field '$field'");
+			if ($field === 'owner' && $value === 'me') {
+				$value = self::owner_me($info);
+				if ($value === null) return array();
+			}
 			$value = cms_types::clean(cms_types::of_column($columns[$field]), $value, $field);
 			$sql .= $value === null ? " AND `$field` IS NULL " : " AND `$field` = :f_$field ";
 			if ($value !== null) $bindings[":f_$field"] = $value;

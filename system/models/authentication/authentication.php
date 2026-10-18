@@ -37,7 +37,7 @@ class authentication
 	// ##Accounts
 
 	static function connect() {
-		database::instance('cms');
+		database::instance();
 		if (!database::configured()) throw new RuntimeException('No database for the '.config::get('environment').' environment');
 		self::migrate();
 	}

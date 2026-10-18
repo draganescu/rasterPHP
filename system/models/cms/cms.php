@@ -171,7 +171,7 @@ class cms
 
 		cms::session();
 
-		$db = database::instance('cms');
+		$db = database::instance();
 		if (!database::configured()) {
 			return;
 		}
@@ -421,9 +421,8 @@ class cms
 		// owner=me: the logged in person's own records, editors included
 		// (their /account shows what they made, not everyone's)
 		if ($record && isset($filters['owner']) && $filters['owner'] === 'me') {
-			$user = authentication::user();
-			if (!$user || !$record['owner'] || !$user['id']) return array();
-			$filters['owner'] = (string)$user['id'];
+			$filters['owner'] = cms_records::owner_me($record);
+			if ($filters['owner'] === null) return array();
 		}
 		// a record's hidden fields are no filter for visitors (no asking
 		// "did this email book?"), and neither is owner, except the
@@ -514,7 +513,7 @@ class cms
 			http_response_code(403);
 			exit('Forbidden');
 		}
-		database::instance('cms');
+		database::instance();
 	}
 
 	// What /api offers, like any model: the editor's endpoints, its style
@@ -564,7 +563,7 @@ class cms
 
 	// message shown above the login form
 	function login_message() {
-		database::instance('cms');
+		database::instance();
 		if (!database::configured()) {
 			return '<p class="notice">No database is configured for this environment (application/config/db/).</p>';
 		}

@@ -172,11 +172,13 @@ test('an app from Raster 1.x', function () use ($site) {
 	has($out, 'application is at 1.0.0, the framework at 2.1.0');
 	has($out, 'render.cms.login is now render.authentication.login');
 	has($out, 'application/views/default/editor.html:2');
-	has($out, 'name the array $queries');
+	// $querries is no longer read, so nothing is said about it
+	lacks($out, '$querries', 'the $querries deprecation is gone');
+	lacks($out, 'name the array $queries', 'the $querries deprecation is gone');
 	list($code, $out) = raster($site, array('upgrade', '--dry-run'));
 	has($out, '2.0.0 agent-files');
 	has($out, '2.0.0 cms-login-region');
-	has($out, '2.0.0 queries-name');
+	lacks($out, 'queries-name', 'the $querries step is gone');
 	lacks($out, 'private-folders', 'only the steps it needs');
 	lacks($out, '2.1.0 marker', 'already there');
 	list($code, $out) = raster($site, array('upgrade'));
@@ -185,7 +187,6 @@ test('an app from Raster 1.x', function () use ($site) {
 	same("@AGENTS.md\n", file_get_contents("$site/CLAUDE.md"));
 	has(file_get_contents("$site/application/views/default/editor.html"), '<!-- render.authentication.login -->');
 	has(file_get_contents("$site/application/views/default/editor.html"), '<!-- /render.authentication.login -->');
-	has(file_get_contents("$site/application/models/sql.php"), '$queries[');
 	list($code, $out) = raster($site, array('doctor'));
 	same(0, $code, $out);
 	lacks($out, 'deprecated');

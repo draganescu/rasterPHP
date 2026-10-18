@@ -104,7 +104,9 @@ class cms_store {
 	// conditions: list of (field, operator, value), the values resolved;
 	// options: order and limit; fields: what a field the list mentions starts
 	// as when the list adds it (the value of featured=1, empty for the rest).
-	static function list_options($argument) {
+	// Model code (cms_records::find) passes $from_url false: there a ?x
+	// value is a mistake, not the URL's, and throws.
+	static function list_options($argument, $from_url = true) {
 		$out = array('conditions' => array(), 'options' => array(), 'fields' => array());
 		foreach (explode('&', (string)$argument) as $chunk) {
 			if (trim($chunk) === '') continue;
@@ -118,6 +120,7 @@ class cms_store {
 				continue;
 			}
 			$dynamic = $value === 'today' || ($value !== '' && $value[0] === '?');
+			if (!$from_url && $value !== '' && $value[0] === '?') throw new InvalidArgumentException("find() takes values, not $value: pass the value");
 			if (!isset($out['fields'][$field])) $out['fields'][$field] = $operator === '=' && !$dynamic ? $value : '';
 			$value = self::list_value($value);
 			if ($value === null) continue;
@@ -198,7 +201,7 @@ class cms_store {
 	}
 
 	static function connect() {
-		database::instance('cms');
+		database::instance();
 		if (!database::configured()) {
 			throw new RuntimeException('No database connection for the '.config::get('environment').' environment (see application/config/db/)');
 		}

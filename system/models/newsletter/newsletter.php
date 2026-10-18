@@ -29,7 +29,7 @@ class newsletter
 	const MARKER = '{{raster:unsubscribe_url}}';
 
 	static function connect() {
-		database::instance('cms');
+		database::instance();
 		if (!database::configured()) throw new RuntimeException('No database for the '.config::get('environment').' environment');
 	}
 
@@ -192,7 +192,9 @@ class newsletter
 
 	function count() {
 		self::connect();
-		return self::table_ready() ? (string)R::count('subscriber', " status = 'confirmed' ") : '0';
+		if (!self::table_ready()) return '0';
+		$rows = database::instance('newsletter')->confirmed_count();
+		return (string)(int)$rows[0]['total'];
 	}
 
 	// in an issue: each reader's link. On the web: the unsubscribe page.

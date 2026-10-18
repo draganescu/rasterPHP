@@ -24,7 +24,7 @@ class feed
 		// records of a private type (orders, bookings) are never in a feed or the sitemap
 		if (cms_records::is_private($collection)) return array();
 		$type = cms::collection_type($collection);
-		database::instance('cms');
+		database::instance();
 		if (!database::configured() || !cms_store::table_exists($type)) return array();
 		$columns = cms_store::columns($type);
 		list($sql, $bindings) = cms_store::published_sql($columns);
@@ -66,7 +66,7 @@ class feed
 			$updated = date('Y-m-d', filemtime($inspector->theme_dir().'/'.$view));
 			$rows[] = array('url' => $name === config::get('default_view', 'index') ? $link.'/' : $link.'/'.$name, 'updated' => $updated);
 		}
-		database::instance('cms');
+		database::instance();
 		if (database::configured()) {
 			foreach (array_unique($item_views) as $collection) {
 				foreach ($this->items($collection, 1000) as $item) {

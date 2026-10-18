@@ -16,13 +16,6 @@ return array(
 		'pattern' => '/<!-- \/?render\.cms\.login -->/',
 		'message' => 'render.cms.login is now render.authentication.login (`raster upgrade` changes it)',
 	),
-	'querries' => array(
-		'since' => '2.0.0',
-		'removed_in' => '2.2.0',
-		'in' => '#^models/sql\.php$#',
-		'pattern' => '/\$querries\b/',
-		'message' => 'models/sql.php: name the array $queries (`raster upgrade` changes it)',
-	),
 	'legacy-validation-regions' => array(
 		'since' => '2.0.0',
 		'removed_in' => '3.0.0',

@@ -1861,8 +1861,15 @@ test('C42', 'lint checks the event wiring', function () use ($root) {
 
 
 test('C43', 'named queries: a missing name is an error, and lint finds it', function () use ($root) {
+	same(1, count(database::instance('cafe')->count_category('cakes')), 'a named call');
+	// the name is for that call only: the shared instance is left as it was
 	database::instance('cafe');
-	same(1, count(database::instance()->count_category('cakes')), 'the model name sticks for later calls');
+	try {
+		database::instance()->count_category('cakes');
+		check(false, 'the model name stuck for later calls');
+	} catch (BadMethodCallException $e) {
+		has($e->getMessage(), "No query named 'count_category': add models/<model>/sql/count_category.sql");
+	}
 	try {
 		database::instance('cafe')->count_categry('coffee');
 		check(false, 'a misspelled query should throw');

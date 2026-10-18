@@ -50,12 +50,4 @@ return array(
 			return 'changed '.implode(', ', $changed);
 		},
 	),
-	'queries-name' => array(
-		'description' => 'models/sql.php names its array $queries',
-		'needed' => function ($c) { return is_file($c['app'].'/models/sql.php') && preg_match('/\$querries\b/', file_get_contents($c['app'].'/models/sql.php')); },
-		'apply' => function ($c) {
-			$file = $c['app'].'/models/sql.php';
-			file_put_contents($file, preg_replace('/\$querries\b/', '$queries', file_get_contents($file)));
-		},
-	),
 );
