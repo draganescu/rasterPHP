@@ -27,6 +27,7 @@ After logging in, every HTML page of the site shows an **Edit** button.
 | replace a picture | click it, choose or drop a new one, drag to choose what shows, then **Use photo** |
 | work on a list item | use the handle on the item: **Details** (every field, the slug, visibility, publish date), **Duplicate**, **Hide**/**Show**, **Schedule**, **Delete** |
 | add a list item | use the card at the end of each list: it's made from the template's sample item |
+| do it all from the keyboard | in edit mode, Tab reaches each item, picture and new-item card. On an item, Enter moves into its handle (Tab between its buttons, `Esc` to come back); on a picture, Enter chooses a new one; on the card, Enter starts a new item |
 | see fields that aren't visible | open the **Page** panel: fields in `<head>` (like the title and meta description) and in attributes are listed there, with the page's lists |
 | open a staff page | **Admin** menu in the editor's bar: every page protected for editors or admins that you may open (see [Admin pages](#admin-pages)) |
 | go back to an earlier version | **Page** panel → **History** → **Restore**. Restoring adds a new version; nothing is overwritten. |

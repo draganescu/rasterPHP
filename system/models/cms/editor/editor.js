@@ -304,6 +304,7 @@
 			'html.raster-editing img[data-raster-field]:hover{filter:brightness(.92);outline-color:var(--raster-a)}',
 			'html.raster-editing [data-raster-item]{transition:opacity .3s,filter .3s,outline-color .2s,transform .35s;outline:2px dashed transparent;outline-offset:6px}',
 			'html.raster-editing [data-raster-item]:hover,html.raster-editing [data-raster-item].raster-active{outline-color:color-mix(in srgb,var(--raster-a) 45%,transparent)}',
+			'html.raster-editing [data-raster-item]:focus-visible,html.raster-editing img[data-raster-field]:focus-visible,.raster-ghost:focus-visible{outline:2px solid var(--raster-a)!important;opacity:1}',
 			'[data-raster-state=draft],[data-raster-state=scheduled]{opacity:.55;filter:saturate(.4)}',
 			'[data-raster-state=draft]:hover,[data-raster-state=scheduled]:hover{opacity:.85}',
 			'.raster-leaving{opacity:0!important;transform:scale(.96)!important;transition:opacity .35s,transform .35s!important}',
@@ -723,11 +724,22 @@
 			if (!on) f.el.removeAttribute('contenteditable');
 			if (on && (f.kind === 'text' || f.kind === 'rich')) { f.el.setAttribute('spellcheck', 'true'); if (!f.el.hasAttribute('aria-label')) f.el.setAttribute('aria-label', human(f.info.field)); }
 		});
+		reachable(on);
 		if (on) { glow(); addGhosts(); } else { removeGhosts(); clearFloats(); if (document.activeElement && document.activeElement.isContentEditable) document.activeElement.blur(); }
 		store('raster-editing', on ? '1' : null);
 		updateDock();
 		if (!quiet) toast(on ? t('edit_mode_on') : t('edit_mode_off'));
 		closeBubble();
+	}
+	// in edit mode Tab reaches items, photos and new-item cards, which only a
+	// pointer could reach before: focus shows their handle or photo button
+	function reachable(on) {
+		var els = Object.keys(items).map(function (id) { return items[id].el; }).concat(fields.filter(function (f) { return f.kind === 'image'; }).map(function (f) { return f.el; }));
+		els.forEach(function (el) { tabbable(el, on); });
+	}
+	function tabbable(el, on) {
+		if (on && !el.hasAttribute('tabindex')) { el.setAttribute('tabindex', '0'); el.setAttribute('data-raster-tab', ''); }
+		if (!on && el.hasAttribute('data-raster-tab')) { el.removeAttribute('tabindex'); el.removeAttribute('data-raster-tab'); }
 	}
 	var plaintextOnly = (function () { var d = document.createElement('div'); d.setAttribute('contenteditable', 'plaintext-only'); return d.contentEditable === 'plaintext-only'; })();
 	function updateDock() {
@@ -745,6 +757,12 @@
 
 	// focus, typing, leaving
 	document.addEventListener('focusin', function (e) {
+		if (editing && !touch && e.target !== host) {
+			var itemEl = e.target.closest && e.target.closest('[data-raster-item]');
+			if (itemEl) { cancelDeactivate(); activateItem(items[itemEl.getAttribute('data-raster-item')]); }
+			else if (activeItem && !floating) clearFloats();
+			if (e.target.matches && e.target.matches('img[data-raster-field]')) showPhotoButton(fieldFor(e.target));
+		}
 		var field = fieldFor(e.target);
 		if (!field || !editing || field.kind === 'image') return;
 		if (field.before == null) field.before = { value: fieldValue(field), html: field.el.innerHTML };
@@ -761,6 +779,16 @@
 		}, 0);
 	});
 	document.addEventListener('keydown', function (e) {
+		if (editing && (e.key === 'Enter' || e.key === ' ') && e.target.hasAttribute && e.target.hasAttribute('tabindex') && !e.target.isContentEditable && e.target !== host) {
+			// an item opens its handle; a photo, a new-item card or a photo in it is clicked
+			if (e.target.hasAttribute('data-raster-item') && !e.target.classList.contains('raster-ghost')) {
+				e.preventDefault();
+				activateItem(items[e.target.getAttribute('data-raster-item')]);
+				if (handle) handle.querySelector('button').focus();
+				return;
+			}
+			if (e.target.matches('img, .raster-ghost:not(.raster-new)')) { e.preventDefault(); e.target.click(); return; }
+		}
 		var field = fieldFor(e.target);
 		if (field && editing) {
 			if (e.key === 'Escape') {
@@ -886,6 +914,7 @@
 			record ? null : button('clock', t('schedule'), function () { openSchedule(item); }),
 			button('trash', t('delete'), function () { remove(item); }, 'danger')]
 		));
+		handle.addEventListener('keydown', function (e) { if (e.key === 'Escape') { e.stopPropagation(); item.el.focus(); } });
 		handle.addEventListener('mouseleave', function (e) { if (!item.el.contains(e.relatedTarget)) scheduleDeactivate(); });
 		handle.addEventListener('mouseenter', cancelDeactivate);
 		ui.floats.appendChild(handle);
@@ -1051,6 +1080,7 @@
 		el.setAttribute('data-raster-item', id);
 		el.classList.remove('raster-active', 'raster-ghost', 'raster-new');
 		el.classList.add('raster-arriving');
+		if (editing) tabbable(el, true);
 		var parts = el.querySelectorAll('[data-raster-field]');
 		if (el.hasAttribute('data-raster-field')) parts = [el].concat(Array.prototype.slice.call(parts));
 		Array.prototype.forEach.call(parts, function (node) {
@@ -1066,6 +1096,7 @@
 			node.setAttribute('data-raster-field', fid);
 			if (kind === 'image' || kind === 'attr') node.removeAttribute('data-raster-edit'); else node.setAttribute('data-raster-edit', kind);
 			if (editing && kind !== 'image') node.setAttribute('contenteditable', kind === 'text' && plaintextOnly ? 'plaintext-only' : 'true');
+			if (kind === 'image' && editing) tabbable(node, true);
 			item.fields.push(field);
 			fields.push(field);
 		});
@@ -1225,6 +1256,7 @@
 			ui.floats.appendChild(label);
 			var ghost = { el: el, label: label, list: list };
 			el.addEventListener('click', function (e) { if (!el.classList.contains('raster-new')) { e.preventDefault(); startNew(ghost); } });
+			tabbable(el, true);
 			ghosts.push(ghost);
 		});
 		place();
@@ -1236,11 +1268,13 @@
 	function startNew(ghost) {
 		var el = ghost.el;
 		el.classList.add('raster-new');
+		tabbable(el, false);
 		if (ghost.label) { ghost.label.remove(); ghost.label = null; }
 		var parts = Array.prototype.slice.call(el.querySelectorAll('[data-raster-name]'));
 		if (el.hasAttribute('data-raster-name')) parts.unshift(el);
 		parts.forEach(function (node) {
 			if (node.tagName === 'IMG') {
+				tabbable(node, true);
 				node.addEventListener('click', function () { pickPhoto({ el: node, kind: 'image', attr: node.getAttribute('data-raster-attr'), pending: true, info: { field: node.getAttribute('data-raster-name') } }); });
 				return;
 			}
@@ -1312,6 +1346,7 @@
 			if (photoButton && photoButton.field === field && !field.el.contains(e.relatedTarget) && e.relatedTarget !== host) { photoButton.remove(); photoButton = null; }
 		};
 		field.el.addEventListener('mouseleave', leave, { once: true });
+		field.el.addEventListener('blur', leave, { once: true });
 	}
 	function pickPhoto(field) {
 		var input = document.createElement('input');

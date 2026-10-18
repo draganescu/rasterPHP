@@ -1307,7 +1307,11 @@ of lists and filter pages come along; drafts and the editor don't.
   lines, so what it stores fits where it prints. Items get a handle to
   edit details, duplicate, hide, schedule or delete them; each list ends with
   a card for a new item, made from the template's mock-up. Photos (`print.@src`)
-  are replaced by choosing or dropping a picture, framed in the browser. The
+  are replaced by choosing or dropping a picture, framed in the browser.
+  Everything works from the keyboard too: in edit mode Tab reaches each
+  item, photo and new-item card, focus shows the item's handle or the photo
+  button, Enter moves into the handle (Esc comes back), picks a photo or
+  starts the new item. The
   Page panel lists fields the page can't show (in `<head>`, in attributes),
   the lists, and the page's history. The dock sits at the bottom of the
   screen; flick it up (a finger, a mouse dragged and let go, or two fingers

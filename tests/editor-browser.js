@@ -4,7 +4,8 @@
 // find; set CHROMIUM=/path/to/chrome if needed). Starts the demo café on a
 // fresh database, logs in as an editor and uses the editor the way a person
 // would: edit mode, typing, undo, adding an item with a photo, hiding,
-// deleting and undoing, the page panel. Screenshots go to tests/screens/.
+// deleting and undoing, a keyboard-only pass, Enter in a paragraph field,
+// the page panel. Screenshots go to tests/screens/.
 const { chromium } = require('playwright');
 const { spawn, execFileSync } = require('child_process');
 const fs = require('fs');
@@ -156,6 +157,66 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 		await page.keyboard.press('Control+z');
 		await page.waitForTimeout(1200);
 		check((await (await fetch(base + '/menu')).text()).includes('Cortado'), 'undo brings the item back');
+
+		// keyboard only: Tab reaches items, photos and the new-item card, and
+		// every action on an item works from the keyboard (#121)
+		await page.goto(base + '/menu');
+		await page.waitForTimeout(500);
+		await page.mouse.move(2, 2);
+		const focused = () => page.evaluate(() => {
+			const el = document.activeElement;
+			if (el && el.hasAttribute('data-raster-host')) return { kind: 'host' };
+			if (!el || !el.matches) return { kind: '' };
+			if (el.matches('.raster-ghost')) return { kind: 'ghost' };
+			if (el.matches('img[data-raster-field]')) return { kind: 'photo' };
+			if (el.matches('[data-raster-item]')) return { kind: 'item', text: el.innerText };
+			return { kind: el.tagName };
+		});
+		const reached = {};
+		let photoButton = false, itemHandle = false;
+		for (let i = 0; i < 120 && !reached.ghost; i++) {
+			await page.keyboard.press('Tab');
+			const f = await focused();
+			reached[f.kind] = true;
+			if (f.kind === 'photo') photoButton = photoButton || await inShadow(page, h => !!h.shadowRoot.querySelector('.photo-button'));
+			if (f.kind === 'item') itemHandle = itemHandle || await inShadow(page, h => !!h.shadowRoot.querySelector('.handle button[aria-label=Delete]'));
+		}
+		check(reached.item && reached.photo && reached.ghost, 'Tab reaches an item, a photo and the new-item card: ' + Object.keys(reached).join(', '));
+		check(itemHandle, 'a focused item shows its handle');
+		check(photoButton, 'a focused photo shows the replace button');
+		// to the first dish, Enter into its handle, Tab to Hide, Enter
+		await page.goto(base + '/menu');
+		await page.waitForTimeout(500);
+		await page.mouse.move(2, 2);
+		let first = null;
+		for (let i = 0; i < 120; i++) {
+			await page.keyboard.press('Tab');
+			const f = await focused();
+			if (f.kind === 'item') { first = f.text; break; }
+		}
+		const firstItem = page.locator('[data-raster-item]').first();
+		check(first !== null && await firstItem.evaluate(el => el === document.activeElement), 'Tab lands on the first item');
+		await page.keyboard.press('Enter');
+		check(await inShadow(page, h => !!h.shadowRoot.activeElement && !!h.shadowRoot.activeElement.closest('.handle')), 'Enter on an item moves into its handle');
+		for (let i = 0; i < 8 && !(await inShadow(page, h => h.shadowRoot.activeElement && h.shadowRoot.activeElement.getAttribute('aria-label') === 'Show')); i++) await page.keyboard.press('Tab');
+		await page.keyboard.press('Enter');
+		await page.waitForTimeout(900);
+		check(await firstItem.getAttribute('data-raster-state') === 'live', 'Show, from the keyboard, shows the hidden dish');
+		await firstItem.focus();
+		await page.keyboard.press('Enter');
+		await page.keyboard.press('Escape');
+		check(await firstItem.evaluate(el => el === document.activeElement), 'Esc in the handle goes back to the item');
+		// a focused photo opens the file chooser with Enter
+		const photo = page.locator('img[data-raster-field]').first();
+		await photo.focus();
+		const [picker] = await Promise.all([page.waitForEvent('filechooser', { timeout: 10000 }).catch(() => null), page.keyboard.press('Enter')]);
+		check(!!picker, 'Enter on a photo opens the file chooser: ' + await page.evaluate(() => document.activeElement.outerHTML.slice(0, 200)));
+		// the new-item card opens with Enter
+		const card = page.locator('.raster-ghost').first();
+		await card.focus();
+		await page.keyboard.press('Enter');
+		check(await card.evaluate(el => el.classList.contains('raster-new') && el.contains(document.activeElement)), 'Enter on the new-item card starts a new item');
+		await page.keyboard.press('Escape');
 
 		// a record: the model's actions are buttons, its readonly fields are not editable
 		await fetch(base + '/visit', { method: 'POST', body: new URLSearchParams({ raster_form: 'reservation.book', name: 'Ilinca', email: 'ilinca@example.com', date: soon, guests: '2', terms: '1' }), redirect: 'manual' });
