@@ -3589,6 +3589,24 @@ test('I10', 'a form that sends mail answers at once, even when the mail server n
 	has((string)@file_get_contents("$tmp/php-errors.log"), 'Raster error: Mail: SMTP error after connect', 'the failure is logged');
 });
 
+test('I10', 'a visitor who leaves before a long page has loaded still has the mail sent', function () use ($root, $tmp) {
+	$dir = "$tmp/mail-left";
+	$script = "$tmp/left-early.php";
+	file_put_contents($script, '<?php require '.var_export("$root/system/boot.php", true).'; boot::$appname = "demo"; boot::cli();'
+		.' ob_start(); mail::send("ana@example.com", "Left early", "<p>Hi</p>"); echo str_repeat("x", 4 << 20);');
+	$port = free_port();
+	$process = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", $script), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root,
+		array('PATH' => getenv('PATH'), 'RASTER_APP' => 'demo', 'RASTER_MAIL' => "log://$dir", 'RASTER_ENV' => ''));
+	$GLOBALS['servers'][] = $process;
+	for ($i = 0; $i < 100 && !@fsockopen('127.0.0.1', $port); $i++) usleep(50000);
+	$socket = fsockopen('127.0.0.1', $port, $errno, $errstr, 2);
+	fwrite($socket, "GET / HTTP/1.1\r\nHost: 127.0.0.1:$port\r\nConnection: close\r\n\r\n");
+	fread($socket, 100);
+	fclose($socket);
+	for ($i = 0; $i < 60 && !glob("$dir/*.eml"); $i++) usleep(50000);
+	same(1, count(glob("$dir/*.eml") ?: array()), 'mails sent:');
+});
+
 test('I11', 'mail headers are encoded: names, long subjects, and the sender for bounces (#124)', function () use ($root, $tmp) {
 	$dir = "$tmp/mail-headers";
 	$args = "$tmp/sendmail-args.txt";

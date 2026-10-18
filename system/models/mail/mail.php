@@ -157,9 +157,11 @@ class mail
 		if (!static::$kept) return;
 		$kept = static::$kept;
 		static::$kept = array();
+		// first, or a visitor who has gone stops PHP at the flush below
+		// and the mail is lost
+		ignore_user_abort(true);
 		if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
 		static::finish_answer();
-		ignore_user_abort(true);
 		$smtp = in_array(strtolower((string)strstr(static::transport(), ':', true)), array('smtp', 'smtps'), true);
 		$down = null;
 		static::keep_open();
