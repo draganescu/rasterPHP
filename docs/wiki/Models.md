@@ -161,6 +161,22 @@ Since render blocks run before print blocks, a `print` method can always read wh
 
 To render a **whole other view** into a string, use `controller::render_view('partials/card', array('title' => 'Hi'))`. Values are available in that view as `print.self.<name>`. The emails Raster sends are made this way.
 
+## What a model needs
+
+A model that sends emails, or has pages that only work with PHP behind them, says so in a static `requires()`:
+
+```php
+static function requires() {
+    return array(
+        'emails' => array('render.quote.ask' => array('_email/quote_received')),
+        'pages' => array(config::get('quote_thanks_page', 'quote-thanks')),
+        'settings' => array('quote_staff_email', 'quote_thanks_page'),
+    );
+}
+```
+
+`php bin/raster lint` then reports a view with `render.quote.ask` in a theme without `_email/quote_received.html`; the sitemap and `raster export` leave the pages out (`sitemap_skip` and `export_skip` add to them); and `describe` lists the settings. It may read settings, as here, so a page moved by its setting is left out where it now is. The bundled `authentication` and `newsletter` models declare their emails and pages this way, and theirs count only on a site whose views use them.
+
 ## A model's JSON API
 
 A model can offer some of its methods over HTTP, as JSON:
@@ -192,6 +208,8 @@ What is never reachable:
 
 - methods that are static, not public, or whose name starts with `_`
 - the bundled models, except `cms`, and of `cms` only what its own `api()` lists: the in-page editor's endpoints (which check for an editor and a security token), `style` and `logout`. A public method added in a `the_cms` override answers 404 unless the override lists it. The override's `api()` adds to what `cms` lists, so the in-page editor keeps working. `config::set('api_system_models')->to(array('cms', 'feed'))` lets another bundled model through, for what its `api()` lists.
+
+**Staff methods only answer your own site.** A method listed for `member`, `editor` or `admin` answers `403` with `{"error":"cross-site"}` when another website started the request, whatever the verb, GET too. The visitor's session cookie comes along when they follow a link from another site, so without this a link on someone else's page could make an editor's browser call a staff method that changes data. Browsers say where a request comes from with the `Origin`, `Sec-Fetch-Site` or `Referer` header; `Origin: null` counts as another site unless `Sec-Fetch-Site` says it's yours. A server calling your site (a payment provider's webhook) sends none of these, so methods listed for visitors work as before.
 
 Posts to `/api` pass the same cross-site check as forms. When the visitor is logged in, the post must also include the session token as a `csrf` field, as forms do; your page's scripts can read it from a hidden `csrf` input of any post form on the page. Posts to `/api` don't count as form submissions, though: `validation::get()->submitted()` is `false`, so form handlers written as shown in [Forms and validation](Forms-and-Validation) do nothing over `/api`.
 

@@ -60,9 +60,10 @@ class raster_export {
 		$this->target = rtrim($target, '/');
 		$this->url = $url === '' ? '/' : $url;
 		if (substr($this->url, -1) !== '/') $this->url .= '/';
-		// pages that only work with PHP behind them: accounts and newsletter answers
+		// pages that only work with PHP behind them, as the models in use
+		// name them: accounts and newsletter answers
 		$this->skip = array('#^/(api|mcp|logout)(/|$)#');
-		foreach (array(config::get('login_page', 'login'), 'register', 'forgot', config::get('reset_page', 'reset'), 'account', config::get('newsletter_confirm_page', 'newsletter-confirm'), config::get('newsletter_unsubscribe_page', 'newsletter-unsubscribe')) as $page) {
+		foreach (controller::required('pages') as $page) {
 			$this->skip[] = '#^/'.preg_quote(trim($page, '/'), '#').'$#';
 		}
 		$this->skip = array_merge($this->skip, (array)config::get('export_skip', array()));

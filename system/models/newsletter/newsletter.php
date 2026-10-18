@@ -46,6 +46,17 @@ class newsletter
 		);
 	}
 
+	// what a site using the newsletter needs: the confirmation email's view,
+	// the pages that answer its links (the sitemap and a static export leave
+	// them out) and the settings that change it
+	static function requires() {
+		return array(
+			'emails' => array('render.newsletter.signup' => array('_email/newsletter_confirm')),
+			'pages' => array(config::get('newsletter_confirm_page', 'newsletter-confirm'), config::get('newsletter_unsubscribe_page', 'newsletter-unsubscribe')),
+			'settings' => array('newsletter_double_opt_in', 'newsletter_confirm_page', 'newsletter_unsubscribe_page'),
+		);
+	}
+
 	static function table_ready() {
 		return cms_store::table_exists('subscriber');
 	}

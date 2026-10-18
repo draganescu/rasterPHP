@@ -6,7 +6,7 @@ This page lists the protections Raster applies for you, and the few things that 
 
 **Private files stay private.** Code, config, the database and raw templates are never served, on `php -S`, Apache, nginx or Caddy alike, from one list of rules. See [Deploying to production](Deploying-to-Production#how-a-raster-site-is-laid-out-on-a-server). Matching ignores upper and lower case, so `/APPLICATION/DATA/RASTER.SQLITE` is refused too.
 
-**Forms can't be posted from other websites.** Every POST is checked against the browser's `Origin`, `Sec-Fetch-Site` or `Referer` header. This blocks cross-site request forgery (CSRF), where a malicious page makes a visitor's browser submit your forms. Logged-in users' forms also carry a secret per-session token that must match. See [Forms and validation](Forms-and-Validation#protection-added-for-you).
+**Forms can't be posted from other websites.** Every POST is checked against the browser's `Origin`, `Sec-Fetch-Site` or `Referer` header, and `/api` methods listed for staff or members are checked on every verb, GET too (see [Models](Models)). This blocks cross-site request forgery (CSRF), where a malicious page makes a visitor's browser submit your forms. Logged-in users' forms also carry a secret per-session token that must match. See [Forms and validation](Forms-and-Validation#protection-added-for-you).
 
 **Spam bots are fooled.** Every post form has a hidden honeypot field. Posts that fill it get a fake success and nothing is done.
 

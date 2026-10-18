@@ -52,7 +52,9 @@ class feed
 		require_once BASE.'tools/inspector.php';
 		$inspector = new raster_inspector();
 		$link = rtrim(config::get('link_uri'), '/');
-		$skip = (array)config::get('sitemap_skip', array('login', 'account', 'reset', 'forgot', 'register', 'newsletter-confirm', 'newsletter-unsubscribe'));
+		// the pages the models in use need PHP for (login, the newsletter's
+		// answers), and what sitemap_skip adds
+		$skip = array_merge(controller::required('pages'), (array)config::get('sitemap_skip', array()));
 		$rows = array();
 		$item_views = array();
 		foreach ($inspector->views() as $view) {

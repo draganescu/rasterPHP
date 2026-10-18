@@ -70,11 +70,13 @@ Tell browsers and feed readers about the feed in your `<head>`:
 
 `render.feed.pages` lists every page of the theme and every published item of every collection that has an item view (`<name>_item.html`), each with `url` and `updated` (a date).
 
-Left out automatically: partials and emails (`_…`), protected pages, and the account and newsletter pages. Change that list with:
+Left out automatically: partials and emails (`_…`), protected pages, and the account and newsletter pages, wherever their settings put them (`login_page`, `reset_page`, `newsletter_confirm_page`…). Each model names those pages itself, in its `requires()` (see [Models](Models)). Leave out more with:
 
 ```php
-config::set('sitemap_skip')->to(array('login', 'account', 'register', 'forgot', 'reset', 'thanks', '404'));
+config::set('sitemap_skip')->to(array('thanks', '404'));
 ```
+
+`sitemap_skip` adds to the pages left out automatically; it doesn't replace them.
 
 ## JSON
 
