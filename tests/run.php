@@ -533,6 +533,24 @@ test('in-page links stay on the page, and every <head> gets the base (#117)', fu
 		unlink($view);
 	}
 });
+test('an extension on a routed or missing URL is never HTML labelled as another type (#120)', function () use ($base) {
+	$type = function ($headers) { return (string)current(preg_grep('/^Content-Type:/i', $headers)); };
+	// a missing page is the 404 page, as HTML
+	list($status, $body, $headers) = http('GET', "$base/nothing-here.json");
+	same(404, $status);
+	check(stripos($type($headers), 'text/html') !== false, $type($headers));
+	// a routed URL renders the routed view in that format: news.rss
+	list($status, $body, $headers) = http('GET', "$base/news/news_page/2.rss");
+	same(200, $status);
+	check(stripos($type($headers), 'application/rss+xml') !== false && strpos($body, '<rss') !== false, $type($headers));
+	// and is a 404 when the view has no file in it
+	list($status, , $headers) = http('GET', "$base/news/news_page/2.json");
+	same(404, $status);
+	check(stripos($type($headers), 'text/html') !== false, $type($headers));
+	// real format views are unchanged
+	same(200, http('GET', "$base/news.rss")[0]);
+	same(200, http('GET', "$base/sitemap.xml")[0]);
+});
 test('missing pages and items are 404', function () use ($base) {
 	same(404, http('GET', "$base/nothing-here")[0]);
 	same(404, http('GET', "$base/news/news_item/999")[0]);

@@ -119,6 +119,7 @@ How routes match:
 - Routes are tried in the order they are written. The first match wins, and a matching route wins over a file with the same name.
 - A routed URL is a page of its own: CMS page fields on `/specials` are stored separately from those on `/menu`.
 - `->from('theme')` renders the view from another theme folder, for example a print-friendly version of a page.
+- A routed URL with an extension renders the view's file in that format: `/news/news_page/2.rss` is page 2 of `news.rss`. When the view has no such file (`/specials.json` with no `menu.json`), the answer is the 404 page.
 
 Most sites need no routes at all. CMS collection URLs such as `/news/news_item/3` and `/news/news_page/2` are routed automatically; see [The CMS](The-CMS).
 
@@ -132,7 +133,7 @@ By default an unknown URL gets a bare "404 Not Found" heading. To use your own p
 config::set('error_document_404')->to('404');
 ```
 
-The page is rendered with status 404, so it can use the layout and CMS fields like any other page. A CMS item URL whose item doesn't exist (`/news/news_item/no-such-post`) also returns 404.
+The page is rendered with status 404, so it can use the layout and CMS fields like any other page. It is always an HTML page, also for a missing `/about.json` or `/feed.rss`. A CMS item URL whose item doesn't exist (`/news/news_item/no-such-post`) also returns 404.
 
 ## Sites in a subfolder, and servers without URL rewriting
 

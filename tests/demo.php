@@ -216,6 +216,15 @@ test(array('A2', 'A3', 'A4'), 'pages by file name, nested views, /index', functi
 test(array('A5', 'A6'), 'routes file and URL keys', function () use ($base) {
 	has(http('GET', "$base/specials")[1], '<h1>Menu</h1>');
 	same(404, http('GET', "$base/my-specials")[0], 'routes are anchored');
+	// a routed URL with an extension its view has no file for is a 404 page,
+	// in HTML and in the site's theme (#120)
+	foreach (array('/specials.json', '/print/menu.txt', '/about.json') as $url) {
+		list($status, $body, $headers) = http('GET', $base.$url);
+		same(404, $status, $url);
+		has(header_value($headers, 'Content-Type'), 'text/html', $url);
+		has($body, '/demo/views/cafe/', "$url: the 404 page with its base");
+	}
+	has(header_value(http('GET', "$base/journal/journal_page/2.rss")[2], 'Content-Type'), 'application/rss+xml', 'page 2 of the feed is journal.rss');
 	has(between(http('GET', "$base/lab/color/red")[1], 'param'), '<p class="color">red</p>');
 });
 test(array('A7', 'A8'), 'unknown pages and partials are 404', function () use ($base) {

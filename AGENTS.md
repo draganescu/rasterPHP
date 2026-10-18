@@ -68,7 +68,10 @@ media/                        uploads from the CMS
 - **Formats:** `/news.rss` renders `news.rss`, and `/sitemap.xml` renders
   `sitemap.xml` (also `.json`, `.txt`, `.atom`). Printed values are escaped
   for the format: XML-escaped in feeds, JSON-escaped in JSON views. HTML views
-  print values as they are.
+  print values as they are. A route or a collection URL with an extension renders
+  the routed view's file in that format (`/news/news_page/2.rss` is page 2
+  of `news.rss`), and is a 404 when there is none. A 404 page is always
+  HTML, whatever the missing URL's extension (`/about.json`).
 - Files and folders starting with `_` are never pages: `_layout.html` for
   partials, `_email/` for emails. Collection URLs follow the same rule:
   `/_email/digest/news_page/1` is a 404 even when `_email/digest.html`

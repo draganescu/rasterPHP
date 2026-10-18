@@ -305,6 +305,7 @@ class controller {
 			$view = $default_view;
 		}
 		
+		$theme = config::get('theme');
 		// then we look up routes to see if the author specifically requested
 		// a different view trough controller::route( 'url/param' )->to( 'view' );
 		foreach ($dotted ? array() : $this->routes as $url=>$file)
@@ -330,10 +331,19 @@ class controller {
 			}
 		}
 		
-		// the route is the filesystem address to the view
+		// the route is the filesystem address to the view. With an extension
+		// it is the view's file in that format (/journal/journal_page/2.rss
+		// is journal.rss), and a 404 when there is none, not the HTML view
+		// labelled as JSON (#120)
 		if($template != '') {
-			$route = controller::build_view_path($template);
+			$route = controller::build_view_path($template, $format_ext);
 			$view = $template;
+			if ($format_ext !== null && !file_exists($route)) {
+				config::set('theme')->to($theme);
+				$template = '';
+				$route = $is_safe && file_exists($default_file) ? $default_file : '';
+				$view = $route ? $default_view : '';
+			}
 		}
 
 		// index route
@@ -349,6 +359,8 @@ class controller {
 			event::dispatch('route_not_found');
 			$route = controller::error('404');
 			$view = '';
+			// the 404 page is HTML, whatever extension the missing URL had
+			config::set('format')->to('html');
 		}
 
 		// obvious right?
