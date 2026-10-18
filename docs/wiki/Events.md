@@ -83,8 +83,8 @@ These are sent whatever caused the change: a form, the in-page editor, the JSON 
 | `cms.item_deleted` | `collection`, `item` |
 | `cms.page_saved` | `type` (the page's table), `slug`, `changed` (names of changed fields), `fields` (the saved page: `revision`, `updated_at`, and `fields` with the values, so `$payload['fields']['fields']['headline']`) |
 | `content_changed` | none (sent by `util::content_changed()`; inside a transaction, once after the commit) |
-| `mail.sent` | `to`, `subject` |
-| `mail.failed` | `to`, `subject`, `error` |
+| `mail.sent` | `to`, `subject`. In a web request, after the answer (see [Sending email](Sending-Email#mail-goes-out-after-the-answer)) |
+| `mail.failed` | `to`, `subject`, `error`. In a web request, after the answer |
 
 ## Request events
 

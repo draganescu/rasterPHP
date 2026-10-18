@@ -88,7 +88,7 @@ Pass options as one string, in the style of a URL query:
 | `<field>=?<name>` | equals the URL's `?<name>=`; left out when the URL has none or it is empty |
 | `<field>>=<value>` | also `>`, `<`, `<=`, and `!=` (which keeps items where the field is empty) |
 
-`today` is the date the page is shown: `date>=today` is what's coming, `date<today` what's past. Values compare as the field's type: a field whose mock-up is `2026-10-10` is a date, `14` an int, `4.50` a number, `19:00` a time, and anything else text. Whoever writes a value, it is stored as its type (`5 Oct 2026` becomes `2026-10-05`), or refused when it can't be one.
+`today` is the date the page is shown, in the site's time zone (setting `timezone`): `date>=today` is what's coming, `date<today` what's past. Values compare as the field's type: a field whose mock-up is `2026-10-10` is a date, `14` an int, `4.50` a number, `19:00` a time, and anything else text. Whoever writes a value, it is stored as its type (`5 Oct 2026` becomes `2026-10-05`), or refused when it can't be one.
 
 A filter on a field that doesn't exist yet **adds that field**. So `render.cms.products('featured=1')` gives products a `featured` field, which editors set to `1` on the items to show.
 
@@ -168,6 +168,8 @@ Every item has two extra fields:
 
 - `enabled`: `0` makes it a **draft** (the editor calls this *Hidden*).
 - `published_at`: a date and time in the future **schedules** it.
+
+`published_at`, like every date Raster stores, is the site's clock in its time zone (setting `timezone`; see [Settings](Settings-and-Environments)). An item scheduled for 09:00 goes live at 09:00 there, and the editor's Schedule box and its live or scheduled badge use the site's clock too, whatever zone the editor's computer is in.
 
 Visitors don't see drafts or scheduled items, on lists, detail pages, feeds or sitemaps. Logged-in editors see everything, so they can check a post before it goes out. When a scheduled item's time comes, the page cache is thrown away so it shows up.
 

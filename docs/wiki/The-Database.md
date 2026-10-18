@@ -100,6 +100,12 @@ How it works:
   ```
 
   Values for `'%s'` are quoted safely by the database driver. A `.sql` file with the same name wins over an entry here.
+- **Now and today come from PHP.** A query that needs the current time takes it as an argument, `date('Y-m-d H:i:s')` or `date('Y-m-d')`, never SQLite's `date('now')` or MySQL's `NOW()`. Those follow the database's clock (always UTC on SQLite), while everything Raster stores is in the site's time zone (setting `timezone`), so they would be hours off:
+
+  ```sql
+  -- sql/upcoming.sql, called as ->upcoming(date('Y-m-d'))
+  SELECT * FROM bookingdata WHERE date >= ? ORDER BY date
+  ```
 - Calling a name that has no query throws a `BadMethodCallException`. `lint` finds such calls in your models before you run them.
 
 ### Inline queries

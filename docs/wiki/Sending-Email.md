@@ -35,9 +35,17 @@ if (!$sent) {
 }
 ```
 
-`send_view($view, $to, $values, $headers)` returns `true` when the message was handed over. The optional `$headers` array adds headers, such as `array('Reply-To' => 'sales@example.com')`.
+`send_view($view, $to, $values, $headers)` returns `false` when the message can't be sent at all (a bad recipient address, an unknown transport, an unknown site address in production) and `true` otherwise. In a web request `true` means the message is kept to be sent after the answer (see below), so it doesn't tell you the mail server took it: `mail.failed` does. On the command line `true` means the message was handed over. The optional `$headers` array adds headers, such as `array('Reply-To' => 'sales@example.com')`.
 
-To send HTML you built yourself: `mail::send($to, $subject, $html)`.
+To send HTML you built yourself: `mail::send($to, $subject, $html)`. It returns `false` and `true` the same way, without the check of the site's address.
+
+## Mail goes out after the answer
+
+In a web request the mail is not sent while the visitor waits. `send()` and `send_view()` check the message and keep it; once the page has been answered (the session written, and the connection finished where PHP can do that, as under PHP-FPM), Raster sends every kept mail over one connection. A visitor who closes the tab early doesn't stop it.
+
+So a slow or silent mail server can't hold a contact form: SMTP waits 5 seconds at most (`mail::TIMEOUT`), and once the server can't be reached the rest of that request's mails fail at once. Each failure is written to the log and sends `mail.failed`.
+
+On the command line (`raster send`, your scripts, MCP over stdio), and between `mail::keep_open()` and `mail::close()`, mail is sent at once and `send()` returns whether it was handed over.
 
 To render a view into a string without sending it (for a PDF, an export, or an HTML fragment for a script), use `controller::render_view('_email/welcome', array('name' => 'Ada'))`. The values are available as `print.self.<name>`, and the page being built isn't affected.
 
@@ -79,7 +87,7 @@ RASTER_URL=https://example.com/
 
 ## Events
 
-Every send dispatches `mail.sent` (with `to` and `subject`) or `mail.failed` (with `error` too). Listen to them to keep a log or raise an alarm; see [Events](Events).
+Every send dispatches `mail.sent` (with `to` and `subject`) or `mail.failed` (with `error` too). In a web request they come after the answer, when the kept mail is sent, so a listener can't change the page any more; `mail.failed` is the only word that a kept mail didn't go. Listen to them to keep a log or raise an alarm; see [Events](Events).
 
 ## Testing email
 
