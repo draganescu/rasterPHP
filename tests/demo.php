@@ -920,6 +920,11 @@ test(array('H1', 'H2', 'H3', 'H4', 'H5', 'H11'), 'double opt-in', function () us
 });
 test(array('H6', 'H9'), 'sending an issue', function () use ($base) {
 	same(2, raster(array('send', '/journal/journal_item/opening-day'), array('RASTER_URL' => ''))[0], 'needs RASTER_URL');
+	$before = count(mails());
+	list($code, $out) = raster(array('send', '/journal/journal_item/opening-day', '--dryrun'), array('RASTER_URL' => "$base/"));
+	same(2, $code, $out);
+	has($out, "send doesn't take --dryrun");
+	same($before, count(mails()), 'a mistyped --dry-run sent the issue');
 	list($code, $out) = raster(array('send', '/journal/journal_item/opening-day', '--dry-run'), array('RASTER_URL' => "$base/"));
 	has($out, 'Would send "Journal" to 2 subscriber(s)');
 	list($code, $out) = raster(array('send', '/journal/journal_item/opening-day', '--to=test@example.com'), array('RASTER_URL' => "$base/"));
@@ -1255,7 +1260,7 @@ test('M16', 'render_url renders without a web server', function () use ($base) {
 
 // ## F. Schema, and N. the command line
 
-test(array('F1', 'F2', 'F4', 'F5'), 'schema: status, check, rename, drop', function () use ($base, $views) {
+test(array('F1', 'F2', 'F4', 'F5', 'F8'), 'schema: status, check, rename, drop, --dry-run', function () use ($base, $views) {
 	http('GET', "$base/faq");
 	list($code, $out) = raster(array('schema', '--json'));
 	same(0, $code, $out);
@@ -1268,6 +1273,10 @@ test(array('F1', 'F2', 'F4', 'F5'), 'schema: status, check, rename, drop', funct
 		same(1, raster(array('schema', '--check'))[0], 'drift after renaming');
 		list(, $out) = raster(array('schema'));
 		has($out, '--rename=aboutpage.heading:title');
+		list($code, $out) = raster(array('schema', '--rename=aboutpage.heading:title', '--dry-run'));
+		same(0, $code, $out);
+		has($out, 'would move aboutpage.heading into title', 'the GET made the new column');
+		same(1, raster(array('schema', '--check'))[0], '--dry-run renamed it');
 		same(0, raster(array('schema', '--rename=aboutpage.heading:title'))[0]);
 		has(http('GET', "$base/about")[1], '<h1>Our story</h1>', 'the content moved');
 	});
@@ -1280,6 +1289,13 @@ test(array('F1', 'F2', 'F4', 'F5'), 'schema: status, check, rename, drop', funct
 	database::instance('cms');
 	R::exec('CREATE TABLE IF NOT EXISTS oldpage (id INTEGER PRIMARY KEY, x TEXT)');
 	has(raster(array('schema'))[1], 'table oldpage');
+	list($code, $out) = raster(array('schema', '--drop=oldpage', '--dry-run'));
+	same(0, $code, $out);
+	has($out, 'would drop table oldpage');
+	has(raster(array('schema'))[1], 'table oldpage', '--dry-run dropped it');
+	list($code, $out) = raster(array('schema', '--apply', '--dry-run'));
+	same(0, $code, $out);
+	has($out, 'nothing applied');
 	same(0, raster(array('schema', '--drop=oldpage'))[0]);
 	same(0, raster(array('schema', '--check'))[0], raster(array('schema'))[1]);
 });
@@ -1505,6 +1521,61 @@ test('N11', 'exporting again writes only what changed', function () use ($tmp, $
 	check(is_file("$out/extra.txt"), 'files the export did not write are kept');
 	$manifest = json_decode(file_get_contents("$out/.raster-export.json"), true);
 	check(isset($manifest['files']['about/index.html']) && !empty($manifest['fingerprint']));
+});
+test('N16', 'a page that answers an error stops the export, and the last export stays', function () use ($tmp, $root, $views) {
+	$out = "$tmp/failing";
+	same(0, raster(array('export', $out, '--url=https://cafe.example/'))[0]);
+	$manifest = file_get_contents("$out/.raster-export.json");
+	$original = file_get_contents("$views/about.html");
+	@mkdir("$root/demo/models/zzthrows");
+	$boom = '<!-- print.zzthrows.boom -->x<!-- /print.zzthrows.boom -->';
+	with_file("$root/demo/models/zzthrows/zzthrows.php", "<?php\nclass zzthrows\n{\n\tfunction boom() { throw new RuntimeException('boom'); }\n}\n", function () use ($out, $views, $original, $boom) {
+		// a model that throws, on About
+		with_file("$views/about.html", str_replace('<h2>Opening hours</h2>', $boom.'<h2>Opening hours</h2>', $original), function () use ($out) {
+			list($code, $output) = raster(array('export', $out, '--url=https://cafe.example/'));
+			same(1, $code, $output);
+			has($output, '/about answered 500');
+			has($output, 'Nothing was written');
+			check(is_file("$out/about/index.html"), 'the page from the last export was removed');
+			check(is_file("$out/index.html"));
+		});
+		// the same for the 404 page: its 404.html stays
+		$not_found = file_get_contents("$views/404.html");
+		with_file("$views/404.html", str_replace('<h1>', $boom.'<h1>', $not_found), function () use ($out) {
+			check(is_file("$out/404.html"), 'the last export has a 404.html');
+			list($code, $output) = raster(array('export', $out, '--url=https://cafe.example/'));
+			same(1, $code, $output);
+			has($output, 'The 404 page answered 500');
+			has($output, 'Nothing was written');
+			check(is_file("$out/404.html"), 'the 404.html from the last export was removed');
+		});
+	});
+	@rmdir("$root/demo/models/zzthrows");
+	same($manifest, file_get_contents("$out/.raster-export.json"), 'the list of files is the last export\'s');
+	list($code, $output) = raster(array('export', $out, '--url=https://cafe.example/'));
+	same(0, $code, $output);
+});
+test('N17', 'commands refuse options they do not take, and say which they do', function () use ($views) {
+	list($code, $out) = raster(array('lint', '--jsn'));
+	same(2, $code, $out);
+	has($out, "lint doesn't take --jsn");
+	has($out, '--json');
+	has($out, '--all-themes');
+	list($code, $out) = raster(array('version', '--dry-run'));
+	same(2, $code, $out);
+	has($out, "version doesn't take --dry-run");
+	// what the parser can't read is refused too, not taken as a folder or a URL
+	same(2, raster(array('export', '/tmp/raster-never', '--dry_run'))[0]);
+	check(!file_exists('/tmp/raster-never'), 'the export ran');
+	// a typo of --dry-run on schema --drop drops nothing
+	database::instance('cms');
+	R::exec('CREATE TABLE IF NOT EXISTS zzkeptpage (id INTEGER PRIMARY KEY, x TEXT)');
+	same(2, raster(array('schema', '--drop=zzkeptpage', '--dryrun'))[0]);
+	check(in_array('zzkeptpage', R::inspect()), 'the table was dropped');
+	R::exec('DROP TABLE zzkeptpage');
+	// every option the help names is one the command takes
+	has(raster(array('help'))[1], '--dry-run');
+	same(0, raster(array('lint', '--theme=print', '--json'))[0]);
 });
 test('N4', 'serve', function () use ($root) {
 	$port = free_port();
@@ -2292,6 +2363,14 @@ test(array('R7', 'R9', 'R10', 'R11'), 'hidden fields, lists, transactions and li
 			$ticket = cms_records::create('ticket', array('title' => 'Mugs', 'stock' => 1, 'secret' => 'tok_123', 'lines' => array(array('name' => '<i>Mug</i>', 'qty' => 2))));
 			same(array(array('name' => '<i>Mug</i>', 'qty' => 2)), $ticket['lines'], 'lists come back as lists');
 			same('tok_123', $ticket['secret'], 'the model sees hidden fields');
+			// a public URL never carries a hidden field, even when it is the
+			// first text a record has
+			$fair = cms_records::create('ticket', array('secret' => 'ana@example.com', 'link' => 'Spring fair'));
+			$bare = cms_records::create('ticket', array('secret' => 'tok_456'));
+			cms_records::delete('ticket', $fair['id']);
+			cms_records::delete('ticket', $bare['id']);
+			same('spring-fair', $fair['slug'], 'the slug skips hidden fields:');
+			same('item', $bare['slug'], 'with only a hidden field, the slug is item:');
 			same('24.00', cms_records::create('ticket', array('title' => '24.00'))['title'], 'text fields keep what they are given');
 			$shown = mcp($base, 'get_item', array('collection' => 'ticket', 'id' => $ticket['id']));
 			check(!array_key_exists('secret', $shown), 'MCP never sees hidden fields');
@@ -3230,6 +3309,91 @@ test('H13', 'signing up twice: one subscriber, the same link again, mailed by a 
 	same(array_fill(0, 2, R::getCell('SELECT token FROM subscriber WHERE email = ?', array('again@example.com'))), $links, 'both mails carry the link that works:');
 	has(http('GET', "$base/letters/confirm?token={$links[0]}")[1], '<h1>You are subscribed</h1>');
 	same(array('newsletter.confirmation_mail'), mcp($base, 'site_overview')['events']['newsletter.subscribed'], 'who sends the confirmation:');
+});
+
+test('H14', 'an interrupted send goes on where it stopped (#86)', function () use ($base) {
+	database::instance('cms');
+	$readers = R::getCol("SELECT email FROM subscriber WHERE status = 'confirmed' ORDER BY id");
+	check(count($readers) >= 3, 'readers: '.count($readers));
+	$got = function ($since) {
+		$to = array();
+		foreach (array_slice(mails(), $since) as $mail) if ($mail['subject'] === 'Journal') $to[] = $mail['to'];
+		return array_count_values($to);
+	};
+	$before = count(mails());
+	// a model that stops the run when the second mail is handed over, as a
+	// dropped SSH session would
+	$dir = dirname(__DIR__).'/demo/models/zzstop';
+	@mkdir($dir);
+	try {
+		with_file("$dir/zzstop.php", "<?php\nclass zzstop {\n\tstatic \$n = 0;\n\tstatic function listens() { return array('mail.sent' => 'stop'); }\n\tfunction stop() { if (++self::\$n === (int)getenv('ZZ_STOP_AFTER')) exit(3); }\n}\n", function () use ($base) {
+			same(3, raster(array('send', '/journal'), array('RASTER_URL' => "$base/", 'ZZ_STOP_AFTER' => '2'))[0], 'the run was stopped');
+		});
+	} finally { @rmdir($dir); }
+	same(2, array_sum($got($before)), 'mailed before the stop');
+	list($code, $out) = raster(array('send', '/journal', '--dry-run'), array('RASTER_URL' => "$base/"));
+	has($out, 'Would send "Journal" to '.(count($readers) - 1).' subscriber(s) who don\'t have it yet');
+	list($code, $out) = raster(array('send', '/journal'), array('RASTER_URL' => "$base/"));
+	same(0, $code, $out);
+	has($out, 'Sent "Journal" to '.(count($readers) - 1).' more subscriber(s), '.count($readers).' in all');
+	$counts = $got($before);
+	same(1, $counts[$readers[0]], 'the first reader got it once:');
+	// the second was handed over as the run was stopped, before it was noted
+	same(2, $counts[$readers[1]], 'the second reader:');
+	foreach (array_slice($readers, 2) as $email) same(1, isset($counts[$email]) ? $counts[$email] : 0, "$email:");
+	list($code, $out) = raster(array('send', '/journal'), array('RASTER_URL' => "$base/"));
+	same(1, $code, $out);
+	has($out, '/journal was already sent');
+	has($out, 'to '.count($readers).' subscribers');
+});
+test('H15', 'readers a send failed get it on a plain rerun, over one SMTP connection, and no password is printed (#86)', function () use ($base, $root, $tmp) {
+	database::instance('cms');
+	$readers = R::getCol("SELECT email FROM subscriber WHERE status = 'confirmed' ORDER BY id");
+	$port = free_port();
+	$log = "$tmp/smtp-resume.log";
+	$process = proc_open(array(PHP_BINARY, "$root/tests/fake_smtp.php", (string)$port, $log, 'plain'), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes);
+	$GLOBALS['servers'][] = $process;
+	for ($up = false, $i = 0; $i < 100 && !($up = @fsockopen('127.0.0.1', $port, $errno, $errstr, 0.2)); $i++) usleep(50000);
+	check($up, 'the fake SMTP server answers');
+	// it serves one connection at a time: let this one go
+	fclose($up);
+	// an '@' in the password: SMTP takes the last one as the end of it, and
+	// so must the printed destination
+	$env = array('RASTER_URL' => "$base/", 'RASTER_MAIL' => "smtp://letters:s3cret@pass@127.0.0.1:$port");
+	// accepted deliveries per address, and SMTP sessions, in the transcript so far
+	$accepted = function () use ($log) {
+		$text = (string)@file_get_contents($log);
+		preg_match_all('/^C: RCPT TO:<([^>]+)>\nS: 250 /m', $text, $m);
+		return array(array_count_values($m[1]), substr_count($text, "C: EHLO "));
+	};
+	file_put_contents("$log.refuse", $readers[1]."\n");
+	list($code, $out) = raster(array('send', '/about', '--dry-run'), $env);
+	has($out, 'via smtp://127.0.0.1:'.$port);
+	lacks($out, 'pass@');
+	list($code, $out) = raster(array('send', '/about'), $env);
+	same(1, $code, $out);
+	has($out, $readers[1].': ');
+	has($out, 'Sent "About" to '.(count($readers) - 1).' subscriber(s), 1 failed', $out);
+	lacks($out, 'pass@');
+	list($counts, $connections) = $accepted();
+	same(1, $connections, 'one connection for the whole run:');
+	has((string)file_get_contents($log), 'C: '.base64_encode('s3cret@pass')."\n", 'the whole password is sent:');
+	same(count($readers) - 1, array_sum($counts));
+	unlink("$log.refuse");
+	list($code, $out) = raster(array('send', '/about'), $env);
+	same(0, $code, $out);
+	has($out, 'Sent "About" to 1 more subscriber(s), '.count($readers).' in all');
+	list($counts) = $accepted();
+	foreach ($readers as $email) same(1, isset($counts[$email]) ? $counts[$email] : 0, "$email:");
+	same(1, raster(array('send', '/about'), $env)[0], 'sent to everyone: once only');
+	list($code, $out) = raster(array('send', '/about', '--again'), $env);
+	same(0, $code, $out);
+	has($out, 'Sent "About" to '.count($readers).' subscriber(s)');
+	list($counts) = $accepted();
+	foreach ($readers as $email) same(2, $counts[$email], "--again mails $email again:");
+	list($code, $out) = raster(array('send', '/about', '--to=test@example.com'), $env);
+	same(0, $code, $out);
+	lacks($out, 'pass@');
 });
 
 // ## 2.1.8 wave 2: content saves and the cache bump

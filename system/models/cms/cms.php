@@ -151,7 +151,7 @@ class cms
 			if ($m[3] === 'item' && $m[1] !== $m[2]) return;
 			$candidates = $m[3] === 'item' ? array($m[2].'_item', $m[1]) : array($m[1]);
 			foreach ($candidates as $view) {
-				if (strpos($view, '..') !== false || strpos(basename($view), '_') === 0) continue;
+				if (strpos($view, '..') !== false || controller::is_partial($view)) continue;
 				$file = controller::build_view_path($view);
 				// only views that actually render this collection
 				if (file_exists($file) && strpos(file_get_contents($file), '<!-- render.cms.'.$m[2]) !== false) {
@@ -475,7 +475,7 @@ class cms
 			foreach ($data as $key => $item) {
 				if (!empty($item['slug'])) continue;
 				$bean = R::load($this->data_name, $item['id']);
-				$bean->slug = cms_store::unique_slug($this->data_name, cms_store::slug_source($item), $item['id']);
+				$bean->slug = cms_store::unique_slug($this->data_name, cms_store::slug_source($item, $record ? array_merge($record['hidden'], array('owner', 'created_at')) : array()), $item['id']);
 				R::store($bean);
 				$data[$key]['slug'] = $bean->slug;
 			}

@@ -87,7 +87,7 @@ RASTER_URL=https://example.com/ php bin/raster send /news/news_item/our-new-offi
 | `--dry-run` | says how many subscribers would get it, sends nothing |
 | `--to=address` | sends only to that address, as a test |
 | `--subject="…"` | a subject other than the page's `<title>` |
-| `--again` | sends a page that was already sent (each page is sent once otherwise) |
+| `--again` | sends a page that was already sent to everyone again (each page is sent once otherwise) |
 
 What happens:
 
@@ -95,7 +95,11 @@ What happens:
 2. Scripts, forms and `<nav>` elements are removed; they don't belong in an email.
 3. Links and images become absolute addresses on your site.
 4. The page's `<title>` becomes the subject (or `--subject`). A page without a title isn't sent.
-5. Each confirmed subscriber gets their own copy with their own unsubscribe link.
+5. Each confirmed subscriber gets their own copy with their own unsubscribe link, all over one connection to the mail server.
+
+If the run stops part way (a dropped SSH session, a crash) or some addresses fail (a greylisting server), run the same command again: it mails only the subscribers who don't have the issue yet, and says how many it reached in all. Each address is written down as its mail is handed over. Once a run has reached everyone, the page counts as sent and the command refuses to send it again without `--again`. The one exception: a mail handed over at the very moment the process was killed isn't written down yet, so that reader may get it twice.
+
+The command prints the mail transport without its user name or password.
 
 The site's address, `RASTER_URL` (or the `site_url` setting), is required, so links point at your live site. Run the command on the server, or anywhere with the production database, with `RASTER_ENV=production`.
 

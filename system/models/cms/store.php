@@ -29,13 +29,16 @@ class cms_store {
 		return substr($text, 0, 80) ?: 'item';
 	}
 
-	// the text a slug is made from: title, headline or name, else the first field
-	static function slug_source($values) {
+	// the text a slug is made from: title, headline or name, else the first
+	// field. $skip lists fields a public URL must never carry (a record's
+	// hidden fields, its owner).
+	static function slug_source($values, $skip = array()) {
 		foreach (array('title', 'headline', 'name') as $field) {
-			if (!empty($values[$field])) return $values[$field];
+			if (!empty($values[$field]) && !in_array($field, $skip, true)) return $values[$field];
 		}
 		foreach ($values as $field => $value) {
-			if (!in_array($field, self::$system_fields) && is_string($value) && trim(strip_tags($value)) !== '') return $value;
+			if (in_array($field, $skip, true) || in_array($field, self::$system_fields)) continue;
+			if (is_string($value) && trim(strip_tags($value)) !== '') return $value;
 		}
 		return 'item';
 	}
@@ -399,7 +402,9 @@ class cms_store {
 			raster_cache::schedule(strtotime($bean->published_at));
 		}
 		if (empty($bean->slug)) {
-			$bean->slug = self::unique_slug($type, self::slug_source($bean->export()), (int)$bean->id);
+			// never from a hidden field: the slug is in the record's public URL
+			$skip = $info ? array_merge($info['hidden'], array('owner', 'created_at')) : array();
+			$bean->slug = self::unique_slug($type, self::slug_source($bean->export(), $skip), (int)$bean->id);
 		}
 		if ($info && !$id) {
 			$bean->created_at = R::isoDateTime();

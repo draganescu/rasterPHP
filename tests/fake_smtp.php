@@ -3,7 +3,8 @@
 //   php tests/fake_smtp.php <port> <transcript-file> [plain|starttls|smtps] [cert.pem] [host]
 // plain never offers STARTTLS; starttls offers and performs it; smtps is TLS
 // from the first byte. It accepts AUTH LOGIN and appends every session
-// (commands and message) to the transcript file.
+// (commands and message) to the transcript file. Addresses listed in
+// <transcript-file>.refuse, one a line, are answered 450 greylisted.
 if ($argc < 3) exit("usage: fake_smtp.php <port> <file> [mode] [cert]\n");
 $mode = isset($argv[3]) ? $argv[3] : 'plain';
 $cert = isset($argv[4]) && $argv[4] !== '' ? $argv[4] : null;
@@ -53,7 +54,9 @@ while ($client = @stream_socket_accept($server, -1)) {
 		} elseif (strpos($command, 'AUTH') === 0) {
 			$session .= $secure ? "AUTH OVER TLS\n" : "AUTH IN PLAIN TEXT\n";
 			$say('334 VXNlcm5hbWU6');
-		} elseif (strpos($command, 'MAIL') === 0 || strpos($command, 'RCPT') === 0) {
+		} elseif (strpos($command, 'RCPT') === 0 && preg_match('/<([^>]+)>/', $line, $m) && in_array($m[1], array_map('trim', (array)@file($log.'.refuse')))) {
+			$say('450 greylisted');
+		} elseif (strpos($command, 'MAIL') === 0 || strpos($command, 'RCPT') === 0 || strpos($command, 'RSET') === 0) {
 			$say('250 ok');
 		} elseif (strpos($command, 'DATA') === 0) {
 			$say('354 go ahead');

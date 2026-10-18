@@ -89,6 +89,12 @@ test('a 2.1.0 release', function () use ($rel200, $rel210) {
 });
 
 test('update --dry-run changes nothing', function () use ($site, $rel210) {
+	// a typo of --dry-run is refused, not taken as an update
+	list($code, $out) = raster($site, array('update', $rel210, '--dryrun'));
+	same(2, $code, $out);
+	has($out, "update doesn't take --dryrun");
+	same("2.0.0\n", file_get_contents("$site/system/VERSION"));
+	same(2, raster($site, array('upgrade', '--dryrun'))[0]);
 	list($code, $out) = raster($site, array('update', $rel210, '--dry-run'));
 	same(0, $code, $out);
 	has($out, 'Raster 2.0.0 → 2.1.0: 2 changed, 2 new, 1 removed file(s)', $out);

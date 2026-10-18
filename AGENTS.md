@@ -27,7 +27,9 @@ php bin/raster doctor             # is this site healthy, up to date, ready for 
 ```
 
 `describe`, `vocabulary`, `annotations`, `lint`, `schema` and `doctor` all take
-`--json`. If you can speak MCP, use that instead: the same answers come from one
+`--json`. A command refuses an option it doesn't take (a mistyped
+`--dry-run`, say) with exit 2 and the options it does take, before it runs:
+`php bin/raster help` lists them all. If you can speak MCP, use that instead: the same answers come from one
 long-lived process (`php bin/raster mcp`, already in `.mcp.json`) rather than
 starting PHP again for every question — `describe` costs about 70 ms, everything
 else under 20. See **Editors and agents**.
@@ -68,7 +70,9 @@ media/                        uploads from the CMS
   for the format: XML-escaped in feeds, JSON-escaped in JSON views. HTML views
   print values as they are.
 - Files and folders starting with `_` are never pages: `_layout.html` for
-  partials, `_email/` for emails.
+  partials, `_email/` for emails. Collection URLs follow the same rule:
+  `/_email/digest/news_page/1` is a 404 even when `_email/digest.html`
+  renders `news` (one check, `controller::is_partial()`).
 - Unknown URLs return 404, and so does any path with a segment starting
   with a dot (`/./about`, `/.env`); `a//b` is `a/b`. View files themselves (`.html`, `.rss`, `.xml`,
   `.json`, `.txt` under `application/views/`) are never served raw (403); other
@@ -107,7 +111,7 @@ an agent can read it and be sure.
 | `<!-- print.model.method /-->` | Same, with no default. |
 | `<!-- print.@src.model.method --><img src="a.jpg"><!-- /print.@src.model.method -->` | Sets the attribute of the tag it wraps (`+` instead of `@` appends). `false`, `null` or an empty string keep the mock-up's value. With `cms`, a page field such as a photo. |
 | `<!-- render.model.method --> … <!-- /render.model.method -->` | Repeated once per row the method returns. Inside, `print.key` is a key of the row. |
-| `<!-- remove --> … <!-- /remove -->` | Mock-up content. Removed before anything runs. Can't be nested. |
+| `<!-- remove --> … <!-- /remove -->` | Mock-up content. Removed before anything runs, so fields and collections inside it are not part of the content model. Can't be nested. |
 | `<!-- res.name --> … <!-- /res.name -->` | A reusable fragment. |
 | `<!-- dry.view.name /-->` | Inserts fragment `res.name` from `view.html` (e.g. `dry._layout.header`). |
 | `<!-- print.if.flag --> … <!-- /print.if.flag -->` | Shown only when the template flag is true (`template::set('flag')->to(true)`). `if.live` is true on the running site and `if.static` in a static export. |
@@ -463,7 +467,9 @@ item of a collection is the mock-up content.
     a mock-up changes type (`14` becomes `14 lei`), `schema` shows the
     column as retyped and `schema --apply` converts it if every stored
     value fits; otherwise it names the values that don't.
-- **Items** get a `slug` made from their title, headline or name. They also
+- **Items** get a `slug` made from their title, headline or name (else
+  their first text field; never a record's hidden fields, which a public
+  URL must not carry). They also
   have `enabled` (`0` makes a draft) and `published_at` (a future date
   schedules the item). Visitors don't see drafts or scheduled items; editors
   do.
@@ -476,7 +482,12 @@ item of a collection is the mock-up content.
   `schema` shows orphaned columns and suggests
   `--rename=table.old:new`, which moves the content across.
   `--drop=table.column` or `--drop=table` deletes something no template uses;
-  `--force` overrides that check. `--check` exits 1 when the templates and the
+  `--force` overrides that check. Either takes only CMS page and collection
+  tables: the accounts and subscribers, a table a model declares with
+  `schema()`, and a record type's table and the columns its `types()`
+  declares are never dropped, `--force` or not, and are never listed as
+  unused. `--dry-run` says what `--rename`, `--drop` and `--apply` would
+  change and changes nothing. `--check` exits 1 when the templates and the
   database differ (for CI).
 
 ## Records: types a model declares
@@ -498,7 +509,7 @@ class reservation {
             'owner'    => true,                // remember who made it; they may read their own
             'public'   => false,               // the default: only editors (and owners) see records
             'readonly' => array('status'),     // shown to editors, written only by the model
-            'hidden'   => array(),             // never shown to editors or agents (payment ids, tokens)
+            'hidden'   => array(),             // never shown to editors or agents, nor made a slug (payment ids, tokens)
             'html'     => array(),             // fields printed as HTML; the rest print escaped
             'actions'  => array('confirm' => 'editor', 'refund' => 'admin'),
         ));   // a type's name is lowercase letters and digits; no field x next to x_id
@@ -767,7 +778,24 @@ class reservation {
   subscribers. Scripts, forms and `<nav>` are removed, and links become
   absolute. Put `<a href="<!-- print.newsletter.unsubscribe_url /-->">` in the
   page so each reader gets their own unsubscribe link. A page is sent once
-  unless you pass `--again`.
+  unless you pass `--again`. Each address is noted (table
+  `newsletterdelivery`) as its mail is handed over, so running the command
+  again after it stopped, or after some addresses failed, mails only the
+  confirmed subscribers who don't have it yet; the page counts as sent once
+  a run reached everyone. `--again` mails everyone. A mail handed over just
+  as the process was killed isn't noted yet, so that one reader may get it
+  twice. One SMTP connection serves the whole run, and the transport is
+  printed without its user, password or options.
+  - From code: `newsletter::send_issue($url, $html, $subject, $again)`
+    sends a page rendered with `RASTER_SENDING=1` and passed through
+    `newsletter::prepare_issue()`. It returns false when the issue already
+    reached everyone, else its `newsletterissue` row (`recipients`,
+    `incomplete`); `newsletter::$sent` and `newsletter::$failures`
+    (email => error) say what this run did. It makes its two tables, with
+    the types `schema --apply` gives them, also on a frozen database, and
+    on MySQL widens the small columns an older Raster made for them
+    (`recipients` as TINYINT, `subject` as VARCHAR(191)), as `--apply`
+    does, so sites need no step for it.
 
 **mail**: emails are views. `mail::send_view('_email/welcome', $to,
 array('name' => 'Ada'))` uses the view's `<title>` as the subject.
@@ -778,6 +806,10 @@ array('name' => 'Ada'))` uses the view's `<title>` as the subject.
   - `smtp://user:pass@host:587` requires STARTTLS (add `?insecure=1` to allow
     plain SMTP; `localhost` is allowed as is), and `smtps://…:465` uses TLS.
 - Sender: `RASTER_MAIL_FROM`.
+- Many mails at once: `mail::keep_open()` keeps the SMTP connection for the
+  mails that follow (`RSET` between them, a new connection if the server
+  dropped it) until `mail::close()`. `mail::destination()` is the transport
+  without user, password or options, for printing.
 
 **feed**:
 - `render.feed.items('news')`: the newest published items, with every field
@@ -910,6 +942,9 @@ of lists and filter pages come along; drafts and the editor don't.
   nothing is written. Wrap forms in `<!-- print.if.live -->` and write what
   the static site shows instead in `<!-- print.if.static -->` (a phone
   number, an email address, the RSS feed).
+- **A page that answers an error** (5xx, a model that throws) or doesn't
+  answer, the 404 page included, also stops the export: it names each such page, writes and removes
+  nothing, so the last export stays whole, and exits 1.
 - Left out: pages that need an account, login, sign-up, password and
   newsletter pages, `/api`, and paths in `config::set('export_skip')` or
   `--skip=/path`. The command lists links to left-out pages and query
@@ -1025,7 +1060,11 @@ of lists and filter pages come along; drafts and the editor don't.
   `the_events.php` are loaded after the framework's own).
 - **Values in scripts and styles:** `"/*- print.model.method /-*/"` is the
   same as `<!-- print.model.method /-->`, written so the file stays valid
-  JavaScript or CSS.
+  JavaScript or CSS. `lint`, `schema`, `describe` and MCP read it as the
+  engine does (the marks are `script_form` in `raster annotations`), so a
+  `print.cms` field written this way is a field like any other. A plain
+  comment that only starts like it, `/*- header */`, is no annotation and
+  hides none of the ones after it.
 - **Render into memory:** a render method whose result has the key
   `'__' => true` next to its rows is rendered but not printed; read the HTML later from
   `template::instance()->render_results['model']['method']`.
