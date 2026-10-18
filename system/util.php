@@ -335,10 +335,26 @@ class raster_cache {
 		$ttl = (int)config::get('page_cache_ttl', 3600);
 		if (!$meta || $meta['v'] !== self::$version || time() - $meta['t'] > $ttl) { fclose($handle); return; }
 		header('Content-Type: '.$meta['type']);
+		// the headers the page was made with, a name given twice sent twice
+		$sent = array();
+		foreach (isset($meta['headers']) ? (array)$meta['headers'] : array() as $header) {
+			$name = strtolower(strtok($header, ':'));
+			header($header, !isset($sent[$name]));
+			$sent[$name] = true;
+		}
+		header('Last-Modified: '.self::http_date($meta['t']));
 		header('X-Raster-Cache: hit');
-		fpassthru($handle);
+		// the browser's copy is as new as this one
+		$since = isset($_SERVER['HTTP_IF_MODIFIED_SINCE']) ? strtotime((string)$_SERVER['HTTP_IF_MODIFIED_SINCE']) : false;
+		if ($since !== false && $since >= $meta['t']) http_response_code(304);
+		else fpassthru($handle);
 		fclose($handle);
 		exit;
+	}
+
+	// a time as HTTP writes it, in GMT whatever the site's time zone
+	static function http_date($time) {
+		return gmdate('D, d M Y H:i:s', (int)$time).' GMT';
 	}
 
 	// Is the view file spelled as the request found it? Each name under the
@@ -362,15 +378,22 @@ class raster_cache {
 		// content changed while the page was made: it may show the old content
 		if (self::$version === null || self::$version !== self::version()) return;
 		$type = 'text/html; charset=utf-8';
+		// what models and listeners set (X-Robots-Tag, a CORS header) goes
+		// out again with every copy; PHP's own X-Powered-By it sends itself
+		$headers = array();
 		foreach (headers_list() as $header) {
-			if (stripos($header, 'Set-Cookie:') === 0) return;
-			if (stripos($header, 'Content-Type:') === 0) $type = trim(substr($header, 13));
+			$name = strtolower(trim(strtok($header, ':')));
+			if ($name === 'set-cookie') return;
+			if ($name === 'content-type') $type = trim(substr($header, 13));
+			elseif (!in_array($name, array('x-powered-by', 'last-modified', 'x-raster-cache'), true)) $headers[] = $header;
 		}
 		// /ABOUT finds about.html on a disk that ignores case: it answers,
 		// but every spelling would be a copy of its own
 		if (!self::spelled_as_on_disk(controller::instance()->current_route)) return;
-		$meta = json_encode(array('v' => self::$version, 't' => time(), 'type' => $type));
-		self::write(self::dir().self::key(), $meta."\n".$output);
-		if (!headers_sent()) header('X-Raster-Cache: miss');
+		$time = time();
+		$meta = json_encode(array('v' => self::$version, 't' => $time, 'type' => $type, 'headers' => $headers));
+		if (!self::write(self::dir().self::key(), $meta."\n".$output) || headers_sent()) return;
+		header('Last-Modified: '.self::http_date($time));
+		header('X-Raster-Cache: miss');
 	}
 }

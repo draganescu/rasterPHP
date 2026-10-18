@@ -1240,6 +1240,11 @@ use `'model.method'`: `method(true)` returns
     published, each one of several (`data/cache/next` keeps every time
     still to come, one per line). A page whose render overlapped the
     change is not kept.
+  - A cached page goes out with the headers it was made with (what models
+    and listeners set: `X-Robots-Tag`, a CORS header, `Link`), never
+    `Set-Cookie`: a page that sets a cookie is not kept. It carries
+    `Last-Modified` (the time it was stored, in GMT), and a request whose
+    `If-Modified-Since` is not older gets a 304 without the page.
   - A filter page with no items (`/news/news_items/tag/nothing`), a page
     past the last one and a filter on a field the list doesn't have answer
     200 but are never cached, so made-up URLs don't fill the disk. Neither
@@ -1252,7 +1257,8 @@ use `'model.method'`: `method(true)` returns
     as on macOS and Windows). A model that decides the same calls
     `raster_cache::skip()`.
   - Settings: `page_cache_ttl` (3600 seconds) and `page_cache_skip` (path
-    patterns). Responses carry `X-Raster-Cache: hit|miss`. `describe` says
+    patterns). Responses carry `X-Raster-Cache: hit|miss` (`miss` only when
+    the page was stored). `describe` says
     whether the cache is on (`site.page_cache`).
   - **Changes Raster doesn't make itself don't clear it.** Raster's own
     writes do (`write_view`, `update_page`, the item tools, the editor,

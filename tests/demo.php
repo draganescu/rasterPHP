@@ -2971,6 +2971,31 @@ test('L15', 'cache clear says so when it can\'t write the cache, and upgrade cle
 	same('miss', header_value(http('GET', "$prod/faq")[2], 'X-Raster-Cache'), 'the first request after an upgrade');
 });
 
+test('L16', 'a cached page keeps the headers it was made with, has Last-Modified and answers 304', function () use ($root, $tmp, $maildir) {
+	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => test_db("$tmp/prod.sqlite"), 'RASTER_URL' => 'https://cafe.example/', 'RASTER_MAIL' => "log://$maildir", 'CAFE_TIMEZONE' => 'Pacific/Kiritimati');
+	$prod = server(free_port(), $env);
+	raster(array('cache', 'clear'), $env);
+	list(, $first, $miss) = http('GET', "$prod/faq");
+	same('miss', header_value($miss, 'X-Raster-Cache'));
+	list($status, $body, $hit) = http('GET', "$prod/faq");
+	same(200, $status);
+	same('hit', header_value($hit, 'X-Raster-Cache'));
+	same($first, $body);
+	foreach (array('X-Cafe', 'X-Cafe-Done', 'Content-Type') as $name) same(header_value($miss, $name), header_value($hit, $name), $name);
+	same(1, count(preg_grep('/^X-Cafe:/i', $hit)), 'a header is sent once');
+	$modified = header_value($hit, 'Last-Modified');
+	same($modified, header_value($miss, 'Last-Modified'));
+	check(preg_match('/^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/', (string)$modified), 'an HTTP date: '.$modified);
+	check(abs(strtotime($modified) - time()) < 30, 'in GMT, whatever the site\'s time zone: '.$modified);
+	list($status, $body, $headers) = http('GET', "$prod/faq", null, array("If-Modified-Since: $modified"));
+	same(304, $status);
+	same('', $body);
+	same('hit', header_value($headers, 'X-Raster-Cache'));
+	same(200, http('GET', "$prod/faq", null, array('If-Modified-Since: '.gmdate('D, d M Y H:i:s', strtotime($modified) - 60).' GMT'))[0], 'an older copy gets the page');
+	same(200, http('GET', "$prod/faq", null, array('If-Modified-Since: yesterday-ish'))[0], 'a date that is not one');
+	// a session cookie is never kept, nor sent again
+	foreach ($hit as $header) check(stripos($header, 'Set-Cookie:') !== 0, $header);
+});
 
 // ## 2.1.8 batch B: errors and /api
 
