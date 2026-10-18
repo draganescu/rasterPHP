@@ -20,7 +20,7 @@ php bin/raster serve              # http://localhost:8000, no setup, SQLite
 php bin/raster lint               # after every template edit; exit 1 on errors
 php bin/raster lint --fix         # repair what is mechanical, report the rest
 php bin/raster schema             # what the CMS will store, compared with the database
-php bin/raster render /about      # print a page without a server (exit 1 on 4xx/5xx)
+php bin/raster render /about      # print a page without a server (exit 1 on 3xx/4xx/5xx)
 php bin/raster render /staff --as=editor   # as staff see it, says what the editor can edit (not in production)
 php bin/raster cache clear        # after editing files or the database by hand, in production
 php bin/raster doctor             # is this site healthy, up to date, ready for production?
@@ -836,6 +836,10 @@ bundled model declares none of its types, and `lint` warns.
   see **Editors and agents**),
   `registration` (false turns sign-up off), `login_page`, `after_login`,
   `password_min_length` (8).
+- A protected page answers a visitor with a 303 to the login page, and
+  `raster render` (MCP `render_url`) does the same: it prints `Location:
+  …` and `HTTP 303` on stderr, no page, and exits 1. `--as` renders it
+  as that person sees it.
 - Five wrong passwords lock an account for 15 minutes. Once 15 minutes have
   passed since the last wrong one, counting starts again from zero.
 - One email, one account: two sign-ups at once with one email (a double
@@ -1258,8 +1262,8 @@ use `'model.method'`: `method(true)` returns
     That also deletes `data/cache/models.json`, where Raster keeps what the
     models declare; it is made again when a model file changes anyway, and
     a site whose `data/` can't be written to simply looks every time.
-    `render` and `render_url` never read the cache, so a fresh render does
-    not mean visitors see the change.
+    `render` and `render_url` never read or write the cache, so a fresh
+    render does not mean visitors see the change.
 
 ## Static export
 

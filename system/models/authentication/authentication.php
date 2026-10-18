@@ -370,9 +370,12 @@ class authentication
 		return true;
 	}
 
+	// on the command line only `raster render` follows it: the page ends
+	// there with 303, and the address goes to stderr
 	protected function redirect($location) {
-		if (PHP_SAPI === 'cli') return;
+		if (PHP_SAPI === 'cli' && !defined('RASTER_RENDER')) return;
 		header('Location: '.$location, true, 303);
+		if (PHP_SAPI === 'cli') fwrite(STDERR, "Location: $location\n");
 		exit;
 	}
 

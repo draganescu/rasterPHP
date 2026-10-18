@@ -644,8 +644,12 @@ switch ($command) {
 		// --as=<email|username|role>: the page as that person sees it, the
 		// in-page editor's marks included for editors and admins
 		if (isset($options['as']) && is_string($options['as']) && $options['as'] !== '') define('RASTER_RENDER_AS', $options['as']);
+		// the page is made afresh, never from the page cache, and a redirect
+		// ends it as on the web (authentication::redirect)
+		define('RASTER_RENDER', true);
 		chdir($root);
-		// exit status 1 for 4xx/5xx responses (missing page, template errors)
+		// exit status 1 for redirects and 4xx/5xx responses (a protected
+		// page, a missing one, template errors)
 		if (defined('RASTER_RENDER_AS')) ob_start();
 		register_shutdown_function(function () {
 			// what the editor can do on the page, on stderr so the HTML stays clean
@@ -660,7 +664,7 @@ switch ($command) {
 				}
 			}
 			$status = http_response_code();
-			if ($status && $status >= 400) {
+			if ($status && $status >= 300) {
 				fwrite(STDERR, "HTTP $status\n");
 				exit(1);
 			}
@@ -713,7 +717,8 @@ Raster command line
                                          again after a stop or a failure and it mails only
                                          those who don't have it yet (--again: everyone)
   php bin/raster mcp                     MCP server over stdio for local agents
-  php bin/raster render <url>            print the HTML of a URL (never from the page cache)
+  php bin/raster render <url>            print the HTML of a URL (never from the page cache);
+                                         exit 1 on a redirect (a protected page) or an error
         --as=<email|username|role>       as that person sees it: --as=editor shows the
                                          in-page editor's marks (a summary goes to stderr);
                                          not in production

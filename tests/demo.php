@@ -2874,6 +2874,38 @@ test(array('L9', 'L10'), 'page cache: made-up list URLs are not kept, a change d
 	same('200 miss', $cache('/journal/journal_items/author/Mara'));
 });
 
+// ## Page cache and the clock (#158 group 8)
+
+test('L13', 'raster render never reads or writes the page cache, and a protected page answers its redirect', function () use ($root, $tmp, $maildir) {
+	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => test_db("$tmp/prod.sqlite"), 'RASTER_URL' => 'https://cafe.example/', 'RASTER_MAIL' => "log://$maildir");
+	$prod = server(free_port(), $env);
+	raster(array('cache', 'clear'), $env);
+	http('GET', "$prod/faq");
+	same('hit', header_value(http('GET', "$prod/faq")[2], 'X-Raster-Cache'));
+	$faq = "$root/demo/views/cafe/faq.html";
+	with_file($faq, str_replace('</body>', '<p>Edited by hand</p></body>', file_get_contents($faq)), function () use ($env) {
+		list($code, $out) = raster(array('render', '/faq'), $env);
+		same(0, $code, $out);
+		has($out, 'Edited by hand', 'render printed the cached page');
+	});
+	raster(array('render', '/about'), $env);
+	same('miss', header_value(http('GET', "$prod/about")[2], 'X-Raster-Cache'), 'render stored the page');
+	// a protected page: the redirect the web gets, and exit 1
+	list($code, $out) = raster(array('render', '/staff'), $env);
+	same(1, $code, $out);
+	has($out, 'HTTP 303');
+	has($out, 'Location: https://cafe.example/login?next=%2Fstaff');
+	lacks($out, '<html', 'the protected page itself');
+	$answers = mcp_stdio(array(array('render_url', array('url' => '/staff'))));
+	same(303, $answers[0]['status']);
+	same(false, $answers[0]['ok']);
+	has($answers[0]['errors'], '/login?next=%2Fstaff');
+	same('', $answers[0]['html']);
+	// the account a page is rendered as still sees it
+	same(0, raster(array('render', '/staff', '--as=editor'))[0]);
+});
+
+
 // ## 2.1.8 batch B: errors and /api
 
 test('C51', 'cms offers over /api only what its api() lists: the editor endpoints, style and logout; an override adds nothing unlisted', function () use ($base, $root) {

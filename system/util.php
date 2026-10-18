@@ -205,7 +205,9 @@ class raster_cache {
 	static function cacheable() {
 		if (self::$cacheable !== null) return self::$cacheable;
 		$uri = (string)config::get('uri_string');
-		$ok = self::enabled()
+		// `raster render` (and MCP render_url) always makes the page afresh,
+		// and keeps no copy of it
+		$ok = self::enabled() && !defined('RASTER_RENDER')
 			&& isset($_SERVER['REQUEST_METHOD']) && in_array($_SERVER['REQUEST_METHOD'], array('GET', 'HEAD'))
 			&& !isset($_COOKIE[session_name()])
 			&& !preg_match('#^/(api|mcp|login)(/|$)#', $uri);
