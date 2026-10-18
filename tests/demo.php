@@ -1770,6 +1770,21 @@ test(array('J7', 'J8'), 'a language per domain, the cookie name', function () us
 	has(implode("\n", $headers), 'Set-Cookie: cafe_lang=ro');
 	lacks(implode("\n", $headers), 'Set-Cookie: lang=');
 });
+test('J7', 'a language per domain with the site address set (#96)', function () use ($db, $maildir) {
+	$port = free_port();
+	$k = server($port, array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'RASTER_URL' => "http://localhost:$port/"));
+	// the site's own domain_language domain keeps its language and its links
+	$body = http('GET', "$k/lab", null, array("Host: ro.localhost:$port"))[1];
+	has($body, '>Meniu</a>');
+	has($body, "href=\"http://ro.localhost:$port/menu\"");
+	same(200, http('POST', "$k/visit", array('raster_form' => 'reservation.contact', 'email' => ''), array("Host: ro.localhost:$port", "Origin: http://ro.localhost:$port"))[0], 'a form sent from that domain');
+	// any other host gets the site's address
+	$body = http('GET', "$k/lab", null, array('Host: evil.example'))[1];
+	has($body, "href=\"http://localhost:$port/menu\"");
+	lacks($body, 'evil.example');
+	// a made-up subdomain of it is another host
+	lacks(http('GET', "$k/lab", null, array("Host: evil.ro.localhost:$port"))[1], 'evil.ro.localhost');
+});
 test('L6', 'site_url in config', function () use ($db, $maildir) {
 	$k = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'CAFE_SITE_URL' => 'https://knob.example/'));
 	$body = http('GET', "$k/about", null, array('Host: evil.example'))[1];

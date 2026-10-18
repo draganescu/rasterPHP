@@ -1197,7 +1197,10 @@ use `'model.method'`: `method(true)` returns
   `config::set('site_url')`). Links in pages and emails then never depend on
   the visitor's `Host` header. In production, emails with links (password
   reset, newsletter confirmation) are not sent without it, and
-  `raster send` needs it. With a path (`https://example.com/shop/`) the site
+  `raster send` needs it. A domain listed in `domain_language` (exactly,
+  port aside) is the site's own too: a request on it keeps its host, so its
+  language, its links and its forms; every other host gets the address.
+  With a path (`https://example.com/shop/`) the site
   lives under it: URLs are matched and links built under `/shop/`, also with
   `raster serve` and behind a proxy that forwards the path unchanged. With
   `php -S` directly, use `RASTER_URL`, not `site_url`. Addresses outside the

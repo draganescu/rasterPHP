@@ -84,7 +84,10 @@ class config {
     	// set, links in pages and emails never depend on the Host header.
     	$site = getenv('RASTER_URL') ?: $config->site_url;
     	if ($site && ($parts = parse_url($site)) && !empty($parts['host'])) {
-    		$config->host = strtolower($parts['host']).(isset($parts['port']) ? ':'.$parts['port'] : '');
+    		// a domain the site lists in domain_language is one of its own
+    		// addresses: it keeps its language, its links and its forms (#96)
+    		$own = array_key_exists(preg_replace('/:\d+$/', '', $config->host), array_change_key_case((array)$config->domain_language));
+    		if (!$own) $config->host = strtolower($parts['host']).(isset($parts['port']) ? ':'.$parts['port'] : '');
     		if ($config->protocol == '') $config->protocol = isset($parts['scheme']) ? strtolower($parts['scheme']) : 'https';
     		$config->trusted_url = true;
     	}
