@@ -517,6 +517,22 @@ test('template defaults become content', function () use ($base) {
 	check(strpos($body, 'href="'.$base.'/news/news_item/raster-runs-on-php-8"') !== false, 'detail link');
 	check(strpos($body, 'href="'.$base.'/news"') !== false, '.html links rewritten');
 });
+test('in-page links stay on the page, and every <head> gets the base (#117)', function () use ($base, $root) {
+	$view = "$root/application/views/default/zz-anchors.html";
+	file_put_contents($view, "<!doctype html>\n<html>\n<head prefix=\"og: https://ogp.me/ns#\">\n<link rel=\"stylesheet\" href=\"style.css\">\n</head>\n<body><header>x</header>\n<a href=\"#prices\">Prices</a> <a href='?sort=price'>Sort</a> <a href=\"//cdn.example.com/guide.html\">Guide</a> <a href=\"about.html\">About</a>\n</body>\n</html>\n");
+	try {
+		list($status, $body) = http('GET', "$base/zz-anchors?sort=name");
+		same(200, $status);
+		check(strpos($body, "<head prefix=\"og: https://ogp.me/ns#\">\n<base href='$base/application/views/default/'") !== false, 'the base after <head prefix>: '.$body);
+		check(strpos($body, "<header>\n<base") === false, '<header> is not <head>');
+		check(strpos($body, 'href="'.$base.'/zz-anchors?sort=name#prices"') !== false, 'the anchor is on this page, with its query');
+		check(strpos($body, "href='$base/zz-anchors?sort=price'") !== false, 'the query is on this page');
+		check(strpos($body, 'href="//cdn.example.com/guide.html"') !== false, 'another site\'s link is left as written');
+		check(strpos($body, 'href="'.$base.'/about"') !== false, '.html links are still rewritten');
+	} finally {
+		unlink($view);
+	}
+});
 test('missing pages and items are 404', function () use ($base) {
 	same(404, http('GET', "$base/nothing-here")[0]);
 	same(404, http('GET', "$base/news/news_item/999")[0]);

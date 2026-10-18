@@ -77,8 +77,8 @@ It also defines a JavaScript variable, `BASE`, holding the site's root address, 
 
 Two things follow from the `<base>` tag:
 
-- **In-page anchors need the page name.** `href="#contact"` would point at the theme folder, not the current page. Write `href="about.html#contact"` (which becomes `/about#contact`) or `href="/about#contact"`.
-- The tag is only added when your `<head>` is written exactly as `<head>` (no attributes) and when the page doesn't already have a `<base>` tag. If you write your own `<base>`, asset paths are up to you.
+- **In-page links stay on the page.** Raster writes the page's own address in front of `href="#contact"` and `href="?sort=price"`, so they go to `/about#contact` and `/about?sort=price` rather than the theme folder. A link to another site that starts with `//` (`//cdn.example.com/guide.html`) is left as written.
+- The tag goes right after your `<head>`, with attributes or without (`<head prefix="og: …">`), unless the page already has a `<base>` tag. If you write your own `<base>`, asset paths are up to you.
 
 Emails and newsletter issues don't get the tag; their relative links and images are turned into absolute addresses instead.
 

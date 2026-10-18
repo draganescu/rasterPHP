@@ -34,11 +34,7 @@ The template calls a method with fewer (or more) arguments than its PHP signatur
 
 ## My CSS or images don't load on some pages
 
-Asset paths are relative to the **theme folder**: write `href="style.css"`, not `href="../style.css"` or `href="/style.css"`. Raster adds a `<base>` tag that makes this work on every URL. The tag is only added when your `<head>` tag is written exactly as `<head>`, without attributes. See [Pages and URLs](Pages-and-URLs#assets-css-images-scripts).
-
-## In-page anchor links (`href="#section"`) go to the wrong place
-
-Because of that same `<base>` tag, `#section` points at the theme folder. Write `href="about.html#section"` or `href="/about#section"`.
+Asset paths are relative to the **theme folder**: write `href="style.css"`, not `href="../style.css"` or `href="/style.css"`. Raster adds a `<base>` tag that makes this work on every URL. See [Pages and URLs](Pages-and-URLs#assets-css-images-scripts).
 
 ## My form doesn't do anything when sent
 
