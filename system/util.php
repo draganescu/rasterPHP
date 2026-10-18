@@ -68,6 +68,14 @@ class util {
 		exit;
 	}
 
+	// An absolute link to a page of the site, for emails and redirects:
+	// util::url('letters/confirm', array('token' => $t))
+	static function url($page = '', $query = array())
+	{
+		$url = rtrim((string)config::get('link_uri'), '/').'/'.ltrim((string)$page, '/');
+		return $query ? $url.'?'.http_build_query($query) : $url;
+	}
+
 	// Absolute links are safe to email when the site's address is configured
 	// (RASTER_URL or site_url), or in development. Otherwise the address
 	// would come from the visitor's Host header and could be forged.

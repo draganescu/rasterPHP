@@ -14,16 +14,29 @@
 *   smtps://user:pass@host:465    SMTP over TLS
 * The sender is RASTER_MAIL_FROM (or config mail_from), e.g. "Site <hi@example.com>".
 *
+* In a web request mail goes out after the answer: send() checks and keeps
+* the message, and send_kept() sends what was kept once the visitor has the
+* page, so a slow mail server never holds a form. The command line sends at
+* once.
+*
 * Many mails at once (a newsletter issue) share one SMTP connection:
 *   mail::keep_open(); ... mail::send(...) ...; mail::close();
 */
 class mail
 {
+	// seconds to wait for the SMTP server to connect or answer
+	const TIMEOUT = 5;
+	// a confirmation or reset link asked for again within this many seconds
+	// is not mailed again
+	const RESEND_AFTER = 300;
+
 	public static $last_error = null;
 	// between keep_open() and close(): whether to keep the connection, and
 	// the one that is open (array(dsn, command))
 	protected static $keep = false;
 	protected static $open = null;
+	// the messages a web request sends after its answer (array(to, subject, headers, body))
+	protected static $kept = array();
 
 	static function transport() {
 		$dsn = getenv('RASTER_MAIL') ?: config::get('mail');
@@ -35,19 +48,19 @@ class mail
 	// user and password run to the last '@' before the path, as parse_url()
 	// (and so smtp_connect()) reads them, so an '@' in a password is cut too
 	static function destination() {
-		return preg_replace('#^([a-z]+://)[^/?\#]*@#i', '$1', strtok(self::transport(), '?'));
+		return preg_replace('#^([a-z]+://)[^/?\#]*@#i', '$1', strtok(static::transport(), '?'));
 	}
 
 	// the SMTP connection stays open for the mails that follow, until close()
 	static function keep_open() {
-		self::$keep = true;
+		static::$keep = true;
 	}
 
 	static function close() {
-		self::$keep = false;
-		if (!self::$open) return;
-		$command = self::$open[1];
-		self::$open = null;
+		static::$keep = false;
+		if (!static::$open) return;
+		$command = static::$open[1];
+		static::$open = null;
 		$command(false, 0);
 	}
 
@@ -55,7 +68,7 @@ class mail
 		$from = getenv('RASTER_MAIL_FROM') ?: config::get('mail_from');
 		if (!$from && !util::trusted_links()) $from = 'site@localhost';
 		if (!$from) $from = 'site@'.preg_replace('/:\d+$/', '', (string)config::get('host', 'localhost'));
-		return self::clean_header($from);
+		return static::clean_header($from);
 	}
 
 	static function clean_header($value) {
@@ -66,16 +79,17 @@ class mail
 		return preg_match('/<([^>]+)>/', $from, $m) ? $m[1] : $from;
 	}
 
-	// Renders a view and sends it. Returns true when it was handed over.
+	// Renders a view and sends it. Returns true when it was handed over (or,
+	// in a web request, kept to send after the answer).
 	static function send_view($view, $to, $vars = array(), $headers = array()) {
 		if (!util::trusted_links()) {
-			self::$last_error = 'Set RASTER_URL (or config site_url) to the site address before sending email from the site';
-			log::error('Mail: '.self::$last_error);
+			static::$last_error = 'Set RASTER_URL (or config site_url) to the site address before sending email from the site';
+			log::error('Mail: '.static::$last_error);
 			return false;
 		}
 		$html = controller::render_view($view, $vars);
 		$subject = preg_match('/<title>(.*?)<\/title>/is', $html, $m) ? html_entity_decode(trim(strip_tags($m[1])), ENT_QUOTES) : 'Message from '.config::get('host');
-		return self::send($to, $subject, $html, null, $headers);
+		return static::send($to, $subject, $html, null, $headers);
 	}
 
 	static function text_version($html) {
@@ -91,51 +105,130 @@ class mail
 		return trim(preg_replace("/\n\s*\n+/", "\n\n", $text));
 	}
 
+	// Sends a message, or in a web request keeps it for send_kept(). Returns
+	// false for a recipient or transport that can't work, and true once the
+	// message is handed over or kept; mail.failed says when a kept one
+	// could not be sent.
 	static function send($to, $subject, $html, $text = null, $headers = array()) {
-		self::$last_error = null;
-		$to = self::clean_header($to);
-		if (!filter_var(self::address($to), FILTER_VALIDATE_EMAIL)) {
-			self::$last_error = "Invalid recipient: $to";
+		static::$last_error = null;
+		$to = static::clean_header($to);
+		if (!filter_var(static::address($to), FILTER_VALIDATE_EMAIL)) {
+			static::$last_error = "Invalid recipient: $to";
 			return false;
 		}
-		$text = $text === null ? self::text_version($html) : $text;
+		$scheme = strtolower((string)strstr(static::transport(), ':', true));
+		if (!in_array($scheme, array('log', 'mail', 'smtp', 'smtps'), true)) {
+			static::$last_error = "Unknown mail transport '".static::transport()."'";
+			log::error('Mail: '.static::$last_error);
+			event::dispatch('mail.failed', array('to' => $to, 'subject' => (string)$subject, 'error' => static::$last_error));
+			return false;
+		}
+		$text = $text === null ? static::text_version($html) : $text;
 		$boundary = 'raster-'.bin2hex(random_bytes(8));
 		$host = preg_replace('/:\d+$/', '', (string)config::get('host', 'localhost'));
 		$all = array(
-			'From' => self::from(),
-			'To' => $to,
-			'Subject' => '=?UTF-8?B?'.base64_encode(self::clean_header($subject)).'?=',
+			'From' => static::named(static::from()),
+			'To' => static::named($to),
+			'Subject' => static::encoded(static::clean_header($subject)),
 			'Date' => date('r'),
 			'Message-ID' => '<'.bin2hex(random_bytes(12)).'@'.$host.'>',
 			'MIME-Version' => '1.0',
 			'Content-Type' => 'multipart/alternative; boundary="'.$boundary.'"',
 		);
-		foreach ($headers as $name => $value) $all[self::clean_header($name)] = self::clean_header($value);
+		foreach ($headers as $name => $value) $all[static::clean_header($name)] = static::clean_header($value);
 		$body = "--$boundary\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n"
 			.chunk_split(base64_encode($text))
 			."--$boundary\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n"
 			.chunk_split(base64_encode($html))
 			."--$boundary--\r\n";
+		$message = array($to, (string)$subject, $all, $body);
+		if (PHP_SAPI === 'cli' || static::$keep) return static::deliver($message);
+		if (!static::$kept) register_shutdown_function(array(get_called_class(), 'send_kept'));
+		static::$kept[] = $message;
+		return true;
+	}
 
-		$dsn = self::transport();
+	// Sends what a web request kept, after its answer: the session is
+	// written (so the visitor's next request isn't held), the answer
+	// finished, and the mails go out over one connection. A failure is
+	// logged and sends mail.failed; once the server can't be reached, the
+	// rest fail at once.
+	static function send_kept() {
+		if (!static::$kept) return;
+		$kept = static::$kept;
+		static::$kept = array();
+		if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
+		static::finish_answer();
+		ignore_user_abort(true);
+		$smtp = in_array(strtolower((string)strstr(static::transport(), ':', true)), array('smtp', 'smtps'), true);
+		$down = null;
+		static::keep_open();
+		foreach ($kept as $message) {
+			if ($down !== null) {
+				static::failed($message, $down);
+				continue;
+			}
+			// a failure that leaves no connection open was the server itself
+			if (!static::deliver($message) && $smtp && !static::$open) $down = static::$last_error;
+		}
+		static::close();
+	}
+
+	// the visitor gets the whole answer now, while PHP goes on
+	protected static function finish_answer() {
+		if (function_exists('fastcgi_finish_request')) return fastcgi_finish_request();
+		if (function_exists('frankenphp_finish_request')) return frankenphp_finish_request();
+		if (function_exists('litespeed_finish_request')) return litespeed_finish_request();
+		while (ob_get_level() > 0 && @ob_end_flush());
+		flush();
+	}
+
+	// hands a message to the transport; true when it was accepted
+	protected static function deliver($message) {
+		list($to, $subject, $all, $body) = $message;
+		static::$last_error = null;
+		$dsn = static::transport();
 		$scheme = strtolower((string)strstr($dsn, ':', true));
 		try {
 			switch ($scheme) {
-				case 'log': $sent = self::via_log($all, $body); break;
-				case 'mail': $sent = self::via_mail($all, $body); break;
+				case 'log': $sent = static::via_log($all, $body); break;
+				case 'mail': $sent = static::via_mail($all, $body); break;
 				case 'smtp':
-				case 'smtps': $sent = self::via_smtp($dsn, $all, $body); break;
+				case 'smtps': $sent = static::via_smtp($dsn, $all, $body); break;
 				default: throw new RuntimeException("Unknown mail transport '$dsn'");
 			}
 			if (!$sent) throw new RuntimeException('The '.$scheme.' transport did not accept the message');
 		} catch (Exception $e) {
-			self::$last_error = $e->getMessage();
-			log::error('Mail: '.$e->getMessage());
-			event::dispatch('mail.failed', array('to' => $to, 'subject' => (string)$subject, 'error' => self::$last_error));
-			return false;
+			return static::failed($message, $e->getMessage());
 		}
-		event::dispatch('mail.sent', array('to' => $to, 'subject' => (string)$subject));
+		event::dispatch('mail.sent', array('to' => $to, 'subject' => $subject));
 		return true;
+	}
+
+	protected static function failed($message, $error) {
+		static::$last_error = $error;
+		log::error('Mail: '.$error);
+		event::dispatch('mail.failed', array('to' => $message[0], 'subject' => $message[1], 'error' => $error));
+		return false;
+	}
+
+	// text for a header, as encoded words of at most 75 characters when it
+	// isn't plain ASCII
+	protected static function encoded($text) {
+		return mb_encode_mimeheader((string)$text, 'UTF-8', 'B');
+	}
+
+	// "Name <address>" with the name encoded; a bare address as it is
+	protected static function named($value) {
+		if (!preg_match('/^(.*?)\s*<([^>]+)>$/', $value, $m) || trim($m[1]) === '') return $value;
+		return static::encoded(trim($m[1])).' <'.$m[2].'>';
+	}
+
+	// whether a link mailed at $stamp (a date and time) went out within
+	// RESEND_AFTER seconds, so asking again sends nothing
+	static function sent_lately($stamp) {
+		$time = $stamp ? strtotime((string)$stamp) : false;
+		return $time !== false && $time > time() - static::RESEND_AFTER && $time <= time() + 60;
 	}
 
 	protected static function header_block($headers, $skip = array()) {
@@ -148,43 +241,46 @@ class mail
 
 	protected static function via_log($headers, $body) {
 		// log:// writes to application/data/mail/, log:///some/dir to that folder
-		$path = substr(self::transport(), strlen('log://'));
+		$path = substr(static::transport(), strlen('log://'));
 		$dir = $path !== '' ? rtrim($path, '/').'/' : APPBASE.'data/mail/';
 		// two mails at once may both find no folder
 		if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) throw new RuntimeException('Can\'t create the mail folder '.$dir);
 		// names sort in the order the mails were sent
 		list($usec, $sec) = explode(' ', microtime());
 		$file = $dir.date('Ymd-His', (int)$sec).'-'.substr($usec, 2, 6).'-'.bin2hex(random_bytes(2)).'.eml';
-		file_put_contents($file, self::header_block($headers)."\r\n".$body);
+		file_put_contents($file, static::header_block($headers)."\r\n".$body);
 		return true;
 	}
 
+	// -f gives sendmail the sender for bounces, when it is a plain address
 	protected static function via_mail($headers, $body) {
-		return mail($headers['To'], $headers['Subject'], $body, self::header_block($headers, array('To', 'Subject')));
+		$from = static::address($headers['From']);
+		$envelope = preg_match('/^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+$/', $from) ? '-f'.$from : '';
+		return mail($headers['To'], $headers['Subject'], $body, static::header_block($headers, array('To', 'Subject')), $envelope);
 	}
 
 	protected static function via_smtp($dsn, $headers, $body) {
 		$command = null;
 		// a kept connection says RSET first; one the server has dropped is opened again
-		if (self::$open && self::$open[0] === $dsn) {
+		if (static::$open && static::$open[0] === $dsn) {
 			try {
-				self::$open[1]('RSET', 250);
-				$command = self::$open[1];
+				static::$open[1]('RSET', 250);
+				$command = static::$open[1];
 			} catch (Exception $e) {
-				self::$open[1](false, 0);
-				self::$open = null;
+				static::$open[1](false, 0);
+				static::$open = null;
 			}
 		}
-		if (!$command) $command = self::smtp_connect($dsn);
+		if (!$command) $command = static::smtp_connect($dsn);
 		try {
-			$command('MAIL FROM:<'.self::address($headers['From']).'>', 250);
-			$command('RCPT TO:<'.self::address($headers['To']).'>', 250);
+			$command('MAIL FROM:<'.static::address($headers['From']).'>', 250);
+			$command('RCPT TO:<'.static::address($headers['To']).'>', 250);
 			$command('DATA', 354);
-			$data = self::header_block($headers)."\r\n".$body;
+			$data = static::header_block($headers)."\r\n".$body;
 			$data = preg_replace('/^\./m', '..', $data);
 			$command($data."\r\n.", 250);
 		} finally {
-			if (self::$keep) self::$open = array($dsn, $command);
+			if (static::$keep) static::$open = array($dsn, $command);
 			else $command(false, 0);
 		}
 		return true;
@@ -198,9 +294,9 @@ class mail
 		$port = isset($parts['port']) ? $parts['port'] : ($secure ? 465 : 587);
 		$user = isset($parts['user']) ? rawurldecode($parts['user']) : null;
 		$pass = isset($parts['pass']) ? rawurldecode($parts['pass']) : null;
-		$socket = @stream_socket_client(($secure ? 'ssl://' : 'tcp://').$parts['host'].':'.$port, $errno, $errstr, 15);
+		$socket = @stream_socket_client(($secure ? 'ssl://' : 'tcp://').$parts['host'].':'.$port, $errno, $errstr, static::TIMEOUT);
 		if (!$socket) throw new RuntimeException("SMTP connection failed: $errstr");
-		stream_set_timeout($socket, 15);
+		stream_set_timeout($socket, static::TIMEOUT);
 		$read = function () use ($socket) {
 			$response = '';
 			while (($line = fgets($socket, 515)) !== false) {

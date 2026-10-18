@@ -548,7 +548,7 @@ test('accounts: register, protected pages, reset by email', function () use ($ba
 	same(303, form_post("$base/forgot", array('raster_form' => 'authentication.forgot', 'email' => 'ada@example.com'))[0]);
 	$mail = last_mail();
 	check($mail && preg_match('/token=([a-f0-9]{48})/', $mail['text'], $t), 'reset email');
-	check(strpos($mail['raw'], 'Subject: =?UTF-8?B?'.base64_encode('Reset your password').'?=') !== false, 'subject from <title>');
+	check(strpos($mail['raw'], "\r\nSubject: Reset your password\r\n") !== false, 'subject from <title>');
 	same(303, form_post("$base/reset?token={$t[1]}", array('raster_form' => 'authentication.reset', 'token' => $t[1], 'password' => 'brand new pass', 'password_again' => 'brand new pass'))[0]);
 	check(strpos(http('GET', "$base/reset?token={$t[1]}")[1], 'expired or was already used') !== false, 'token single use');
 	same(303, form_post("$base/login", array('raster_form' => 'authentication.login', 'login' => 'ada@example.com', 'password' => 'brand new pass'))[0]);
@@ -729,6 +729,9 @@ test('a password reset ends other sessions', function () use ($base, $maildir) {
 	list(, , $headers) = form_post("$base/login", array('raster_form' => 'authentication.login', 'login' => 'ada@example.com', 'password' => 'brand new pass'));
 	$cookie = preg_replace('/^Set-Cookie:\s*([^;]+).*$/i', '$1', current(preg_grep('/^Set-Cookie/i', $headers)));
 	check(strpos(http('GET', "$base/account", null, array("Cookie: $cookie"))[1], 'Logged in as') !== false, 'session A works');
+	// the reset the forged Host test asked for was minutes ago, not seconds
+	cms_store::connect();
+	R::exec('UPDATE user SET reset_expires = ? WHERE email = ?', array(date('Y-m-d H:i:s', time() + 3600 - 6 * 60), 'ada@example.com'));
 	form_post("$base/forgot", array('raster_form' => 'authentication.forgot', 'email' => 'ada@example.com'));
 	preg_match('/token=([a-f0-9]{48})/', last_mail()['text'], $t);
 	form_post("$base/reset?token={$t[1]}", array('raster_form' => 'authentication.reset', 'token' => $t[1], 'password' => 'third password', 'password_again' => 'third password'));
@@ -2194,15 +2197,18 @@ test('many sign-ups at once with the same addresses leave one subscriber each', 
 	echo '['.array_sum(array_map('count', $links)).' confirmations for 25 addresses] ';
 });
 
-test('signing up again while pending sends the same link again (#77)', function () use ($maildir) {
+test('signing up again within 5 minutes sends nothing; later, the same link again (#77 #47)', function () use ($maildir) {
 	cms_store::connect();
 	$before = count(glob("$maildir/*.eml"));
 	same('pending', newsletter::subscribe('twice@example.com', 'Twice'));
 	$token = R::getCell('SELECT token FROM subscriber WHERE email = ?', array('twice@example.com'));
-	same('pending', newsletter::subscribe('Twice@Example.com ', 'Twice again'));
+	same('pending', newsletter::subscribe('Twice@Example.com ', 'Twice again'), 'the same answer:');
 	same($token, R::getCell('SELECT token FROM subscriber WHERE email = ?', array('twice@example.com')), 'the token after the second sign-up:');
 	same(1, (int)R::getCell('SELECT COUNT(*) FROM subscriber WHERE email = ?', array('twice@example.com')));
-	same($before + 2, count(glob("$maildir/*.eml")), 'mails:');
+	same($before + 1, count(glob("$maildir/*.eml")), 'mails within 5 minutes:');
+	R::exec('UPDATE subscriber SET confirm_sent_at = ? WHERE email = ?', array(date('Y-m-d H:i:s', time() - 6 * 60), 'twice@example.com'));
+	same('pending', newsletter::subscribe('twice@example.com', 'Twice'));
+	same($before + 2, count(glob("$maildir/*.eml")), 'mails 6 minutes later:');
 	same(array($token, $token), confirmation_links($maildir)['twice@example.com'], 'the links the two mails carry:');
 });
 
@@ -2411,6 +2417,87 @@ test('after a commit, content_changed comes once and its listeners see the new r
 		same(array($rows + 2), $changed_seen);
 	} finally {
 		event::unbind('content_changed')->from(null, 'test_content_changed');
+	}
+});
+
+// ## Phase 1 groundwork: the site's time zone, mail after the answer
+
+// Applies config timezone as a request would (config::initialize), runs
+// $fn, then puts PHP's own zone back
+function with_timezone($zone, $fn) {
+	$was = date_default_timezone_get();
+	config::set('timezone')->to($zone);
+	try {
+		config::initialize();
+		return $fn();
+	} finally {
+		config::set('timezone')->to(null);
+		date_default_timezone_set($was);
+	}
+}
+
+test('the site time zone sets today and published_at (#84)', function () use ($root, $db) {
+	cms_store::connect();
+	// UTC+14; before 10:00 UTC its date is still UTC's, so then the test
+	// takes Niue (UTC-11), whose date is UTC's yesterday until 11:00
+	$zone = (int)gmdate('G') >= 10 ? 'Pacific/Kiritimati' : 'Pacific/Niue';
+	$there = new DateTime('now', new DateTimeZone($zone));
+	check($there->format('Y-m-d') !== gmdate('Y-m-d'), "$zone and UTC have different dates now");
+	$dir = "$root/application/models/zztz";
+	@mkdir($dir);
+	file_put_contents("$dir/zztz.php", '<?php class zztz { static function types() { return array("zztzday" => array("fields" => array("title" => "", "day" => ""), "types" => array("day" => "date"), "public" => true)); } }');
+	$view = "$root/application/views/default/zz-tz.html";
+	file_put_contents($view, "<html><body><ul><!-- render.cms.zztzday('day>=today&day<=today') --><li><!-- print.title -->x<!-- /print.title --></li><!-- /render.cms.zztzday('day>=today&day<=today') --></ul>"
+		."<ol><!-- render.cms.news('limit=100') --><li><!-- print.headline -->x<!-- /print.headline --></li><!-- /render.cms.news('limit=100') --></ol></body></html>");
+	$config = "$root/application/config/the_app.php";
+	$settings = file_get_contents($config);
+	// the page as a request on a UTC server renders it
+	$render = function () use ($root, $db) {
+		$env = 'RASTER_DB='.escapeshellarg($db).' RASTER_ENV=development';
+		return (string)shell_exec("$env ".escapeshellarg(PHP_BINARY).' -d date.timezone=UTC '.escapeshellarg("$root/bin/raster").' render /zz-tz 2>&1');
+	};
+	cms_records::forget();
+	try {
+		cms_records::create('zztzday', array('title' => 'UTC today', 'day' => gmdate('Y-m-d')));
+		cms_records::create('zztzday', array('title' => 'Site today', 'day' => $there->format('Y-m-d')));
+		// a minute ago on the site's clock: hours away on UTC's
+		$minute_ago = (clone $there)->modify('-1 minute')->format('Y-m-d H:i:s');
+		cms_store::save_item('newsdata', 0, array('headline' => 'Zone news', 'published_at' => $minute_ago), array('headline', 'published_at'));
+		$utc = $render();
+		check(strpos($utc, '<li>UTC today</li>') !== false && strpos($utc, 'Site today') === false, "without a time zone today is UTC's: $utc");
+		check(strpos($utc, 'Zone news') === false, 'and the news is still scheduled');
+		file_put_contents($config, $settings."\nconfig::set('timezone')->to('$zone');\n");
+		$zoned = $render();
+		check(strpos($zoned, '<li>Site today</li>') !== false, "today is the site's date: $zoned");
+		check(strpos($zoned, 'UTC today') === false, "an item dated today in UTC is not today on the site: $zoned");
+		check(strpos($zoned, '<li>Zone news</li>') !== false, 'published a minute ago on the site clock is live');
+		// stamps follow it too
+		$stamp = with_timezone($zone, function () {
+			$item = cms_records::create('zztzday', array('title' => 'Stamped', 'day' => ''));
+			return $item['created_at'];
+		});
+		check(abs(strtotime($stamp.' '.$zone) - time()) < 120, "created_at is stamped on the site's clock: $stamp");
+		// an unknown zone keeps PHP's own
+		$errors = ini_get('error_log');
+		$logged = sys_get_temp_dir().'/raster-tz-log-'.getmypid().'.txt';
+		ini_set('error_log', $logged);
+		try {
+			$kept = with_timezone('Mars/Olympus', function () { return date_default_timezone_get(); });
+		} finally {
+			ini_set('error_log', (string)$errors);
+		}
+		same(date_default_timezone_get(), $kept, 'an unknown zone:');
+		check(strpos((string)@file_get_contents($logged), "Unknown timezone 'Mars/Olympus'") !== false, 'an unknown zone is logged');
+		@unlink($logged);
+	} finally {
+		file_put_contents($config, $settings);
+		unlink("$dir/zztz.php");
+		rmdir($dir);
+		unlink($view);
+		cms_records::forget();
+		R::exec("DELETE FROM newsdata WHERE headline = 'Zone news'");
+		R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS zztzdaydata');
+		cms_store::forget();
 	}
 });
 

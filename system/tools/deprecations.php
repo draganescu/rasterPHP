@@ -30,4 +30,11 @@ return array(
 		'pattern' => '/<!-- render\.validation\.(not_empty|email_format|are_the_same)\(/',
 		'message' => 'regions from older Raster: not_empty and email_format become required and type="email" on the input with render.validation.field(\'name\'); are_the_same becomes matches',
 	),
+	'url-helpers' => array(
+		'since' => '2.2.7',
+		'removed_in' => '2.3.0',
+		'in' => '#\.php$#',
+		'pattern' => '/\b(authentication::url|newsletter::page_url)\(/',
+		'message' => 'authentication::url($page) and newsletter::page_url($setting, $default, $token) are util::url($page, $query): util::url(config::get(\'newsletter_confirm_page\', \'newsletter-confirm\'), array(\'token\' => $token))',
+	),
 );

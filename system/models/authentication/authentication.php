@@ -259,8 +259,9 @@ class authentication
 		return $have >= self::$roles[$role];
 	}
 
+	// deprecated for util::url() (system/tools/deprecations.php)
 	static function url($page) {
-		return rtrim(config::get('link_uri'), '/').'/'.ltrim((string)$page, '/');
+		return util::url($page);
 	}
 
 	// only paths on this site can be redirect targets
@@ -285,7 +286,7 @@ class authentication
 		$user->login_expires = date('Y-m-d H:i:s', time() + 60);
 		R::store($user);
 		$next = self::safe_next($next);
-		return config::get('link_uri').'?raster_login='.$token.($next !== '' ? '&next='.rawurlencode($next) : '');
+		return util::url('', $next !== '' ? array('raster_login' => $token, 'next' => $next) : array('raster_login' => $token));
 	}
 
 	// The id of the account a login link's token is for, or false. Finding
@@ -353,7 +354,7 @@ class authentication
 				http_response_code(403);
 				exit('You do not have access to this page.');
 			}
-			$this->redirect(self::url(config::get('login_page', 'login')).'?next='.rawurlencode(strtok($uri, '?')));
+			$this->redirect(util::url(config::get('login_page', 'login')).'?next='.rawurlencode(strtok($uri, '?')));
 		}
 		return true;
 	}
@@ -387,7 +388,7 @@ class authentication
 		self::log_in($id);
 		event::dispatch('authentication.logged_in', self::payload($id));
 		$next = self::safe_next(util::get('next') ?: util::post('next'));
-		$this->redirect($next !== '' ? rtrim(config::get('link_uri'), '/').$next : (config::get('after_login') ? self::url(config::get('after_login')) : config::get('link_uri')));
+		$this->redirect($next !== '' ? rtrim(config::get('link_uri'), '/').$next : (config::get('after_login') ? util::url(config::get('after_login')) : config::get('link_uri')));
 		return false;
 	}
 
@@ -421,7 +422,7 @@ class authentication
 		}
 		self::log_in($id);
 		event::dispatch('authentication.registered', self::payload($id));
-		util::done('registered', config::get('after_login') ? self::url(config::get('after_login')) : config::get('link_uri'));
+		util::done('registered', config::get('after_login') ? util::url(config::get('after_login')) : config::get('link_uri'));
 		return false;
 	}
 
@@ -432,12 +433,15 @@ class authentication
 		if (!$v->valid()) return $this->form_again();
 		self::connect();
 		$user = self::find(util::post('email'));
+		// asked again within a few minutes: the link already sent still works
+		$asked = $user && $user->reset_hash && $user->reset_expires ? strtotime((string)$user->reset_expires) - 3600 : false;
+		if ($asked !== false && mail::sent_lately(date('Y-m-d H:i:s', $asked))) $user = null;
 		if ($user && filter_var($user->email, FILTER_VALIDATE_EMAIL)) {
 			$token = bin2hex(random_bytes(24));
 			$user->reset_hash = hash('sha256', $token);
 			$user->reset_expires = date('Y-m-d H:i:s', time() + 3600);
 			R::store($user);
-			$reset = self::url(config::get('reset_page', 'reset')).'?token='.$token;
+			$reset = util::url(config::get('reset_page', 'reset'), array('token' => $token));
 			if (!mail::send_view('_email/password_reset', $user->email, array('reset_url' => $reset, 'name' => $user->name))) {
 				log::error('Password reset email failed: '.mail::$last_error);
 			}
@@ -478,7 +482,7 @@ class authentication
 		R::store($user);
 		self::log_in($user->id);
 		event::dispatch('authentication.password_changed', self::payload($user->id));
-		util::done('password_changed', config::get('after_login') ? self::url(config::get('after_login')) : config::get('link_uri'));
+		util::done('password_changed', config::get('after_login') ? util::url(config::get('after_login')) : config::get('link_uri'));
 		return false;
 	}
 
@@ -486,7 +490,7 @@ class authentication
 	function account() {
 		$user = self::user();
 		if (!$user) {
-			$this->redirect(self::url(config::get('login_page', 'login')).'?next='.rawurlencode(strtok('/'.ltrim((string)config::get('uri_string'), '/'), '?')));
+			$this->redirect(util::url(config::get('login_page', 'login')).'?next='.rawurlencode(strtok('/'.ltrim((string)config::get('uri_string'), '/'), '?')));
 			return array();
 		}
 		$v = validation::get();

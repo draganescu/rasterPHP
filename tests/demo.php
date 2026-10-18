@@ -126,9 +126,11 @@ function mails() {
 		$part = function ($type) use ($raw) {
 			return preg_match('/Content-Type: '.preg_quote($type, '/').'; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n(.*?)\r\n--/s', $raw, $m) ? base64_decode($m[1]) : '';
 		};
-		preg_match('/^Subject: =\?UTF-8\?B\?([^?]+)\?=/m', $raw, $s);
-		preg_match('/^To: (.*)$/m', $raw, $t);
-		$mails[] = array('raw' => $raw, 'to' => trim($t[1]), 'subject' => isset($s[1]) ? base64_decode($s[1]) : '', 'text' => $part('text/plain'), 'html' => $part('text/html'));
+		// headers may be folded over several lines, in encoded words
+		$head = preg_replace('/\r\n[ \t]+/', ' ', substr($raw, 0, (int)strpos($raw, "\r\n\r\n")));
+		preg_match('/^Subject: (.*)$/m', $head, $s);
+		preg_match('/^To: (.*)$/m', $head, $t);
+		$mails[] = array('raw' => $raw, 'to' => trim($t[1]), 'subject' => isset($s[1]) ? mb_decode_mimeheader(trim($s[1])) : '', 'text' => $part('text/plain'), 'html' => $part('text/html'));
 	}
 	return $mails;
 }
@@ -1007,7 +1009,7 @@ test(array('I3', 'I4', 'I8', 'I9'), 'SMTP: plain on localhost, STARTTLS and smtp
 	has($transcript, 'C: '.base64_encode('user'));
 	has($transcript, 'C: MAIL FROM:<hello@cafe.test>');
 	has($transcript, 'C: RCPT TO:<owner@cafe.test>');
-	has($transcript, 'From: Café <hello@cafe.test>');
+	has($transcript, 'From: =?UTF-8?B?'.base64_encode('Café').'?= <hello@cafe.test>');
 	// but not to another host, unless you insist
 	list($port, $log) = $smtp('plain', '127.0.0.2');
 	has($send("smtp://user:pass@127.0.0.2:$port"), 'does not offer STARTTLS');
@@ -1027,7 +1029,7 @@ test(array('I3', 'I4', 'I8', 'I9'), 'SMTP: plain on localhost, STARTTLS and smtp
 	// the sender from config mail_from when RASTER_MAIL_FROM is not set
 	list($port, $log) = $smtp('plain', '127.0.0.1');
 	same('sent', $send("smtp://127.0.0.1:$port", false));
-	has(file_get_contents($log), 'From: Raster Café <hello@cafe.test>');
+	has(file_get_contents($log), 'From: Raster =?UTF-8?B?'.base64_encode('Café').'?= <hello@cafe.test>');
 });
 
 // ## J. Languages
@@ -1737,12 +1739,15 @@ test(array('I6', 'I7'), 'mail: the default log folder and PHP mail()', function 
 	$before = count(glob("$root/demo/data/mail/*.eml") ?: array());
 	same('sent', $send('RASTER_MAIL='));
 	same($before + 1, count(glob("$root/demo/data/mail/*.eml") ?: array()), 'development logs to data/mail');
+	// a sendmail that keeps what it is given (and takes the -f it is passed)
 	$out = "$tmp/sendmail.txt";
-	same('sent', $send('RASTER_MAIL=mail://', '-d '.escapeshellarg('sendmail_path=tee -a '.$out.' >/dev/null')));
+	file_put_contents("$tmp/sendmail-keep.sh", "#!/bin/sh\ncat >> ".escapeshellarg($out)."\n");
+	chmod("$tmp/sendmail-keep.sh", 0755);
+	same('sent', $send('RASTER_MAIL=mail://', '-d '.escapeshellarg("sendmail_path=$tmp/sendmail-keep.sh")));
 	$message = file_get_contents($out);
 	has($message, 'To: owner@cafe.test');
-	has($message, 'From: Raster Café <hello@cafe.test>');
-	has($message, 'Subject: =?UTF-8?B?');
+	has($message, 'From: Raster =?UTF-8?B?'.base64_encode('Café').'?= <hello@cafe.test>');
+	has($message, 'Subject: ');
 });
 test(array('J7', 'J8'), 'a language per domain, the cookie name', function () use ($base) {
 	has(http('GET', "$base/lab", null, array('Host: ro.localhost'))[1], '>Meniu</a>');
@@ -3295,13 +3300,17 @@ test('G24', 'a member changing to an email while someone signs up with it, in ot
 
 // ## 2.1.8 wave 2: newsletter sign-ups
 
-test('H13', 'signing up twice: one subscriber, the same link again, mailed by a listener', function () use ($base) {
+test('H13', 'signing up twice: one subscriber, one mail within 5 minutes, the same link later, mailed by a listener; a reset asked twice sends one mail', function () use ($base) {
 	$before = count(mails());
 	foreach (array('Again@example.com', 'again@example.com ') as $email) {
-		same("$base/journal?done=check_email", header_value(http('POST', "$base/journal", array('raster_form' => 'newsletter.signup', 'email' => $email))[2], 'Location'));
+		same("$base/journal?done=check_email", header_value(http('POST', "$base/journal", array('raster_form' => 'newsletter.signup', 'email' => $email))[2], 'Location'), 'the same answer both times:');
 	}
 	database::instance('cms');
 	same(1, (int)R::getCell('SELECT COUNT(*) FROM subscriber WHERE email = ?', array('again@example.com')), 'subscribers:');
+	same(array('again@example.com'), array_column(array_slice(mails(), $before), 'to'), 'mails within 5 minutes:');
+	// six minutes later the same link goes again
+	R::exec('UPDATE subscriber SET confirm_sent_at = ? WHERE email = ?', array(date('Y-m-d H:i:s', time() - 6 * 60), 'again@example.com'));
+	same("$base/journal?done=check_email", header_value(http('POST', "$base/journal", array('raster_form' => 'newsletter.signup', 'email' => 'again@example.com'))[2], 'Location'));
 	$sent = array_slice(mails(), $before);
 	same(array('again@example.com', 'again@example.com'), array_column($sent, 'to'));
 	$links = array();
@@ -3309,6 +3318,17 @@ test('H13', 'signing up twice: one subscriber, the same link again, mailed by a 
 	same(array_fill(0, 2, R::getCell('SELECT token FROM subscriber WHERE email = ?', array('again@example.com'))), $links, 'both mails carry the link that works:');
 	has(http('GET', "$base/letters/confirm?token={$links[0]}")[1], '<h1>You are subscribed</h1>');
 	same(array('newsletter.confirmation_mail'), mcp($base, 'site_overview')['events']['newsletter.subscribed'], 'who sends the confirmation:');
+	// a reset asked twice: one mail, and its link still works
+	raster(array('user', 'twice-reset@cafe.test', '--role=member', '--password=first password'));
+	$before = count(mails());
+	foreach (array(1, 2) as $round) {
+		list($status, , $headers) = http('POST', "$base/forgot", array('raster_form' => 'authentication.forgot', 'email' => 'twice-reset@cafe.test'));
+		same("$base/forgot?done=reset_sent", header_value($headers, 'Location'), "reset $round:");
+	}
+	$sent = array_slice(mails(), $before);
+	same(array('twice-reset@cafe.test'), array_column($sent, 'to'), 'reset mails:');
+	check(preg_match('/token=([a-f0-9]{48})/', $sent[0]['text'], $t), 'reset link');
+	same("$base/members?done=password_changed", header_value(http('POST', "$base/password/new?token={$t[1]}", array('raster_form' => 'authentication.reset', 'token' => $t[1], 'password' => 'second password', 'password_again' => 'second password'))[2], 'Location'), 'the first link works:');
 });
 
 test('H14', 'an interrupted send goes on where it stopped (#86)', function () use ($base) {
@@ -3528,6 +3548,74 @@ test('G25', 'raster login-link logs in once, in production too, never from the p
 	same('', cookie_from($headers), 'a link works once');
 	same("$site/", header_value($headers, 'Location'));
 	same(2, raster(array('login-link', 'nobody@cafe.example'), $env)[0]);
+});
+
+// ## Phase 1 groundwork: mail after the answer, encoded headers
+
+test('I10', 'a form that sends mail answers at once, even when the mail server never does (#87)', function () use ($root, $tmp, $db) {
+	$port = free_port();
+	$log = "$tmp/smtp-silent.log";
+	$process = proc_open(array(PHP_BINARY, "$root/tests/fake_smtp.php", (string)$port, $log, 'silent'), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes);
+	$GLOBALS['servers'][] = $process;
+	for ($up = false, $i = 0; $i < 100 && !($up = @fsockopen('127.0.0.1', $port, $errno, $errstr, 0.2)); $i++) usleep(50000);
+	check($up, 'the silent SMTP server takes connections');
+	fclose($up);
+	// workers of their own, so a held session would show as a held request
+	$site = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "smtp://127.0.0.1:$port", 'PHP_CLI_SERVER_WORKERS' => '4'));
+	raster(array('user', 'waiting@cafe.test', '--role=member', '--password=waiting password'));
+	$cookie = login($site, 'waiting@cafe.test', 'waiting password');
+	$token = token_in(http('GET', "$site/visit", null, array("Cookie: $cookie"))[1]);
+	check($token !== null, 'the form carries the token');
+	$body = http_build_query(array('raster_form' => 'reservation.contact', 'email' => 'a@b.co', 'message' => 'Is the terrace open?', 'csrf' => $token));
+	$url = parse_url($site);
+	$started = microtime(true);
+	$socket = fsockopen($url['host'], $url['port'], $errno, $errstr, 2);
+	stream_set_timeout($socket, 20);
+	fwrite($socket, "POST /visit HTTP/1.1\r\nHost: {$url['host']}:{$url['port']}\r\nCookie: $cookie\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: ".strlen($body)."\r\nConnection: close\r\n\r\n$body");
+	$status = fgets($socket);
+	$answered = microtime(true) - $started;
+	same('HTTP/1.1 303', substr((string)$status, 0, 12), 'the answer:');
+	check($answered < 1, "answered in {$answered}s");
+	// the visitor's next request is not held by the session
+	$next = microtime(true);
+	same(200, http('GET', "$site/members", null, array("Cookie: $cookie"))[0], 'still logged in');
+	$waited = microtime(true) - $next;
+	check($waited < 1, "the next request waited {$waited}s");
+	while (!feof($socket) && fgets($socket) !== false);
+	fclose($socket);
+	$took = microtime(true) - $started;
+	check($took < 10, "the request ended after {$took}s");
+	has((string)@file_get_contents($log), 'CONNECTED', 'the mail was tried');
+	has((string)@file_get_contents("$tmp/php-errors.log"), 'Raster error: Mail: SMTP error after connect', 'the failure is logged');
+});
+
+test('I11', 'mail headers are encoded: names, long subjects, and the sender for bounces (#124)', function () use ($root, $tmp) {
+	$dir = "$tmp/mail-headers";
+	$args = "$tmp/sendmail-args.txt";
+	$sendmail = "$tmp/fake-sendmail.sh";
+	file_put_contents($sendmail, "#!/bin/sh\necho \"\$@\" > ".escapeshellarg($args)."\ncat >/dev/null\n");
+	chmod($sendmail, 0755);
+	$subject = trim(str_repeat('Ședință lungă despre cafea ', 6));
+	$send = function ($dsn, $ini = '') use ($root, $subject) {
+		$code = 'require "'.$root.'/system/boot.php"; boot::$appname = "demo"; boot::cli();'
+			.' echo mail::send("Ana Pâr <ana@example.com>", '.var_export($subject, true).', "<p>Hi</p>") ? "sent" : "failed: ".mail::$last_error;';
+		return shell_exec('RASTER_MAIL_FROM= RASTER_MAIL='.escapeshellarg($dsn).' '.escapeshellarg(PHP_BINARY).' '.$ini.' -r '.escapeshellarg($code).' 2>&1');
+	};
+	same('sent', $send("log://$dir"));
+	$files = glob("$dir/*.eml");
+	same(1, count($files));
+	$raw = file_get_contents($files[0]);
+	$head = "\r\n".substr($raw, 0, strpos($raw, "\r\n\r\n"));
+	has($head, "\r\nFrom: Raster =?UTF-8?B?".base64_encode('Café').'?= <hello@cafe.test>', 'the sender name:');
+	check(preg_match('/^To: ([^\r\n]*)/m', $head, $to) && strpos($to[1], '=?UTF-8?B?') !== false && strpos($to[1], 'Pâr') === false, 'the recipient name: '.$to[1]);
+	check(preg_match('/^Subject: ([^\r\n]*(?:\r\n[ \t][^\r\n]*)*)/m', $head, $m), 'a subject');
+	preg_match_all('/=\?UTF-8\?B\?[^?]*\?=/', $m[1], $words);
+	check(count($words[0]) > 1, 'a long subject is split: '.$m[1]);
+	foreach ($words[0] as $word) check(strlen($word) <= 75, 'an encoded word of '.strlen($word).' characters');
+	same($subject, mb_decode_mimeheader(preg_replace('/\r\n[ \t]+/', ' ', $m[1])), 'the subject reads back:');
+	check(!preg_match('/[\x80-\xff]/', $head), 'no raw 8-bit bytes in the headers');
+	same('sent', $send('mail://', '-d '.escapeshellarg("sendmail_path=$sendmail")));
+	has((string)@file_get_contents($args), '-fhello@cafe.test', 'sendmail is told the sender:');
 });
 
 // ## No PHP warnings, notices or deprecations on any request
