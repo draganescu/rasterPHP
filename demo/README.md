@@ -5,18 +5,30 @@ real job. `tests/demo.php` drives it over HTTP, the command line, MCP and a
 fake SMTP server, and fails if any feature below has no passing test.
 
 ```sh
+php demo/seed.php                         # what the café takes bookings for
 RASTER_APP=demo php bin/raster serve      # http://localhost:8000
 RASTER_APP=demo php bin/raster user you@example.com --role=editor
 php tests/demo.php                        # the whole matrix
 ```
+
+Bookings come from the bundled booking model (`system/models/booking/`); the
+café writes only its pages, its emails and one extra field
+(`models/the_booking`). `demo/seed.php` adds what can be booked: the Dining
+room (20 people, sittings at 19:00 and 21:00 Tuesday to Sunday, closed on 25
+December) and the salon's two stylists with their hours and two services. Run
+it once after `raster schema --apply` (in production) or on a fresh database;
+running it again adds nothing. Until then the booking forms say `not_open`.
 
 | Where | What it shows |
 |---|---|
 | `/` | page fields, featured dishes (a filtered, limited collection), upcoming events |
 | `/menu`, `/menu/menu_item/<slug>` | a collection with pagination, category filter links, counts from an SQL file |
 | `/events`, `/journal` | ordering, drafts, scheduled items, author filter links |
-| `/visit` | a booking form using every validation rule, a contact form, the newsletter form: three forms on one page |
-| `/members`, `/staff`, `/account`, `/login`, `/register`, `/forgot`, `/password/new` | accounts, roles and protected pages; bookings are records the staff page lists and members see on /account |
+| `/visit` | the booking form (a day's sittings as radio buttons) using every validation rule, a contact form, the newsletter form: three forms on one page |
+| `/salon` | appointments: pick a stylist and a service, then a day and a time |
+| `/booking` | the guest's page, by the link in their emails (`?token=`) or from /account: cancel, or move to another time |
+| `/staff`, `/staff/setup`, `/staff/bookings`, `/booking/booking_item/<slug>` | the staff page from the Records recipe (counts, needs attention, requests, the agenda with the places left, the past), the booking setup, every booking, one booking |
+| `/members`, `/account`, `/login`, `/register`, `/forgot`, `/password/new` | accounts, roles and protected pages; members see their bookings on /account |
 | `/lab` | the engine's edge cases, one section each |
 | `/journal.rss`, `/journal.atom`, `/feed.json`, `/sitemap.xml`, `/hours.txt` | formats |
 | `?lang=ro` | the Romanian translation |
@@ -73,7 +85,7 @@ php tests/demo.php                        # the whole matrix
 | C21 | bound query parameters |
 | C22 | application bindings in `config/the_events.php` |
 | C23 | models load each other on first use |
-| C24 | the JSON api; system and static methods private |
+| C24 | the JSON api; system and static methods private, a bundled model without `api()` too |
 | C25 | development shows template errors, partials included |
 | C26 | `route_not_found` event |
 | C27 | values in scripts: `/*- print.x /-*/` |
@@ -87,7 +99,7 @@ php tests/demo.php                        # the whole matrix
 | C35 | `the_<model>` overrides a bundled model |
 | C36 | `log::enable()` prints the log to the browser console |
 | C37 | `strict_templates` off renders broken templates anyway |
-| C38 | a model sends an event and another listens (`listens()`): a booking subscribes the guest |
+| C38 | a model sends an event and another listens (`listens()`): `booking.requested` subscribes the guest |
 | C39 | MCP site_overview lists who listens to what |
 | C40 | `executed_<model>_<method>` uses the model's own name (also under a `the_` override) and carries the result |
 | C41 | bundled models send events from every path: cms over MCP, authentication.registered |
@@ -115,7 +127,7 @@ php tests/demo.php                        # the whole matrix
 | D10 | pattern |
 | D11 | cant_be |
 | D12 | accepted |
-| D13 | an application rule (`models/validation/rules/`) |
+| D13 | an application rule (`models/validation/rules/no_links.php`, on the contact form's message) |
 | D14 | not_empty and email_format from older Raster |
 | D15 | matches |
 | D16 | form_state fills inputs, selects, radios, checkboxes, textareas, never passwords |
@@ -126,8 +138,8 @@ php tests/demo.php                        # the whole matrix
 | D21 | /api never runs form models |
 | D22 | logged in posts without the token are refused |
 | D23 | type="url" |
-| D24 | `field('guests', 'max')` shows only when that rule fails |
-| D25 | validation::errors() lists what failed |
+| D24 | `field('people', 'max')` shows only when that rule fails |
+| D25 | validation::errors() lists what failed (the contact form's count) |
 | D26 | a form with `method="get"` shows what the URL asked (the staff page's filters) |
 | D27 | a form shown again keeps what was typed exactly, `$100`, `\1` and `$0` included |
 | D28 | a field sent as a list (`name[]`) when the form doesn't name it so, or with bytes that aren't UTF-8, fails `required`; a field named `tags[]` takes a list |
@@ -295,16 +307,25 @@ php tests/demo.php                        # the whole matrix
 | R11 | lint checks types: static check(), a method for each action, keys that mean nothing |
 | R12 | `schema --apply` creates record tables in production, with every column and no row |
 | R13 | `raster make model <name> --from=<view>`: a model for the records a form sends |
-| R14 | a staff page lists records by status (`status=new&order=date`), and filter addresses (`/reservation/reservation_items/date/…`) show one evening, for staff only |
-| R15 | list options: filters from the URL (`seating=?seating`), dates (`date>=today`, `date<today`), `!=`, and `order=date,name`; pagination keeps the query |
+| R14 | a staff page lists records by status (`status=requested&date>=today`), one day at a time (`date=?day`), and every booking filtered by a GET form (`/staff/bookings?status=requested`), for staff only |
+| R15 | list options: filters from the URL (`resource=?resource`), dates (`date>=today`, `date<today`), `!=`, and `order=date,time`; pagination keeps the query |
 | R16 | `staff_add`: staff add bookings from the card at the end of a list; a new item starts with the list's filters; no card on an item's page |
 | R17 | lint warns about records a form makes that no view lists, and about any page listing records a model reads itself without `listed()` (on admin pages, that the editor can't edit them) |
-| R18 | `cms_records::listed()`: a model's agenda of bookings by evening, nested in its rows, is edited in place with the record's actions; values the model adds are not editable; `find()` asks for the coming evenings with list options and has no 1,000 cap |
-| R19 | a record's own page (`/reservation/reservation_item/<slug>`) is where editors edit a record a model view links to; visitors get a 404 |
+| R18 | `cms_records::listed()`: the booking agenda's bookings by day, nested in its rows, are edited in place with the record's actions; values the model adds are not editable; `find()` asks for the coming days with list options and has no 1,000 cap |
+| R19 | a record's own page (`/booking/booking_item/<slug>`) is where editors edit a record a model view links to; visitors get a 404, and the login page where it is protected |
 | T1 | a template field is of its mock-up's type (`14.50` a number, `2026-10-10` a date, `19:00` a time), a record field of its default's (`0` an int, `false` a bool) or the one `types` names; `schema`, `describe` and `site_overview` say so |
 | T2 | values are stored as their type whoever writes them (`12 Dec 2026` is `2026-12-12`, `8pm` is `20:00`), or refused with the field and an example |
 | T3 | lists filter and sort by type: `order=-price` puts 100 above 18 above 9.50, `price>=10` compares numbers, `order=date,starts` dates and times |
-| T4 | models, MCP and /api read ints, floats and bools, so the reservation model has no casts |
+| T4 | models, MCP and /api read ints, floats and bools, so the booking model and the café's listener have no casts |
 | T5 | templates print text: a number with as many decimals as its mock-up, nothing for an empty value; a form value of the wrong type raises `<field>_invalid` |
 | T6 | `schema --apply` converts a column whose type changed when every value fits, and names the values that don't |
 | T7 | a time prints `19:00` whatever the database gives back (MySQL's `19:00:00`); lists hide drafts and scheduled items and sort by `newest` whether `published_at` is a typed column or still text from before 2.1.7 (only a text one is compared with `''`, which MySQL refuses for a date) |
+| P1 | booking setup records make the slots: the café's sittings Tuesday to Sunday, closed Mondays and on 25 December (`demo/seed.php`); times as radio buttons, no JavaScript |
+| P2 | a guest books on /visit: `booking_requested` with their link, `booking_new` to staff, and the newsletter box subscribes them through `booking.requested` |
+| P3 | the last places: `fully_booked` for the one too many, also when guests post at once |
+| P4 | the staff page from the Records recipe: counts, requests, the agenda with the places left, actions in place, a phone booking from the card, a move that tells the guest |
+| P5 | needs attention: a day closed under its bookings flags them, and confirming one is refused with the reason |
+| P6 | the manage link: a GET shows the booking and changes nothing, a POST cancels or moves it, `too_late`, dead after a cancel, never cached, left out of the sitemap and export |
+| P7 | the salon: two stylists, two services of mixed lengths, one booking at a time, `service_unavailable` |
+| P8 | a logged in guest manages their bookings from /account, without a token |
+| P9 | `the_booking` adds a field (`newsletter`) to the bundled type |

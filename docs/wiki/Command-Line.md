@@ -42,7 +42,7 @@ application/views/default/team.html:11:20: error: Model 'office' has no public m
 
 ```sh
 php bin/raster render /about
-php bin/raster render '/bookings?stylist=Ana' --as=editor
+php bin/raster render '/staff?resource=ana' --as=editor
 ```
 
 Prints the HTML of a URL without a web server. Exits with 1 when the page answers with an error (404, 500), which makes it handy in tests. A query string fills `?…` as a browser's would.

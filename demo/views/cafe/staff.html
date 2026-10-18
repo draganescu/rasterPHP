@@ -9,33 +9,42 @@
   <main class="">
     <h1>Staff</h1>
     <p>Only editors and admins can see this page. Log in as staff to edit any text on the site from the toolbar.</p>
-    <h2>Reservations</h2>
-    <p>Bookings are records: the reservation model declares them, and the page editor lets staff change them, or confirm and cancel them. A date shows that evening's bookings; <a href="reservation.html">all bookings</a> are on one page. A booking taken over the phone is added at the end of a list.</p>
+    <h2>Bookings</h2>
+    <p><!-- print.booking.count('status=requested&date>=today') -->3<!-- /print.booking.count('status=requested&date>=today') --> requests to answer, <!-- print.booking.count('attention') -->0<!-- /print.booking.count('attention') --> bookings that need attention.</p>
+    <p>Bookings come from the bundled booking model: guests book on <a href="visit.html">/visit</a> and <a href="salon.html">/salon</a>, and each booking is a request that holds its place until you confirm or decline it with its buttons. Edit one in the page, or move it by changing its date or time. A booking taken over the phone is added at the end of a list. What can be booked, and when, is on <a href="staff/setup.html">the setup page</a>; <a href="staff/bookings.html">every booking</a> is on one page.</p>
     <form method="get" class="filters">
-      <label>Seating <select name="seating"><option value="">Any</option><option value="window">Window</option><option value="inside">Inside</option><option value="terrace">Terrace</option></select></label>
-      <label>Evening <input type="date" name="day"></label>
+      <label>For <select name="resource"><option value="">All</option><option value="dining-room">Dining room</option><option value="ana">Ana</option><option value="mihai">Mihai</option></select></label>
+      <label>Day <input type="date" name="day"></label>
       <button>Show</button> <a href="staff.html">Show all</a>
     </form>
-    <h3>To confirm</h3>
+    <h3>Needs attention</h3>
     <table class="list"><tbody>
-      <!-- render.cms.reservation('status=new&date>=today&seating=?seating&date=?day&order=date,name') -->
-      <tr class="booking"><td><!-- print.name -->Ana<!-- /print.name --></td><td><!-- print.@href.raster_filter@date --><a href="reservation/reservation_items/date/2026-10-01"><!-- print.date -->2026-10-01<!-- /print.date --></a><!-- /print.@href.raster_filter@date --></td><td><!-- print.guests -->2<!-- /print.guests --> guests</td><td><!-- print.notes -->Window seat<!-- /print.notes --></td><td class="status"><!-- print.status -->new<!-- /print.status --></td></tr>
-      <!-- /render.cms.reservation('status=new&date>=today&seating=?seating&date=?day&order=date,name') -->
+      <!-- render.booking.attention -->
+      <tr class="booking"><td><!-- print.name -->Ana<!-- /print.name --></td><td><!-- print.date -->2026-10-20<!-- /print.date --> <!-- print.time -->19:00<!-- /print.time --></td><td><!-- print.resource_name -->Dining room<!-- /print.resource_name --></td><td class="attention"><!-- print.attention -->closed<!-- /print.attention --></td><td class="status"><!-- print.status -->requested<!-- /print.status --></td></tr>
+      <!-- /render.booking.attention -->
     </tbody></table>
-    <h3>By evening</h3>
-    <!-- render.reservation.agenda -->
-    <section class="evening">
-      <h4><!-- print.date -->2026-10-01<!-- /print.date -->, <!-- print.seats_left -->12<!-- /print.seats_left --> seats left</h4>
+    <h3>Requests</h3>
+    <table class="list"><tbody>
+      <!-- render.cms.booking('status=requested&date>=today&resource=?resource&date=?day&order=date,time') -->
+      <tr class="booking"><td><!-- print.name -->Ana<!-- /print.name --></td><td><!-- print.date -->2026-10-20<!-- /print.date --> <!-- print.time -->19:00<!-- /print.time --></td><td><!-- print.resource -->dining-room<!-- /print.resource --></td><td><!-- print.people -->2<!-- /print.people --> people</td><td><!-- print.notes -->Window seat<!-- /print.notes --></td><td class="status"><!-- print.status -->requested<!-- /print.status --></td></tr>
+      <!-- /render.cms.booking('status=requested&date>=today&resource=?resource&date=?day&order=date,time') -->
+    </tbody></table>
+    <h3>By day</h3>
+    <p>Pick one of the above in For to see the places left in each slot.</p>
+    <!-- render.booking.agenda('from=today&days=7&resource=?resource') -->
+    <section class="day">
+      <h4><!-- print.date -->2026-10-20<!-- /print.date --></h4>
+      <ul class="slots"><!-- print.slots --><!-- print.+class.state --><li class="slot "><!-- print.time -->19:00<!-- /print.time -->: <!-- print.left_people -->12<!-- /print.left_people --> places left</li><!-- /print.+class.state --><!-- /print.slots --></ul>
       <table class="list"><tbody>
-        <!-- print.bookings --><tr class="agenda-booking"><td><!-- print.name -->Ana<!-- /print.name --></td><td><!-- print.guests -->2<!-- /print.guests --> guests</td><td class="status"><!-- print.status -->new<!-- /print.status --></td><td><!-- print.@href.raster_detail_link --><a href="reservation/reservation_item/1">Open</a><!-- /print.@href.raster_detail_link --></td></tr><!-- /print.bookings -->
+        <!-- print.bookings --><tr class="agenda-booking"><td><!-- print.time -->19:00<!-- /print.time --></td><td><!-- print.name -->Ana<!-- /print.name --></td><td><!-- print.resource_name -->Dining room<!-- /print.resource_name --> <!-- print.service_name --><!-- /print.service_name --></td><td><!-- print.people -->2<!-- /print.people --> people</td><td class="status"><!-- print.status -->requested<!-- /print.status --></td><td class="attention"><!-- print.attention --><!-- /print.attention --></td><td><!-- print.@href.raster_detail_link --><a href="booking/booking_item/1">Open</a><!-- /print.@href.raster_detail_link --></td></tr><!-- /print.bookings -->
       </tbody></table>
     </section>
-    <!-- /render.reservation.agenda -->
-    <h3>Past evenings</h3>
+    <!-- /render.booking.agenda('from=today&days=7&resource=?resource') -->
+    <h3>Past</h3>
     <table class="list"><tbody>
-      <!-- render.cms.reservation('status!=cancelled&date<today&seating=?seating&date=?day&order=-date,name&limit=20') -->
-      <tr class="booking"><td><!-- print.name -->Ana<!-- /print.name --></td><td><!-- print.@href.raster_filter@date --><a href="reservation/reservation_items/date/2026-10-01"><!-- print.date -->2026-10-01<!-- /print.date --></a><!-- /print.@href.raster_filter@date --></td><td><!-- print.guests -->2<!-- /print.guests --> guests</td><td><!-- print.notes -->Window seat<!-- /print.notes --></td><td class="status"><!-- print.status -->new<!-- /print.status --></td></tr>
-      <!-- /render.cms.reservation('status!=cancelled&date<today&seating=?seating&date=?day&order=-date,name&limit=20') -->
+      <!-- render.cms.booking('date<today&status!=cancelled&resource=?resource&date=?day&order=-date,-time&limit=20') -->
+      <tr class="booking"><td><!-- print.name -->Ana<!-- /print.name --></td><td><!-- print.date -->2026-10-20<!-- /print.date --> <!-- print.time -->19:00<!-- /print.time --></td><td><!-- print.resource -->dining-room<!-- /print.resource --></td><td><!-- print.people -->2<!-- /print.people --> people</td><td><!-- print.notes -->Window seat<!-- /print.notes --></td><td class="status"><!-- print.status -->confirmed<!-- /print.status --></td></tr>
+      <!-- /render.cms.booking('date<today&status!=cancelled&resource=?resource&date=?day&order=-date,-time&limit=20') -->
     </tbody></table>
   </main>
   <!-- dry._layout.footer /-->

@@ -22,6 +22,7 @@
 **Visitors**
 - [Forms and validation](Forms-and-Validation)
 - [Records](Records)
+- [Bookings](Bookings)
 - [Accounts and roles](Accounts-and-Roles)
 - [Sending email](Sending-Email)
 - [Newsletter](Newsletter)

@@ -6,19 +6,19 @@ Events let one model react to something another model did, without either knowin
 
 Say your booking form should also add the guest to the newsletter when they tick a box, and a new account should get a welcome email. You could call `newsletter::subscribe()` from the booking model, but then the booking model has to know about newsletters, and every new side effect means editing it.
 
-With events, the booking model only announces what happened. Any model that cares listens.
+With events, the booking model only announces what happened. Any model that cares listens. The bundled booking model sends `booking.requested`, `booking.confirmed`, `booking.declined`, `booking.cancelled` and `booking.rescheduled` (see [Bookings](Bookings)); the demo café's own model listens to the first.
 
 ## Sending an event
 
 ```php
-event::dispatch('reservation.booked', array(
+event::dispatch('inquiry.received', array(
     'name' => $name,
     'email' => $email,
-    'newsletter' => true,
+    'people' => 12,
 ));
 ```
 
-- The first argument is the event's name. Use `<model>.<what happened>`, in the past tense: `reservation.booked`, `order.paid`.
+- The first argument is the event's name. Use `<model>.<what happened>`, in the past tense: `inquiry.received`, `booking.requested`, `order.paid`.
 - The second is the **payload**: an array with the details listeners need.
 - `dispatch()` returns `false` if any listener returned `false`, and `true` otherwise. What that means is up to the sender.
 
@@ -30,14 +30,15 @@ Declare what a model listens to with a static `listens()` method, next to the co
 class cafe {
     static function listens() {
         return array(
-            'reservation.booked' => 'subscribe_guest',
+            'booking.requested' => 'subscribe_guest',
             'authentication.registered' => 'welcome',
             'cms.item_saved' => array('log_change', 'notify_team'),   // several methods
         );
     }
 
+    // who is 'guest' or 'staff'; newsletter is a field the café's the_booking adds
     function subscribe_guest($booking) {
-        if ($booking['newsletter']) newsletter::subscribe($booking['email'], $booking['name'], '/visit');
+        if ($booking['who'] === 'guest' && $booking['newsletter']) newsletter::subscribe($booking['email'], $booking['name'], '/visit');
     }
 
     function welcome($user) {
@@ -52,8 +53,8 @@ You can also bind listeners in `application/config/the_events.php`. In the start
 
 ```php
 <?php
-event::bind('reservation.booked')->to('cafe', 'subscribe_guest');
-event::unbind('reservation.booked')->from('cafe', 'subscribe_guest');   // remove a binding
+event::bind('booking.requested')->to('cafe', 'subscribe_guest');
+event::unbind('booking.confirmed')->from('booking', 'confirmed_mail');   // remove a binding: here the booking model's own email
 ```
 
 **Order.** Listeners run in this order:

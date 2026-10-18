@@ -825,7 +825,7 @@ class raster_inspector {
 				// problems a check() names: $problems[] = 'sold_out'
 				preg_match_all('/\$problems\[\]\s*=\s*[\'"]([a-z0-9_]+)[\'"]/', $source, $m);
 				$names = array_merge($names, $m[1]);
-				// cms_records::submit('reservation', 'booked') redirects with ?done=booked
+				// cms_records::submit('inquiry', 'sent') redirects with ?done=sent
 				// (the type's name when there is no second argument)
 				preg_match_all('/submit\(\s*[\'"]([a-z0-9_]+)[\'"](?:\s*,\s*[\'"]([a-z0-9_]+)[\'"])?/', $source, $m, PREG_SET_ORDER);
 				foreach ($m as $call) $names[] = isset($call[2]) && $call[2] !== '' ? $call[2] : $call[1];
