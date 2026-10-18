@@ -17,9 +17,11 @@ event::bind('route_set')->to('authentication','setup');
 event::bind('newsletter.subscribed')->to('newsletter', 'confirmation_mail');
 // Bookings email the guest (and staff, when the guest acted) at each step,
 // after the commit; a booking staff add or move in the page gets its guest
-// a link. Only the bundled booking model: a site's own keeps its own ways.
+// a link. Only the bundled booking model, and only where a view uses it
+// (as for its types): a site's own keeps its own ways, and a site without
+// booking loads none of its files when it saves a record.
 $booking = controller::model('booking');
-if ($booking && $booking['bundled']) {
+if ($booking && $booking['bundled'] && controller::uses('booking')) {
 	event::bind('cms.item_saved')->to('booking', 'saved');
 	foreach (array('requested', 'confirmed', 'declined', 'cancelled', 'rescheduled') as $step) event::bind("booking.$step")->to('booking', $step.'_mail');
 }

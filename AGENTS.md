@@ -1098,8 +1098,11 @@ link follow.
   guest's email and link through the model's `cms.item_saved` listener
   (`booking.saved`), with `who` `staff`; staff aren't emailed about their
   own. The listeners are framework bindings (`system/config/events.php`),
-  bound only for the bundled model, never a site's own `booking`; unbind
-  one to send your own:
+  bound only for the bundled model and only where a view uses it (as for
+  its types), never a site's own `booking`; a site without booking loads
+  none of its files. A `booking::move()` inside your own
+  `cms_records::transaction()` still sends its email once. Unbind one to
+  send your own:
   `event::unbind('booking.confirmed')->from('booking', 'confirmed_mail')`
   (also `requested_mail`, `declined_mail`, `cancelled_mail`,
   `rescheduled_mail`).

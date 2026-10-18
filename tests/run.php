@@ -2961,9 +2961,15 @@ function booking_site($fn) {
 	cms_records::forget();
 	cms_store::connect();
 	if (class_exists('booking', false)) booking::forget();
+	// this process booted without a view that uses booking, so it binds the
+	// listeners system/config/events.php binds for a site that has one
+	$listeners = array('cms.item_saved' => 'saved');
+	foreach (array('requested', 'confirmed', 'declined', 'cancelled', 'rescheduled') as $step) $listeners["booking.$step"] = $step.'_mail';
+	foreach ($listeners as $event => $method) event::bind($event)->to('booking', $method);
 	try {
 		return $fn();
 	} finally {
+		foreach ($listeners as $event => $method) event::unbind($event)->from('booking', $method);
 		putenv('RASTER_MAIL_FROM');
 		foreach (array('bookingresource', 'bookinghours', 'bookingclosed', 'bookingservice', 'booking') as $type) R::getDatabaseAdapter()->exec("DROP TABLE IF EXISTS {$type}data");
 		cms_store::forget();
@@ -3010,6 +3016,17 @@ test('booking types count only where views use the model', function () use ($roo
 		same('time', cms_records::info('bookinghours')['types']['starts']);
 		same(true, booking::ready());
 	});
+});
+
+test('a site without booking binds no booking listener and loads no booking file when it saves a record', function () {
+	$code = 'cms_store::save_item("zzthing", 0, array("title" => "x"), array("title"), "editor");'
+		.' echo json_encode(array("bound" => array_values(preg_grep("/^booking\\./", call_user_func_array("array_merge", array_values(event::bindings())))),'
+		.' "loaded" => array_values(preg_grep("~/models/booking/~", get_included_files()))));';
+	$out = json_decode(race_php($code, 1)[0], true);
+	check(is_array($out), 'no report from the save');
+	same(array(), $out['bound'], 'booking listeners bound:');
+	same(array(), $out['loaded'], 'booking files loaded:');
+	R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS zzthing');
 });
 
 test('a site booking model or type keeps the name', function () {
@@ -4292,20 +4309,22 @@ test('booking: a site can unbind a booking email', function () {
 	});
 });
 
-test("booking: bundled listeners are not bound to a site's own booking model", function () {
-	$app = APPBASE.config::get('models_path', 'models');
-	$bound = 'echo json_encode(call_user_func_array("array_merge", array_values(event::bindings())));';
-	$out = json_decode(race_php($bound, 1)[0], true);
-	check(in_array('booking.confirmed_mail', $out, true) && in_array('booking.saved', $out, true), 'the bundled model: '.json_encode($out));
-	temp_model("$app/booking", array('booking.php' => "<?php\nclass booking\n{\n\tstatic function types() {\n\t\treturn array('booking' => array('fields' => array('name' => '')));\n\t}\n}\n"));
-	try {
+test("booking: bundled listeners are bound where views use booking, not to a site's own booking model", function () {
+	booking_site(function () {
+		$app = APPBASE.config::get('models_path', 'models');
+		$bound = 'echo json_encode(call_user_func_array("array_merge", array_values(event::bindings())));';
 		$out = json_decode(race_php($bound, 1)[0], true);
-	} finally {
-		remove_dir("$app/booking");
-		controller::forget_models();
-	}
-	check(is_array($out), 'no bindings');
-	same(array(), array_values(preg_grep('/^booking\./', $out)), 'bound to the site model:');
+		check(in_array('booking.confirmed_mail', $out, true) && in_array('booking.saved', $out, true), 'the bundled model: '.json_encode($out));
+		temp_model("$app/booking", array('booking.php' => "<?php\nclass booking\n{\n\tstatic function types() {\n\t\treturn array('booking' => array('fields' => array('name' => '')));\n\t}\n}\n"));
+		try {
+			$out = json_decode(race_php($bound, 1)[0], true);
+		} finally {
+			remove_dir("$app/booking");
+			controller::forget_models();
+		}
+		check(is_array($out), 'no bindings');
+		same(array(), array_values(preg_grep('/^booking\./', $out)), 'bound to the site model:');
+	});
 });
 
 test('booking: requires(): emails, pages, settings and records', function () {
