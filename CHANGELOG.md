@@ -3,6 +3,16 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.9
+
+Nothing for sites to do.
+
+**Staff `/api` methods refuse requests other sites start.** A method a model's `api()` lists for `member`, `editor` or `admin` now answers 403 `{"error":"cross-site"}` on any verb, GET included, when the browser says another site started the request (`Origin`, `Sec-Fetch-Site` or `Referer`). Methods listed for `visitor`, webhooks among them, answer as before. Forms and `/api` posts with `Origin: null` are refused too, unless the browser's `Sec-Fetch-Site` says they come from the site itself.
+
+**`sitemap_skip` adds to the pages left out, rather than replacing them.** The login, sign-up, password and newsletter pages are always left out of the sitemap and of `raster export`, wherever `login_page`, `reset_page` and the newsletter settings put them. A site's `sitemap_skip` no longer needs to repeat them. Those pages are left out only on sites whose views use accounts or the newsletter: elsewhere, a page that happens to be called `account` is an ordinary page. `describe` lists the account and newsletter settings on those sites only.
+
+**Models can say what they need.** A model's `static function requires()` names the emails its regions send, the pages that need PHP behind them, and its settings. `lint`, the sitemap, `raster export` and `describe` read it (see "What a model declares" in AGENTS.md).
+
 ## 2.2.8
 
 Set `timezone` in production (`config::set('timezone')->to('Europe/Bucharest')`); `doctor` warns when neither it nor php.ini's `date.timezone` is set. `today`, scheduled items, stamps and the editor's Schedule box and badge follow it. `mail::send()` returns true once a message is kept: in a web request mail now goes out after the page answers, with SMTP waiting at most 5 seconds. Delivery failures are logged and send `mail.failed` (listeners on `mail.sent`/`mail.failed` run after the answer). Names in From and To and long subjects are sent as encoded words, and `mail://` passes `-f` with the sender's address. Signing up again within 5 minutes sends no second email, nor does asking for a password reset again. The link already sent still works. Run `schema --apply` (new `subscriber.confirm_sent_at`). `authentication::url()` and `newsletter::page_url()` are deprecated for `util::url($page, $query)`.
