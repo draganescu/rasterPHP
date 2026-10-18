@@ -3,6 +3,16 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.12
+
+Nothing for sites to do. **Bookings, part two.** A site whose views use `render.booking.*` now takes bookings. `render.booking.form` stores a request that holds its place, and capacity is counted at the busiest minute in one query inside the write's lock, so two guests can't both take the last table. Staff confirm, decline or cancel bookings with the actions, and may book a walk-in or a booking at ten minutes' notice, but never over capacity. A booking stranded by a change of the setup needs attention, with the reason, in `render.booking.agenda` and `render.booking.attention` and in `print.booking.count('attention')`. These are for editors only and editable in place. New setting: `booking_max_people` (12). **Record types can fill their own fields.** A model's static `fill($type, $after, $before)` returns the fields it works out (a booking's end), merged into every write before `check()`. `cms_records::writer()` tells `check()` who is writing. **Forms shown again** select value-less options by their text and keep unticked boxes unticked (#80).
+
+## 2.2.11
+
+Nothing for sites to do.
+
+**Bookings, part one.** A site whose views use `render.booking.*` gets the bundled booking model's setup records: `bookingresource` (what is booked, with a people limit and a bookings limit), `bookinghours` (when slots start), `bookingclosed` (days off) and `bookingservice` (what a booking is for and how long it lasts). Staff edit them in the page. `render.booking.slots`, `days`, `resources` and `services` list one day's start times, the next days with a free slot, and the active resources and services. They read the date and the guest's choices from the URL, need no JavaScript, and are never page-cached. Times follow the site's `timezone` across DST changes, and a booking ends by midnight. New settings: `booking_notice` (60 minutes) and `booking_horizon` (60 days). A site with its own `booking` model or type keeps it, and lint says so.
+
 ## 2.2.10
 
 Nothing for sites to do, unless `models/sql.php` still names its array `$querries`: rename it `$queries`.
