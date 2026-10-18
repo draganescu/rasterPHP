@@ -90,7 +90,7 @@ class booking
 	// model's own email listener, never stored, logged or sent with an event
 	static $links = array();
 	// while the model makes its own writes (the form, the actions, moves):
-	// saved() leaves those alone
+	// saved() leaves those alone, and fill() marks none of them moved
 	static $writing = false;
 	// the booking the manage page is about, by its ?token= or ?booking=
 	static $managed = array();
@@ -201,8 +201,11 @@ class booking
 		if (!$before || $moved || $after['status'] !== $before['status']) $values['changed_at'] = date('Y-m-d H:i:s');
 		// a guest's link works until the booking starts
 		if ((!$before || $moved) && (string)$after['date'] !== '' && (string)$after['time'] !== '') $values['token_expires'] = $after['date'].' '.$after['time'].':00';
+		// a move the model makes itself (move()) has its link and event
+		// already: only staff's own edits are left for saved(), which may run
+		// after writing() is done, at the commit of a transaction around it
 		if ($before) unset(self::$moved[(int)$before['id']]);
-		if ($before && $placed && self::is_staff()) self::$moved[(int)$before['id']] = true;
+		if ($before && $placed && self::is_staff() && !self::$writing) self::$moved[(int)$before['id']] = true;
 		return $values;
 	}
 

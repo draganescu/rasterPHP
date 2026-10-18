@@ -3673,7 +3673,7 @@ test('booking: moving a booking frees its old place in the same write', function
 		same(array('confirmed', '21:00', '23:00'), array($moved['status'], $moved['time'], $moved['ends']));
 		same('4', booking_left($tue, '19:00'));
 		same('16', booking_left($tue, '21:00'));
-		check(isset(booking::$moved[$four['id']]), 'a staff move is noted');
+		check(!isset(booking::$moved[$four['id']]), "the model's own move is not left for saved()");
 		// the in-page editor's change of time works out the end again
 		$back = booking_staff(array('time' => '19:00'), $four['id']);
 		same(array('19:00', '21:00', 'confirmed'), array($back['time'], $back['ends'], $back['status']));
@@ -4244,6 +4244,22 @@ test('booking: every email is sent once per change', function () {
 		same(array('booking_changed once@example.test'), booking_sent($mails));
 		check(booking_token($mails[0]) !== null, 'the changed email has a link');
 		same(array(array('booking.rescheduled', 'staff', 'confirmed')), array_map(function ($e) { return array($e[0], $e[1]['who'], $e[1]['status']); }, $events));
+		// the model's own move inside a transaction of the site's code: its
+		// events come at that commit, and still once
+		$hashes = count(cms_records::get('booking', $b['id'])['token_hashes']);
+		$events = booking_events(function () use ($b, &$mails) {
+			$mails = booking_mails(function () use ($b) {
+				cms_records::transaction(function () use ($b) { booking::move($b['id'], array('time' => '19:00'), 'staff'); });
+			});
+		});
+		same(array('booking_changed once@example.test'), booking_sent($mails));
+		same(array('booking.rescheduled'), array_column($events, 0));
+		same($hashes + 1, count(cms_records::get('booking', $b['id'])['token_hashes']), 'one new link');
+		$events = booking_events(function () use ($b, &$mails) {
+			$mails = booking_mails(function () use ($b) { booking_staff(array('time' => '21:00'), $b['id']); });
+		});
+		same(array('booking_changed once@example.test'), booking_sent($mails), 'an editor move after it:');
+		same(array('booking.rescheduled'), array_column($events, 0));
 		$mails = booking_mails(function () use ($b) { booking_staff(array('notes' => 'by the window', 'phone' => '0721'), $b['id']); });
 		same(array(), booking_sent($mails));
 		$mails = booking_mails(function () use ($tue) { booking_staff(array('date' => $tue, 'time' => '21:00')); });
