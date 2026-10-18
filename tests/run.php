@@ -858,6 +858,20 @@ test('collections: slugs, drafts, scheduling, order', function () use ($base) {
 	same(404, http('GET', "$base/news/news_item/secret-draft")[0]);
 	check(strpos($body, 'Ünïcode') < strpos($body, 'Raster runs on PHP 8'), 'order=newest');
 });
+test('an item titled only with digits opens at its own slug (#90)', function () use ($base) {
+	http('GET', "$base/news");
+	$year = mcp_call('create_item', array('collection' => 'news', 'fields' => array('headline' => '1984')))['structuredContent'];
+	$one = mcp_call('create_item', array('collection' => 'news', 'fields' => array('headline' => '1')))['structuredContent'];
+	same('1984', $year['slug']);
+	same('1', $one['slug']);
+	check(strpos(http('GET', "$base/news/news_item/1984")[1], '<h1>1984</h1>') !== false, 'the item titled 1984');
+	// item 1 is the mock-up; the link /news/news_item/1 is the item titled 1
+	check(strpos(http('GET', "$base/news/news_item/1")[1], '<h1>1</h1>') !== false, 'the item titled 1, not item id 1');
+	// an id no slug shadows still opens its item
+	check(strpos(http('GET', "$base/news/news_item/{$year['id']}")[1], '<h1>1984</h1>') !== false, 'by id');
+	mcp_call('delete_item', array('collection' => 'news', 'id' => $year['id']));
+	mcp_call('delete_item', array('collection' => 'news', 'id' => $one['id']));
+});
 test('feeds are well-formed and escaped', function () use ($base) {
 	list($status, $body, $headers) = http('GET', "$base/news.rss");
 	same(200, $status);

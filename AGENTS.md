@@ -499,7 +499,9 @@ item of a collection is the mock-up content.
   (`print.cms.site_name`) is shared by every page. Put these in `_layout.html`.
 - **Collection URLs** are routed to views that render that collection:
   - `/news/news_item/<slug or id>` renders `news_item.html` (or `news.html`)
-    with that item. If there's no such item, the response is a 404.
+    with that item. If there's no such item, the response is a 404. A
+    number is a slug first: an item titled `1984` opens at
+    `/news/news_item/1984`, and a number no item has as its slug is an id.
   - `/news/news_page/2` is page 2. The page size comes from `news_page_size` or
     `raster_page_size` (10).
   - `/news/news_items/tag/php` lists the items where `tag` is `php`.
