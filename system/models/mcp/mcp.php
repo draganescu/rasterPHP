@@ -149,7 +149,29 @@ class mcp
 		$errors = trim((string)file_get_contents($log));
 		@unlink($log);
 		if ($errors !== '') log::warning('MCP: '.substr($errors, 0, 500));
-		return $reply;
+		if (trim($reply) !== '') return $reply;
+		// the fresh process died before it answered (a model it loads at boot
+		// no longer parses): every request in the line still gets an answer
+		$failed = $this->fresh_failed($line, $errors);
+		return $failed === null ? '' : json_encode($failed, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)."\n";
+	}
+
+	// what a line gets when no fresh process could answer it: ping needs no
+	// site code, a request gets -32603 with what the process wrote on its
+	// way down, a notification nothing
+	protected function fresh_failed($line, $errors) {
+		$body = json_decode($line, true);
+		if (json_last_error() !== JSON_ERROR_NONE) return $this->error(null, -32700, 'Parse error');
+		$batch = is_array($body) && $body && array_keys($body) === range(0, count($body) - 1);
+		$message = 'A fresh MCP process could not answer: '.($errors !== '' ? substr($errors, 0, 2000) : 'it exited without a reply');
+		$responses = array();
+		foreach ($batch ? $body : array($body) as $one) {
+			if (!is_array($one) || !array_key_exists('id', $one)) continue;
+			$id = is_scalar($one['id']) ? $one['id'] : null;
+			$responses[] = isset($one['method']) && $one['method'] === 'ping' ? $this->result($id, new stdClass()) : $this->error($id, -32603, $message);
+		}
+		if (!$responses) return null;
+		return $batch ? $responses : $responses[0];
 	}
 
 	// ##JSON-RPC

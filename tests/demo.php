@@ -2431,6 +2431,35 @@ test('M20', 'one MCP session sees the fields, collections, methods, api() and ty
 	}
 });
 
+test('M20', 'a model with a syntax error during an MCP session: ping answers, other calls get an error, and the fix counts (#194)', function () {
+	$cafe = APPBASE.'models/cafe/cafe.php';
+	$session = new mcp_session();
+	try {
+		check(isset($session->call('vocabulary')['models']['cafe']));
+		check(!isset($session->call('render_url', array('url' => '/'))['error']));
+		// an agent halfway through editing a model
+		with_file($cafe, file_get_contents($cafe)."\n}}} broken(\n", function () use ($session) {
+			$ping = $session->line('{"jsonrpc":"2.0","id":3,"method":"ping"}', 15);
+			check($ping !== null, 'ping got no answer');
+			same(3, $ping['id']);
+			check(isset($ping['result']), 'ping: '.json_encode($ping));
+			$vocabulary = $session->line('{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"vocabulary","arguments":{}}}', 15);
+			check($vocabulary !== null, 'vocabulary got no answer');
+			same(4, $vocabulary['id']);
+			same(-32603, $vocabulary['error']['code'] ?? null, json_encode($vocabulary));
+			has($vocabulary['error']['message'], 'cafe.php');
+			has($vocabulary['error']['message'], 'Parse error');
+			same(null, $session->line('{"jsonrpc":"2.0","method":"notifications/initialized"}', 2), 'a notification still gets nothing back');
+			$batch = $session->line('[{"jsonrpc":"2.0","id":5,"method":"tools/list"},{"jsonrpc":"2.0","method":"notifications/x"}]', 15);
+			same(array(5), array_column((array)$batch, 'id'), 'a batch gets an error for each request: '.json_encode($batch));
+		});
+		// fixed, the next call answers again
+		check(isset($session->call('vocabulary')['models']['cafe']), 'vocabulary after the fix');
+	} finally {
+		$session->close();
+	}
+});
+
 // A second model, only while these tests run, for what the café's
 // bookings don't need: hidden fields, lists, transactions, public records
 $probe_dir = dirname(__DIR__).'/demo/models/probe';

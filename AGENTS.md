@@ -1354,6 +1354,9 @@ of lists and filter pages come along; drafts and the editor don't.
     the server has loaded changes (a model's `api()`, `types()` or
     `listens()`, config), a fresh `bin/raster mcp` answers every later
     call, under 100 ms each. Restart the server to make it fast again.
+    If that fresh process dies before it answers (a model halfway through
+    an edit no longer parses), `ping` is still answered and every other
+    request gets `-32603` with PHP's message, until the file is fixed.
 - **Tools for the site itself:**
   - `describe` — how URLs reach views, the pages and collections the markup
     declares, the admin pages, the settings that change behaviour, and whether
