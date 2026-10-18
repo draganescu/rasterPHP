@@ -256,8 +256,7 @@ class template {
 			$base = $script;
 		
 		if ($template->format === 'html' && !$template->is_email) {
-			// after the first <head>, with attributes or without (<head prefix="og: …">)
-			$template->output = preg_replace_callback('/<head(\s[^>]*)?>/i', function ($m) use ($base) { return $m[0]."\n".$base; }, $template->output, 1);
+			$template->output = str_replace('<head>', "<head>\n".$base, $template->output);
 		}
 		
 		// mock-up content goes first, so models inside it are never called

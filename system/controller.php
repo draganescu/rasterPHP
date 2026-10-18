@@ -652,20 +652,8 @@ class controller {
 		$template = template::instance();
 		// links to the default view go to the site root
 		$template->output = preg_replace("/(href|action)=(\"|')".preg_quote(config::get('default_view'), '/')."\.html(\"|')/", '$1=$2'.template::get('link_uri').'$3', $template->output);
-		// //cdn.example.com/guide.html is another site's page
-		$template->output = preg_replace("/(href|action|src)=(\"|')(?!\/\/)([a-zA-Z0-9\-\._\?\,\'\/\\\+&amp;%\$#\=~]*)\?".template::get('tpl_uri')."=(.*?)(\"|')/", '$1="'.template::get('link_uri').'$4"', $template->output);
-		$template->output = preg_replace("/(href|action|src)=(\"|')(?!\/\/)([a-zA-Z0-9\-\._\?\,\'\/\\\+&amp;%\$#\=~]*)\.html/", '$1=$2'.template::get('link_uri').'$3', $template->output);
-		// href="#prices" and href="?sort=price" are this page, not the theme
-		// folder the <base> points at (#117). Only on <a> and <area>: an SVG
-		// <use href="#icon"> is already this document, and a full URL that
-		// differs from the address bar would make it an external file
-		if ($template->format === 'html' && !$template->is_email) {
-			$page = template::get('link_uri').implode('/', array_map('rawurlencode', explode('/', ltrim((string)config::get('uri_string'), '/'))));
-			$query = $_GET ? '?'.http_build_query($_GET) : '';
-			$template->output = preg_replace_callback('/(<(?:a|area)\s(?:[^>]*?\s)?)href=(["\'])([#?])/i', function ($m) use ($page, $query) {
-				return $m[1].'href='.$m[2].htmlspecialchars($page.($m[3] === '#' ? $query : ''), ENT_QUOTES).$m[3];
-			}, $template->output);
-		}
+		$template->output = preg_replace("/(href|action|src)=(\"|')([a-zA-Z0-9\-\._\?\,\'\/\\\+&amp;%\$#\=~]*)\?".template::get('tpl_uri')."=(.*?)(\"|')/", '$1="'.template::get('link_uri').'$4"', $template->output);
+		$template->output = preg_replace("/(href|action|src)=(\"|')([a-zA-Z0-9\-\._\?\,\'\/\\\+&amp;%\$#\=~]*)\.html/", '$1=$2'.template::get('link_uri').'$3', $template->output);
 		// links to feed and data views: href="news.rss" -> /news.rss
 		$template->output = preg_replace_callback('/(href)=(["\'])([a-zA-Z0-9\-_\/]+\.(rss|atom|xml|json|txt))\2/', function ($m) {
 			return file_exists(controller::build_view_path(substr($m[3], 0, -strlen($m[4]) - 1), '.'.$m[4])) ? $m[1].'='.$m[2].template::get('link_uri').$m[3].$m[2] : $m[0];
