@@ -31,9 +31,11 @@ class mail
 		return $dsn;
 	}
 
-	// the transport without user, password or options, for printing
+	// the transport without user, password or options, for printing; the
+	// user and password run to the last '@' before the path, as parse_url()
+	// (and so smtp_connect()) reads them, so an '@' in a password is cut too
 	static function destination() {
-		return preg_replace('#^([a-z]+://)[^@/?]*@#i', '$1', strtok(self::transport(), '?'));
+		return preg_replace('#^([a-z]+://)[^/?\#]*@#i', '$1', strtok(self::transport(), '?'));
 	}
 
 	// the SMTP connection stays open for the mails that follow, until close()

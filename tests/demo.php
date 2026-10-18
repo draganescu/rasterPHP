@@ -3225,7 +3225,9 @@ test('H15', 'readers a send failed get it on a plain rerun, over one SMTP connec
 	check($up, 'the fake SMTP server answers');
 	// it serves one connection at a time: let this one go
 	fclose($up);
-	$env = array('RASTER_URL' => "$base/", 'RASTER_MAIL' => "smtp://letters:s3cret-pass@127.0.0.1:$port");
+	// an '@' in the password: SMTP takes the last one as the end of it, and
+	// so must the printed destination
+	$env = array('RASTER_URL' => "$base/", 'RASTER_MAIL' => "smtp://letters:s3cret@pass@127.0.0.1:$port");
 	// accepted deliveries per address, and SMTP sessions, in the transcript so far
 	$accepted = function () use ($log) {
 		$text = (string)@file_get_contents($log);
@@ -3235,14 +3237,15 @@ test('H15', 'readers a send failed get it on a plain rerun, over one SMTP connec
 	file_put_contents("$log.refuse", $readers[1]."\n");
 	list($code, $out) = raster(array('send', '/about', '--dry-run'), $env);
 	has($out, 'via smtp://127.0.0.1:'.$port);
-	lacks($out, 's3cret-pass');
+	lacks($out, 'pass@');
 	list($code, $out) = raster(array('send', '/about'), $env);
 	same(1, $code, $out);
 	has($out, $readers[1].': ');
 	has($out, 'Sent "About" to '.(count($readers) - 1).' subscriber(s), 1 failed', $out);
-	lacks($out, 's3cret-pass');
+	lacks($out, 'pass@');
 	list($counts, $connections) = $accepted();
 	same(1, $connections, 'one connection for the whole run:');
+	has((string)file_get_contents($log), 'C: '.base64_encode('s3cret@pass')."\n", 'the whole password is sent:');
 	same(count($readers) - 1, array_sum($counts));
 	unlink("$log.refuse");
 	list($code, $out) = raster(array('send', '/about'), $env);
@@ -3258,7 +3261,7 @@ test('H15', 'readers a send failed get it on a plain rerun, over one SMTP connec
 	foreach ($readers as $email) same(2, $counts[$email], "--again mails $email again:");
 	list($code, $out) = raster(array('send', '/about', '--to=test@example.com'), $env);
 	same(0, $code, $out);
-	lacks($out, 's3cret-pass');
+	lacks($out, 'pass@');
 });
 
 // ## 2.1.8 wave 2: content saves and the cache bump
