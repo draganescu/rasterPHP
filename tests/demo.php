@@ -1444,6 +1444,12 @@ test('N7', 'deploy prints the server configuration', function () use ($root) {
 		has($out, 'phar', 'the private extensions are in there');
 		lacks($out, '/demo/', 'no rule names an app folder, so adding an app needs no change');
 	}
+	// nginx takes 1 MB bodies by default; the editor sends pictures up to 12 MB (#115)
+	list($code, $nginx) = raster(array('deploy', '--config=nginx'));
+	check(preg_match('/^    client_max_body_size (\d+)m;$/m', $nginx, $m) && (int)$m[1] > 12, 'a body size above the editor\'s 12 MB: '.$nginx);
+	has($nginx, "    gzip on;\n");
+	has($nginx, 'gzip_types text/css');
+	check(preg_match('#location /media/ \{[^}]*expires 1y;#', $nginx), 'media/ is cached for long: its file names never repeat');
 	same(2, raster(array('deploy'))[0], 'no --config is a usage error');
 	same(1, raster(array('deploy', '--config=iis'))[0]);
 });
