@@ -3,6 +3,16 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.7
+
+Nothing for sites to do.
+
+**One model lookup.** Pages, events, `/api`, `lint` and MCP now find a model the same way: `models/<name>/`, else `models/the_<name>/` over the bundled model, else the bundled model. A `the_mail` override now changes the emails the newsletter and accounts send, because bundled models send through the override. `lint` warns when a site model has a bundled model's name, since it hides the bundled one completely.
+
+**Faster requests on sites with many models.** Raster keeps what models declare, and the events they listen to, in `data/cache/models.json`. A request then binds listeners without reading every model file. The file is made again when a model file changes or Raster is updated, and `raster cache clear` deletes it. An override's `listens()` replaces the bundled model's; call `parent::listens()` to keep both.
+
+**Bundled record types only where used.** A bundled model's `types()` count only on a site whose views use that model, so a site that doesn't use it gets no extra tables. Types a site's own `the_<name>` override declares always count, as before.
+
 ## 2.2.6
 
 Nothing for sites to do. A model that relied on `cms_records::find()`
