@@ -231,7 +231,10 @@ static function requires() {
   it may read config: a page moved by its setting is left out where it is.
   `controller::required('pages')` merges what every model in use declares;
   a bundled model's counts only on a site whose views use it, as for
-  `types()`. `authentication` and `newsletter` declare theirs this way.
+  `types()`. Emails are the exception: `lint` (and MCP's checks of a view
+  before it is written) asks for a region's emails wherever the region
+  appears, so a site's first newsletter form is checked too.
+  `authentication` and `newsletter` declare theirs this way.
 
 ### SQL in files
 

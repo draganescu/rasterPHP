@@ -454,7 +454,7 @@ test('required emails come from the model', function () {
 	$app = APPBASE.config::get('models_path', 'models');
 	temp_model("$app/zzneeds", array('zzneeds.php' => "<?php\nclass zzneeds\n{\n\tstatic function requires() {\n\t\treturn array('emails' => array('render.zzneeds.ask' => array('_email/zz_answer')), 'pages' => array('zz-thanks'), 'settings' => array('zz_staff'));\n\t}\n\tfunction ask() { return false; }\n}\n"));
 	// a bundled model's only where a view uses it
-	temp_model(BASE.'models/zzunused', array('zzunused.php' => "<?php\nclass zzunused\n{\n\tstatic function requires() {\n\t\treturn array('pages' => array('zz-unused'));\n\t}\n}\n"));
+	temp_model(BASE.'models/zzunused', array('zzunused.php' => "<?php\nclass zzunused\n{\n\tstatic function requires() {\n\t\treturn array('pages' => array('zz-unused'), 'emails' => array('render.zzunused.ask' => array('_email/zz_unused')));\n\t}\n}\n"));
 	try {
 		controller::forget_models();
 		$problems = $inspector->lint_source('<!-- render.zzneeds.ask -->x<!-- /render.zzneeds.ask -->', 'view', 'default');
@@ -463,6 +463,9 @@ test('required emails come from the model', function () {
 		check(in_array('zz-thanks', controller::required('pages'), true), 'the site model\'s page');
 		check(in_array('zz_staff', controller::required('settings'), true), 'the site model\'s setting');
 		check(!in_array('zz-unused', controller::required('pages'), true), 'a bundled model no view uses');
+		// a draft that uses it is linted for its emails all the same: the
+		// tag in it is the use (MCP checks views before they are written)
+		check(has_problem($inspector->lint_source('<!-- render.zzunused.ask -->x<!-- /render.zzunused.ask -->', 'view', 'default'), 'zz_unused'), 'the draft\'s missing email view');
 	} finally {
 		remove_dir("$app/zzneeds");
 		remove_dir(BASE.'models/zzunused');

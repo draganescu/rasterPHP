@@ -197,13 +197,15 @@ class controller {
 	// region => the _email views it sends. requires() may read config, so
 	// it is asked each time, never kept in models.json:
 	//   controller::required('pages')  // array('login', 'register', …)
-	static function required($key) {
+	// $all: bundled models too where no view uses them yet, for lint,
+	// which checks a region's emails only where the region is
+	static function required($key, $all = false) {
 		$list = array();
 		$map = array();
 		foreach (controller::models() as $name => $found) {
 			if (empty($found['declares']['requires'])) continue;
 			$own = !$found['bundled'] || ($found['parent'] && strpos((string)file_get_contents($found['file']), 'function requires(') !== false);
-			if (!$own && !controller::uses($name)) continue;
+			if (!$own && !$all && !controller::uses($name)) continue;
 			try {
 				$class = controller::model_class($name);
 				if (!$class || !method_exists($class, 'requires') || !(new ReflectionMethod($class, 'requires'))->isStatic()) continue;

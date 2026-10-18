@@ -911,8 +911,9 @@ class raster_inspector {
 			}
 		}
 		// models that send emails need their email views, as their
-		// requires() names them
-		foreach (controller::required('emails') as $tag => $views) {
+		// requires() names them; a region in this view is a use of its
+		// model, so a draft is checked before it is written
+		foreach (controller::required('emails', true) as $tag => $views) {
 			$at = strpos($html, '<!-- '.$tag.' -->');
 			if ($at === false) continue;
 			foreach ((array)$views as $view) {
