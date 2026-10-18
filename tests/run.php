@@ -190,6 +190,12 @@ test('lint and the content model read script-form annotations and skip remove bl
 	// and must not run on to the next --> and swallow a real one
 	$stray = lint_html('<style>/*- header */ h1{color:red}</style><h1><!-- print.site.year -->T<!-- /print.site.year --></h1>');
 	same(array(), array_values(array_filter($stray, function ($p) { return $p['severity'] === 'error'; })), 'an unclosed /*- comment hides nothing: '.json_encode($stray));
+	// a long comment (an old mock-up left in, a big inline svg after a stray
+	// /*-) still lets the annotations after it be read
+	$long = '<!-- old mock-up: '.str_repeat("<p>lorem ipsum</p>\n", 2000).' --><h1><!-- print.site.no_such_method -->T<!-- /print.site.no_such_method --></h1>';
+	check(has_problem(lint_html($long), "no public method 'no_such_method'"), 'an annotation after a 38 KB comment is linted');
+	$tokens = raster_inspector::tokenize('<style>/*- layout */ body{}</style><svg>'.str_repeat('<path d="M0 0L10 10"/>', 4000).'</svg><!-- print.cms.title /-->');
+	same('print.cms.title', $tokens ? $tokens[count($tokens) - 1]['name'] : null, 'an annotation after a stray /*- and a big svg is read');
 	$fix = lint_html('<script>var t = "/*-print.site.year /-*/";</script>');
 	check(has_problem($fix, 'write it exactly as /*- print.site.year /-*/'), 'its fix keeps the script form: '.json_encode($fix));
 	$dir = sys_get_temp_dir().'/raster-probe-'.getmypid();

@@ -93,14 +93,33 @@ class raster_inspector {
 		$opens = array('<!--');
 		$closes = array('-->');
 		foreach (template::$script_form as $mark => $means) {
-			if ($means === '<!--') $opens[] = preg_quote($mark, '/');
-			if ($means === '-->') $closes[] = preg_quote($mark, '/');
+			if ($means === '<!--') $opens[] = $mark;
+			if ($means === '-->') $closes[] = $mark;
 		}
 		// a body holds no opener, so a "/*-" that ends with a plain "*/" (a CSS
 		// or JS comment) cannot run on to a later "-->" and swallow the
-		// annotation there: the match restarts at the innermost opener
-		$opener = implode('|', $opens);
-		preg_match_all('/(?:'.$opener.')((?:(?!'.$opener.').)*?)(?:'.implode('|', $closes).')/s', $html, $matches, PREG_OFFSET_CAPTURE);
+		// annotation there: a comment starts at the last opener before its
+		// closer. Found by walking the markers, not with one regex over the
+		// bodies, which runs out of PCRE stack on a long comment.
+		$is_open = array_flip($opens);
+		$markers = array();
+		foreach (array_merge($opens, $closes) as $marker) $markers[] = preg_quote($marker, '/');
+		if (preg_match_all('/'.implode('|', $markers).'/', $html, $marks, PREG_OFFSET_CAPTURE) === false) {
+			throw new Exception('Could not read the comments in this view: '.preg_last_error_msg());
+		}
+		$matches = array(array(), array());
+		$start = null;
+		foreach ($marks[0] as $mark) {
+			if (isset($is_open[$mark[0]])) {
+				$start = $mark;
+			} elseif ($start !== null) {
+				$body_at = $start[1] + strlen($start[0]);
+				$end = $mark[1] + strlen($mark[0]);
+				$matches[0][] = array(substr($html, $start[1], $end - $start[1]), $start[1]);
+				$matches[1][] = array(substr($html, $body_at, $mark[1] - $body_at), $body_at);
+				$start = null;
+			}
+		}
 		foreach ($matches[0] as $i => $match) {
 			$raw = $match[0];
 			$offset = $match[1];
