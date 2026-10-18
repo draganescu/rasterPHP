@@ -3417,6 +3417,32 @@ test('booking: capacity: people at the busiest minute', function () {
 	});
 });
 
+// The MCP stdio server is one process across many calls, while the setup
+// changes in the browser beside it: each booking reads the setup again.
+test('booking: a long-lived process checks a booking against the setup as it is now', function () {
+	booking_site(function () {
+		$tue = booking_cafe();
+		$wed = date('Y-m-d', strtotime("$tue +1 day"));
+		// the table is there for the other process to write
+		cms_records::create('bookingclosed', array('date' => '2020-01-01', 'note' => 'Long ago'));
+		$mcp = new mcp();
+		$book = function ($date, $people) use ($mcp) {
+			$answer = $mcp->call_tool('create_item', array('collection' => 'booking', 'fields' => array('name' => 'Agent', 'date' => $date, 'time' => '19:00', 'people' => $people)));
+			return empty($answer['isError']) ? 'stored' : $answer['content'][0]['text'];
+		};
+		same('stored', $book($tue, 8));
+		check(isset(booking::setup()['resources']['dining-room']), 'the setup is read');
+		// another process writes the setup
+		R::exec('UPDATE bookingresourcedata SET people = 10 WHERE slug = ?', array('dining-room'));
+		check(strpos($book($tue, 8), 'fully_booked') !== false, 'fully_booked');
+		R::exec('INSERT INTO bookingcloseddata (date, note) VALUES (?, ?)', array($wed, 'Holiday'));
+		check(strpos($book($wed, 2), 'not_a_slot') !== false, 'not_a_slot');
+		R::exec('UPDATE bookingresourcedata SET active = 0 WHERE slug = ?', array('dining-room'));
+		check(strpos($book($tue, 1), 'resource_inactive') !== false, 'resource_inactive');
+		same(1, count(cms_records::find('booking')));
+	});
+});
+
 test('booking: capacity: a bookings limit across slot boundaries', function () {
 	booking_site(function () {
 		$tue = booking_salon();

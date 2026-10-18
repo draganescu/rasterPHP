@@ -152,6 +152,10 @@ class booking
 	// status or time last changed.
 	static function fill($type, $after, $before) {
 		if ($type !== 'booking') return array();
+		// fill() comes first in the write's lock: the setup is read there, as
+		// it is now, for fill() and check() (a long-lived process, like MCP
+		// over stdio, or a page that showed slots first, read it before)
+		self::forget();
 		$values = array();
 		$resources = self::setup()['resources'];
 		if ((string)$after['resource'] === '' && count($resources) === 1) $values['resource'] = $after['resource'] = (string)key($resources);
