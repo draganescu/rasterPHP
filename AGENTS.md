@@ -204,6 +204,38 @@ static function schema() {
 Each column is declared as the type of its example: `''` is TEXT, `0` an
 integer, `0.0` a number, `false` a bool, on SQLite and MySQL alike.
 
+### What a model declares
+
+A model tells Raster what it is with static hooks, which `/api` can never
+reach: `schema()` (its tables), `types()` (its records, see **Records**),
+`api()` (what `/api` offers), `listens()` (see **Events**), and
+`requires()`, what a site that uses the model needs:
+
+```php
+static function requires() {
+    return array(
+        'emails' => array('render.booking.form' => array('_email/booking_received')),
+        'pages' => array(config::get('booking_cancel_page', 'booking-cancel')),
+        'settings' => array('booking_staff_email', 'booking_cancel_page'),
+    );
+}
+```
+
+- `emails`: a region and the `_email/` views it sends. `lint` reports a
+  view with the region in a theme that lacks one of them.
+- `pages`: views that only work with PHP behind them. The sitemap
+  (`feed.pages`) and `raster export` leave them out; `sitemap_skip` and
+  `export_skip` add to them.
+- `settings`: `describe` lists their values.
+- `requires()` is asked when it is needed, never kept in `models.json`, so
+  it may read config: a page moved by its setting is left out where it is.
+  `controller::required('pages')` merges what every model in use declares;
+  a bundled model's counts only on a site whose views use it, as for
+  `types()`. Emails are the exception: `lint` (and MCP's checks of a view
+  before it is written) asks for a region's emails wherever the region
+  appears, so a site's first newsletter form is checked too.
+  `authentication` and `newsletter` declare theirs this way.
+
 ### SQL in files
 
 **A model's SQL goes in files, not in PHP strings.** Each query is a file in
@@ -331,14 +363,22 @@ form handlers, listeners. A model without `api()` offers nothing. A role the
 caller lacks answers 401 (not logged in) or 403. Static methods are never
 reachable, even listed. Of the system models, only `cms` is reachable, and
 only for what its own `api()` lists: the in-page editor's endpoints, `style`
-and `logout`, which check the caller themselves. An override (`the_feed`)
+and `logout`, which check the caller themselves; `api_system_models` lets
+others through. `api::reachable($name)` is that one rule, for `/api` and
+`vocabulary` alike. An override (`the_feed`)
 is reached only by the name it overrides, and a public method it adds
 answers 404 unless its `api()` lists it; that list adds to the bundled
 model's, so the editor's endpoints stay. Posts
 there pass the same site check as forms, but they are not form submissions:
 `validation::get()->submitted()` is false, so form models do nothing over
-`/api`. A method listed for visitors can be called by anyone: if it changes
-data, it checks what it is given. `lint` reports an `api()` naming a method
+`/api`. A method listed for any role but `visitor` answers 403
+`{"error":"cross-site"}` to a request another site started, on every verb,
+GET too: the session cookie (SameSite=Lax) comes along when someone follows
+a link from another site. The browser says so with `Origin` (`Origin: null`
+counts, unless `Sec-Fetch-Site` says it is this site), `Sec-Fetch-Site` or
+`Referer` (`controller::is_foreign()`, the same test forms pass). A
+method listed for visitors can be called by anyone, from anywhere: if it
+changes data, it checks what it is given. `lint` reports an `api()` naming a method
 that doesn't exist or can't be called, or a role that doesn't exist, and
 `vocabulary` shows what each model offers.
 
@@ -408,8 +448,9 @@ class contact {
   filled.
 - **Added automatically** to every post form: `raster_form` (its owner), a
   honeypot field, and the session token for logged in users.
-- **Refused automatically:** posts from other sites, and bots that fill the
-  honeypot. The bots get a fake success.
+- **Refused automatically:** posts from other sites (an `Origin: null`
+  counts as another site unless `Sec-Fetch-Site` says it is this one), and
+  bots that fill the honeypot. The bots get a fake success.
 - **Forms that ask with the URL** (`<form method="get">`, a filter or a
   search) show what the URL asked: `/bookings?stylist=Ana` keeps Ana chosen.
   Nothing else happens to them; see `field=?name` in the CMS options.
@@ -730,9 +771,9 @@ class reservation {
 
 ## Bundled models
 
-A bundled model's record types (`types()`) count only on a site whose views
-use the model (`render.<name>.…`, `print.<name>.…`, in any theme); the
-tables in its `schema()` always count.
+A bundled model's record types (`types()`) and needs (`requires()`) count
+only on a site whose views use the model (`render.<name>.…`,
+`print.<name>.…`, in any theme); the tables in its `schema()` always count.
 
 **authentication**: accounts, with every screen written in your templates.
 - Regions:
@@ -997,9 +1038,10 @@ of lists and filter pages come along; drafts and the editor don't.
 - **A page that answers an error** (5xx, a model that throws) or doesn't
   answer, the 404 page included, also stops the export: it names each such page, writes and removes
   nothing, so the last export stays whole, and exits 1.
-- Left out: pages that need an account, login, sign-up, password and
-  newsletter pages, `/api`, and paths in `config::set('export_skip')` or
-  `--skip=/path`. The command lists links to left-out pages and query
+- Left out: pages that need an account, the pages the models in use name
+  in `requires()` (login, sign-up, password and newsletter pages, wherever
+  their settings put them), `/api`, and paths in
+  `config::set('export_skip')` or `--skip=/path`. The command lists links to left-out pages and query
   strings, since a static host can't answer them.
 - **Exporting again** to the same folder writes only files that changed and
   removes the ones the site no longer has, so a deploy uploads just those.
@@ -1158,7 +1200,7 @@ Set in `config/the_app.php` with `config::set('name')->to(value)`.
 | `raster_page_size`, `<name>_page_size` | 10 | items per page |
 | `raster_media_folder` | `media` | where uploads go |
 | `feed_limit` | 20 | items in `feed.items` |
-| `sitemap_skip` | login, account, … | views left out of `feed.pages` |
+| `sitemap_skip` | none | views left out of `feed.pages`, besides private pages and the pages the models in use name in `requires()` (login, account, the newsletter's answers, …) |
 | `protected` | none | `array('path' => 'role')` |
 | `registration` | true | false turns sign-up off |
 | `login_page`, `after_login`, `reset_page` | `login`, none, `reset` | account pages |

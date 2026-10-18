@@ -438,6 +438,41 @@ test('a site model named like a bundled one wins and lint says so', function () 
 	}
 });
 
+test('required emails come from the model', function () {
+	$inspector = new raster_inspector();
+	$forgot = "<!-- render.authentication.forgot --><form method=\"post\"><input type=\"email\" name=\"email\" required></form><!-- /render.authentication.forgot -->";
+	// the test theme has no _email/ folder; the default theme has the view
+	check(has_problem($inspector->lint_source($forgot, 'view', 'test'), 'which does not exist'), 'the missing _email/password_reset');
+	check(!has_problem($inspector->lint_source($forgot, 'view', 'default'), 'which does not exist'), 'the default theme has _email/password_reset');
+	// what the bundled models say they need
+	$pages = controller::required('pages');
+	foreach (array('login', 'register', 'forgot', 'reset', 'account', 'newsletter-confirm', 'newsletter-unsubscribe') as $page) check(in_array($page, $pages, true), "$page is not among the required pages: ".json_encode($pages));
+	$settings = controller::required('settings');
+	foreach (array('registration', 'password_min_length', 'newsletter_double_opt_in', 'newsletter_confirm_page') as $setting) check(in_array($setting, $settings, true), "$setting is not among the required settings");
+	same(array('_email/newsletter_confirm'), controller::required('emails')['render.newsletter.signup']);
+	// a site model's requires() counts the same way
+	$app = APPBASE.config::get('models_path', 'models');
+	temp_model("$app/zzneeds", array('zzneeds.php' => "<?php\nclass zzneeds\n{\n\tstatic function requires() {\n\t\treturn array('emails' => array('render.zzneeds.ask' => array('_email/zz_answer')), 'pages' => array('zz-thanks'), 'settings' => array('zz_staff'));\n\t}\n\tfunction ask() { return false; }\n}\n"));
+	// a bundled model's only where a view uses it
+	temp_model(BASE.'models/zzunused', array('zzunused.php' => "<?php\nclass zzunused\n{\n\tstatic function requires() {\n\t\treturn array('pages' => array('zz-unused'), 'emails' => array('render.zzunused.ask' => array('_email/zz_unused')));\n\t}\n}\n"));
+	try {
+		controller::forget_models();
+		$problems = $inspector->lint_source('<!-- render.zzneeds.ask -->x<!-- /render.zzneeds.ask -->', 'view', 'default');
+		check(has_problem($problems, 'render.zzneeds.ask sends an email written in'), 'lint said: '.json_encode($problems));
+		check(has_problem($problems, 'zz_answer'), 'it names the view');
+		check(in_array('zz-thanks', controller::required('pages'), true), 'the site model\'s page');
+		check(in_array('zz_staff', controller::required('settings'), true), 'the site model\'s setting');
+		check(!in_array('zz-unused', controller::required('pages'), true), 'a bundled model no view uses');
+		// a draft that uses it is linted for its emails all the same: the
+		// tag in it is the use (MCP checks views before they are written)
+		check(has_problem($inspector->lint_source('<!-- render.zzunused.ask -->x<!-- /render.zzunused.ask -->', 'view', 'default'), 'zz_unused'), 'the draft\'s missing email view');
+	} finally {
+		remove_dir("$app/zzneeds");
+		remove_dir(BASE.'models/zzunused');
+		controller::forget_models();
+	}
+});
+
 // ## Integration tests
 
 $port = free_port();
@@ -556,6 +591,36 @@ test('editor login and csrf', function () use ($base) {
 	list($status, $body) = http('POST', "$base/login", 'login=editor&password=wrong', array('Content-Type: application/x-www-form-urlencoded'));
 	same(200, $status, 'wrong password must not log in');
 	check(strpos($body, 'Wrong email or password') !== false);
+});
+test('staff /api methods refuse cross-site requests on every verb (#122)', function () use ($base, $root) {
+	$dir = "$root/application/models/zzstaff";
+	@mkdir($dir);
+	file_put_contents("$dir/zzstaff.php", "<?php\nclass zzstaff {\n\tstatic function api() { return array('close_day' => 'editor', 'hours' => 'visitor'); }\n\tfunction close_day() { return 'closed'; }\n\tfunction hours() { return 'open'; }\n}\n");
+	cms_store::connect();
+	cms_store::create_user('editor', 'correct horse');
+	try {
+		list(, , $headers) = http('POST', "$base/login", 'login=editor&password=correct+horse', array('Content-Type: application/x-www-form-urlencoded'));
+		$cookie = preg_replace('/^Set-Cookie:\s*([^;]+).*$/i', '$1', current(preg_grep('/^Set-Cookie/i', $headers)));
+		foreach (array('Origin: https://evil.test', 'Origin: null', 'Sec-Fetch-Site: cross-site', 'Referer: https://evil.test/page') as $header) {
+			list($status, $body) = http('GET', "$base/api/zzstaff/close_day", null, array("Cookie: $cookie", $header));
+			same(403, $status, "GET with $header");
+			same(array('error' => 'cross-site'), json_decode($body, true), "GET with $header");
+		}
+		list($status, $body) = http('DELETE', "$base/api/zzstaff/close_day", null, array("Cookie: $cookie", 'Origin: https://evil.test'));
+		same(403, $status, 'DELETE');
+		same(array('error' => 'cross-site'), json_decode($body, true), 'DELETE');
+		same(403, http('POST', "$base/api/zzstaff/close_day", '', array("Cookie: $cookie", 'Origin: https://evil.test'))[0], 'POST');
+		// the same site, as staff
+		same(array(200, '"closed"'), array_slice(http('GET', "$base/api/zzstaff/close_day", null, array("Cookie: $cookie")), 0, 2), 'same-site GET');
+		same(200, http('GET', "$base/api/zzstaff/close_day", null, array("Cookie: $cookie", "Origin: $base"))[0], 'same-site GET with Origin');
+		same(200, http('GET', "$base/api/zzstaff/close_day", null, array("Cookie: $cookie", 'Origin: null', 'Sec-Fetch-Site: same-origin'))[0], 'Origin null that the browser says is the same site');
+		// a visitor method answers anyone, from anywhere
+		same(array(200, '"open"'), array_slice(http('GET', "$base/api/zzstaff/hours", null, array('Origin: https://evil.test')), 0, 2), 'visitor method cross-site');
+		same(200, http('GET', "$base/api/zzstaff/hours", null, array("Cookie: $cookie", 'Sec-Fetch-Site: cross-site'))[0], 'visitor method cross-site, logged in');
+	} finally {
+		@unlink("$dir/zzstaff.php");
+		@rmdir($dir);
+	}
 });
 test('mcp requires a token', function () use ($base) {
 	same(401, http('POST', "$base/mcp", '{}')[0]);

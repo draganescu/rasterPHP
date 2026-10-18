@@ -438,9 +438,9 @@ class raster_inspector {
 				'queries' => $this->model_queries($name),
 				'methods' => $methods,
 			);
-			// what /api/<model>/<method> answers, and for whom. A bundled model,
-			// overridden or not, only when config api_system_models lets it through
-			if (!($found['bundled'] || $found['shadows']) || in_array($name, (array)config::get('api_system_models', array('cms')))) $models[$name]['api'] = $this->model_api($name);
+			// what /api/<model>/<method> answers, and for whom, when /api
+			// reaches the model at all (api::reachable)
+			if (api::reachable($name)) $models[$name]['api'] = $this->model_api($name);
 		}
 		ksort($models);
 		$listeners = array();
@@ -910,12 +910,14 @@ class raster_inspector {
 				$problems[] = self::problem_at('warning', $html, $alert[0][1], "No model raises '{$alert[1][0]}': call validation::get()->raise('{$alert[1][0]}') or util::done('{$alert[1][0]}') for this alert to show");
 			}
 		}
-		// models that send emails need their email views
-		$emails = array('render.authentication.forgot' => '_email/password_reset', 'render.newsletter.signup' => '_email/newsletter_confirm');
-		foreach ($emails as $tag => $view) {
+		// models that send emails need their email views, as their
+		// requires() names them; a region in this view is a use of its
+		// model, so a draft is checked before it is written
+		foreach (controller::required('emails', true) as $tag => $views) {
 			$at = strpos($html, '<!-- '.$tag.' -->');
 			if ($at === false) continue;
-			if (!file_exists($this->theme_dir($theme).'/'.$view.$this->ext)) {
+			foreach ((array)$views as $view) {
+				if (file_exists($this->theme_dir($theme).'/'.$view.$this->ext)) continue;
 				$problems[] = self::problem_at('error', $html, $at, "$tag sends an email written in ".self::short($this->theme_dir($theme).'/'.$view.$this->ext).", which does not exist");
 			}
 		}

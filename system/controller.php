@@ -191,6 +191,38 @@ class controller {
 		return in_array((string)$name, self::$used, true);
 	}
 
+	// what the models in use need, merged: requires()[$key] of every model
+	// that has the hook, a bundled one only where a view uses it (as for
+	// types()). 'pages' and 'settings' are lists of names; 'emails' is
+	// region => the _email views it sends. requires() may read config, so
+	// it is asked each time, never kept in models.json:
+	//   controller::required('pages')  // array('login', 'register', …)
+	// $all: bundled models too where no view uses them yet, for lint,
+	// which checks a region's emails only where the region is
+	static function required($key, $all = false) {
+		$list = array();
+		$map = array();
+		foreach (controller::models() as $name => $found) {
+			if (empty($found['declares']['requires'])) continue;
+			$own = !$found['bundled'] || ($found['parent'] && strpos((string)file_get_contents($found['file']), 'function requires(') !== false);
+			if (!$own && !$all && !controller::uses($name)) continue;
+			try {
+				$class = controller::model_class($name);
+				if (!$class || !method_exists($class, 'requires') || !(new ReflectionMethod($class, 'requires'))->isStatic()) continue;
+				$needs = call_user_func(array($class, 'requires'));
+			} catch (Throwable $e) {
+				log::warning("$name::requires(): ".$e->getMessage());
+				continue;
+			}
+			if (!is_array($needs) || !isset($needs[$key])) continue;
+			foreach ((array)$needs[$key] as $k => $value) {
+				if (!is_int($k)) $map[$k] = array_values(array_unique(array_merge(isset($map[$k]) ? $map[$k] : array(), (array)$value)));
+				elseif (!in_array($value, $list, true)) $list[] = $value;
+			}
+		}
+		return $map ?: $list;
+	}
+
 	// what the lookups found is kept for the request; the tests change models
 	// in the middle of one
 	static function forget_models() {
@@ -339,10 +371,12 @@ class controller {
 		return $this;
 	}
 
-	// Rejects posts that come from another site (the browser tells us with
-	// the Origin, Sec-Fetch-Site or Referer headers), posts from bots that
-	// filled the honeypot, and posts from logged in users without the token.
-	static function guard_post() {
+	// Did another site start this request? The browser says so with the
+	// Origin header (`null` when it hides where the request came from:
+	// a sandboxed frame, a page with Referrer-Policy: no-referrer, unless
+	// Sec-Fetch-Site says it is this site), Sec-Fetch-Site or Referer. A
+	// server calling (a webhook) sends none of them, so it is not foreign.
+	static function is_foreign() {
 		$host = strtolower((string)config::get('host'));
 		$origin = isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : null;
 		$site = isset($_SERVER['HTTP_SEC_FETCH_SITE']) ? $_SERVER['HTTP_SEC_FETCH_SITE'] : null;
@@ -351,11 +385,18 @@ class controller {
 			$parts = parse_url($url);
 			return isset($parts['host']) ? strtolower($parts['host'].(isset($parts['port']) ? ':'.$parts['port'] : '')) : '';
 		};
-		$foreign = false;
-		if ($origin !== null && $origin !== 'null') $foreign = $host_of($origin) !== $host;
-		elseif ($site !== null) $foreign = !in_array($site, array('same-origin', 'none'));
-		elseif ($referer !== null) $foreign = $host_of($referer) !== $host;
-		if ($foreign) {
+		if ($origin === 'null') return !in_array($site, array('same-origin', 'none'), true);
+		if ($origin !== null) return $host_of($origin) !== $host;
+		if ($site !== null) return !in_array($site, array('same-origin', 'none'), true);
+		if ($referer !== null) return $host_of($referer) !== $host;
+		return false;
+	}
+
+	// Rejects posts that come from another site (controller::is_foreign()),
+	// posts from bots that filled the honeypot, and posts from logged in
+	// users without the token.
+	static function guard_post() {
+		if (controller::is_foreign()) {
 			http_response_code(403);
 			exit('Forbidden: this form was sent from another site.');
 		}

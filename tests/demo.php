@@ -299,6 +299,12 @@ test(array('B4', 'O1'), 'sitemap', function () use ($base) {
 	has($body, "<loc>$base/docs/setup</loc>");
 	has($body, "<loc>$base/journal/journal_item/opening-day</loc>");
 	foreach (array('/login', '/members', '/staff', '/account') as $private) lacks($body, "<loc>$base$private</loc>");
+	// the account and newsletter pages are left out where the settings put
+	// them (the newsletter's under /letters), though sitemap_skip doesn't name them
+	foreach (array('/register', '/forgot', '/password/new', '/letters/confirm', '/letters/stop') as $page) lacks($body, "<loc>$base$page</loc>");
+	foreach (array('login', 'register', 'forgot', 'password/new', 'letters/confirm', 'letters/stop') as $page) check(!in_array($page, config::get('sitemap_skip'), true), "sitemap_skip still names $page");
+	// sitemap_skip adds to them
+	lacks($body, "<loc>$base/lab</loc>");
 });
 test('B5', 'plain text', function () use ($base) {
 	list(, $body, $headers) = http('GET', "$base/hours.txt");
@@ -1447,7 +1453,7 @@ test('N8', 'doctor: the rules on disk, and intentional deprecations', function (
 		has(raster(array('doctor'))[1], 'is missing');
 	});
 });
-test('N9', 'raster export: the site as static files', function () use ($tmp) {
+test(array('N9', 'O1'), 'raster export: the site as static files', function () use ($tmp) {
 	$out = "$tmp/static";
 	list($code, $output) = raster(array('export', $out, '--url=https://cafe.example/'));
 	same(0, $code, $output);
@@ -1458,7 +1464,7 @@ test('N9', 'raster export: the site as static files', function () use ($tmp) {
 	foreach (array('index.html', 'about/index.html', 'menu/index.html', 'menu/menu_page/2/index.html', 'menu/menu_item/americano/index.html', 'menu/menu_items/category/cakes/index.html', 'journal.rss', 'feed.json', 'sitemap.xml', 'hours.txt', '404.html', 'demo/views/cafe/style.css', 'demo/views/cafe/img/menu/flat-white.jpg', 'print/menu/index.html', 'ro/index.html', 'ro/menu/index.html', '.raster-export.json') as $file) {
 		check(is_file("$out/$file"), "missing $file");
 	}
-	foreach (array('login/index.html', 'members/index.html', 'register/index.html', 'account/index.html', 'ro/journal.rss') as $file) check(!file_exists("$out/$file"), "should not export $file");
+	foreach (array('login/index.html', 'members/index.html', 'register/index.html', 'account/index.html', 'forgot/index.html', 'password/new/index.html', 'letters/confirm/index.html', 'letters/stop/index.html', 'ro/journal.rss') as $file) check(!file_exists("$out/$file"), "should not export $file");
 	$home = file_get_contents("$out/index.html");
 	has($home, "<base href='https://cafe.example/demo/views/cafe/' />");
 	has($home, 'href="https://cafe.example/menu"');
@@ -2553,6 +2559,13 @@ test('C48', '/api answers only what a model lists, for the roles it names', func
 	list($status, $body) = http('GET', "$base/api/reservation/day/2026-12-01", null, array("Cookie: $staff"));
 	same(200, $status);
 	check((bool)preg_grep('/^Group /', array_column(json_decode($body, true), 'name')), 'staff get the bookings');
+	// staff methods refuse what another site started, on every verb (#122)
+	foreach (array('Origin: https://evil.test', 'Origin: null', 'Sec-Fetch-Site: cross-site', 'Referer: https://evil.test/') as $header) {
+		list($status, $body) = http('GET', "$base/api/reservation/day/2026-12-01", null, array("Cookie: $staff", $header));
+		same(403, $status, "staff GET with $header");
+		same(array('error' => 'cross-site'), json_decode($body, true));
+	}
+	same(200, http('GET', "$base/api/cafe/hours", null, array('Origin: https://evil.test'))[0], 'a visitor method answers other sites');
 	// the vocabulary tells agents what each model offers
 	$vocabulary = json_decode(raster(array('vocabulary', '--json'))[1], true);
 	same(array('day' => 'editor'), $vocabulary['models']['reservation']['api']);

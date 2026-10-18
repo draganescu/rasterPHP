@@ -97,7 +97,7 @@ php tests/demo.php                        # the whole matrix
 | C45 | a short closing tag (`<!-- /render -->`) is a lint error that names the full closing tag |
 | C46 | lint checks how many arguments a method takes, and names the nearest real method |
 | C47 | a relative link inside a `print.validation.alert()` block goes to the route, not the view file |
-| C48 | /api answers only what a model lists in `api()`, for the roles it names; a model that lists nothing offers nothing; the vocabulary shows each list, cms's included; overrides are never addressed as `the_<model>`; lint checks `api()` |
+| C48 | /api answers only what a model lists in `api()`, for the roles it names; a model that lists nothing offers nothing; the vocabulary shows each list, cms's included; overrides are never addressed as `the_<model>`; lint checks `api()`; a method listed for staff refuses a request another site started (Origin, `Origin: null`, Sec-Fetch-Site, Referer) on every verb with 403 `cross-site` |
 | C49 | in production (strict templates off) any exception (a missing named query too) shows the plain error page and goes to the error log; `log::warning` and `log::error` always reach the error log |
 | C50 | an /api method that throws answers JSON: 500 `{"error":"server error"}` logged with the URL (a bad query too), 503 when the database is down, 400 for missing arguments; development adds the trace |
 | C51 | `cms` offers over /api only what its `api()` lists (the editor endpoints, `style`, `logout`); a public method of a `the_cms` override answers 404 unless listed |
@@ -281,7 +281,7 @@ php tests/demo.php                        # the whole matrix
 | N15 | `raster upgrade` takes an app with no `config/raster-version` as current: writes the version, runs no old steps |
 | N16 | a page that answers 500 (a model that throws) stops `raster export` with exit 1, naming the page; so does a 404 page that answers 500; the last export's files, 404.html included, stay |
 | N17 | every command refuses an option it doesn't take (`send --dryrun`, `lint --jsn`) with exit 2 and the options it does, before anything runs; the help names them all |
-| O1 | the sitemap skips private pages and lists items |
+| O1 | the sitemap skips private pages and lists items; the sitemap and `raster export` leave out the account and newsletter pages the models' `requires()` name, where the settings put them (`letters/confirm`), and `sitemap_skip` adds to them |
 | R1 | a model declares a type (`types()`): a collection with the model's fields and no mock-up row, in site_overview, describe and schema |
 | R2 | `cms_records::submit`: a form stores a record with only the fields people may write; what visitors typed prints as text |
 | R3 | `check()` runs on every write: the form (an alert), the editor (422 with the problems), MCP and the model's own code |

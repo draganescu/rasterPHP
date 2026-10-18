@@ -18,15 +18,13 @@
 class raster_describe
 {
 	// The settings worth telling an agent about: they change how the site
-	// behaves. Anything that could hold a secret (mcp_token, the mail DSN and
-	// its password) is deliberately not here.
+	// behaves. The models in use add theirs (requires(), 'settings').
+	// Anything that could hold a secret (mcp_token, the mail DSN and its
+	// password) is deliberately not here.
 	static $settings = array(
 		'theme', 'default_view', 'views_ext', 'rewrite', 'strict_templates',
 		'error_document_404', 'error_document_503', 'site_url', 'cms_enabled', 'raster_page_size',
-		'raster_media_folder', 'feed_limit', 'sitemap_skip', 'protected',
-		'registration', 'login_page', 'after_login', 'reset_page',
-		'password_min_length', 'newsletter_double_opt_in',
-		'newsletter_confirm_page', 'newsletter_unsubscribe_page', 'mail_from',
+		'raster_media_folder', 'feed_limit', 'sitemap_skip', 'protected', 'mail_from',
 		'languages', 'domain_language', 'language_cookie', 'page_cache',
 		'page_cache_ttl', 'page_cache_skip', 'api_system_models',
 		'allow_deprecated',
@@ -127,7 +125,7 @@ class raster_describe
 
 		if ($want('settings')) {
 			$settings = array();
-			foreach (self::$settings as $name) {
+			foreach (array_unique(array_merge(self::$settings, controller::required('settings'))) as $name) {
 				$value = config::get($name);
 				if ($value !== null) $settings[$name] = $value;
 			}
