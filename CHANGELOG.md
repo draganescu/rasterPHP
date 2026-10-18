@@ -3,6 +3,17 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.1
+
+Nothing for sites to do. Records that already have a slug keep it.
+
+- **A record's slug is never made from its hidden fields.** A record with
+  no `title`, `headline` or `name` took its slug from its first filled text
+  field, hidden ones included, so a public type whose first field was a
+  hidden `secret` or `email` showed that value in its URL, and editors and
+  agents got it back as the record's slug. Hidden fields, `owner` and
+  `created_at` are now skipped when a slug is made (#93).
+
 ## 2.2.0
 
 Nothing for sites to do.
