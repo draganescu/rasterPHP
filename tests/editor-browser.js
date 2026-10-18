@@ -34,6 +34,8 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 	const ahead = (weekday, weeks) => { const d = new Date(); d.setUTCDate(d.getUTCDate() + ((weekday - d.getUTCDay() + 7) % 7 || 7) + 7 * (weeks - 1)); return d.toISOString().slice(0, 10); };
 	const tuesday = ahead(2, 1), wednesday = ahead(3, 2);
 	const server = spawn('php', ['-S', '127.0.0.1:' + p, path.join(root, 'index.php')], { cwd: root, env, stdio: 'ignore' });
+	// stopped however the test ends, also when the browser fails to start
+	process.on('exit', () => server.kill());
 	await new Promise(r => setTimeout(r, 600));
 	for (const url of ['/', '/menu', '/about']) await fetch(base + url);
 	const browser = await chromium.launch(process.env.CHROMIUM ? { executablePath: process.env.CHROMIUM } : {});
