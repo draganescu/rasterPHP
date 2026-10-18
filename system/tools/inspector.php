@@ -475,11 +475,15 @@ class raster_inspector {
 		return (object)$offered;
 	}
 
-	// the named queries a model can call as methods: its own sql/ folder
+	// the named queries a model can call as methods: the sql/ folders of
+	// its own, override and bundled folders (as database::query_file reads them)
 	function model_queries($model) {
-		$dir = APPBASE.config::get('models_path', 'models')."/$model/sql";
+		$found = controller::model($model);
 		$names = array();
-		foreach (glob("$dir/*.sql") ?: array() as $file) $names[] = basename($file, '.sql');
+		foreach ($found ? $found['dirs'] : array() as $dir) {
+			foreach (glob("$dir/sql/*.sql") ?: array() as $file) $names[] = basename($file, '.sql');
+		}
+		$names = array_values(array_unique($names));
 		sort($names);
 		return $names;
 	}
@@ -1070,8 +1074,9 @@ class raster_inspector {
 
 	// ##Named queries
 	// database::instance('cafe')->count_category(...) needs
-	// models/cafe/sql/count_category.sql or $queries['count_category'] in
-	// models/sql.php. Without a model name, the calling model's folder counts.
+	// models/cafe/sql/count_category.sql (or the_cafe's, or the bundled
+	// model's) or $queries['count_category'] in models/sql.php. Without a
+	// model name, the calling model's folders count.
 	function lint_queries() {
 		$problems = array();
 		$models = APPBASE.config::get('models_path', 'models');
@@ -1089,7 +1094,7 @@ class raster_inspector {
 				$name = $call[3][0];
 				if (in_array(strtolower($name), $own)) continue;
 				$model = isset($call[2]) && $call[2][0] !== '' ? $call[2][0] : ($folder !== null ? preg_replace('/^the_/', '', $folder) : null);
-				if (($model && is_file("$models/$model/sql/$name.sql")) || isset($named[$name])) continue;
+				if (database::query_file($model, $name) !== null || isset($named[$name])) continue;
 				$where = $model ? config::get('models_path', 'models')."/$model/sql/$name.sql" : "models/<model>/sql/$name.sql";
 				$problems[] = array(
 					'severity' => 'error', 'file' => self::short($file->getPathname()),

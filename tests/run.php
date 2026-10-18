@@ -2792,6 +2792,128 @@ test('an unknown mail transport never shows its password', function () {
 	}
 });
 
+// ## SQL for bundled models (#94 #127 #95)
+// Last: they add accounts and subscribers, which the schema tests above
+// would count as drift.
+
+test('a model\'s queries survive calls into bundled models (#94)', function () use ($maildir) {
+	$app = APPBASE.config::get('models_path', 'models');
+	$dir = sys_get_temp_dir().'/raster-zzq-'.getmypid();
+	@mkdir($dir);
+	// an email that prints a CMS field, as the bundled emails do
+	file_put_contents("$dir/email.html", "<html><head><title>Hi</title></head><body><!-- print.cms.zzq_line -->Line<!-- /print.cms.zzq_line --></body></html>");
+	// a view that calls the CMS between two of zzq's own queries
+	file_put_contents("$dir/page.html", "<p><!-- print.zzq.after /--></p><h1><!-- print.cms.zzq_heading -->H<!-- /print.cms.zzq_heading --></h1><p><!-- print.zzq.again /--></p>");
+	temp_model("$app/zzq", array(
+		'zzq.php' => "<?php\nclass zzq\n{\n\tstatic function types() {\n\t\treturn array('zzqnote' => array('fields' => array('name' => '')));\n\t}\n"
+			."\tfunction after() {\n\t\t\$seen = array();\n"
+			."\t\tcms_records::find('zzqnote');\n\t\t\$seen[] = database::instance()->one()[0]['one'];\n"
+			."\t\tnewsletter::subscribe('zzq@example.test');\n\t\t\$seen[] = database::instance()->one()[0]['one'];\n"
+			."\t\tmail::send_view(".var_export("$dir/email.html", true).", 'zzq@example.test');\n\t\t\$seen[] = database::instance()->one()[0]['one'];\n"
+			."\t\treturn implode(',', \$seen);\n\t}\n"
+			."\tfunction again() {\n\t\treturn 'again '.database::instance()->one()[0]['one'];\n\t}\n}\n",
+	));
+	temp_model("$app/zzq/sql", array('one.sql' => "SELECT 1 AS one\n"));
+	try {
+		controller::forget_models();
+		cms_records::forget();
+		reconnect();
+		cms_records::find('zzqnote');
+		same('1', (string)database::instance('zzq')->one()[0]['one'], 'named, after find():');
+		newsletter::subscribe('zzq-direct@example.test');
+		same('1', (string)database::instance('zzq')->one()[0]['one'], 'named, after subscribe():');
+		// a name applies to that call only
+		check(database::instance()->current_model !== 'zzq', 'the name stuck to the shared instance');
+		$html = controller::render_view("$dir/page.html");
+		check(strpos($html, '<p>1,1,1</p>') !== false, 'zzq\'s own query from its template method: '.$html);
+		check(strpos($html, '<p>again 1</p>') !== false, 'zzq\'s own query after the view printed a CMS field: '.$html);
+	} finally {
+		remove_dir("$app/zzq");
+		array_map('unlink', glob("$dir/*") ?: array());
+		@rmdir($dir);
+		controller::forget_models();
+		cms_records::forget();
+	}
+});
+
+test('bundled and the_ queries are found (#127 #41)', function () {
+	check(database::query_file('newsletter', 'confirmed_count') !== null, 'the bundled newsletter has no confirmed_count.sql');
+	same(null, database::query_file('newsletter', 'no_such_query'));
+	$app = APPBASE.config::get('models_path', 'models');
+	temp_model(BASE.'models/zzq', array('zzq.php' => "<?php\nclass zzq\n{\n}\n"));
+	temp_model(BASE.'models/zzq/sql', array('one.sql' => "SELECT 1 AS one\n", 'two.sql' => "SELECT 2 AS two\n"));
+	temp_model("$app/the_zzq", array('the_zzq.php' => "<?php\nclass the_zzq extends zzq\n{\n}\n"));
+	temp_model("$app/the_zzq/sql", array('two.sql' => "SELECT 22 AS two\n"));
+	try {
+		controller::forget_models();
+		same("$app/the_zzq/sql/two.sql", database::query_file('zzq', 'two'), 'the override\'s file wins:');
+		same(BASE.'models/zzq/sql/one.sql', database::query_file('zzq', 'one'), 'the bundled file is still found:');
+		same('22', (string)database::instance('zzq')->two()[0]['two']);
+		same('1', (string)database::instance('zzq')->one()[0]['one']);
+		$vocabulary = (new raster_inspector())->vocabulary();
+		check(in_array('confirmed_count', $vocabulary['models']['newsletter']['queries'], true), 'vocabulary: '.json_encode($vocabulary['models']['newsletter']['queries']));
+		same(array('one', 'two'), $vocabulary['models']['zzq']['queries']);
+	} finally {
+		remove_dir(BASE.'models/zzq');
+		remove_dir("$app/the_zzq");
+		controller::forget_models();
+	}
+});
+
+test('percent signs in SQL files run as written (#95)', function () {
+	$app = APPBASE.config::get('models_path', 'models');
+	$shared = "$app/sql.php";
+	check(!is_file($shared), 'the starter has a models/sql.php');
+	temp_model("$app/zzpct", array('zzpct.php' => "<?php\nclass zzpct\n{\n}\n"));
+	// the day of the month, written as each database writes it
+	$day = on_mysql() ? "DATE_FORMAT(%s, '%%d')" : "strftime('%%d', %s)";
+	temp_model("$app/zzpct/sql", array(
+		'pct.sql' => 'SELECT '.sprintf($day, "'2026-10-05'")." AS d\n",
+		'like.sql' => "SELECT name FROM (SELECT 'pea soup' AS name) AS t WHERE name LIKE '%soup%'\n",
+		'bound.sql' => 'SELECT '.sprintf($day, '?')." AS d\n",
+	));
+	file_put_contents($shared, "<?php\n\$queries['zzquoted'] = \"SELECT '%s' AS v\";\n");
+	try {
+		controller::forget_models();
+		same('05', (string)database::instance('zzpct')->pct()[0]['d']);
+		same('pea soup', (string)database::instance('zzpct')->like()[0]['name']);
+		same('07', (string)database::instance('zzpct')->bound('2026-10-07')[0]['d']);
+		// models/sql.php keeps its '%s', quoted by the driver
+		same("it's", (string)database::instance()->zzquoted("it's")[0]['v']);
+	} finally {
+		remove_dir("$app/zzpct");
+		@unlink($shared);
+		controller::forget_models();
+	}
+});
+
+test('find() refuses ?param and handles owner=me (#176)', function () {
+	$app = APPBASE.config::get('models_path', 'models');
+	temp_model("$app/zzown", array('zzown.php' => "<?php\nclass zzown\n{\n\tstatic function types() {\n\t\treturn array('zzown' => array('fields' => array('title' => ''), 'owner' => true));\n\t}\n}\n"));
+	try {
+		controller::forget_models();
+		cms_records::forget();
+		reconnect();
+		$member = authentication::create_user('zzown-member@example.test', 'a long password', 'member', 'Member');
+		$other = authentication::create_user('zzown-other@example.test', 'a long password', 'member', 'Other');
+		cms_records::create('zzown', array('title' => 'mine', 'owner' => $member));
+		cms_records::create('zzown', array('title' => 'theirs', 'owner' => $other));
+		$thrown = null;
+		try { cms_records::find('zzown', 'title=?b'); } catch (InvalidArgumentException $e) { $thrown = $e->getMessage(); }
+		same('find() takes values, not ?b: pass the value', $thrown);
+		$titles = 'echo json_encode(array_merge(array_column(cms_records::find("zzown", "owner=me"), "title"), array("|"), array_column(cms_records::find("zzown", array("owner" => "me")), "title")));';
+		$out = race_php('define("RASTER_RENDER_AS", "zzown-member@example.test"); '.$titles, 1);
+		same(array('mine', '|', 'mine'), json_decode($out[0], true), 'as the member: '.$out[0]);
+		$out = race_php($titles, 1);
+		same(array('|'), json_decode($out[0], true), 'logged out: '.$out[0]);
+	} finally {
+		R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS zzowndata');
+		remove_dir("$app/zzown");
+		controller::forget_models();
+		cms_records::forget();
+	}
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";
 foreach ($skipped as $skip) echo "  - $skip\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";

@@ -3,6 +3,20 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.10
+
+Nothing for sites to do, unless `models/sql.php` still names its array `$querries`: rename it `$queries`.
+
+**A model's queries survive calls into other models.** A name passed to `database::instance('x')` now applies to that call only. Before, it stuck to the shared instance, so after `cms_records::find()`, `newsletter::subscribe()` or an email printing a CMS field, a model's own `database::instance()->query_name()` was looked up in the CMS folder and threw. Code that passed a name once and then relied on it for later unnamed calls must pass it on each call.
+
+**Bundled models and overrides have SQL files.** Named queries are looked up in a `the_<name>` override's `sql/` folder, then the bundled model's `system/models/<name>/sql/`. `vocabulary` and `lint` see them. The newsletter's confirmed count is `newsletter.confirmed_count`.
+
+**`%` in SQL files runs as written.** `strftime('%d', date)`, `DATE_FORMAT(d, '%d.%m')` and `LIKE '%soup%'` no longer crash the page. `query()` runs SQL as written; the `'%s'` entries of `models/sql.php` are quoted as before.
+
+**`$querries` in models/sql.php is no longer read** (deprecated since 2.0).
+
+**`cms_records::find()` takes values.** A `?x` value (the URL's, in a template) now throws instead of silently dropping the condition, and `owner=me` gives the logged in person's records (none when logged out).
+
 ## 2.2.9
 
 Nothing for sites to do.

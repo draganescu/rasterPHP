@@ -6,14 +6,17 @@
 // by name as methods of the database class (see __call below)
 class database {
 	
-    // the current_model is a holder that we use so we know where to take
-    // the sql from when overriden methods are called
-    // as in $db->get_my_stuff();
+    // the model whose sql/ folder named queries come from, as in
+    // $db->get_my_stuff(); set while a template calls the model
+    // (controller::call_method) and put back after
     public $current_model = null;
 
     // singleton boilerplate
 	private static $instances = array();
     protected function __clone() {}
+    // No name gives the one shared instance. A name gives a copy bound to
+    // that model, for that call only: database::instance('cafe')->x() never
+    // changes where the next database::instance()->y() looks.
     public static function instance( $model = false )
     {  
         $cls = __CLASS__;
@@ -22,10 +25,10 @@ class database {
             self::$instances[$cls] = new $cls;
         }
         $database = self::$instances[$cls];
-        if ($model) {
-            $database->current_model = $model;
-        }
-        return $database;
+        if (!$model) return $database;
+        $bound = clone $database;
+        $bound->current_model = $model;
+        return $bound;
     }
 
     // true when a connection was selected for the current environment
@@ -52,29 +55,49 @@ class database {
 
     // ##Named queries
     // SQL kept out of PHP. A model's queries live in
-    // models/<model>/sql/<name>.sql, and any model's in models/sql.php
+    // models/<model>/sql/<name>.sql (a the_<model> override's folder first,
+    // then the bundled model's), and any model's in models/sql.php
     // ($queries['name'] = "SELECT …"). Call one as a method:
     //
     //   database::instance()->count_category('coffee')        // inside the model
     //   database::instance('cafe')->count_category('coffee')  // from anywhere
     //
     // The arguments are bound to ? placeholders, or pass one array for :name
-    // placeholders. sprintf-style '%s' values are quoted by the driver. The
-    // result is a list of rows. A name with no query is an error.
+    // placeholders. A file runs as written, % signs and all; the '%s' values
+    // of models/sql.php are quoted by the driver. The result is a list of
+    // rows. A name with no query is an error.
     public function __call($name, $arguments) {
-        $sql = self::find_query($this->current_model, $name);
-        if ($sql === null) {
-            throw new BadMethodCallException("No query named '$name': add ".config::get('models_path', 'models').'/'.($this->current_model ?: '<model>')."/sql/$name.sql, or \$queries['$name'] in models/sql.php");
+        $file = self::query_file($this->current_model, $name);
+        if ($file !== null) {
+            $sql = file_get_contents($file);
+            // an old file written for sprintf, called with values and with
+            // nothing to bind them to, still has them quoted in
+            if ($arguments && !preg_match('/\?|:[a-z_]/i', $sql)) return $this->printf_query($sql, $arguments);
+            return $this->query($sql, $arguments);
         }
-        return $this->query($sql, $arguments);
+        $queries = self::named_queries();
+        if (isset($queries[$name])) return $this->printf_query($queries[$name], $arguments);
+        throw new BadMethodCallException("No query named '$name': add ".config::get('models_path', 'models').'/'.($this->current_model ?: '<model>')."/sql/$name.sql, or \$queries['$name'] in models/sql.php");
+    }
+
+    // the file of a model's named query, or null: the first
+    // <dir>/sql/<name>.sql over the model's folders (the site's own, or a
+    // the_ override's then the bundled model's, see controller::model)
+    static function query_file($model, $name) {
+        if (!$model || !preg_match('/^[a-z0-9_]+$/i', $model.$name)) return null;
+        $found = controller::model($model);
+        // a folder with only sql/ in it is still the model's
+        $dirs = $found ? $found['dirs'] : array(APPBASE.config::get('models_path', 'models')."/$model");
+        foreach ($dirs as $dir) {
+            if (is_file("$dir/sql/$name.sql")) return "$dir/sql/$name.sql";
+        }
+        return null;
     }
 
     // the SQL of a named query, or null; the model's own file wins
     static function find_query($model, $name) {
-        $models = APPBASE.config::get('models_path', 'models');
-        if ($model && preg_match('/^[a-z0-9_]+$/i', $model.$name) && is_file("$models/$model/sql/$name.sql")) {
-            return file_get_contents("$models/$model/sql/$name.sql");
-        }
+        $file = self::query_file($model, $name);
+        if ($file !== null) return file_get_contents($file);
         $queries = self::named_queries();
         return isset($queries[$name]) ? $queries[$name] : null;
     }
@@ -85,23 +108,27 @@ class database {
         if (!is_file($file)) return array();
         return (function ($__file) {
             $queries = array();
-            $querries = array(); // the old spelling, still read
             include $__file;
-            return array_merge((array)$querries, (array)$queries);
+            return (array)$queries;
         })($file);
     }
 
     // Runs a query and returns all rows. Parameters are bound, never pasted:
     //   $db->query('SELECT * FROM book WHERE author = ?', array('Tolkien'));
     //   $db->query('SELECT * FROM book WHERE author = :a', array(':a' => 'Tolkien'));
-    // Older SQL files that use sprintf placeholders (%s, %d) still work; their
-    // values are quoted by the database driver first.
+    // The SQL runs as written: LIKE '%soup%' and strftime('%d', …) are SQL.
     public function query( $query, $params = array() ) {
-        $params = (array)$params;
-        if (count($params) === 1 && isset($params[0]) && is_array($params[0])) {
-            $params = $params[0];
-        }
-        if (preg_match('/%[sd]/', $query) && !preg_match('/\?|:[a-z_]/i', $query)) {
+        $params = self::params($params);
+        log::info('Query: '. $query);
+        return R::getAll( $query, $params );
+    }
+
+    // models/sql.php's sprintf form, "… WHERE a = '%s'": each value is quoted
+    // by the database driver and put in its place, when values are given and
+    // the SQL has no ? or :name for them
+    protected function printf_query( $query, $params = array() ) {
+        $params = self::params($params);
+        if ($params && preg_match('/%[sd]/', $query) && !preg_match('/\?|:[a-z_]/i', $query)) {
             $pdo = R::getDatabaseAdapter()->getDatabase()->getPDO();
             $quoted = array();
             foreach ($params as $value) {
@@ -110,8 +137,14 @@ class database {
             $query = vsprintf(str_replace("'%s'", '%s', $query), $quoted);
             $params = array();
         }
-        log::info('Query: '. $query);
-        return R::getAll( $query, $params );
+        return $this->query($query, $params);
+    }
+
+    // a call's arguments as bindings: one array is the :name form
+    protected static function params($params) {
+        $params = (array)$params;
+        if (count($params) === 1 && isset($params[0]) && is_array($params[0])) return $params[0];
+        return $params;
     }
 
     // each connection config in APPBASE.'config/db/' is parsed and if 

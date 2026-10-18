@@ -255,12 +255,20 @@ $rows = database::instance('products')->in_category('chairs', 200); // from anyw
 - `?` placeholders are bound to the arguments in order. For `:name`
   placeholders pass one array: `->between(array(':low' => 1, ':high' => 5))`.
 - Without a model name, the query is looked up in the folder of the model
-  a template is currently calling. A name you pass stays set for later
-  calls, so pass it whenever you're not sure.
-- Queries any model can use go in `models/sql.php`:
+  a template is currently calling (and put back when that call ends). A
+  name you pass applies to that call only, so code that calls another
+  model, bundled or not, never moves your queries; pass the name whenever
+  you're not sure.
+- The model's folders are those `controller::model()` finds: the site's
+  own `models/<name>/`, or a `models/the_<name>/` override's `sql/` first
+  and then the bundled `system/models/<name>/sql/`. Bundled models keep
+  their fixed queries there too (`newsletter.confirmed_count`).
+- A file runs as written: `strftime('%d', date)` and `LIKE '%soup%'` are
+  SQL. Queries any model can use go in `models/sql.php`:
   `$queries['name'] = "SELECT … WHERE a = '%s'"`. Its `'%s'` values are
-  quoted by the database driver. A file in the model's `sql/` folder wins
-  over an entry there with the same name.
+  quoted by the database driver. (So are an old file's, when it is called
+  with values and has no `?` or `:name` for them.) A file in the model's
+  `sql/` folder wins over an entry there with the same name.
 - A name with no query throws `BadMethodCallException`, and `lint` reports
   `database::instance(…)->name(…)` calls that have no query.
 - **Times are PHP's, in the site's time zone** (setting `timezone`). A query
@@ -727,7 +735,11 @@ class reservation {
   `$filters` is `array('field' => 'value')` (equal values) or list options
   as `render.cms` takes them, `'date>=today&status!=cancelled'`, with
   `order=` and `limit=` in them too; `$order` is as in list options
-  (`'date,-time'`, oldest first by default). `find()` returns every record
+  (`'date,-time'`, oldest first by default). The values are values: a
+  `?stylist` (the URL's, in a template) throws `InvalidArgumentException`,
+  so pass `util::param()` or `$_GET` yourself. `owner=me` (or
+  `array('owner' => 'me')`) is the logged in person's records, and none
+  when nobody is logged in. `find()` returns every record
   that matches unless `$limit` (or `limit=`) says how many, so ask for
   only what the page shows. It hands records to a template through
   `listed($type, $rows)` (see staff pages above).
@@ -1156,7 +1168,8 @@ of lists and filter pages come along; drafts and the editor don't.
   Raster sends. Other static calls between models (`newsletter::subscribe`,
   `i18n::detect`, `authentication::` helpers) go to the bundled class.
   A helper file in the override's folder (`the_cms/store.php`) is found
-  before the bundled one.
+  before the bundled one, and so is a query in its `sql/` folder
+  (`the_newsletter/sql/confirmed_count.sql`).
 - **Core files:** `application/the_<name>.php` is loaded after
   `system/<name>.php`. A `the_config`, `the_controller`, `the_event`,
   `the_log`, `the_database` or `the_template` class there replaces that

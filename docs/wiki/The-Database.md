@@ -91,7 +91,9 @@ This is the way to write SQL in Raster, rather than strings in PHP:
 How it works:
 
 - `?` placeholders are filled from the arguments, in order. For `:name` placeholders pass one array: `->between(array(':low' => 1, ':high' => 5))`. Values are bound, never pasted into the SQL, so they can't change the query (this is what protects you from SQL injection).
-- Without a model name, Raster looks in the folder of the model a template is currently calling. A model name you pass is remembered for later calls, so pass it whenever you're not sure.
+- Without a model name, Raster looks in the folder of the model a template is currently calling. A model name you pass counts for that one call: calling another model (the CMS, the newsletter) never changes where your next query is looked up. Pass the name whenever you're not sure.
+- A `the_<name>` override's `sql/` folder is read first, then the bundled model's (`system/models/<name>/sql/`), so an override can replace one query of a bundled model.
+- A file runs as written: `strftime('%d', date)` and `LIKE '%soup%'` need no escaping.
 - Queries any model may use can go in `application/models/sql.php`:
 
   ```php

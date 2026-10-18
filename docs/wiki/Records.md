@@ -164,6 +164,8 @@ cms_records::get('reservation', 12);
 cms_records::find('reservation', array('date' => '2026-10-05'));
 cms_records::find('reservation', 'date>=today&status!=cancelled&order=date');  // list options
 cms_records::find('reservation', array(), 'newest', 10);  // a limit; without one, every match
+cms_records::find('reservation', 'owner=me');  // the logged in person's, none when logged out
+// values only: a ?stylist is the URL's, for templates, and find() throws on one
 cms_records::refuse('fully_booked');   // stop, with a named problem
 ```
 
