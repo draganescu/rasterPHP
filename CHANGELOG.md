@@ -3,6 +3,16 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.13
+
+To take bookings, add the six `_email/booking_*.html` views (`booking_requested`, `booking_new`, `booking_confirmed`, `booking_declined`, `booking_cancelled`, `booking_changed`) and a manage page (`booking.html`, or set `booking_manage_page`) with `render.booking.manage`. lint names any view that is missing.
+
+**Booking links.** Every email to a guest carries a fresh link to manage the booking. Opening it changes nothing. The page's own buttons cancel or move the booking, up to `booking_cutoff` minutes (120) before the start. The link stops working at the start, or once the booking is declined or cancelled. A logged-in guest manages their own bookings without a link. Links are never stored, logged or page-cached; the booking keeps only a hash.
+
+**Booking events.** `booking.requested`, `booking.confirmed`, `booking.declined`, `booking.cancelled` and `booking.rescheduled` arrive after the commit, with the booking's fields and `who` (`guest` or `staff`). The bundled model sends its emails from listeners you can unbind in `config/the_events.php`. Staff emails go to `booking_staff_email`, or else the sender.
+
+**Models can declare the records a region needs.** `requires()` takes a `records` key. lint warns on a booking form while there is no resource yet.
+
 ## 2.2.12
 
 Nothing for sites to do. **Bookings, part two.** A site whose views use `render.booking.*` now takes bookings. `render.booking.form` stores a request that holds its place, and capacity is counted at the busiest minute in one query inside the write's lock, so two guests can't both take the last table. Staff confirm, decline or cancel bookings with the actions, and may book a walk-in or a booking at ten minutes' notice, but never over capacity. A booking stranded by a change of the setup needs attention, with the reason, in `render.booking.agenda` and `render.booking.attention` and in `print.booking.count('attention')`. These are for editors only and editable in place. New setting: `booking_max_people` (12). **Record types can fill their own fields.** A model's static `fill($type, $after, $before)` returns the fields it works out (a booking's end), merged into every write before `check()`. `cms_records::writer()` tells `check()` who is writing. **Forms shown again** select value-less options by their text and keep unticked boxes unticked (#80).
