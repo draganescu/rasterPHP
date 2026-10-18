@@ -69,12 +69,17 @@ function server($port, $env) {
 	global $tmp;
 	$process = proc_open(array(PHP_BINARY, '-d', 'error_reporting=-1', '-d', 'log_errors=1', '-d', 'display_errors=0', '-d', "error_log=$tmp/php-errors.log", '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, $env);
 	for ($i = 0; $i < 100 && !@fsockopen('127.0.0.1', $port); $i++) usleep(50000);
-	$servers[] = $process;
+	$servers[$port] = $process;
 	return "http://127.0.0.1:$port";
 }
 register_shutdown_function(function () use ($tmp, $root) {
 	global $servers;
-	foreach ($servers as $process) proc_terminate($process);
+	// with PHP_CLI_SERVER_WORKERS the workers outlive the terminated
+	// parent, so they go by port too
+	foreach ($servers as $port => $process) {
+		proc_terminate($process);
+		exec("pkill -f -- '[-]S 127.0.0.1:$port' 2>/dev/null");
+	}
 	exec('rm -rf '.escapeshellarg($tmp).' '.escapeshellarg("$root/demo/data/cache").' '.escapeshellarg("$root/demo/data/mail").' '.escapeshellarg("$root/demo/data/changes.log"));
 	foreach (glob("$root/media/*") ?: array() as $file) if (basename($file) !== '.gitignore' && filemtime($file) > time() - 3600) @unlink($file);
 });
@@ -1593,7 +1598,10 @@ test('N4', 'serve', function () use ($root) {
 		has(http('GET', "http://127.0.0.1:$port/about")[1], 'About us');
 	} finally {
 		proc_terminate($process);
-		exec("pkill -f 'php -S 127.0.0.1:$port' 2>/dev/null");
+		// serve's own php -S outlives the terminated parent; match it by
+		// port, since the binary may be php8.2, and [-] keeps pkill from
+		// matching the shell that runs it
+		exec("pkill -f -- '[-]S 127.0.0.1:$port' 2>/dev/null");
 	}
 });
 
