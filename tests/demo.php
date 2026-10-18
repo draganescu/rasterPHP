@@ -2945,6 +2945,32 @@ test('L14', 'several scheduled items each clear the page cache when their time c
 	demo_php('cms_store::connect(); R::exec("DELETE FROM eventsdata WHERE title IN (\'First due\', \'Second due\')");', $env);
 });
 
+test('L15', 'cache clear says so when it can\'t write the cache, and upgrade clears it', function () use ($root, $tmp, $maildir) {
+	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => test_db("$tmp/prod.sqlite"), 'RASTER_URL' => 'https://cafe.example/', 'RASTER_MAIL' => "log://$maildir");
+	$prod = server(free_port(), $env);
+	$dir = "$root/demo/data/cache";
+	raster(array('cache', 'clear'), $env);
+	http('GET', "$prod/faq");
+	// the cache belongs to the web server's user, and this is someone else
+	foreach (glob("$dir/*") as $file) chmod($file, 0444);
+	chmod($dir, 0555);
+	try {
+		list($code, $out) = raster(array('cache', 'clear'), $env);
+		same(1, $code, $out);
+		has($out, "error: can't write $dir/version");
+		lacks($out, 'Page cache cleared');
+		$answers = mcp_stdio(array(array('clear_cache')));
+		has(isset($answers[0]['error']) ? $answers[0]['error'] : '', "Can't write $dir/version");
+	} finally {
+		chmod($dir, 0775);
+		foreach (glob("$dir/*") as $file) chmod($file, 0664);
+	}
+	same('hit', header_value(http('GET', "$prod/faq")[2], 'X-Raster-Cache'));
+	list($code, $out) = raster(array('upgrade'), $env);
+	same(0, $code, $out);
+	same('miss', header_value(http('GET', "$prod/faq")[2], 'X-Raster-Cache'), 'the first request after an upgrade');
+});
+
 
 // ## 2.1.8 batch B: errors and /api
 

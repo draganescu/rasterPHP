@@ -247,6 +247,7 @@ php tests/demo.php                        # the whole matrix
 | L12 | the page cache is thrown away and `content_changed` sent once a transaction commits, and not at all when it is rolled back |
 | L13 | `raster render` and MCP `render_url` never read or write the page cache; a protected page answers its 303 to the login page, with exit 1 |
 | L14 | several scheduled items each clear the page cache when their time comes, in the site's `timezone` |
+| L15 | `raster cache clear` and MCP `clear_cache` fail when they can't write the cache; `upgrade` (and so `update`) clears it |
 | M1 | MCP needs its token; GET is refused |
 | M2 | initialize, ping, tools/list, batches, errors |
 | M3 | notifications get 202 |

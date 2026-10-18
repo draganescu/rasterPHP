@@ -93,7 +93,7 @@ class util {
 			cms_records::$changed = true;
 			return;
 		}
-		raster_cache::bump();
+		if (raster_cache::bump() === false) log::warning("page cache: can't write ".raster_cache::dir().'version, so visitors still get the pages cached before this change');
 		event::dispatch('content_changed');
 	}
 
@@ -233,11 +233,14 @@ class raster_cache {
 	}
 
 	// writes a file whole, under a temporary name it then takes: whoever
-	// reads it gets the old file or the new one, never part of one
+	// reads it gets the old file or the new one, never part of one. Returns
+	// whether it wrote.
 	static function write($file, $content) {
 		if (!is_dir(self::dir())) @mkdir(self::dir(), 0775, true);
 		$temporary = $file.'.'.bin2hex(random_bytes(6)).'.tmp';
-		if (@file_put_contents($temporary, $content) === false || !@rename($temporary, $file)) @unlink($temporary);
+		if (@file_put_contents($temporary, $content) !== false && @rename($temporary, $file)) return true;
+		@unlink($temporary);
+		return false;
 	}
 
 	// content changed: a new version, and the pages cached under the old one
@@ -245,24 +248,29 @@ class raster_cache {
 	// one an hour old was left by a request that died before it was done.
 	// The version is random, not counted, so it is never read to make the
 	// next one and an old one never comes back. Returns how many pages were
-	// deleted.
+	// deleted, or false when the version can't be written (the cache belongs
+	// to another user): the cached pages are then still served.
 	static function bump() {
-		self::write(self::dir().'version', bin2hex(random_bytes(8)));
+		$written = self::write(self::dir().'version', bin2hex(random_bytes(8)));
 		$removed = 0;
 		foreach (glob(self::dir().'*') ?: array() as $file) {
 			if (preg_match('/^[0-9a-f]{40}$/', basename($file)) && @unlink($file)) $removed++;
 			elseif (substr($file, -4) === '.tmp' && @filemtime($file) < time() - 3600) @unlink($file);
 		}
-		return $removed;
+		return $written ? $removed : false;
 	}
 
 	// throws every cached page away: for changes Raster can't see, such as
-	// views, models or the database edited directly. Returns the new version
-	// and how many cached pages were deleted.
+	// views, models or the database edited directly. Returns the new version,
+	// how many cached pages were deleted and an error when it could not.
 	static function clear() {
 		// and what controller::models() keeps of the models and views
 		@unlink(self::dir().'models.json');
 		$removed = self::bump();
+		if ($removed === false) {
+			return array('version' => self::version(), 'removed' => 0, 'error' => "can't write ".self::dir().'version, so the page cache was not cleared.'
+				.' Run this as the user the web server runs as, or let this user write to that folder');
+		}
 		return array('version' => self::version(), 'removed' => $removed);
 	}
 

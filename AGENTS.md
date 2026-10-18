@@ -1259,8 +1259,12 @@ use `'model.method'`: `method(true)` returns
     forms). A view, theme file, model or config edited with ordinary file
     tools, or the database changed directly, is not seen by visitors who
     aren't logged in until the cache is cleared or `page_cache_ttl` runs
-    out: run `php bin/raster cache clear`, or MCP `clear_cache`.
-    That also deletes `data/cache/models.json`, where Raster keeps what the
+    out: run `php bin/raster cache clear`, or MCP `clear_cache`. When it
+    can't write the cache (its files belong to the web server's user and
+    the command runs as another) it says so and exits 1 (MCP: an error),
+    and visitors keep the old pages: run it as that user. A content change
+    that can't write it logs a warning. `raster upgrade`, and so `update`,
+    clears the cache at the end. That also deletes `data/cache/models.json`, where Raster keeps what the
     models declare; it is made again when a model file changes anyway, and
     a site whose `data/` can't be written to simply looks every time.
     `render` and `render_url` never read or write the cache, so a fresh
@@ -1508,7 +1512,9 @@ command-line output). They win over the settings above.
   that names no app folder (missing, without `config/`, or a framework
   folder such as `system/`) is refused with an error and exit 1, and
   nothing is written. When the version file can't be written, upgrade
-  says so, names the steps that ran, and exits 1.
+  says so, names the steps that ran, and exits 1. Upgrade ends by
+  clearing the page cache, since new framework files and rewritten views
+  make different pages (a cache it can't write is a warning).
   Database changes stay with `raster schema --apply`.
 - `php bin/raster doctor` checks PHP, versions, edited framework files,
   templates, the database, whether `.htaccess` still carries every rule in

@@ -512,6 +512,9 @@ switch ($command) {
 			exit(1);
 		}
 		foreach ($done as $step) echo "  ✓ {$step['version']} {$step['id']}: {$step['description']}".($step['result'] !== '' ? " ({$step['result']})" : '')."\n";
+		// new framework files and rewritten views make new pages
+		$cleared = raster_cache::clear();
+		if (isset($cleared['error'])) fwrite(STDERR, $paint('warning', '33').': '.$cleared['error']."\n");
 		if ($unversioned) echo "$app/ had no config/raster-version: taken as Raster $to, no upgrade steps run ($hint)\n";
 		else echo "$app/ is at Raster $to".($done ? '' : ', nothing to change')."\n";
 		exit(0);
@@ -604,6 +607,10 @@ switch ($command) {
 			exit(2);
 		}
 		$cleared = raster_cache::clear();
+		if (isset($cleared['error'])) {
+			fwrite(STDERR, $paint('error', '31').': '.$cleared['error']."\n");
+			exit(1);
+		}
 		echo 'Page cache cleared ('.$cleared['removed'].' '.($cleared['removed'] === 1 ? 'page' : 'pages').').';
 		echo raster_cache::enabled() ? "\n" : ' It is off in this environment ('.config::get('environment').").\n";
 		exit(0);
