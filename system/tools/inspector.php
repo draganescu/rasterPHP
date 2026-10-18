@@ -1119,13 +1119,21 @@ class raster_inspector {
 
 	// A site model with a bundled model's name replaces it whole: the
 	// bundled one's methods, listeners and tables are gone, and bundled code
-	// that calls it gets the site's class.
+	// that calls it gets the site's class. A site type with the name of a
+	// bundled model in use, or of one of its types, keeps it, and the
+	// bundled model's types are left out (cms_records::types).
 	function lint_models() {
 		$problems = array();
 		foreach (controller::models() as $name => $found) {
 			if (!$found['shadows']) continue;
 			$problems[] = array('file' => self::short($found['file']), 'line' => 1, 'column' => 1, 'severity' => 'warning',
 				'message' => config::get('models_path', 'models')."/$name shadows the bundled $name, which is never loaded: to change the bundled one, name the folder the_$name (class the_$name extends $name); otherwise pick another name");
+		}
+		cms_records::types();
+		foreach (cms_records::$left_out as $name => $taken) {
+			$found = controller::model($taken['by']);
+			$problems[] = array('file' => $found ? self::short($found['file']) : $taken['by'], 'line' => 1, 'column' => 1, 'severity' => 'warning',
+				'message' => "{$taken['by']} declares a type '{$taken['type']}', so the bundled $name model's types are left out and render.$name.* finds nothing: rename that type to use the bundled $name, or stop using render.$name.* in the views");
 		}
 		return $problems;
 	}

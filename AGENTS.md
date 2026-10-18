@@ -786,6 +786,9 @@ class reservation {
 A bundled model's record types (`types()`) and needs (`requires()`) count
 only on a site whose views use the model (`render.<name>.…`,
 `print.<name>.…`, in any theme); the tables in its `schema()` always count.
+A site's own model or type keeps its name: when a site type is called like a
+bundled model in use, or like one of its types (a site's `booking`), that
+bundled model declares none of its types, and `lint` warns.
 
 **authentication**: accounts, with every screen written in your templates.
 - Regions:
@@ -880,6 +883,63 @@ only on a site whose views use the model (`render.<name>.…`,
     on MySQL widens the small columns an older Raster made for them
     (`recipients` as TINYINT, `subject` as VARCHAR(191)), as `--apply`
     does, so sites need no step for it.
+
+**booking**: bookings for a café's sittings or a salon's appointments
+(with or without "with Ana"). So far it has the setup and the slots the
+setup makes; the bookings themselves, their emails and the staff page
+follow.
+- Setup, as records staff edit in the page (`render.cms.bookingresource`
+  and so on; each is made by editors and private):
+  - `bookingresource`: what is booked. `name`, `people` (most people at
+    once in a slot), `bookings` (most bookings at once), `active` (false
+    hides it). 0 is no limit: a café's Dining room has `people` 20, a
+    stylist `bookings` 1.
+  - `bookinghours`: when slots start. `resource` (a resource's slug, empty
+    for every one), `days` (`daily`, or `mon,tue,…`), `starts`, `ends` (the
+    last start; a booking may run past it), `every` (minutes between
+    starts), `from`/`until` (a season, empty for always). A day's slots are
+    the starts of every row that applies, each once; sittings are a large
+    `every` (120), a salon's grid a small one (15).
+  - `bookingclosed`: days off. `date`, `until` (a range, both days
+    included), `resource` (empty closes every one), `note`.
+  - `bookingservice`: what a booking is for. `name`, `minutes`,
+    `resources` (slugs that offer it, comma separated; empty for all),
+    `active`. Without services a booking lasts the `every` of its hours row
+    (a sitting lasts until the next one); a start in several rows keeps the
+    smallest `every`.
+  - Refused with: `every_invalid` (every < 1), `hours_invalid` (no starts or
+    ends, or starts after ends), `days_invalid`, `season_invalid` (from
+    after until), `limit_invalid` (people or bookings below 0),
+    `minutes_invalid` (below 1), `closed_invalid` (no date, or until before
+    it).
+- Regions (options read `?x` from the URL; empty ones are left out). With
+  one active resource it is the one booked; with several, slots and days
+  give nothing until one is chosen, and nothing until a service is chosen
+  when the resource offers any:
+  - `render.booking.slots('date=?date&resource=?resource&service=?service&people=?people')`:
+    one day's start times, as rows with `date`, `time`, `ends`,
+    `left_people` and `left_bookings` (`''` where that limit is 0), `full`
+    (`'1'`/`'0'`) and `state` (`free`/`full`, for `print.+class.state`). A
+    GET form picks the day; the page lists the times as radio buttons. No
+    JavaScript.
+  - `render.booking.days('resource=?resource&service=?service&limit=14')`:
+    the next days with a free slot, `date` and `slots_free`.
+  - `render.booking.resources('service=?service')` and
+    `render.booking.services('resource=?resource')`: the active ones,
+    editable in the page.
+  - Slots and days are never page-cached.
+- Times are the site's clock (`timezone`). A start the clock skips in spring
+  isn't a slot, the hour repeated in autumn gives each time once, and a
+  booking ends by midnight (a start whose span would end later isn't a slot;
+  an end at midnight is `00:00`). `booking_notice` counts real minutes, so
+  on the spring day 04:00 is 30 minutes after 02:30.
+- From code: `booking::day($date, $resource, $service, $people, $taken,
+  $now)` gives the slot rows, `booking::starts($date, $resource)` the
+  start times, `booking::peak($rows, $from, $to)` the most people and
+  bookings at once over minutes `[$from, $to)` (spans are half-open: one
+  ending at 10:00 and one starting then never meet).
+- Settings: `booking_notice` (60 minutes ahead), `booking_horizon` (60 days
+  ahead).
 
 **mail**: emails are views. `mail::send_view('_email/welcome', $to,
 array('name' => 'Ada'))` uses the view's `<title>` as the subject.
@@ -1219,6 +1279,8 @@ Set in `config/the_app.php` with `config::set('name')->to(value)`.
 | `login_page`, `after_login`, `reset_page` | `login`, none, `reset` | account pages |
 | `password_min_length` | 8 | |
 | `timezone` | PHP's (`date.timezone`, UTC on most servers) | the site's time zone, `'Europe/Bucharest'`: `today`, scheduled items and every stamp follow it; an unknown name is logged and PHP's kept. `doctor` warns in production when neither this nor php.ini's `date.timezone` is set |
+| `booking_notice` | 60 | minutes ahead a guest may book |
+| `booking_horizon` | 60 | days ahead a guest may book |
 | `newsletter_double_opt_in` | true | false subscribes without a confirmation |
 | `newsletter_confirm_page`, `newsletter_unsubscribe_page` | `newsletter-confirm`, `newsletter-unsubscribe` | |
 | `mail`, `mail_from` | see `RASTER_MAIL` | transport and sender |
