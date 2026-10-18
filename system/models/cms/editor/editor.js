@@ -681,8 +681,10 @@
 		return /^(javascript|data|vbscript):/i.test(plain.replace(/[\x00-\x20]+/g, ''));
 	}
 
-	// inline: for a region that can't hold paragraphs; its top-level
-	// paragraphs become lines, so the value fits where it sits
+	// inline: for a region that can't hold paragraphs; its paragraphs,
+	// lists, headings and quotes, at any depth, become lines, so the value
+	// fits where it sits
+	var blocks = 'p,ul,ol,li,h2,h3,h4,blockquote';
 	function clean(html, inline) {
 		var box = document.createElement('template');
 		box.innerHTML = html;
@@ -703,15 +705,18 @@
 				if (child.tagName === 'A' && scriptLink(child.getAttribute('href'))) child.removeAttribute('href');
 			});
 		})(box.content);
-		if (inline) Array.prototype.slice.call(box.content.childNodes).forEach(function (child) {
-			if (child.nodeType !== 1 || child.tagName !== 'P') return;
+		// the outermost block first, so its own blocks are then siblings
+		var br = function (n) { return !!n && n.nodeType === 1 && n.tagName === 'BR'; };
+		for (var child, n, m; inline && (child = box.content.querySelector(blocks));) {
 			if (child.textContent.trim() || child.querySelector('*')) {
-				for (var n = child.previousSibling; n && !meaningful(n); n = n.previousSibling);
-				if (n && !(n.nodeType === 1 && n.tagName === 'BR')) child.parentNode.insertBefore(document.createElement('br'), child);
+				for (n = child.previousSibling; n && !meaningful(n); n = n.previousSibling);
+				for (m = child.nextSibling; m && !meaningful(m); m = m.nextSibling);
+				if (n && !br(n)) child.parentNode.insertBefore(document.createElement('br'), child);
+				if (m && !br(m) && !br(child.lastChild)) child.parentNode.insertBefore(document.createElement('br'), child.nextSibling);
 				while (child.firstChild) child.parentNode.insertBefore(child.firstChild, child);
 			}
 			child.remove();
-		});
+		}
 		var out = document.createElement('div');
 		out.appendChild(box.content.cloneNode(true));
 		return out.innerHTML.replace(/<p><\/p>/g, '');

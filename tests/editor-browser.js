@@ -103,6 +103,22 @@ const booked = later(30), phoned = later(60);
 			await page.waitForTimeout(900);
 			html = await (await fetch(base + '/about')).text();
 			check(/<p class="lead">We roast <em>our own<\/em> beans\.<br>Second line\.(<br>)?Pasted one\.<br>Pasted two\.<\/p>/.test(html), 'a pasted paragraph stays in the line: ' + (html.match(/<p class="lead">[\s\S]*?<h2>/) || [''])[0]);
+			// and so are a pasted list, heading and quote, at any depth
+			await lead.click();
+			await page.keyboard.press('Control+End');
+			await lead.evaluate(el => {
+				const data = new DataTransfer();
+				data.setData('text/html', '<ul><li>One</li><li>Two</li></ul><h2>Head</h2><blockquote><p>Quote</p></blockquote>');
+				data.setData('text/plain', 'One Two Head Quote');
+				el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+			});
+			await page.mouse.click(5, 5);
+			await page.waitForTimeout(900);
+			html = await (await fetch(base + '/about')).text();
+			check(/<p class="lead">We roast <em>our own<\/em> beans\.<br>Second line\.(<br>)?Pasted one\.<br>Pasted two\.(<br>)?One<br>Two<br>Head<br>Quote<\/p>/.test(html), 'a pasted list, heading and quote become lines: ' + (html.match(/<p class="lead">[\s\S]*?<h2>/) || [''])[0]);
+			await page.reload();
+			await page.waitForTimeout(500);
+			check(await page.locator('p.lead[data-raster-field]').count() === 1 && await page.locator('main > p:empty').count() === 0, 'after a pasted list the lead is still one field');
 			// a rich field that is a list: Enter adds a bullet, as the browser does
 			const features = page.locator('ul.features');
 			await features.locator('li').last().click();
