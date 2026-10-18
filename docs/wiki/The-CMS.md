@@ -160,7 +160,7 @@ Items relate **by value**: two news items with the same `author` text are "by th
 
 ## Slugs
 
-Every item gets a **slug**, a readable id for its URL, made from its `title`, `headline` or `name` field (or else its first text field). Accents are turned into plain letters: *Café crème* becomes `cafe-creme`. If the slug is taken, `-2`, `-3` and so on are added, even for items saved at the same moment. Editors can change it in the item's details.
+Every item gets a **slug**, a readable id for its URL, made from its `title`, `headline` or `name` field (or else its first text field). A record's hidden fields are never used: the slug is in its public URL. Accents are turned into plain letters: *Café crème* becomes `cafe-creme`. If the slug is taken, `-2`, `-3` and so on are added, even for items saved at the same moment. Editors can change it in the item's details.
 
 ## Drafts and scheduled items
 

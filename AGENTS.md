@@ -463,7 +463,9 @@ item of a collection is the mock-up content.
     a mock-up changes type (`14` becomes `14 lei`), `schema` shows the
     column as retyped and `schema --apply` converts it if every stored
     value fits; otherwise it names the values that don't.
-- **Items** get a `slug` made from their title, headline or name. They also
+- **Items** get a `slug` made from their title, headline or name (else
+  their first text field; never a record's hidden fields, which a public
+  URL must not carry). They also
   have `enabled` (`0` makes a draft) and `published_at` (a future date
   schedules the item). Visitors don't see drafts or scheduled items; editors
   do.
@@ -498,7 +500,7 @@ class reservation {
             'owner'    => true,                // remember who made it; they may read their own
             'public'   => false,               // the default: only editors (and owners) see records
             'readonly' => array('status'),     // shown to editors, written only by the model
-            'hidden'   => array(),             // never shown to editors or agents (payment ids, tokens)
+            'hidden'   => array(),             // never shown to editors or agents, nor made a slug (payment ids, tokens)
             'html'     => array(),             // fields printed as HTML; the rest print escaped
             'actions'  => array('confirm' => 'editor', 'refund' => 'admin'),
         ));   // a type's name is lowercase letters and digits; no field x next to x_id
