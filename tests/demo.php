@@ -1561,6 +1561,25 @@ test('N11', 'a new day exports again: a list of what is coming drops what is pas
 		}
 	});
 });
+test('N11', 'an export that crosses midnight records the day its pages were made on', function () use ($tmp, $root) {
+	// the clock moves to the next day between rendering and saving the
+	// fingerprint: the next day's export must still run
+	$out = "$tmp/midnight";
+	$script = "$tmp/midnight.php";
+	file_put_contents($script, '<?php require '.var_export("$root/system/boot.php", true).'; boot::$appname = "demo"; boot::cli();'
+		.' require_once BASE."tools/inspector.php"; require_once BASE."tools/export.php";'
+		.' class late_export extends raster_export { protected function collect_pages() { date_default_timezone_set("Pacific/Kiritimati"); parent::collect_pages(); } }'
+		.' @mkdir('.var_export($out, true).', 0775, true);'
+		.' $e = (new late_export('.var_export($root, true).', '.var_export($out, true).', "https://cafe.example/"))->run();'
+		.' echo $e->errors ? implode("\n", $e->errors) : "exported";');
+	$process = proc_open(array(PHP_BINARY, $script), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, array_merge(getenv(), array('CAFE_TIMEZONE' => 'Etc/GMT+12')));
+	$output = stream_get_contents($pipes[1]).stream_get_contents($pipes[2]);
+	same(0, proc_close($process), $output);
+	same('exported', trim($output));
+	list($code, $output) = raster(array('export', $out, '--url=https://cafe.example/'), array('CAFE_TIMEZONE' => 'Pacific/Kiritimati'));
+	same(0, $code, $output);
+	lacks($output, 'Nothing changed since the last export', 'the next day exports again');
+});
 test('N16', 'a page that answers an error stops the export, and the last export stays', function () use ($tmp, $root, $views) {
 	$out = "$tmp/failing";
 	same(0, raster(array('export', $out, '--url=https://cafe.example/'))[0]);
