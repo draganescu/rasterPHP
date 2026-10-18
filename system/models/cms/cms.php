@@ -151,7 +151,7 @@ class cms
 			if ($m[3] === 'item' && $m[1] !== $m[2]) return;
 			$candidates = $m[3] === 'item' ? array($m[2].'_item', $m[1]) : array($m[1]);
 			foreach ($candidates as $view) {
-				if (strpos($view, '..') !== false || strpos(basename($view), '_') === 0) continue;
+				if (strpos($view, '..') !== false || controller::is_partial($view)) continue;
 				$file = controller::build_view_path($view);
 				// only views that actually render this collection
 				if (file_exists($file) && strpos(file_get_contents($file), '<!-- render.cms.'.$m[2]) !== false) {

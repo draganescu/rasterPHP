@@ -3,6 +3,16 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.5
+
+Nothing for sites to do.
+
+- **Collection URLs never serve a view inside a `_` folder.** Files and
+  folders starting with `_` are never pages, but the CMS collection router
+  only checked the view's own name, so `/_email/digest/news_page/1` showed
+  an email view as a page. `controller::is_partial()` now decides for the
+  controller and the collection router alike (#46).
+
 ## 2.2.4
 
 Nothing for sites to do. A script that passes a command an option it

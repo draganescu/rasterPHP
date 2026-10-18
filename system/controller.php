@@ -45,6 +45,13 @@ class controller {
         return self::$instances[$cls];
     }
 	
+	// Files and folders starting with _ (_layout.html, _email/) are partials,
+	// never pages, whichever URL asks for them
+	static function is_partial($view)
+	{
+		return (bool)preg_match('#(^|/)_#', (string)$view);
+	}
+
 	// So, the views can be taken out of the application's directory for
 	// -paranoid- sorry security reasons. This is why you can 
 	// config::set('views_path')->to('hidden_dir_relative_to_'.APPBASE) 
@@ -127,7 +134,7 @@ class controller {
 		// so these are 404s, whatever the routes say
 		$dotted = (bool)preg_match('#(^|/)\.#', implode('/', $segments));
 		$is_safe = $default_view !== '' && !$dotted
-			&& !preg_match('#(^|/)_#', $default_view);
+			&& !controller::is_partial($default_view);
 		$view = '';
 		if($is_safe && file_exists($default_file)) {
 			$route = $default_file;
