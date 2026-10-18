@@ -3,6 +3,11 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.16
+
+- Listeners of bundled models declared in `listens()` now run with the framework's own bindings: before `config/the_events.php` and before the site's models' `listens()`. A site listener sees what the bundled listener already did, and `the_events.php` can unbind it with `event::unbind(…)->from(…)` (#27).
+- Models now autoload before the config files load.
+
 ## 2.2.15
 
 Nothing for sites to do.

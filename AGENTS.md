@@ -318,10 +318,13 @@ class cafe {
   `event::unbind(…)->from(…)`.
 - Listeners get the payload array and run in order: the framework's own
   bindings in `system/config/events.php` (routing, the CMS and account
-  checks, the newsletter's confirmation email, the booking emails), then
-  `the_events.php`, then
-  `listens()`, then the framework's core handlers (controller and log). A
-  listener returning `false` makes
+  checks, the newsletter's confirmation email, the booking emails) and the
+  bundled models' `listens()` (an override's, for a `the_` model), then
+  `the_events.php`, then the site's own models' `listens()`, then the
+  framework's core handlers (controller and log). So a site listener sees
+  the state a bundled model's listener left (an order already marked
+  paid), and `the_events.php` can unbind any of the framework's listeners,
+  `listens()` ones included. A listener returning `false` makes
   `event::dispatch()` return `false`; the sender decides what that means.
 - Name your events `<model>.<what happened>`, in the past tense.
 - `listens()` returns a constant array: Raster keeps what it returns in
