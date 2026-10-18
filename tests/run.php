@@ -289,8 +289,8 @@ test('the_mail reaches mail sent by newsletter', function () use ($maildir) {
 		same('', implode('', $out), 'the process said:');
 		$mails = glob("$dir/*.eml") ?: array();
 		same(1, count($mails), 'mails:');
-		check(preg_match('/^Subject: =\?UTF-8\?B\?([^?]+)\?=/m', file_get_contents($mails[0]), $m), 'no subject');
-		same('[T] ', substr(base64_decode($m[1]), 0, 4), 'the subject starts:');
+		check(preg_match('/^Subject: (.*(?:\r?\n[ \t].*)*)/m', file_get_contents($mails[0]), $m), 'no subject');
+		same('[T] ', substr(mb_decode_mimeheader($m[1]), 0, 4), 'the subject starts:');
 	} finally {
 		remove_dir("$app/the_mail");
 		remove_dir($dir);
