@@ -406,6 +406,31 @@ test('new sites get no old .htaccess below the root (#76)', function () use ($re
 	has(raster($site, array('doctor'))[1], '✓ .htaccess has every rule');
 });
 
+// ## Uploads (#115)
+
+test('doctor in production warns when PHP takes smaller uploads than the editor sends (#115)', function () use ($site) {
+	$doctor = function ($upload, $post) use ($site) {
+		$env = array_merge(getenv(), array('RASTER_APP' => 'application', 'RASTER_DB' => "$site/application/data/test.sqlite", 'NO_COLOR' => '1', 'RASTER_ENV' => 'production', 'RASTER_URL' => 'https://site.example/', 'RASTER_MAIL' => 'smtp://mail.example:587'));
+		unset($env['RASTER_MCP_TOKEN']);
+		$process = proc_open(array(PHP_BINARY, '-d', "upload_max_filesize=$upload", '-d', "post_max_size=$post", "$site/bin/raster", 'doctor'), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $site, $env);
+		$out = stream_get_contents($pipes[1]).stream_get_contents($pipes[2]);
+		return array(proc_close($process), $out);
+	};
+	// stock PHP: 2 MB files in an 8 MB request
+	list($code, $out) = $doctor('2M', '8M');
+	same(0, $code, 'a warning, not a failure: '.$out);
+	has($out, 'PHP takes uploads up to 2M');
+	has($out, 'upload_max_filesize = 12M');
+	list($code, $out) = $doctor('64M', '8M');
+	has($out, 'PHP takes requests up to 8M');
+	has($out, 'post_max_size = 13M');
+	list($code, $out) = $doctor('12M', '13M');
+	lacks($out, 'PHP takes');
+	// 0 is no limit for post_max_size
+	list($code, $out) = $doctor('1G', '0');
+	lacks($out, 'PHP takes');
+});
+
 // ## 2.1.8 batch G: MCP themes
 // (batch G adds its tests here)
 

@@ -9,6 +9,7 @@ If your site has no forms or accounts, a [static export](Static-Export) to a sta
 - **PHP 8.1 or newer**, running as **PHP-FPM** (the usual way PHP runs behind a web server; FPM stands for FastCGI Process Manager), with the extensions `pdo`, `pdo_sqlite` (or `pdo_mysql`), `mbstring` and `json`. `openssl` for email over TLS.
 - A web server in front: **Apache**, **nginx** or **Caddy**.
 - Shell access, to run `php bin/raster` commands.
+- PHP that takes the editor's pictures, up to 12 MB: `upload_max_filesize = 12M` and `post_max_size = 13M` in the php.ini PHP-FPM reads. Stock PHP takes 2 MB, so a large PNG never arrives. `doctor` warns in production when they're lower; it reads the command line's php.ini, which on some systems is another file.
 
 Any ordinary PHP hosting works. `php bin/raster serve` is for development only; don't use it on a server.
 
@@ -53,7 +54,7 @@ The one in the site's root folder is the only `.htaccess` a Raster site needs. S
 php bin/raster deploy --config=nginx --host=example.com --root=/var/www/site --socket=unix//run/php/php8.3-fpm.sock
 ```
 
-prints a complete `server { … }` block: an exact location for `index.php`, one `return 403` location per private rule, and `try_files` for everything else. Save it in your nginx sites folder, add HTTPS (for example with Certbot), and reload nginx.
+prints a complete `server { … }` block: an exact location for `index.php`, one `return 403` location per private rule, and `try_files` for everything else. It also lets requests up to 13 MB through (`client_max_body_size`; nginx's default of 1 MB would refuse the editor's larger pictures with a 413), compresses CSS, scripts, feeds and other text (`gzip`), and gives `/media/` a cache lifetime of a year, since an upload never reuses a file name. Save it in your nginx sites folder, add HTTPS (for example with Certbot), and reload nginx.
 
 **Caddy.**
 
@@ -176,7 +177,7 @@ When you've renamed a field, run the `--rename` that `raster schema` suggests be
 
 ## Checklist
 
-- [ ] PHP 8.1+ with PHP-FPM and the required extensions
+- [ ] PHP 8.1+ with PHP-FPM and the required extensions, taking 12 MB uploads
 - [ ] web server configured from `raster deploy`, with HTTPS
 - [ ] `RASTER_ENV=production`, `RASTER_URL`, `RASTER_MAIL`, `RASTER_MAIL_FROM` set
 - [ ] `application/data/` and `media/` writable by the web server

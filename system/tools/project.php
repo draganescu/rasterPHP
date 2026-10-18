@@ -358,6 +358,13 @@ class raster_project
 
 	// ##Doctor
 
+	// a php.ini size (2M, 512K, 1G) in bytes
+	static function bytes($size) {
+		$units = array('k' => 1024, 'm' => 1048576, 'g' => 1073741824);
+		$unit = strtolower(substr(trim((string)$size), -1));
+		return (int)$size * (isset($units[$unit]) ? $units[$unit] : 1);
+	}
+
 	// checks a project and one app: array of array(status, title, detail)
 	// with status ok, warn or fail
 	static function doctor($root, $app, $environment) {
@@ -469,6 +476,14 @@ class raster_project
 			if (!in_array(strtolower((string)ini_get('display_errors')), array('', '0', 'off', 'false', 'no'), true)) {
 				$add('warn', 'display_errors is on in PHP\'s settings', "Raster turns it off for each request, but an error before that (a mistake in config/) still reaches visitors.\nSet display_errors = Off and log_errors = On in php.ini, as php.ini-production does");
 			}
+			// the editor sends pictures up to cms_editor::UPLOAD_MB, in a request
+			// with the rest of its form; stock PHP takes 2M files in 8M requests
+			$mb = cms_editor::UPLOAD_MB;
+			$upload = ini_get('upload_max_filesize');
+			$post = ini_get('post_max_size');
+			$where = "in the php.ini of the PHP that serves the site (this command may read another one)";
+			if (self::bytes($upload) < $mb * 1048576) $add('warn', "PHP takes uploads up to $upload; the editor sends pictures up to $mb MB", "Larger pictures don't arrive. Set upload_max_filesize = {$mb}M $where");
+			if (self::bytes($post) && self::bytes($post) < ($mb + 1) * 1048576) $add('warn', "PHP takes requests up to $post; the editor sends pictures up to $mb MB", "Larger pictures don't arrive. Set post_max_size = ".($mb + 1)."M $where");
 		}
 		return $checks;
 	}

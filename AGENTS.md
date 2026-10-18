@@ -1220,6 +1220,11 @@ use `'model.method'`: `method(true)` returns
   php bin/raster deploy --config=caddy  --host=site.example --socket=unix//run/php/php-fpm.sock
   ```
 
+  The nginx config also takes request bodies up to 13 MB
+  (`client_max_body_size`; nginx's 1 MB would refuse the editor's larger
+  pictures with a 413), gzips text other than pages, and gives `/media/` a
+  year's `expires`, since an upload never reuses a file name.
+
   `raster serve` is PHP's built in server, for development. In production run
   PHP-FPM behind one of those. `doctor` checks that the `.htaccess` on disk
   still carries every rule. Matching ignores case on every server, and
@@ -1509,8 +1514,12 @@ command-line output). They win over the settings above.
   templates, the database, whether `.htaccess` still carries every rule in
   `system/private_paths.php`, uses of deprecated features
   (`system/tools/deprecations.php`, minus the ones config `allow_deprecated`
-  says are on purpose) and, in production, the site address, mail, tokens
-  and whether PHP shows errors (`display_errors`).
+  says are on purpose) and, in production, the site address, mail, tokens,
+  whether PHP shows errors (`display_errors`) and whether PHP takes the
+  editor's pictures: it warns when `upload_max_filesize` is below 12M or
+  `post_max_size` below 13M (`cms_editor::UPLOAD_MB` and the rest of the
+  form). It reads the command line's php.ini, which can differ from
+  PHP-FPM's.
   Exit 1 when something must be fixed.
 - `php bin/raster new <folder>` starts a new site from this copy of Raster.
 - `CHANGELOG.md` in the repository lists what changed in each release.
