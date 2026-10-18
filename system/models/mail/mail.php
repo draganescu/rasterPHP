@@ -118,7 +118,7 @@ class mail
 		}
 		$scheme = strtolower((string)strstr(static::transport(), ':', true));
 		if (!in_array($scheme, array('log', 'mail', 'smtp', 'smtps'), true)) {
-			static::$last_error = "Unknown mail transport '".static::transport()."'";
+			static::$last_error = "Unknown mail transport '".static::destination()."'";
 			log::error('Mail: '.static::$last_error);
 			event::dispatch('mail.failed', array('to' => $to, 'subject' => (string)$subject, 'error' => static::$last_error));
 			return false;
@@ -197,7 +197,7 @@ class mail
 				case 'mail': $sent = static::via_mail($all, $body); break;
 				case 'smtp':
 				case 'smtps': $sent = static::via_smtp($dsn, $all, $body); break;
-				default: throw new RuntimeException("Unknown mail transport '$dsn'");
+				default: throw new RuntimeException("Unknown mail transport '".static::destination()."'");
 			}
 			if (!$sent) throw new RuntimeException('The '.$scheme.' transport did not accept the message');
 		} catch (Exception $e) {

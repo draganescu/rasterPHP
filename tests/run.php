@@ -2501,6 +2501,24 @@ test('the site time zone sets today and published_at (#84)', function () use ($r
 	}
 });
 
+test('an unknown mail transport never shows its password', function () {
+	$before = getenv('RASTER_MAIL');
+	putenv('RASTER_MAIL=bogus://user:s3cret@mail.example.test:25');
+	$errors = ini_get('error_log');
+	$logged = sys_get_temp_dir().'/raster-dsn-log-'.getmypid().'.txt';
+	ini_set('error_log', $logged);
+	try {
+		same(false, mail::send('a@example.test', 'Hi', '<p>Hi</p>'), 'an unknown transport:');
+		check(strpos((string)mail::$last_error, 'bogus://mail.example.test:25') !== false, 'the error names where mail was going: '.mail::$last_error);
+		check(strpos((string)mail::$last_error, 's3cret') === false, 'the error has no password');
+		check(strpos((string)@file_get_contents($logged), 's3cret') === false, 'the log has no password');
+	} finally {
+		ini_set('error_log', (string)$errors);
+		putenv($before === false ? 'RASTER_MAIL' : "RASTER_MAIL=$before");
+		@unlink($logged);
+	}
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";
 foreach ($skipped as $skip) echo "  - $skip\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";
