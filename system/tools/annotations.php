@@ -23,8 +23,11 @@ return array(
 		'close' => '<!-- /{name} -->',
 		'self_closing' => '<!-- {name} /-->',
 		'note' => 'One space inside each end. No newlines, no extra spaces: <!--print.cms.x--> is ignored, and lint reports it as an error.',
-		'in_scripts' => 'Inside JavaScript or CSS, /*- … /-*/ stands for <!-- … -->, so the file stays valid.',
+		'in_scripts' => 'Inside JavaScript or CSS, /*- … /-*/ stands for <!-- … -->, so the file stays valid. lint checks these as any annotation.',
 	),
+	// each mark of the script form and the one it stands for; the engine
+	// (template::unscript) and lint read the same list
+	'script_form' => template::$script_form,
 
 	// ##Keywords
 	// - `name`: the keyword takes a `.reference` (remove does not)

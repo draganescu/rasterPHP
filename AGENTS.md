@@ -107,7 +107,7 @@ an agent can read it and be sure.
 | `<!-- print.model.method /-->` | Same, with no default. |
 | `<!-- print.@src.model.method --><img src="a.jpg"><!-- /print.@src.model.method -->` | Sets the attribute of the tag it wraps (`+` instead of `@` appends). `false`, `null` or an empty string keep the mock-up's value. With `cms`, a page field such as a photo. |
 | `<!-- render.model.method --> … <!-- /render.model.method -->` | Repeated once per row the method returns. Inside, `print.key` is a key of the row. |
-| `<!-- remove --> … <!-- /remove -->` | Mock-up content. Removed before anything runs. Can't be nested. |
+| `<!-- remove --> … <!-- /remove -->` | Mock-up content. Removed before anything runs, so fields and collections inside it are not part of the content model. Can't be nested. |
 | `<!-- res.name --> … <!-- /res.name -->` | A reusable fragment. |
 | `<!-- dry.view.name /-->` | Inserts fragment `res.name` from `view.html` (e.g. `dry._layout.header`). |
 | `<!-- print.if.flag --> … <!-- /print.if.flag -->` | Shown only when the template flag is true (`template::set('flag')->to(true)`). `if.live` is true on the running site and `if.static` in a static export. |
@@ -476,8 +476,12 @@ item of a collection is the mock-up content.
   `schema` shows orphaned columns and suggests
   `--rename=table.old:new`, which moves the content across.
   `--drop=table.column` or `--drop=table` deletes something no template uses;
-  `--force` overrides that check. `--check` exits 1 when the templates and the
-  database differ (for CI).
+  `--force` overrides that check. Either takes only CMS page and collection
+  tables: the accounts and subscribers, a table a model declares with
+  `schema()`, and a record type's table and the columns its `types()`
+  declares are never dropped, `--force` or not, and are never listed as
+  unused. `--check` exits 1 when the templates and the database differ (for
+  CI).
 
 ## Records: types a model declares
 
@@ -1040,7 +1044,11 @@ of lists and filter pages come along; drafts and the editor don't.
   `the_events.php` are loaded after the framework's own).
 - **Values in scripts and styles:** `"/*- print.model.method /-*/"` is the
   same as `<!-- print.model.method /-->`, written so the file stays valid
-  JavaScript or CSS.
+  JavaScript or CSS. `lint`, `schema`, `describe` and MCP read it as the
+  engine does (the marks are `script_form` in `raster annotations`), so a
+  `print.cms` field written this way is a field like any other. A plain
+  comment that only starts like it, `/*- header */`, is no annotation and
+  hides none of the ones after it.
 - **Render into memory:** a render method whose result has the key
   `'__' => true` next to its rows is rendered but not printed; read the HTML later from
   `template::instance()->render_results['model']['method']`.

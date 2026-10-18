@@ -181,6 +181,43 @@ test('content model from the demo theme', function () {
 	foreach ($model['pages'] as $page) if ($page['url'] === '/') same('Write HTML. Get a CMS.', $page['fields']['headline']['default']);
 	same(array('site_name', 'site_footer'), $pages['site']);
 });
+// the inspector reads a view as the engine does: script-form annotations are
+// annotations, and what is inside remove blocks is gone (#108)
+test('lint and the content model read script-form annotations and skip remove blocks', function () {
+	check(has_problem(lint_html('<script>var t = "/*- print.site.no_such_method /-*/";</script>'), "no public method 'no_such_method'"), 'a script-form call is linted');
+	same(array(), array_values(array_filter(lint_html('<style>/*- print.site.year /-*/ /* ok -*/</style>'), function ($p) { return $p['severity'] === 'error'; })), 'a valid one is clean');
+	// a CSS or JS comment that starts with /*- but ends with */ is no annotation
+	// and must not run on to the next --> and swallow a real one
+	$stray = lint_html('<style>/*- header */ h1{color:red}</style><h1><!-- print.site.year -->T<!-- /print.site.year --></h1>');
+	same(array(), array_values(array_filter($stray, function ($p) { return $p['severity'] === 'error'; })), 'an unclosed /*- comment hides nothing: '.json_encode($stray));
+	// a long comment (an old mock-up left in, a big inline svg after a stray
+	// /*-) still lets the annotations after it be read
+	$long = '<!-- old mock-up: '.str_repeat("<p>lorem ipsum</p>\n", 2000).' --><h1><!-- print.site.no_such_method -->T<!-- /print.site.no_such_method --></h1>';
+	check(has_problem(lint_html($long), "no public method 'no_such_method'"), 'an annotation after a 38 KB comment is linted');
+	$tokens = raster_inspector::tokenize('<style>/*- layout */ body{}</style><svg>'.str_repeat('<path d="M0 0L10 10"/>', 4000).'</svg><!-- print.cms.title /-->');
+	same('print.cms.title', $tokens ? $tokens[count($tokens) - 1]['name'] : null, 'an annotation after a stray /*- and a big svg is read');
+	$fix = lint_html('<script>var t = "/*-print.site.year /-*/";</script>');
+	check(has_problem($fix, 'write it exactly as /*- print.site.year /-*/'), 'its fix keeps the script form: '.json_encode($fix));
+	$dir = sys_get_temp_dir().'/raster-probe-'.getmypid();
+	@mkdir("$dir/probe", 0775, true);
+	file_put_contents("$dir/probe/probe.html", '<style>/*- header */ h1{color:red}</style><h1><!-- print.cms.heading -->Hi<!-- /print.cms.heading --></h1>'
+		.'<script>var tagline = "/*- print.cms.tagline /-*/";</script>'
+		.'<!-- remove --><p><!-- print.cms.old_blurb -->x<!-- /print.cms.old_blurb --></p>'
+		.'<!-- render.cms.ghosts --><b><!-- print.name -->Boo<!-- /print.name --></b><!-- /render.cms.ghosts --><!-- /remove -->'
+		.'<!-- render.cms.zzprobes --><!-- print.title -->A<!-- /print.title --><!-- remove --><!-- print.ghost -->g<!-- /print.ghost --><!-- /remove --><!-- /render.cms.zzprobes -->');
+	try {
+		$model = (new raster_inspector($dir, 'probe'))->content_model();
+		$fields = array();
+		foreach ($model['pages'] as $page) if ($page['view'] === 'probe.html') $fields = array_keys($page['fields']);
+		same(array('heading', 'tagline'), $fields, 'page fields');
+		check(!isset($model['collections']['ghosts']), 'a collection inside remove is not one');
+		same(array('title'), array_keys($model['collections']['zzprobes']['fields']), 'a field inside remove is not one');
+	} finally {
+		@unlink("$dir/probe/probe.html");
+		@rmdir("$dir/probe");
+		@rmdir($dir);
+	}
+});
 
 test('a page request loads no command line tools and looks up no core overrides', function () use ($root) {
 	$dir = sys_get_temp_dir().'/raster-loads-'.getmypid();
@@ -1666,6 +1703,46 @@ test('fields named like SQL words sort, filter, rename and drop', function () {
 		check(!array_key_exists('group', cms_store::columns('zzwordsdata')), 'group is gone');
 	} finally {
 		R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS zzwordsdata');
+		cms_store::forget();
+	}
+});
+
+// --drop takes only what the templates own: a table a model declares with
+// schema() or types() is neither unused nor droppable, and neither are the
+// accounts' columns (#109)
+test('schema --drop leaves the tables and columns models declare alone', function () use ($root) {
+	$dir = "$root/application/models/zzweather";
+	@mkdir($dir);
+	file_put_contents("$dir/zzweather.php", '<?php class zzweather { static function schema() { return array("zzweatherdata" => array("city" => "", "degrees" => 0)); }'
+		.' static function types() { return array("zzreading" => array("fields" => array("city" => "", "rain" => 0))); } }');
+	cms_records::forget();
+	$schema = new raster_schema();
+	$refused = function ($table, $column = null, $force = false) use ($schema) {
+		try { $schema->drop($table, $column, $force); } catch (InvalidArgumentException $e) { return $e->getMessage(); }
+		return null;
+	};
+	try {
+		$changes = $schema->apply();
+		check(in_array('created table zzweatherdata', $changes), json_encode($changes));
+		R::getDatabaseAdapter()->exec("INSERT INTO zzweatherdata (city, degrees) VALUES ('Oslo', 4)");
+		check(!in_array('zzweatherdata', $schema->status()['unused_tables']), 'a schema() table is not unused');
+		check(!in_array('zzreadingdata', $schema->status()['unused_tables']), 'nor a types() table');
+		foreach (array(array('zzweatherdata'), array('zzweatherdata', 'city'), array('zzweatherdata', null, true), array('zzweatherdata', 'city', true),
+			array('user', 'password'), array('user', 'password', true), array('subscriber', 'email', true),
+			array('zzreadingdata', null, true), array('zzreadingdata', 'rain', true), array('zzreadingdata', 'created_at', true)) as $drop) {
+			check($refused($drop[0], isset($drop[1]) ? $drop[1] : null, !empty($drop[2])) !== null, 'refused: '.json_encode($drop));
+		}
+		same(1, (int)R::count('zzweatherdata'), 'the row is still there');
+		check(array_key_exists('password', cms_store::columns('user')), 'and the password column');
+		// a column the type no longer declares is the templates' business again
+		cms_types::ensure('zzreadingdata', array('old' => 'text'));
+		same('dropped zzreadingdata.old', $schema->drop('zzreadingdata', 'old'));
+	} finally {
+		@unlink("$dir/zzweather.php");
+		@rmdir($dir);
+		R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS zzweatherdata');
+		R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS zzreadingdata');
+		cms_records::forget();
 		cms_store::forget();
 	}
 });
