@@ -1561,4 +1561,7 @@ version it names). To release, bump `system/VERSION` and add a
 `## <version>` section to `CHANGELOG.md`, then merge to `master`: the
 workflow in `.github/workflows/release.yml` runs the tests, tags
 `v<version>` and publishes the release with those notes. Pull requests run
-the same tests.
+the same tests: the four suites and both lints on PHP 8.1, 8.4 and 8.5,
+an update of a new site from GitHub, the framework, demo and shop suites on
+MySQL with PHP 8.1 and 8.4, and `tests/editor-browser.js` in Chromium. The
+jobs run side by side, so the slowest one sets the time.

@@ -133,10 +133,14 @@ class raster_project
 		return self::unpack($archive, $work);
 	}
 
+	// the headers come from the stream: PHP 8.5 deprecates $http_response_header
 	static function download($url) {
 		$context = stream_context_create(array('http' => array('header' => "User-Agent: raster-update\r\n", 'timeout' => 60, 'ignore_errors' => true)));
-		$body = @file_get_contents($url, false, $context);
-		$status = isset($http_response_header[0]) && preg_match('/\s(\d{3})\s/', $http_response_header[0], $m) ? (int)$m[1] : 0;
+		$stream = @fopen($url, 'r', false, $context);
+		$body = $stream ? stream_get_contents($stream) : false;
+		$meta = $stream ? stream_get_meta_data($stream) : array();
+		if ($stream) fclose($stream);
+		$status = isset($meta['wrapper_data'][0]) && preg_match('/\s(\d{3})\s/', $meta['wrapper_data'][0], $m) ? (int)$m[1] : 0;
 		if ($body === false || $status !== 200) throw new RuntimeException("Could not download $url".($status ? " (HTTP $status)" : ''));
 		return $body;
 	}
