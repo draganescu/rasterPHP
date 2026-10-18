@@ -2279,6 +2279,14 @@ test(array('R7', 'R9', 'R10', 'R11'), 'hidden fields, lists, transactions and li
 			$ticket = cms_records::create('ticket', array('title' => 'Mugs', 'stock' => 1, 'secret' => 'tok_123', 'lines' => array(array('name' => '<i>Mug</i>', 'qty' => 2))));
 			same(array(array('name' => '<i>Mug</i>', 'qty' => 2)), $ticket['lines'], 'lists come back as lists');
 			same('tok_123', $ticket['secret'], 'the model sees hidden fields');
+			// a public URL never carries a hidden field, even when it is the
+			// first text a record has
+			$fair = cms_records::create('ticket', array('secret' => 'ana@example.com', 'link' => 'Spring fair'));
+			$bare = cms_records::create('ticket', array('secret' => 'tok_456'));
+			cms_records::delete('ticket', $fair['id']);
+			cms_records::delete('ticket', $bare['id']);
+			same('spring-fair', $fair['slug'], 'the slug skips hidden fields:');
+			same('item', $bare['slug'], 'with only a hidden field, the slug is item:');
 			same('24.00', cms_records::create('ticket', array('title' => '24.00'))['title'], 'text fields keep what they are given');
 			$shown = mcp($base, 'get_item', array('collection' => 'ticket', 'id' => $ticket['id']));
 			check(!array_key_exists('secret', $shown), 'MCP never sees hidden fields');
