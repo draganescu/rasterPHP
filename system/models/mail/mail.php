@@ -89,6 +89,7 @@ class mail
 		}
 		$html = controller::render_view($view, $vars);
 		$subject = preg_match('/<title>(.*?)<\/title>/is', $html, $m) ? html_entity_decode(trim(strip_tags($m[1])), ENT_QUOTES) : 'Message from '.config::get('host');
+		// static: a site's the_mail sends it, when it has one
 		return static::send($to, $subject, $html, null, $headers);
 	}
 

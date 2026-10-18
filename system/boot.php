@@ -55,23 +55,27 @@ class boot {
 	}
 
 	// Model classes load on first use, so models can call each other
-	// directly: mail::send_view(...), validation::get()
+	// directly: mail::send_view(...), validation::get(). They are found by
+	// controller::model(), as the templates find them; mail is the bundled
+	// class even when the site has a the_mail (that one is the_mail).
 	static function autoload_models() {
 		spl_autoload_register(function ($class) {
 			if (!preg_match('/^[a-z][a-z0-9_]*$/', $class)) return;
-			$paths = controller::build_model_paths($class);
-			foreach (array('app_path', 'system_path') as $key) {
-				if (file_exists($paths[$key])) {
-					require_once $paths[$key];
-					return;
-				}
+			$name = strpos($class, 'the_') === 0 ? substr($class, 4) : $class;
+			$found = controller::model($name);
+			if ($found && $found['class'] === $class) {
+				controller::model_class($name);
+				return;
+			}
+			if ($found && $class === $name && $found['parent']) {
+				require_once $found['parent'];
+				return;
 			}
 			// helper classes live next to their model: cms_store in models/cms/store.php
-			if (preg_match('/^([a-z0-9]+)_([a-z0-9_]+)$/', $class, $m)) {
-				foreach (array(APPBASE, BASE) as $root) {
-					$file = $root.config::get('models_path').'/'.$m[1].'/'.$m[2].'.php';
-					if (file_exists($file)) {
-						require_once $file;
+			if (preg_match('/^([a-z0-9]+)_([a-z0-9_]+)$/', $class, $m) && ($owner = controller::model($m[1]))) {
+				foreach ($owner['dirs'] as $dir) {
+					if (is_file("$dir/{$m[2]}.php")) {
+						require_once "$dir/{$m[2]}.php";
 						return;
 					}
 				}

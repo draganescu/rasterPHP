@@ -115,22 +115,13 @@ class event {
 	}
 
 	// Binds what models declare in `static function listens()`. Called at
-	// boot, after config/the_events.php. Only model files that mention
-	// listens() are loaded.
+	// boot, after config/the_events.php. controller::models() keeps the
+	// lists in data/cache/models.json, so a request loads no model to bind
+	// it; an override's listens() (the_feed's) counts for feed.
 	static function discover() {
-		$roots = array(APPBASE.config::get('models_path', 'models'), BASE.'models');
-		foreach ($roots as $root) {
-			foreach (glob($root.'/*', GLOB_ONLYDIR) ?: array() as $dir) {
-				$folder = basename($dir);
-				$file = "$dir/$folder.php";
-				if (!is_file($file) || strpos(file_get_contents($file), 'function listens(') === false) continue;
-				// models/the_feed/the_feed.php declares listeners for feed
-				$model = strpos($folder, 'the_') === 0 ? substr($folder, 4) : $folder;
-				if (!class_exists($folder)) require_once $file;
-				if (!class_exists($folder) || !method_exists($folder, 'listens')) continue;
-				foreach ((array)call_user_func(array($folder, 'listens')) as $event => $methods) {
-					foreach ((array)$methods as $method) event::bind($event)->to($model, $method);
-				}
+		foreach (controller::models() as $model => $found) {
+			foreach ((array)$found['listens'] as $event => $methods) {
+				foreach ((array)$methods as $method) event::bind($event)->to($model, $method);
 			}
 		}
 	}

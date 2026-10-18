@@ -208,8 +208,10 @@ class mcp
 
 	public function call_tool($name, $arguments) {
 		mcp::load_tools();
-		// the stdio process outlives a `schema --apply` run beside it
+		// the stdio process outlives a `schema --apply` run beside it, and the
+		// models, views and types an agent writes between calls
 		cms_store::forget();
+		cms_records::forget();
 		// what a tool's code prints would break the answer over stdio
 		$level = ob_get_level();
 		ob_start();

@@ -84,14 +84,14 @@ class raster_schema {
 
 	function system_tables() {
 		$tables = array();
-		// bundled models, then the app's own models that declare schema()
-		$models = array('authentication', 'newsletter');
-		foreach (glob(APPBASE.config::get('models_path', 'models').'/*/*.php') ?: array() as $file) {
-			$name = basename($file, '.php');
-			if ($name === basename(dirname($file)) && strpos(file_get_contents($file), 'function schema(') !== false) $models[] = $name;
-		}
-		foreach (array_unique($models) as $model) {
-			if (class_exists($model) && method_exists($model, 'schema')) $tables += $model::schema();
+		// bundled models (accounts, subscribers), then the app's own, that
+		// declare schema(): the first to name a table keeps it
+		foreach (array(true, false) as $bundled) {
+			foreach (controller::models() as $model => $found) {
+				if ($found['bundled'] !== $bundled || empty($found['declares']['schema'])) continue;
+				$class = controller::model_class($model);
+				if ($class && method_exists($class, 'schema')) $tables += $class::schema();
+			}
 		}
 		return $tables;
 	}

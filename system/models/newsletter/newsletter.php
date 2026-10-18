@@ -130,14 +130,16 @@ class newsletter
 		self::connect();
 		$subscriber = self::table_ready() ? R::findOne('subscriber', ' email = ? ', array(strtolower(trim((string)$subscribed['email'])))) : null;
 		if (!$subscriber || $subscriber->status !== 'pending' || !$subscriber->token) return null;
+		// through the site's the_mail, when it has one
+		$mail = controller::model_class('mail');
 		// asked again within a few minutes: the link already sent still works
 		$stamped = self::stamps_confirmations();
-		if ($stamped && mail::sent_lately($subscriber->confirm_sent_at)) return null;
-		$sent = mail::send_view('_email/newsletter_confirm', $subscriber->email, array(
+		if ($stamped && $mail::sent_lately($subscriber->confirm_sent_at)) return null;
+		$sent = $mail::send_view('_email/newsletter_confirm', $subscriber->email, array(
 			'confirm_url' => util::url(config::get('newsletter_confirm_page', 'newsletter-confirm'), array('token' => $subscriber->token)),
 			'name' => (string)$subscriber->name,
 		));
-		if (!$sent) log::error('Newsletter confirmation email failed: '.mail::$last_error);
+		if (!$sent) log::error('Newsletter confirmation email failed: '.$mail::$last_error);
 		elseif ($stamped) {
 			$subscriber->confirm_sent_at = R::isoDateTime();
 			R::store($subscriber);
@@ -255,11 +257,12 @@ class newsletter
 		$issue->subject = (string)$subject;
 		$issue->incomplete = 1;
 		R::store($issue);
-		mail::keep_open();
+		$mail = controller::model_class('mail');
+		$mail::keep_open();
 		try {
 			foreach (self::recipients($issue) as $subscriber) {
 				if (!self::deliver($html, $subject, $subscriber->email, $subscriber->token)) {
-					self::$failures[$subscriber->email] = mail::$last_error;
+					self::$failures[$subscriber->email] = $mail::$last_error;
 					continue;
 				}
 				$delivery = R::dispense('newsletterdelivery');
@@ -270,7 +273,7 @@ class newsletter
 				self::$sent++;
 			}
 		} finally {
-			mail::close();
+			$mail::close();
 		}
 		$issue->recipients = R::count('newsletterdelivery', ' issue = ? ', array((int)$issue->id));
 		$issue->incomplete = self::$failures ? 1 : 0;
@@ -303,7 +306,8 @@ class newsletter
 	static function deliver($html, $subject, $email, $token) {
 		$unsubscribe = util::url(config::get('newsletter_unsubscribe_page', 'newsletter-unsubscribe'), array('token' => $token));
 		$body = str_replace(self::MARKER, htmlspecialchars($unsubscribe, ENT_QUOTES), $html);
-		return mail::send($email, $subject, $body, null, array(
+		$mail = controller::model_class('mail');
+		return $mail::send($email, $subject, $body, null, array(
 			'List-Unsubscribe' => '<'.$unsubscribe.'>',
 			'List-Unsubscribe-Post' => 'List-Unsubscribe=One-Click',
 		));
