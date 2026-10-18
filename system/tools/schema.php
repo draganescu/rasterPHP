@@ -241,24 +241,27 @@ class raster_schema {
 		return $changes;
 	}
 
-	function rename($table, $from, $to) {
+	// with $dry_run, both check everything and say what they would do
+	function rename($table, $from, $to, $dry_run = false) {
 		foreach (array($table, $from, $to) as $name) {
 			if (!preg_match('/^[a-z0-9_]+$/', $name)) throw new InvalidArgumentException("Invalid name '$name'");
 		}
 		cms_store::connect();
 		if (!array_key_exists($from, cms_store::columns($table))) throw new InvalidArgumentException("$table has no column $from");
 		if (!array_key_exists($to, cms_store::columns($table))) {
+			if ($dry_run) return "would rename $table.$from to $to";
 			R::exec("ALTER TABLE `$table` RENAME COLUMN `$from` TO `$to`");
 			return "renamed $table.$from to $to";
 		}
 		// the new column already exists (created with the template default by a
 		// request in development): move the content over, then drop the old one
+		if ($dry_run) return "would move $table.$from into $to";
 		R::exec("UPDATE `$table` SET `$to` = `$from` WHERE `$from` IS NOT NULL");
 		R::exec("ALTER TABLE `$table` DROP COLUMN `$from`");
 		return "moved $table.$from into $to";
 	}
 
-	function drop($table, $column = null, $force = false) {
+	function drop($table, $column = null, $force = false, $dry_run = false) {
 		foreach (array($table, (string)$column) as $name) {
 			if (!preg_match('/^[a-z0-9_]*$/', $name)) throw new InvalidArgumentException("Invalid name '$name'");
 		}
@@ -284,12 +287,14 @@ class raster_schema {
 		if ($column === null) {
 			cms_store::connect();
 			if (!cms_store::table_exists($table)) throw new InvalidArgumentException("There is no table $table");
+			if ($dry_run) return "would drop table $table";
 			R::exec("DROP TABLE `$table`");
 			return "dropped table $table";
 		}
 		if (in_array($column, cms_store::$system_fields)) throw new InvalidArgumentException("$column is managed by Raster");
 		cms_store::connect();
 		if (!array_key_exists($column, cms_store::columns($table))) throw new InvalidArgumentException("$table has no column $column");
+		if ($dry_run) return "would drop $table.$column";
 		R::exec("ALTER TABLE `$table` DROP COLUMN `$column`");
 		return "dropped $table.$column";
 	}

@@ -19,8 +19,9 @@
 // other language goes in /<lang>/, and the language switcher links there.
 // A static host can't answer forms, so the export stops when a page still
 // has one: templates wrap forms in <!-- print.if.live --> and say what shows
-// instead in <!-- print.if.static -->. Accounts are left out, and links with
-// a query string are listed at the end.
+// instead in <!-- print.if.static -->. It also stops when a page answers 5xx
+// or nothing, rather than publish the site without it. Accounts are left
+// out, and links with a query string are listed at the end.
 //
 // Exporting again to the same folder changes only what changed: when nothing
 // the site is made of changed (content, templates, models, assets, media),
@@ -95,7 +96,8 @@ class raster_export {
 		} finally {
 			$this->stop_server();
 		}
-		// forms need PHP: nothing is written while a page still shows one
+		// forms need PHP, and pages that answer an error have nothing to
+		// write: nothing is written, or removed, while either is left
 		$by_form = array();
 		foreach ($this->forms as $path => $owners) foreach (array_unique($owners) as $owner) $by_form[$owner][] = $path;
 		foreach ($by_form as $owner => $paths) {
@@ -203,6 +205,12 @@ class raster_export {
 		}
 		list($status, $body, $type) = $this->fetch($path, $headers);
 		if ($status !== 200) {
+			// a page that breaks or doesn't answer is an error in any language:
+			// leaving it out would remove its file from the last export
+			if ($status === 0 || $status >= 500) {
+				$this->errors[] = $path.($language !== $this->default_language ? " ($language)" : '').($status ? " answered $status" : ' did not answer');
+				return;
+			}
 			if ($language !== $this->default_language) return;
 			if ($status >= 300 && $status < 400) $this->skipped[] = $path;
 			elseif ($status !== 404) $this->warnings[] = "$path answered $status";
@@ -228,9 +236,14 @@ class raster_export {
 		}
 	}
 
-	// the host's 404 page, from a URL that can't exist
+	// the host's 404 page, from a URL that can't exist. One that breaks is
+	// an error like any page: leaving it out would remove 404.html
 	protected function not_found() {
 		list($status, $body, $type) = $this->fetch('/raster-export-'.bin2hex(random_bytes(4)));
+		if ($status === 0 || $status >= 500) {
+			$this->errors[] = 'The 404 page'.($status ? " answered $status" : ' did not answer');
+			return;
+		}
 		if ($status === 404 && strpos($type, 'html') !== false) $this->raw['/404|'.$this->default_language] = $body;
 	}
 

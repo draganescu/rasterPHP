@@ -27,7 +27,9 @@ php bin/raster doctor             # is this site healthy, up to date, ready for 
 ```
 
 `describe`, `vocabulary`, `annotations`, `lint`, `schema` and `doctor` all take
-`--json`. If you can speak MCP, use that instead: the same answers come from one
+`--json`. A command refuses an option it doesn't take (a mistyped
+`--dry-run`, say) with exit 2 and the options it does take, before it runs:
+`php bin/raster help` lists them all. If you can speak MCP, use that instead: the same answers come from one
 long-lived process (`php bin/raster mcp`, already in `.mcp.json`) rather than
 starting PHP again for every question — `describe` costs about 70 ms, everything
 else under 20. See **Editors and agents**.
@@ -482,8 +484,9 @@ item of a collection is the mock-up content.
   tables: the accounts and subscribers, a table a model declares with
   `schema()`, and a record type's table and the columns its `types()`
   declares are never dropped, `--force` or not, and are never listed as
-  unused. `--check` exits 1 when the templates and the database differ (for
-  CI).
+  unused. `--dry-run` says what `--rename`, `--drop` and `--apply` would
+  change and changes nothing. `--check` exits 1 when the templates and the
+  database differ (for CI).
 
 ## Records: types a model declares
 
@@ -931,6 +934,9 @@ of lists and filter pages come along; drafts and the editor don't.
   nothing is written. Wrap forms in `<!-- print.if.live -->` and write what
   the static site shows instead in `<!-- print.if.static -->` (a phone
   number, an email address, the RSS feed).
+- **A page that answers an error** (5xx, a model that throws) or doesn't
+  answer, the 404 page included, also stops the export: it names each such page, writes and removes
+  nothing, so the last export stays whole, and exits 1.
 - Left out: pages that need an account, login, sign-up, password and
   newsletter pages, `/api`, and paths in `config::set('export_skip')` or
   `--skip=/path`. The command lists links to left-out pages and query
