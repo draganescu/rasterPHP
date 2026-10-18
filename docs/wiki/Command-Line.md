@@ -10,6 +10,8 @@ php bin/raster <command> [options]
 
 Many commands take `--json` for output a script can read. Commands exit with code `0` on success and `1` (or `2` for wrong usage) otherwise, so you can use them in scripts and CI pipelines.
 
+A command refuses an option it doesn't take, so a mistyped `--dryrun` stops with code `2` before anything runs, and the error lists the options the command does take.
+
 ## Everyday
 
 ### serve
@@ -50,7 +52,7 @@ Prints the HTML of a URL without a web server. Exits with 1 when the page answer
 ### schema
 
 ```sh
-php bin/raster schema [--apply] [--check] [--rename=table.old:new] [--drop=table.column] [--drop=table] [--force] [--json]
+php bin/raster schema [--apply] [--check] [--rename=table.old:new] [--drop=table.column] [--drop=table] [--force] [--dry-run] [--json]
 ```
 
 Compares the content model your templates declare with the database, and changes the database. See [The CMS](The-CMS#changing-fields-safely).
@@ -78,7 +80,7 @@ php bin/raster users
 php bin/raster send <url> [--to=email] [--subject="…"] [--dry-run] [--again]
 ```
 
-Sends a page of the site as a newsletter issue. Needs `RASTER_URL` (or the `site_url` setting). See [Newsletter](Newsletter#sending-an-issue).
+Sends a page of the site as a newsletter issue. Run it again after a stop or a failure and it mails only the subscribers who don't have it yet. Needs `RASTER_URL` (or the `site_url` setting). See [Newsletter](Newsletter#sending-an-issue).
 
 ## Publishing
 

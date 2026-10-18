@@ -3,7 +3,7 @@
 // Raster command line
 //
 //   php bin/raster lint [--json] [--theme=name] [--all-themes]
-//   php bin/raster schema [--json] [--check] [--apply] [--rename=table.old:new] [--drop=table.column]
+//   php bin/raster schema [--json] [--check] [--apply] [--rename=table.old:new] [--drop=table.column] [--force] [--dry-run]
 //   php bin/raster user <username> [--password=secret]
 //   php bin/raster login-link <email|username> [--next=/path]
 //   php bin/raster mcp
@@ -33,13 +33,28 @@ $command = array_shift($args) ?: 'help';
 $options = array();
 $positional = array();
 foreach ($args as $arg) {
-	if (preg_match('/^--([a-z\-]+)(?:=(.*))?$/', $arg, $m)) {
+	// anything that starts with -- is an option, so a mistyped one is
+	// refused below instead of read as a folder or a URL
+	if (preg_match('/^--([^=]*)(?:=(.*))?$/s', $arg, $m)) {
 		$key = $m[1];
 		$value = isset($m[2]) ? $m[2] : true;
 		if (isset($options[$key])) $options[$key] = array_merge((array)$options[$key], array($value));
 		else $options[$key] = $value;
 	} else {
 		$positional[] = $arg;
+	}
+}
+
+// a command takes the options its lines in the help name, and no other: a
+// mistyped --dry-run must not run for real
+$usage = raster_usage($command);
+if ($usage !== null) {
+	preg_match_all('/--([a-z\-]+)/', $usage, $m);
+	$takes = array_values(array_unique($m[1]));
+	foreach (array_keys($options) as $key) {
+		if (in_array($key, $takes, true)) continue;
+		fwrite(STDERR, "error: $command doesn't take --$key. ".($takes ? 'It takes --'.implode(', --', $takes).'.' : 'It takes no options.')."\n\n$usage");
+		exit(2);
 	}
 }
 
@@ -264,6 +279,8 @@ switch ($command) {
 
 	case 'schema':
 		$schema = new raster_schema();
+		// --dry-run checks and reports each change without making it
+		$dry = isset($options['dry-run']);
 		try {
 			$output = array();
 			foreach ((array)($options['rename'] ?? array()) as $rename) {
@@ -271,16 +288,18 @@ switch ($command) {
 					fwrite(STDERR, "--rename takes table.old:new, e.g. --rename=newsdata.title:headline\n");
 					exit(2);
 				}
-				$output[] = $schema->rename($m[1], $m[2], $m[3]);
+				$output[] = $schema->rename($m[1], $m[2], $m[3], $dry);
 			}
 			foreach ((array)($options['drop'] ?? array()) as $drop) {
 				if (!preg_match('/^([a-z0-9]+)(?:\.([a-z0-9_]+))?$/', (string)$drop, $m)) {
 					fwrite(STDERR, "--drop takes table.column or table, e.g. --drop=newsdata.subtitle\n");
 					exit(2);
 				}
-				$output[] = $schema->drop($m[1], isset($m[2]) ? $m[2] : null, isset($options['force']));
+				$output[] = $schema->drop($m[1], isset($m[2]) ? $m[2] : null, isset($options['force']), $dry);
 			}
-			if (isset($options['apply'])) {
+			if (isset($options['apply']) && $dry) {
+				$output[] = 'nothing applied (--dry-run): --apply creates what is marked + or not in database below, and converts what is marked ~';
+			} elseif (isset($options['apply'])) {
 				$output = array_merge($output, $schema->apply());
 			}
 			$status = $schema->status();
@@ -442,35 +461,30 @@ switch ($command) {
 		}
 		if (isset($options['to'])) {
 			$ok = newsletter::deliver($html, $subject, (string)$options['to'], '');
-			echo $ok ? "Sent \"$subject\" to {$options['to']} (".mail::transport().")\n" : $paint('error', '31').': '.mail::$last_error."\n";
+			echo $ok ? "Sent \"$subject\" to {$options['to']} (".mail::destination().")\n" : $paint('error', '31').': '.mail::$last_error."\n";
 			exit($ok ? 0 : 1);
 		}
-		newsletter::connect();
-		$sent_before = in_array('newsletterissue', R::inspect()) ? R::findOne('newsletterissue', ' url = ? ', array($url)) : null;
-		if ($sent_before && !isset($options['again'])) {
+		// a page is sent once; a run that stopped or failed for some goes on
+		// with the readers who don't have it yet
+		$sent_before = newsletter::issue($url);
+		$again = isset($options['again']);
+		if ($sent_before && !$sent_before->incomplete && !$again) {
 			fwrite(STDERR, "$url was already sent on {$sent_before->sent_at} to {$sent_before->recipients} subscribers. Use --again to send it again.\n");
 			exit(1);
 		}
-		$subscribers = newsletter::subscribers();
+		$resume = $sent_before && !$again;
 		if (isset($options['dry-run'])) {
-			echo "Would send \"$subject\" to ".count($subscribers)." subscriber(s) via ".mail::transport()."\n";
+			echo "Would send \"$subject\" to ".count(newsletter::recipients($resume ? $sent_before : null))." subscriber(s)".($resume ? " who don't have it yet" : '')." via ".mail::destination()."\n";
 			exit(0);
 		}
-		$ok = 0; $failed = 0;
-		foreach ($subscribers as $subscriber) {
-			if (newsletter::deliver($html, $subject, $subscriber->email, $subscriber->token)) $ok++;
-			else { $failed++; fwrite(STDERR, "  {$subscriber->email}: ".mail::$last_error."\n"); }
+		$issue = newsletter::send_issue($url, $html, $subject, $again);
+		if (!$issue) {
+			fwrite(STDERR, "$url was already sent. Use --again to send it again.\n");
+			exit(1);
 		}
-		$was_frozen = database::$frozen;
-		R::freeze(false);
-		$issue = R::dispense('newsletterissue');
-		$issue->url = $url;
-		$issue->subject = $subject;
-		$issue->recipients = $ok;
-		$issue->sent_at = R::isoDateTime();
-		R::store($issue);
-		R::freeze($was_frozen);
-		echo "Sent \"$subject\" to $ok subscriber(s)".($failed ? ", $failed failed" : '')." via ".mail::transport()."\n";
+		foreach (newsletter::$failures as $email => $error) fwrite(STDERR, "  $email: $error\n");
+		$failed = count(newsletter::$failures);
+		echo "Sent \"$subject\" to ".newsletter::$sent.($resume ? " more subscriber(s), {$issue->recipients} in all" : ' subscriber(s)').($failed ? ", $failed failed (run send again to retry them)" : '')." via ".mail::destination()."\n";
 		exit($failed ? 1 : 0);
 
 	case 'upgrade':
@@ -655,12 +669,21 @@ switch ($command) {
 		exit(0);
 
 	default:
-		echo <<<HELP
+		echo raster_usage();
+		exit($command === 'help' ? 0 : 2);
+}
+
+// the help, or the lines of it for one command (null when it has none);
+// they are also the list of options each command takes
+function raster_usage($command = null) {
+	$help = <<<HELP
 Raster command line
 
   php bin/raster serve [--port=8000]     run the site with PHP's built in server
+        --host=localhost                 the address to listen on
   php bin/raster lint [--json]           check every view for annotation errors
         --fix                            repair what is mechanical (spacing, misspelled keywords)
+        --theme=name, --all-themes       another theme than the site's, or every theme
   php bin/raster annotations [--json]    the annotation grammar, as data
   php bin/raster vocabulary [--json]     every name a template may call: models, methods and
                                          their signatures, SQL queries, events, reserved names
@@ -673,7 +696,9 @@ Raster command line
         --rename=table.old:new           rename a column after renaming an annotation
         --drop=table.column              delete a column no template uses
         --drop=table                     delete a table no template uses
-  php bin/raster user <email|name> [--password=...] [--role=admin|editor|member]
+        --force                          --drop even what the templates use
+        --dry-run                        say what --rename, --drop and --apply would change
+  php bin/raster user <email|name> [--password=...] [--role=admin|editor|member] [--name=...]
                                          create a user (admin, random password), or change
                                          an existing one's password or role, keeping the other
   php bin/raster users                   list users
@@ -683,8 +708,10 @@ Raster command line
   php bin/raster make model <name> --from=<view> [--form=<method>] [--dry-run] [--force]
                                          a model for the records a form sends: its type,
                                          an empty check() and the form handler
-  php bin/raster send <url> [--to=email] [--dry-run] [--again]
-                                         email a page to newsletter subscribers
+  php bin/raster send <url> [--to=email] [--subject=...] [--dry-run] [--again]
+                                         email a page to newsletter subscribers; run it
+                                         again after a stop or a failure and it mails only
+                                         those who don't have it yet (--again: everyone)
   php bin/raster mcp                     MCP server over stdio for local agents
   php bin/raster render <url>            print the HTML of a URL (never from the page cache)
         --as=<email|username|role>       as that person sees it: --as=editor shows the
@@ -710,5 +737,13 @@ Raster command line
 Set RASTER_ENV=production to run against the production database.
 
 HELP;
-		exit($command === 'help' ? 0 : 2);
+	if ($command === null) return $help;
+	$lines = '';
+	$in = false;
+	foreach (explode("\n", $help) as $line) {
+		if (preg_match('#^  php bin/raster (\S+)#', $line, $m)) $in = $m[1] === $command;
+		elseif (!preg_match('#^ {8}#', $line)) $in = false;
+		if ($in) $lines .= $line."\n";
+	}
+	return $lines === '' ? null : $lines;
 }

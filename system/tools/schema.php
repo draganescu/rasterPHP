@@ -44,12 +44,14 @@ class raster_schema {
 			$tables[] = $this->compare(isset($collection['model']) ? 'record' : 'collection', $collection['type'], $fields, $meta);
 		}
 
-		// tables in the database that no template uses
+		// tables in the database that no template uses; the ones the
+		// bundled and the app's models declare with schema() are theirs
+		$declared = $this->system_tables();
 		$known = array_map(function ($t) { return $t['table']; }, $tables);
 		$unused = array();
 		foreach (R::inspect() as $table) {
 			if (!preg_match('/(page|data)$/', $table)) continue;
-			if (in_array($table, $known) || in_array($table, array('usersdata', 'rasterdata'))) continue;
+			if (in_array($table, $known) || in_array($table, array('usersdata', 'rasterdata')) || isset($declared[$table])) continue;
 			$unused[] = $table;
 		}
 
@@ -61,10 +63,10 @@ class raster_schema {
 		// tables the bundled models use (accounts, subscribers). A fluid
 		// database creates them when needed; a frozen one needs --apply.
 		$system = array();
-		foreach ($this->system_tables() as $name => $fields) {
+		foreach ($declared as $name => $fields) {
 			$columns = cms_store::table_exists($name) ? cms_store::columns($name) : array();
 			$missing = array_values(array_diff(array_keys($fields), array_keys($columns)));
-			$narrow = $this->narrow($fields, $columns);
+			$narrow = cms_types::narrow($name, array_map(array('cms_types', 'of_default'), $fields));
 			$system[] = array('table' => $name, 'exists' => (bool)$columns, 'missing' => $missing, 'narrow' => $narrow);
 			if (($missing || $narrow) && database::$frozen) $drift = true;
 		}
@@ -92,23 +94,6 @@ class raster_schema {
 			if (class_exists($model) && method_exists($model, 'schema')) $tables += $model::schema();
 		}
 		return $tables;
-	}
-
-	// Columns of a bundled or model-declared table that MySQL sized by the
-	// row 2.1.9 and earlier stored to make the table (varchar(191) for text,
-	// tinyint for a number), and that frozen would never grow: field => the
-	// type it should be. SQLite's columns take any length.
-	protected function narrow($fields, $columns) {
-		if (!$columns || R::getDatabaseAdapter()->getDatabase()->getDatabaseType() !== 'mysql') return array();
-		$narrow = array();
-		foreach ($fields as $field => $default) {
-			if (!isset($columns[$field])) continue;
-			$type = cms_types::of_default($default);
-			$declared = strtolower((string)$columns[$field]);
-			if ($type === 'text' && preg_match('/^(varchar|char|tinytext)\b/', $declared)) $narrow[$field] = 'text';
-			if ($type === 'int' && preg_match('/^(tinyint|smallint|mediumint)\b/', $declared)) $narrow[$field] = 'int';
-		}
-		return $narrow;
 	}
 
 	protected function compare($kind, $type, $fields, $meta) {
@@ -241,13 +226,12 @@ class raster_schema {
 			// row would size MySQL's columns by its values (varchar(191),
 			// tinyint) and frozen, they'd never grow.
 			foreach ($status['system_tables'] as $table) {
-				foreach ($table['narrow'] as $field => $type) {
-					R::getDatabaseAdapter()->exec("ALTER TABLE `{$table['table']}` MODIFY `$field` ".cms_types::sql($type));
+				$types = array_map(array('cms_types', 'of_default'), $this->system_tables()[$table['table']]);
+				foreach (cms_types::widen($table['table'], $types) as $field => $type) {
 					$changes[] = "widened {$table['table']}.$field to ".cms_types::sql($type);
 				}
-				if ($table['narrow']) cms_store::forget();
 				if (!$table['missing']) continue;
-				cms_types::ensure($table['table'], array_map(array('cms_types', 'of_default'), $this->system_tables()[$table['table']]));
+				cms_types::ensure($table['table'], $types);
 				$changes[] = $table['exists'] ? "added {$table['table']}.".implode(", {$table['table']}.", $table['missing']) : "created table {$table['table']}";
 			}
 		} finally {
@@ -257,24 +241,41 @@ class raster_schema {
 		return $changes;
 	}
 
-	function rename($table, $from, $to) {
+	// with $dry_run, both check everything and say what they would do
+	function rename($table, $from, $to, $dry_run = false) {
 		foreach (array($table, $from, $to) as $name) {
 			if (!preg_match('/^[a-z0-9_]+$/', $name)) throw new InvalidArgumentException("Invalid name '$name'");
 		}
 		cms_store::connect();
 		if (!array_key_exists($from, cms_store::columns($table))) throw new InvalidArgumentException("$table has no column $from");
 		if (!array_key_exists($to, cms_store::columns($table))) {
+			if ($dry_run) return "would rename $table.$from to $to";
 			R::exec("ALTER TABLE `$table` RENAME COLUMN `$from` TO `$to`");
 			return "renamed $table.$from to $to";
 		}
 		// the new column already exists (created with the template default by a
 		// request in development): move the content over, then drop the old one
+		if ($dry_run) return "would move $table.$from into $to";
 		R::exec("UPDATE `$table` SET `$to` = `$from` WHERE `$from` IS NOT NULL");
 		R::exec("ALTER TABLE `$table` DROP COLUMN `$from`");
 		return "moved $table.$from into $to";
 	}
 
-	function drop($table, $column = null, $force = false) {
+	function drop($table, $column = null, $force = false, $dry_run = false) {
+		foreach (array($table, (string)$column) as $name) {
+			if (!preg_match('/^[a-z0-9_]*$/', $name)) throw new InvalidArgumentException("Invalid name '$name'");
+		}
+		// only CMS page and collection tables, a column as much as the whole
+		// table; what a model declares (schema(), types()) is the model's,
+		// --force or not
+		$what = $column === null ? "Only CMS page and collection tables can be dropped" : "Only columns of CMS page and collection tables can be dropped";
+		if (!preg_match('/^[a-z0-9]+(page|data)$/', $table) || in_array($table, array('usersdata', 'rasterdata'))) throw new InvalidArgumentException($what);
+		$declared = $this->system_tables();
+		if (isset($declared[$table])) throw new InvalidArgumentException("$what; $table is declared by a model's schema()");
+		$record = cms_records::for_table($table);
+		if ($record && ($column === null || array_key_exists($column, cms_records::columns($record)))) {
+			throw new InvalidArgumentException(($column === null ? "$table holds the records" : "$table.$column is declared")." of the type {$record['name']} in models/{$record['model']}; change its types() instead");
+		}
 		// refuse to drop what the templates still use
 		if (!$force) {
 			foreach ($this->status()['tables'] as $used) {
@@ -284,20 +285,16 @@ class raster_schema {
 			}
 		}
 		if ($column === null) {
-			if (!preg_match('/^[a-z0-9]+(page|data)$/', $table) || in_array($table, array('usersdata', 'rasterdata'))) {
-				throw new InvalidArgumentException("Only CMS page and collection tables can be dropped");
-			}
 			cms_store::connect();
 			if (!cms_store::table_exists($table)) throw new InvalidArgumentException("There is no table $table");
+			if ($dry_run) return "would drop table $table";
 			R::exec("DROP TABLE `$table`");
 			return "dropped table $table";
-		}
-		foreach (array($table, $column) as $name) {
-			if (!preg_match('/^[a-z0-9_]+$/', $name)) throw new InvalidArgumentException("Invalid name '$name'");
 		}
 		if (in_array($column, cms_store::$system_fields)) throw new InvalidArgumentException("$column is managed by Raster");
 		cms_store::connect();
 		if (!array_key_exists($column, cms_store::columns($table))) throw new InvalidArgumentException("$table has no column $column");
+		if ($dry_run) return "would drop $table.$column";
 		R::exec("ALTER TABLE `$table` DROP COLUMN `$column`");
 		return "dropped $table.$column";
 	}

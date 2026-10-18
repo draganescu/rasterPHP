@@ -160,7 +160,7 @@ Items relate **by value**: two news items with the same `author` text are "by th
 
 ## Slugs
 
-Every item gets a **slug**, a readable id for its URL, made from its `title`, `headline` or `name` field (or else its first text field). Accents are turned into plain letters: *Café crème* becomes `cafe-creme`. If the slug is taken, `-2`, `-3` and so on are added, even for items saved at the same moment. Editors can change it in the item's details.
+Every item gets a **slug**, a readable id for its URL, made from its `title`, `headline` or `name` field (or else its first text field). A record's hidden fields are never used: the slug is in its public URL. Accents are turned into plain letters: *Café crème* becomes `cafe-creme`. If the slug is taken, `-2`, `-3` and so on are added, even for items saved at the same moment. Editors can change it in the item's details.
 
 ## Drafts and scheduled items
 
@@ -206,10 +206,11 @@ When you rename an annotation, Raster notices the likely rename and suggests the
 | `php bin/raster schema --drop=aboutpage.heading` | deletes a column no template uses |
 | `php bin/raster schema --drop=olddata` | deletes a whole table no template uses |
 | `--force` | together with `--drop`, deletes even if a template still uses it |
+| `--dry-run` | together with `--rename`, `--drop` or `--apply`, says what would change and changes nothing |
 | `php bin/raster schema --check` | exits with code 1 when templates and database differ, for automated checks |
 | `--json` | the same information as JSON |
 
-`--drop` refuses to delete something a template still uses unless you add `--force`.
+`--drop` refuses to delete something a template still uses unless you add `--force`. It only deletes CMS page and collection tables and their columns: the accounts, the subscribers, a table a model declares, and a record type's table and declared fields stay, even with `--force`.
 
 In production (frozen database), a field you added to a template shows its default until you run `schema --apply` there.
 

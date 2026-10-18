@@ -43,6 +43,10 @@ A static host can't receive a form. If a page still shows a form, the export **s
 
 `if.live` is true on the running site, `if.static` during an export. So the live site keeps its form, and the exported site shows the email address. Other options: link to a hosted form service, or show a phone number.
 
+## Pages that answer an error
+
+If a page answers with an error (500, say, from a model that throws) or doesn't answer at all, the 404 page included, the export also **stops and writes nothing**, naming each such page, and exits with code 1. Nothing is removed either, so the folder keeps the last good export and a deploy script can tell that something went wrong.
+
 ## What is left out
 
 - Pages that need an account (anything that redirects to log in), and the log-in, sign-up, password, account and newsletter confirm/unsubscribe pages
