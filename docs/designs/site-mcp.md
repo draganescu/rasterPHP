@@ -16,12 +16,12 @@ read from the site itself (its pages, its record types, its models), so they
 grow as the site grows and never go stale. That is the same promise as
 "the markup is the schema": nobody writes or maintains a tool list.
 
-Raster already has an MCP server (`system/models/mcp/mcp.php`). It is for
-the agent *coding* the site: views, lint, describe, write_view, plus content
-and record tools that trust the caller like an admin. It stays as it is.
-This design adds a second, separate server for *running* the site: its
-content and its data, as one signed-in person. The two share protocol code
-but no endpoint, no credential and no tool list.
+This is not the coding MCP (`raster mcp`, `system/models/mcp/`), the one an
+agent writing the site's code uses. The two have different uses, people add
+them to different agents, and they have nothing to do with each other: no
+shared code, credential, tools or settings. The site MCP is its own bundled
+model, `system/models/site_mcp/`. This design doesn't change the coding MCP
+except to give up the `/mcp` address (below).
 
 ## Goals
 
@@ -89,7 +89,6 @@ but no endpoint, no credential and no tool list.
 
 | Piece | Where | Used for |
 |---|---|---|
-| JSON-RPC over HTTP and stdio | `system/models/mcp/mcp.php` | protocol handling for both tool sets |
 | Users, roles, `can()` | `system/models/authentication/authentication.php:33`, `:265` | the caller's rights |
 | Login page | site's `login.html`, or Raster's plain `/login` | sign-in during OAuth |
 | Hashed one-time tokens | `login_hash` pattern, `authentication.php:291-335` | the model for storing secrets |
@@ -99,26 +98,19 @@ but no endpoint, no credential and no tool list.
 | Records | `cms_records` (`system/models/cms/records.php`) | types, owner, hidden, actions, visibility |
 | Uploads | `cms_editor::upload()` (`system/models/cms/editor.php:322`) | its checks and naming, moved into one function every upload path calls |
 
-## The two servers
+## Where it lives
 
-| | Coding MCP | Site MCP (new) |
-|---|---|---|
-| For | the agent writing the site | the owner's, staff's or member's assistant |
-| Transport | stdio (`php bin/raster mcp`); HTTP at `/mcp/dev` | HTTP at `/mcp` |
-| Credential | none (stdio) / the static `mcp_token` (HTTP) | OAuth access token for one user |
-| Tools | today's tools, unchanged (their deletes become soft, like every delete) | the ones below |
-| On by default | stdio yes, HTTP only with a token | yes, when the site has users |
-
-Decision (my call): `/mcp` becomes the site MCP, because that is the address
-an owner types. The coding tools over HTTP move to `/mcp/dev` with the same
-`mcp_token`. This breaks anyone using the HTTP coding endpoint today; the
-CHANGELOG says so. Raster Builder uses stdio only. A site turns the site MCP
-off with `config mcp => false`.
-
-The protocol code (`handle()`, results, errors) is shared. Each server is
-just a different tool list and a different way of deciding who is calling.
-Writes from either are recorded with where they came from (`mcp-dev`, or
-`mcp` and the client).
+- `system/models/site_mcp/`: its own small JSON-RPC handling over HTTP, its
+  tools, and its OAuth endpoints. It writes through `cms_store` and
+  `cms_records` like the editor does, and uses nothing from the coding
+  MCP's model.
+- Address: `https://their.site/mcp`, on by default when the site has users;
+  `config site_mcp => false` turns it off.
+- The one contact with the coding MCP (my call): its optional HTTP endpoint
+  answers `POST /mcp` today when `mcp_token` is set. It moves to `/mcp/code`
+  (same token) so the site MCP can have `/mcp`, the address an owner
+  expects. Its stdio use (`raster mcp`, what Raster Builder uses) doesn't
+  change. The CHANGELOG says so.
 
 ## Signing in: OAuth
 
@@ -303,8 +295,7 @@ nothing is ever rewritten.
   brings it back, running `check()` again (a restored booking whose slot was
   taken meanwhile is refused with that problem).
 - `run_action(type, id, action, input)`: a `types()` action, checked
-  against the action's role. Today the coding MCP's `run_action` is "trusted
-  like an admin"; the site MCP's never is.
+  against the action's role and the caller's ownership.
 
 **Text people typed.** Every record a visitor or member wrote comes back
 with `"submitted_by": "visitor" | "member"`, and its free-text fields inside
@@ -374,7 +365,8 @@ say so.
 
 ## Soft delete
 
-Deleting an item, from any writer (editor, either MCP, model code, CLI),
+Deleting an item, from any writer (editor, site MCP, model code, CLI, and
+anything else that deletes through `cms_store`),
 sets `deleted_at` and `deleted_by` instead of removing the row. That holds
 for record types and for plain template collections alike, because both
 delete through `cms_store`.
@@ -394,7 +386,8 @@ for the scheduler. `cms.item_deleted` still fires on delete, and a new
 
 Pages already keep every revision. Revisions today hold only the values
 and `updated_at` (`system/models/cms/store.php:291-322`), so they gain `by`
-(user id), `via` (`editor`, `mcp`, `mcp-dev`, `cli`, `model`), `client` (the
+(user id), `via` (`editor`, `site_mcp`, `cli`, `model`, or whichever other
+writer saved it), `client` (the
 MCP client's name, when there is one) and `changed` (the fields that
 changed), for `page_history` and for the owner to see what an agent did.
 
@@ -423,17 +416,16 @@ this table; nothing else is built for it now.
 ## Protocol details
 
 - Streamable HTTP, `POST /mcp` with JSON answers (no SSE stream is needed
-  for tools that answer at once); `GET /mcp` answers 405. Both the
-  2026-07-28 and 2025-11-25 revisions are added to the versions Raster
-  answers (today it knows only 2025-06-18 and older, `mcp.php:21`), for both
-  servers. The client's version is used when known; otherwise the newest.
+  for tools that answer at once); `GET /mcp` answers 405. It answers the
+  2026-07-28 and 2025-11-25 revisions. The client's version is used when
+  known; otherwise the newest.
   The older ones stay as long as the conformance suite and the Claude and
   ChatGPT checks pass with them. No server-side session is kept.
 - The `Origin` header is checked when present (the spec's DNS-rebinding
   rule), and the token's `resource` must be this site's `/mcp`.
 - Answers are never cached and send `Cache-Control: no-store`.
-- Tool errors come back as `isError` results with a readable message, as
-  `call_tool` does today; protocol errors as JSON-RPC errors.
+- Tool errors come back as `isError` results with a readable message;
+  protocol errors as JSON-RPC errors.
 - MCP calls are logged (when, user, client, tool, target, outcome) without
   arguments' values, so an owner can see what an agent did.
 
@@ -459,7 +451,7 @@ Each is its own PR and release, in order:
 
 1. **Sign in.** Vendored league, the OAuth endpoints and metadata, consent
    and connected-agents pages, token to user, `/mcp` with `site_info` only,
-   coding tools moved to `/mcp/dev`.
+   the coding MCP's HTTP endpoint moved to `/mcp/code`.
 2. **Content.** `get_page` with the outline, `update_fields`,
    `page_history`, `revert_page`.
 3. **Records.** Soft delete everywhere, revision authors, the record
