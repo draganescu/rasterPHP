@@ -812,6 +812,18 @@ function location($headers) {
 	return null;
 }
 
+test('one page has one address: a trailing slash and index.php/ redirect (#131)', function () use ($base) {
+	foreach (array('/about/' => '/about', '/index.php/about' => '/about', '/index.php/about/' => '/about', '/news/news_page/2/' => '/news/news_page/2',
+		'/about/?x=1&y=a%20b' => '/about?x=1&y=a%20b', '/news/news_items/headline/Filler%201/' => '/news/news_items/headline/Filler%201') as $asked => $address) {
+		list($status, , $headers) = http('GET', $base.$asked);
+		same(301, $status, $asked);
+		same($base.$address, location($headers), $asked);
+	}
+	same(200, http('GET', "$base/")[0]);
+	same(200, http('GET', "$base/about")[0]);
+	// a form sent to the slashed address is not lost in a redirect
+	same(200, http('POST', "$base/about/", 'x=1', array('Content-Type: application/x-www-form-urlencoded'))[0]);
+});
 test('lint: form conventions', function () {
 	check(has_problem(lint_html('<form method="post"><input name="a"></form>'), 'not inside a render block'));
 	check(has_problem(lint_html("<!-- render.site.nav --><form method=\"post\"><input name=\"a\" required><!-- render.validation.field('b') -->x<!-- /render.validation.field('b') --></form><!-- /render.site.nav -->"), "no input named b"));

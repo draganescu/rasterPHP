@@ -147,6 +147,18 @@ class config {
 		// this is used to retrieve url params passed as key value pairs
 		$path_info = str_replace('/'.$config->index_file, '', $request_uri);
 		if ($path_info === '') $path_info = '/';
+		// one address per page: /menu/, and /index.php/menu where links leave
+		// index.php out, answer 301 to /menu, so outside links make no
+		// duplicates and the page cache keeps one copy (#131)
+		$method = isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : 'GET';
+		$prefixed = config::get('rewrite') == true && strpos($request_uri.'/', '/'.$config->index_file.'/') === 0 && $path_info !== '/';
+		$slashed = $path_info !== '/' && substr($path_info, -1) === '/';
+		if (PHP_SAPI !== 'cli' && in_array($method, array('GET', 'HEAD'), true) && ($prefixed || $slashed)) {
+			$query = isset($_SERVER['QUERY_STRING']) && $_SERVER['QUERY_STRING'] !== '' ? '?'.$_SERVER['QUERY_STRING'] : '';
+			$path = implode('/', array_map('rawurlencode', explode('/', trim($path_info, '/'))));
+			header('Location: '.$config->link_uri.$path.$query, true, 301);
+			exit;
+		}
 		$request_uri = $path_info;
 		$uri_segments = explode("/", rtrim($path_info, '/'));
 		array_shift($uri_segments);

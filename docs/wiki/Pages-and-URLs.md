@@ -34,6 +34,8 @@ A theme folder holds the views, and also the CSS, images, fonts and scripts they
 
 The query string (`?page=2`) never changes which file is used.
 
+**One address per page.** `/about/`, with a trailing slash, answers with a permanent redirect (301) to `/about`, keeping any query string, so a link someone else writes with the slash doesn't make a second copy of the page for search engines or the page cache. Only GET and HEAD requests are redirected; a form sent to `/about/` is handled where it lands.
+
 **Other formats.** Besides `.html`, a view can be `.rss`, `.atom`, `.xml`, `.json` or `.txt`. The URL keeps the extension, and the right `Content-Type` header is sent. Values printed into these views are escaped for the format (XML escaping for feeds, JSON escaping for JSON) so the file stays valid. See [Feeds, sitemaps and data views](Feeds-Sitemaps-and-Data-Views).
 
 **Files that are never pages.** A file or folder whose name starts with `_` can't be visited, not even through a collection URL: `/_email/digest/news_page/1` is a 404 even when `_email/digest.html` renders `news`. Use this for:
@@ -145,7 +147,7 @@ On a server that can't send every request to `index.php` (see [Deploying to prod
 config::set('rewrite')->to(false);
 ```
 
-Links then go through the entry file: `/index.php/about`.
+Links then go through the entry file: `/index.php/about`. While `rewrite` is on, the other way round, `/index.php/about` answers with a permanent redirect (301) to `/about`.
 
 ## Several sites in one install
 

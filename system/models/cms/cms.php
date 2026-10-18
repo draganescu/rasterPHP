@@ -502,7 +502,8 @@ class cms
 				foreach ($filter_fields as $field) {
 					$filter_link .= $field.'/'.rawurlencode(isset($item[$field]) ? $item[$field] : '').'/';
 				}
-				$data[$key]['raster_filter@'.$at_key] = $filter_link;
+				// without the last slash, as item links are (#131)
+				$data[$key]['raster_filter@'.$at_key] = rtrim($filter_link, '/');
 			}
 		}
 

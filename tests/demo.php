@@ -537,7 +537,7 @@ test(array('E7', 'E9', 'E10', 'E11'), 'filter links, order, limit, template filt
 		mcp($base, 'create_item', array('collection' => 'menu', 'fields' => array('name' => $d[0], 'description' => 'Tasty', 'price' => '10', 'category' => $d[1], 'featured' => $d[2])));
 	}
 	$menu = http('GET', "$base/menu")[1];
-	has($menu, 'href="'.$base.'/menu/menu_items/category/cakes/"');
+	has($menu, 'href="'.$base.'/menu/menu_items/category/cakes"');
 	check(strpos($menu, 'Americano') < strpos($menu, 'Brownie'), 'order=name');
 	$cakes = http('GET', "$base/menu/menu_items/category/cakes")[1];
 	has($cakes, 'Brownie');
@@ -2200,8 +2200,8 @@ test('R14', 'staff see bookings grouped by status, and one evening at a time', f
 	has($confirm, util::e($new->name), 'a new booking is to confirm');
 	same((int)R::count('reservationdata', ' status = ? AND date >= ? ', array('new', date('Y-m-d'))), booking_rows($confirm), 'only new ones to come are to confirm');
 	lacks($confirm, util::e($cancelled->name), 'not the cancelled ones');
-	has($page, 'href="'.$base.'/reservation/reservation_items/date/'.$new->date.'/"', 'each date links to its evening');
-	$evening = http('GET', "$base/reservation/reservation_items/date/{$new->date}/", null, $h)[1];
+	has($page, 'href="'.$base.'/reservation/reservation_items/date/'.$new->date.'"', 'each date links to its evening');
+	$evening = http('GET', "$base/reservation/reservation_items/date/{$new->date}", null, $h)[1];
 	has($evening, util::e($new->name));
 	same((int)R::count('reservationdata', ' date = ? ', array($new->date)), booking_rows($evening), 'only that evening');
 	$open = http('GET', "$base/reservation/reservation_items/status/new", null, $h)[1];
@@ -3014,7 +3014,7 @@ test('E31', 'fields named like SQL words (when, from, group) sort, filter and li
 			same(200, $status);
 			same(array('Oslo', 'Lima', 'Rome'), $titles($html, 'by-when'), 'order=when');
 			same(array('Lima', 'Rome'), $titles($html, 'big'), 'group>2&order=-group');
-			has($html, 'href="'.$base.'/zztrips/zztrips_items/from/Paris/"');
+			has($html, 'href="'.$base.'/zztrips/zztrips_items/from/Paris"');
 			list($status, $html) = http('GET', "$base/zztrips/zztrips_items/from/Paris");
 			same(200, $status);
 			same(array('Lima', 'Rome'), $titles($html, 'by-when'), 'the filter page');

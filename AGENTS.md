@@ -65,6 +65,9 @@ media/                        uploads from the CMS
 
 - `/` renders `index.html`. `/about` renders `about.html`, and
   `/docs/setup` renders `docs/setup.html`. `/index` is the same page as `/`.
+  A page has one address: a GET for `/menu/` (a trailing slash), or for
+  `/index.php/menu` while `rewrite` is on, answers 301 to `/menu`, query
+  kept. Raster's own links, filter links included, never end in a slash.
 - **Formats:** `/news.rss` renders `news.rss`, and `/sitemap.xml` renders
   `sitemap.xml` (also `.json`, `.txt`, `.atom`). Printed values are escaped
   for the format: XML-escaped in feeds, JSON-escaped in JSON views. HTML views
