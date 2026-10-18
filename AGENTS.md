@@ -318,10 +318,13 @@ class cafe {
   `event::unbind(…)->from(…)`.
 - Listeners get the payload array and run in order: the framework's own
   bindings in `system/config/events.php` (routing, the CMS and account
-  checks, the newsletter's confirmation email, the booking emails), then
-  `the_events.php`, then
-  `listens()`, then the framework's core handlers (controller and log). A
-  listener returning `false` makes
+  checks, the newsletter's confirmation email, the booking emails) and the
+  bundled models' `listens()` (an override's, for a `the_` model), then
+  `the_events.php`, then the site's own models' `listens()`, then the
+  framework's core handlers (controller and log). So a site listener sees
+  the state a bundled model's listener left (an order already marked
+  paid), and `the_events.php` can unbind any of the framework's listeners,
+  `listens()` ones included. A listener returning `false` makes
   `event::dispatch()` return `false`; the sender decides what that means.
 - Name your events `<model>.<what happened>`, in the past tense.
 - `listens()` returns a constant array: Raster keeps what it returns in
@@ -1294,7 +1297,9 @@ of lists and filter pages come along; drafts and the editor don't.
 - **Exporting again** to the same folder writes only files that changed and
   removes the ones the site no longer has, so a deploy uploads just those.
   When nothing the site is made of changed (content, templates, models,
-  theme, media), it does nothing. `.raster-export.json` in the folder keeps
+  theme, media) and it is the same day, it does nothing. A new day in the
+  site's time zone always exports again, so `date>=today` lists and what
+  prints from the clock stay current. `.raster-export.json` in the folder keeps
   track; files the export didn't write are left alone. `--clean` starts the
   folder over.
 
@@ -1506,7 +1511,11 @@ command-line output). They win over the settings above.
   `update <file.tar.gz>`; `--dry-run` shows what would change). It refuses
   when framework files were edited since they were installed
   (`system/checksums.json` records them); `--force` goes ahead. Replaced
-  files are kept in `application/data/backups/`.
+  files are kept in `application/data/backups/`. A folder or archive must
+  hold `system/boot.php` to count as a release; anything else is refused,
+  `--force` or not. A framework file it can't write or remove stops the
+  update with exit 1 and the file's name, and the old files are put back,
+  so nothing is half updated or recorded as installed.
 - It then runs `php bin/raster upgrade` for every app: the steps in
   `system/upgrades/<version>.php` the app still needs (renamed annotations,
   moved files). The version an app is at is in `config/raster-version`.

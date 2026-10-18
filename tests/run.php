@@ -280,6 +280,52 @@ test('one lookup: app beats bundled, the_ overrides bundled', function () {
 	}
 });
 
+test('listeners run in order: the framework\'s, the_events.php, the site\'s listens(), core (#27)', function () {
+	// this process: the framework's bindings, a site's, then core
+	event::bind('done')->to('site', 'zz_done');
+	event::bind('route_set')->to('site', 'zz_set');
+	try {
+		$bindings = event::bindings();
+		same(array('cms.setup', 'authentication.setup', 'site.zz_set'), $bindings['route_set'], 'route_set:');
+		same(array('site.zz_done', 'controller.output', 'log.output'), $bindings['done'], 'done:');
+	} finally {
+		event::unbind('done')->from('site', 'zz_done');
+		event::unbind('route_set')->from('site', 'zz_set');
+	}
+	// a bundled model's listens() goes with the framework's bindings, before
+	// the site's, so a site listener sees what the bundled one did
+	$app = APPBASE.config::get('models_path', 'models');
+	$events = APPBASE.'config/the_events.php';
+	$kept = file_get_contents($events);
+	// the starter site's is empty: a binding needs the <?php
+	$php = strpos($kept, '<?php') === 0 ? $kept : "<?php\n";
+	temp_model(BASE.'models/zzpay', array('zzpay.php' => "<?php\nclass zzpay\n{\n\tstatic function listens() {\n\t\treturn array('zz.paid' => 'mark');\n\t}\n\tfunction mark() { echo 'bundled '; }\n}\n"));
+	temp_model("$app/zzshop", array('zzshop.php' => "<?php\nclass zzshop\n{\n\tstatic function listens() {\n\t\treturn array('zz.paid' => 'see');\n\t}\n\tfunction see() { echo 'listens '; }\n\tfunction bound() { echo 'the_events '; }\n}\n"));
+	$paid = 'echo json_encode(event::bindings()["zz.paid"])."\n"; event::dispatch("zz.paid");';
+	try {
+		file_put_contents($events, $php."\nevent::bind('zz.paid')->to('zzshop', 'bound');\n");
+		$out = explode("\n", race_php($paid, 1)[0]);
+		same(array('zzpay.mark', 'zzshop.bound', 'zzshop.see'), json_decode($out[0], true), 'zz.paid listeners:');
+		same('bundled the_events listens ', $out[1], 'zz.paid ran:');
+		// an override's listens() counts for the bundled model, in its place
+		temp_model("$app/the_zzpay", array('the_zzpay.php' => "<?php\nclass the_zzpay extends zzpay\n{\n}\n"));
+		$out = explode("\n", race_php($paid, 1)[0]);
+		same('bundled the_events listens ', $out[1], 'zz.paid ran, with the_zzpay:');
+		remove_dir("$app/the_zzpay");
+		// and the site can unbind it in the_events.php
+		file_put_contents($events, $php."\nevent::unbind('zz.paid')->from('zzpay', 'mark');\n");
+		$out = explode("\n", race_php($paid, 1)[0]);
+		same(array('zzshop.see'), json_decode($out[0], true), 'zz.paid listeners, zzpay.mark unbound:');
+		same('listens ', $out[1], 'zz.paid ran, zzpay.mark unbound:');
+	} finally {
+		file_put_contents($events, $kept);
+		remove_dir(BASE.'models/zzpay');
+		remove_dir("$app/the_zzpay");
+		remove_dir("$app/zzshop");
+		controller::forget_models();
+	}
+});
+
 test('the_mail reaches mail sent by newsletter', function () use ($maildir) {
 	$app = APPBASE.config::get('models_path', 'models');
 	temp_model("$app/the_mail", array('the_mail.php' => "<?php\nclass the_mail extends mail\n{\n\tstatic function send(\$to, \$subject, \$html, \$text = null, \$headers = array()) {\n\t\treturn parent::send(\$to, '[T] '.\$subject, \$html, \$text, \$headers);\n\t}\n}\n"));
@@ -1088,6 +1134,38 @@ test('frozen database: accounts and newsletter after schema --apply', function (
 	} finally {
 		array_map('unlink', glob("$db*") ?: array());
 	}
+});
+test('the comment at the top of bin/raster lists what raster help lists (#49)', function () use ($root) {
+	// per command: the options and the <placeholders> it names
+	$names = function ($text) {
+		preg_match_all('/--([a-z\-]+)/', $text, $options);
+		preg_match_all('/<[^>]+>/', $text, $placeholders);
+		$names = array_values(array_unique(array_merge($options[1], $placeholders[0])));
+		sort($names);
+		return $names;
+	};
+	$header = array();
+	preg_match_all('#^//   php bin/raster (\S+)(.*)$#m', file_get_contents("$root/bin/raster"), $lines, PREG_SET_ORDER);
+	foreach ($lines as $line) $header[$line[1]] = $names($line[2]);
+	$help = array();
+	$command = null;
+	foreach (explode("\n", (string)shell_exec(escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' help')) as $line) {
+		// a command's lines are its own and the indented ones below it; the
+		// usage is what comes before the description's wide gap
+		if (preg_match('#^  php bin/raster (\S+)#', $line, $m)) $command = $m[1];
+		elseif (!preg_match('#^ {8}#', $line)) $command = null;
+		if ($command === null) continue;
+		$parts = preg_split('/\s{2,}/', trim($line));
+		$usage = preg_match('#^(php bin/raster|--)#', $parts[0]) ? $parts[0] : '';
+		// options named only in a description are taken too, as bin/raster does
+		preg_match_all('/--[a-z\-]+/', $line, $options);
+		$help[$command] = array_merge(isset($help[$command]) ? $help[$command] : array(), array($usage), $options[0]);
+	}
+	foreach ($help as $command => $texts) $help[$command] = $names(implode(' ', $texts));
+	ksort($header);
+	ksort($help);
+	same(array_keys($help), array_keys($header), 'the same commands');
+	foreach ($help as $command => $expected) same($expected, $header[$command], "$command:");
 });
 
 // ## What is never served: one list, three servers

@@ -406,6 +406,57 @@ test('new sites get no old .htaccess below the root (#76)', function () use ($re
 	has(raster($site, array('doctor'))[1], '✓ .htaccess has every rule');
 });
 
+test('a file update can\'t write stops it, and the old files are put back (#102)', function () use ($tmp, $rel200, $rel210) {
+	$site = "$tmp/site-readonly";
+	same(0, raster($rel200, array('new', $site))[0]);
+	chmod("$site/system/util.php", 0444);
+	try {
+		list($code, $out) = raster($site, array('update', $rel210));
+		same(1, $code, $out);
+		has($out, 'system/util.php');
+		lacks($out, 'Updated to Raster');
+		lacks($out, 'Warning:', 'a refusal, not a PHP warning');
+		// as it was: what was changed before the failure is back, what was new is gone
+		same("2.0.0\n", file_get_contents("$site/system/VERSION"));
+		lacks(file_get_contents("$site/system/util.php"), '// changed in 2.1.0');
+		check(is_file("$site/system/obsolete.txt"), 'the removed file is back');
+		check(!file_exists("$site/system/tools/hello.php"), 'the new file is gone');
+		check(!file_exists("$site/system/upgrades/2.1.0.php"), 'the new upgrade step is gone');
+		check(!file_exists("$site/application/config/marker.txt"), 'no upgrade ran');
+		same("2.0.0\n", file_get_contents("$site/application/config/raster-version"));
+		list($code, $out) = raster($site, array('doctor'));
+		has($out, '✓ Raster 2.0.0');
+		has($out, '✓ Framework files as installed');
+	} finally {
+		chmod("$site/system/util.php", 0644);
+	}
+	// once the file can be written, the same update goes through
+	list($code, $out) = raster($site, array('update', $rel210));
+	same(0, $code, $out);
+	has(file_get_contents("$site/system/util.php"), '// changed in 2.1.0');
+});
+
+test('update takes only a folder that holds a Raster release, even with --force (#102)', function () use ($tmp, $rel200) {
+	$site = "$tmp/site-notarelease";
+	same(0, raster($rel200, array('new', $site))[0]);
+	$before = file_get_contents("$site/system/checksums.json");
+	mkdir("$tmp/empty-folder");
+	mkdir("$tmp/other-folder/system", 0775, true);
+	file_put_contents("$tmp/other-folder/system/VERSION", "9.9.9\n");
+	foreach (array("$tmp/empty-folder", "$tmp/other-folder") as $folder) {
+		foreach (array(array(), array('--force')) as $force) {
+			list($code, $out) = raster($site, array_merge(array('update', $folder), $force));
+			same(1, $code, $out);
+			has($out, "$folder does not hold a Raster release");
+			lacks($out, 'removed file(s)');
+		}
+	}
+	check(is_file("$site/bin/raster") && is_file("$site/system/boot.php"), 'the framework is still there');
+	list($code, $out) = raster($site, array('doctor'));
+	has($out, '✓ Framework files as installed');
+	same($before, file_get_contents("$site/system/checksums.json"));
+});
+
 // ## Uploads and downloads (#115, #113)
 
 test('doctor in production warns when PHP takes smaller uploads than the editor sends (#115)', function () use ($site) {
