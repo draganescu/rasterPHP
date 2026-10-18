@@ -147,9 +147,9 @@ class booking
 	// ##Bookings
 
 	// The fields a booking works out from the others, on every write: its
-	// end (from the service, else its hours row), the resource when there
-	// is only one, 1 person where no resource counts people, and when its
-	// status or time last changed.
+	// end (from the service, else its hours row), the resource when only
+	// one is active, 1 person where no active resource counts people, and
+	// when its status or time last changed.
 	static function fill($type, $after, $before) {
 		if ($type !== 'booking') return array();
 		// fill() comes first in the write's lock: the setup is read there, as
@@ -158,8 +158,16 @@ class booking
 		self::forget();
 		$values = array();
 		$resources = self::setup()['resources'];
-		if ((string)$after['resource'] === '' && count($resources) === 1) $values['resource'] = $after['resource'] = (string)key($resources);
-		if ($resources && !array_filter(array_column($resources, 'people'))) $values['people'] = $after['people'] = 1;
+		// only active resources count, as in chosen(): a resource switched
+		// off takes no new bookings. A site's one resource is still filled
+		// when it is off, so check() says resource_inactive.
+		$active = array_filter($resources, function ($row) { return $row['active']; });
+		$only = count($active) === 1 ? $active : (count($resources) === 1 ? $resources : array());
+		if ((string)$after['resource'] === '' && $only) $values['resource'] = $after['resource'] = (string)key($only);
+		// a booking kept on a switched-off resource that counts people
+		// keeps its people
+		$own = isset($resources[(string)$after['resource']]) ? (int)$resources[(string)$after['resource']]['people'] : 0;
+		if ($active && !array_filter(array_column($active, 'people')) && !$own) $values['people'] = $after['people'] = 1;
 		$placed = !$before || self::changed($after, $before, array('date', 'time', 'resource', 'service'));
 		if ($placed && (string)$after['time'] !== '') {
 			$every = self::every((string)$after['date'], (string)$after['resource'], (string)$after['time']);

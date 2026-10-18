@@ -3517,6 +3517,30 @@ test('booking: start rules', function () {
 	});
 });
 
+test('booking: an inactive resource is not counted when a booking fills its resource and people', function () {
+	booking_site(function () {
+		// the café switched its terrace off for winter: the dining room is
+		// still the one resource a guest books
+		$tue = booking_cafe();
+		cms_records::create('bookingresource', array('name' => 'Terrace', 'people' => 10, 'active' => false));
+		same(2, count((new booking())->slots("date=$tue")));
+		$made = booking_guest(array('date' => $tue, 'time' => '19:00', 'people' => 2));
+		same(array('dining-room', 2), array($made['resource'], $made['people']));
+	});
+	booking_site(function () {
+		// a salon counts no people, even with a café's room switched off
+		$tue = booking_salon();
+		cms_records::create('bookingresource', array('name' => 'Terrace', 'people' => 10));
+		cms_records::create('bookinghours', array('resource' => 'terrace', 'starts' => '19:00', 'ends' => '19:00', 'every' => 60));
+		$kept = booking_staff(array('date' => $tue, 'time' => '19:00', 'resource' => 'terrace', 'people' => 6));
+		cms_records::update('bookingresource', booking::setup()['resources']['terrace']['id'], array('active' => false));
+		$made = booking_guest(array('date' => $tue, 'time' => '10:00', 'resource' => 'ana', 'service' => 'cut', 'people' => 3));
+		same(1, $made['people']);
+		// a booking on the switched-off room keeps its people
+		same(6, booking::cancel($kept, array())['people']);
+	});
+});
+
 test('booking: staff skip notice and horizon, never capacity', function () {
 	booking_site(function () {
 		$tue = booking_cafe();
