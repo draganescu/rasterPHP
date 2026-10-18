@@ -275,7 +275,7 @@ php tests/demo.php                        # the whole matrix
 | N13 | raster describe, and --sections |
 | N14 | `raster render <url> --as=<account or role>`, and a query string in the URL |
 | N15 | `raster upgrade` takes an app with no `config/raster-version` as current: writes the version, runs no old steps |
-| N16 | a page that answers 500 (a model that throws) stops `raster export` with exit 1, naming the page; the last export's files stay |
+| N16 | a page that answers 500 (a model that throws) stops `raster export` with exit 1, naming the page; so does a 404 page that answers 500; the last export's files, 404.html included, stay |
 | N17 | every command refuses an option it doesn't take (`send --dryrun`, `lint --jsn`) with exit 2 and the options it does, before anything runs; the help names them all |
 | O1 | the sitemap skips private pages and lists items |
 | R1 | a model declares a type (`types()`): a collection with the model's fields and no mock-up row, in site_overview, describe and schema |

@@ -236,9 +236,14 @@ class raster_export {
 		}
 	}
 
-	// the host's 404 page, from a URL that can't exist
+	// the host's 404 page, from a URL that can't exist. One that breaks is
+	// an error like any page: leaving it out would remove 404.html
 	protected function not_found() {
 		list($status, $body, $type) = $this->fetch('/raster-export-'.bin2hex(random_bytes(4)));
+		if ($status === 0 || $status >= 500) {
+			$this->errors[] = 'The 404 page'.($status ? " answered $status" : ' did not answer');
+			return;
+		}
 		if ($status === 404 && strpos($type, 'html') !== false) $this->raw['/404|'.$this->default_language] = $body;
 	}
 

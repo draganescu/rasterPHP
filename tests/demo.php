@@ -1528,9 +1528,9 @@ test('N16', 'a page that answers an error stops the export, and the last export 
 	$manifest = file_get_contents("$out/.raster-export.json");
 	$original = file_get_contents("$views/about.html");
 	@mkdir("$root/demo/models/zzthrows");
-	with_file("$root/demo/models/zzthrows/zzthrows.php", "<?php\nclass zzthrows\n{\n\tfunction boom() { throw new RuntimeException('boom'); }\n}\n", function () use ($out, $views, $original) {
+	$boom = '<!-- print.zzthrows.boom -->x<!-- /print.zzthrows.boom -->';
+	with_file("$root/demo/models/zzthrows/zzthrows.php", "<?php\nclass zzthrows\n{\n\tfunction boom() { throw new RuntimeException('boom'); }\n}\n", function () use ($out, $views, $original, $boom) {
 		// a model that throws, on About
-		$boom = '<!-- print.zzthrows.boom -->x<!-- /print.zzthrows.boom -->';
 		with_file("$views/about.html", str_replace('<h2>Opening hours</h2>', $boom.'<h2>Opening hours</h2>', $original), function () use ($out) {
 			list($code, $output) = raster(array('export', $out, '--url=https://cafe.example/'));
 			same(1, $code, $output);
@@ -1538,6 +1538,16 @@ test('N16', 'a page that answers an error stops the export, and the last export 
 			has($output, 'Nothing was written');
 			check(is_file("$out/about/index.html"), 'the page from the last export was removed');
 			check(is_file("$out/index.html"));
+		});
+		// the same for the 404 page: its 404.html stays
+		$not_found = file_get_contents("$views/404.html");
+		with_file("$views/404.html", str_replace('<h1>', $boom.'<h1>', $not_found), function () use ($out) {
+			check(is_file("$out/404.html"), 'the last export has a 404.html');
+			list($code, $output) = raster(array('export', $out, '--url=https://cafe.example/'));
+			same(1, $code, $output);
+			has($output, 'The 404 page answered 500');
+			has($output, 'Nothing was written');
+			check(is_file("$out/404.html"), 'the 404.html from the last export was removed');
 		});
 	});
 	@rmdir("$root/demo/models/zzthrows");

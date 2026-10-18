@@ -908,7 +908,7 @@ of lists and filter pages come along; drafts and the editor don't.
   the static site shows instead in `<!-- print.if.static -->` (a phone
   number, an email address, the RSS feed).
 - **A page that answers an error** (5xx, a model that throws) or doesn't
-  answer also stops the export: it names each such page, writes and removes
+  answer, the 404 page included, also stops the export: it names each such page, writes and removes
   nothing, so the last export stays whole, and exits 1.
 - Left out: pages that need an account, login, sign-up, password and
   newsletter pages, `/api`, and paths in `config::set('export_skip')` or

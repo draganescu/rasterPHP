@@ -45,7 +45,7 @@ A static host can't receive a form. If a page still shows a form, the export **s
 
 ## Pages that answer an error
 
-If a page answers with an error (500, say, from a model that throws) or doesn't answer at all, the export also **stops and writes nothing**, naming each such page, and exits with code 1. Nothing is removed either, so the folder keeps the last good export and a deploy script can tell that something went wrong.
+If a page answers with an error (500, say, from a model that throws) or doesn't answer at all, the 404 page included, the export also **stops and writes nothing**, naming each such page, and exits with code 1. Nothing is removed either, so the folder keeps the last good export and a deploy script can tell that something went wrong.
 
 ## What is left out
 
