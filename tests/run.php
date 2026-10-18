@@ -2291,9 +2291,13 @@ test('the editor leaves Enter to the browser in a list or a table, and makes a l
 	$js = file_get_contents("$root/system/models/cms/editor/editor.js");
 	check(preg_match('/\tfunction takesBlocks\(el\) \{.*?\n\t\}\n/s', $js, $m), 'editor.js has takesBlocks()');
 	$cases = array('DIV' => true, 'TD' => true, 'UL' => true, 'OL' => true, 'DL' => true, 'TABLE' => true, 'TBODY' => true,
-		'P' => false, 'H2' => false, 'LI' => false, 'SPAN' => false, 'A' => false);
+		'P' => false, 'H2' => false, 'LI' => false, 'SPAN' => false, 'A' => false,
+		// the editor's own wrapper: a <div> is judged by its parent, a <span> never takes blocks
+		'DIV in ARTICLE' => true, 'DIV in TD' => true, 'DIV in LI' => false, 'SPAN in ARTICLE' => false, 'SPAN in P' => false);
 	$file = sys_get_temp_dir().'/raster-blocks-'.getmypid().'.js';
-	file_put_contents($file, $m[0]."\nvar cases = ".json_encode(array_keys($cases)).";\nprocess.stdout.write(JSON.stringify(cases.map(function (t) { return takesBlocks({ tagName: t }); })));\n");
+	file_put_contents($file, $m[0]."\nvar cases = ".json_encode(array_keys($cases)).";\n"
+		."function el(t, wrap, parent) { return { tagName: t, nodeType: 1, parentNode: parent || null, hasAttribute: function (a) { return !!wrap && a === 'data-raster-wrap'; } }; }\n"
+		."process.stdout.write(JSON.stringify(cases.map(function (c) { var p = c.split(' in '); return takesBlocks(p[1] ? el(p[0], true, el(p[1])) : el(p[0])); })));\n");
 	$out = shell_exec(escapeshellarg($node).' '.escapeshellarg($file).' 2>&1');
 	unlink($file);
 	same(array_values($cases), json_decode((string)$out, true), (string)$out);
