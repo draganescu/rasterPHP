@@ -1409,7 +1409,11 @@ command-line output). They win over the settings above.
   `update <file.tar.gz>`; `--dry-run` shows what would change). It refuses
   when framework files were edited since they were installed
   (`system/checksums.json` records them); `--force` goes ahead. Replaced
-  files are kept in `application/data/backups/`.
+  files are kept in `application/data/backups/`. A folder or archive must
+  hold `system/boot.php` to count as a release; anything else is refused,
+  `--force` or not. A framework file it can't write or remove stops the
+  update with exit 1 and the file's name, and the old files are put back,
+  so nothing is half updated or recorded as installed.
 - It then runs `php bin/raster upgrade` for every app: the steps in
   `system/upgrades/<version>.php` the app still needs (renamed annotations,
   moved files). The version an app is at is in `config/raster-version`.
