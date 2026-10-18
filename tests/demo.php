@@ -2310,7 +2310,7 @@ test('R19', 'a record\'s own page is where editors edit what a model view links 
 	has($out, 'HTTP 404');
 	lacks($out, 'Abe Window');
 });
-test('R17', 'lint: records nobody lists, and staff pages listing what a model reads', function () {
+test('R17', 'lint: records nobody lists, and pages listing what a model reads (#125)', function () {
 	$inspector = new raster_inspector();
 	$views = $inspector->theme_dir();
 	$models = APPBASE.'models';
@@ -2322,7 +2322,11 @@ test('R17', 'lint: records nobody lists, and staff pages listing what a model re
 			same(1, count($problems), 'only the method that reads records');
 			$problems = $inspector->lint_source('<!-- render.bookrows.agenda --><p><!-- print.name -->x<!-- /print.name --></p><!-- /render.bookrows.agenda -->', 'staff.html');
 			same(array(), $problems, 'records handed back through cms_records::listed are fine');
-			same(array(), $inspector->lint_source('<!-- render.bookrows.rows --><p><!-- print.name -->x<!-- /print.name --></p><!-- /render.bookrows.rows -->', 'thanks.html'), 'pages for visitors may');
+			// any page: a false bool would print the mock-up, and visitor text as HTML (#125)
+			$problems = $inspector->lint_source('<!-- render.bookrows.rows --><p><!-- print.name -->x<!-- /print.name --></p><!-- /render.bookrows.rows -->', 'thanks.html');
+			check(has_message($problems, 'shows reservation records the bookrows model reads itself without cms_records::listed(), so a false bool prints the mock-up and what visitors typed prints as HTML'), 'a page for visitors too');
+			same(1, count($problems));
+			same(array(), $inspector->lint_source('<!-- render.bookrows.agenda --><p><!-- print.name -->x<!-- /print.name --></p><!-- /render.bookrows.agenda -->', 'thanks.html'), 'listed() rows print as records do');
 		});
 	} finally { @rmdir("$models/bookrows"); }
 	$listed = function () use ($inspector) { return has_message($inspector->lint_types(), "Visitors make 'reservation' records with a form, but no view lists them"); };

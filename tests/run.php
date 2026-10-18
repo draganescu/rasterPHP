@@ -4391,6 +4391,25 @@ test('booking: requires(): emails, pages, settings and records', function () {
 	});
 });
 
+test('lint warns about raw find() rows on any page (#125)', function () {
+	$app = APPBASE.config::get('models_path', 'models');
+	temp_model("$app/zzraw", array('zzraw.php' => "<?php\nclass zzraw\n{\n\tstatic function types() {\n\t\treturn array('zzraw' => array('fields' => array('name' => '', 'newsletter' => false)));\n\t}\n\tfunction rows() {\n\t\treturn cms_records::find('zzraw');\n\t}\n\tfunction text() {\n\t\treturn array_map(function (\$r) { return cms_records::for_template(cms_records::info('zzraw'), \$r); }, cms_records::find('zzraw'));\n\t}\n\tfunction listed() {\n\t\treturn cms_records::listed('zzraw', cms_records::find('zzraw'));\n\t}\n}\n"));
+	try {
+		controller::forget_models();
+		cms_records::forget();
+		$lint = function ($method) {
+			return lint_html("<!-- render.zzraw.$method --><p><!-- print.name -->x<!-- /print.name --> <!-- print.newsletter -->1<!-- /print.newsletter --></p><!-- /render.zzraw.$method -->");
+		};
+		check(has_problem($lint('rows'), 'so a false bool prints the mock-up and what visitors typed prints as HTML'), 'a page for visitors: '.json_encode($lint('rows')));
+		same(array(), $lint('listed'), 'listed() rows');
+		same(array(), $lint('text'), 'rows made text with for_template(), as the booking manage page does');
+	} finally {
+		remove_dir("$app/zzraw");
+		controller::forget_models();
+		cms_records::forget();
+	}
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";
 foreach ($skipped as $skip) echo "  - $skip\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";

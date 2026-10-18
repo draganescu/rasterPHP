@@ -298,7 +298,7 @@ php tests/demo.php                        # the whole matrix
 | R14 | a staff page lists records by status (`status=new&order=date`), and filter addresses (`/reservation/reservation_items/date/…`) show one evening, for staff only |
 | R15 | list options: filters from the URL (`seating=?seating`), dates (`date>=today`, `date<today`), `!=`, and `order=date,name`; pagination keeps the query |
 | R16 | `staff_add`: staff add bookings from the card at the end of a list; a new item starts with the list's filters; no card on an item's page |
-| R17 | lint warns about records a form makes that no view lists, and about admin pages listing records a model reads itself |
+| R17 | lint warns about records a form makes that no view lists, and about any page listing records a model reads itself without `listed()` (on admin pages, that the editor can't edit them) |
 | R18 | `cms_records::listed()`: a model's agenda of bookings by evening, nested in its rows, is edited in place with the record's actions; values the model adds are not editable; `find()` asks for the coming evenings with list options and has no 1,000 cap |
 | R19 | a record's own page (`/reservation/reservation_item/<slug>`) is where editors edit a record a model view links to; visitors get a 404 |
 | T1 | a template field is of its mock-up's type (`14.50` a number, `2026-10-10` a date, `19:00` a time), a record field of its default's (`0` an int, `false` a bool) or the one `types` names; `schema`, `describe` and `site_overview` say so |

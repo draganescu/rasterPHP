@@ -540,9 +540,14 @@ item of a collection is the mock-up content.
   - Models, MCP and `/api` read ints, floats and bools. Templates print
     text: a number with as many decimals as its mock-up (with `14.50` in
     the mock-up, 4.5 prints `4.50`), a bool `1` or `0`, an empty value
-    nothing. That holds for any model's rows, so a model returning
-    `24.0` under a `24.00` mock-up prints `24.00`. The in-page editor
-    shows what was stored the same way.
+    nothing, and what visitors typed as text. That holds for records
+    printed through `render.cms` and `cms_records::listed()`. Rows a model
+    hands back itself follow the plain rules: `false` keeps the mock-up
+    (so a `newsletter` false prints the mock-up's `1`), and values print
+    as they are, unescaped. A number in such a row still prints with its
+    mock-up's decimals (`24.0` under `24.00` prints `24.00`). `lint` warns
+    on any page that shows `find()` rows without `listed()`. The in-page
+    editor shows what was stored the same way.
   - `schema`, `describe` and `site_overview` list each field's type. When
     a mock-up changes type (`14` becomes `14 lei`), `schema` shows the
     column as retyped and `schema --apply` converts it if every stored
@@ -746,7 +751,9 @@ class reservation {
   4. Ask only when none of these can show what is needed.
 
   Rows a model returns from `cms_records::find(…)` without `listed()` can't
-  be edited in the page, and `lint` warns about it on admin pages. Check
+  be edited in the page, print a `false` bool as the mock-up and what
+  visitors typed unescaped; `lint` warns about them on every page (on admin
+  pages, about the editing too). Check
   the page with `php bin/raster render /bookings --as=editor` (MCP
   `render_url` with `as`), which says what the editor can edit there.
 - **The model's own code** writes with `cms_records::create($type, $values)`,

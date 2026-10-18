@@ -136,7 +136,7 @@ function agenda() {                           // render.booking.agenda
 <!-- /render.booking.agenda -->
 ```
 
-`listed()` prints what visitors typed as text and marks each row as its record: staff edit the bookings in place and press their buttons. The model decides which records show, and values it adds to a row print without being editable. New bookings are added from a `render.cms` list or a booking's own page. Without `listed()`, `raster lint` warns on admin pages.
+`listed()` prints what visitors typed as text and marks each row as its record: staff edit the bookings in place and press their buttons. The model decides which records show, and values it adds to a row print without being editable. New bookings are added from a `render.cms` list or a booking's own page. Without `listed()`, a `false` bool prints the mock-up and what visitors typed prints as HTML, and `raster lint` warns on any page that shows such rows (on admin pages, also that the editor can't edit them).
 
 When even that doesn't fit, link each record to its own page with `<!-- print.@href.raster_detail_link -->` (`/booking/booking_item/<slug>`, shown by a view that renders `render.cms.booking`). Editors edit it there; visitors get a 404 for a private type.
 
