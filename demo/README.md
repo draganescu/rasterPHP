@@ -284,7 +284,7 @@ php tests/demo.php                        # the whole matrix
 | R2 | `cms_records::submit`: a form stores a record with only the fields people may write; what visitors typed prints as text |
 | R3 | `check()` runs on every write: the form (an alert), the editor (422 with the problems), MCP and the model's own code |
 | R4 | records are private unless the type says `public`: no pages, feeds, sitemap or item URLs for visitors; editors see them all |
-| R5 | `owner`: a record remembers who made it, and they read their own; `owner=me` lists only the logged in person's (/account), editors included |
+| R5 | `owner`: a record remembers who made it, and they read their own; `owner=me` lists only the logged in person's (/account), editors included, members too on a public type |
 | R6 | `readonly` fields: shown to editors, not editable, refused from the editor and MCP, written by the model |
 | R7 | `hidden` fields: never shown to the editor or MCP |
 | R8 | actions: buttons for the roles allowed, `editor_action`, MCP `run_action`, refusals; hooks are static so /api can't reach them |
@@ -297,7 +297,7 @@ php tests/demo.php                        # the whole matrix
 | R15 | list options: filters from the URL (`seating=?seating`), dates (`date>=today`, `date<today`), `!=`, and `order=date,name`; pagination keeps the query |
 | R16 | `staff_add`: staff add bookings from the card at the end of a list; a new item starts with the list's filters; no card on an item's page |
 | R17 | lint warns about records a form makes that no view lists, and about admin pages listing records a model reads itself |
-| R18 | `cms_records::listed()`: a model's agenda of bookings by evening, nested in its rows, is edited in place with the record's actions; values the model adds are not editable |
+| R18 | `cms_records::listed()`: a model's agenda of bookings by evening, nested in its rows, is edited in place with the record's actions; values the model adds are not editable; `find()` asks for the coming evenings with list options and has no 1,000 cap |
 | R19 | a record's own page (`/reservation/reservation_item/<slug>`) is where editors edit a record a model view links to; visitors get a 404 |
 | T1 | a template field is of its mock-up's type (`14.50` a number, `2026-10-10` a date, `19:00` a time), a record field of its default's (`0` an int, `false` a bool) or the one `types` names; `schema`, `describe` and `site_overview` say so |
 | T2 | values are stored as their type whoever writes them (`12 Dec 2026` is `2026-12-12`, `8pm` is `20:00`), or refused with the field and an example |

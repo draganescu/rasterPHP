@@ -3,6 +3,18 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.6
+
+Nothing for sites to do. A model that relied on `cms_records::find()`
+stopping at 1,000 records can pass a limit.
+
+- **`cms_records::find()` reads every match.** It stopped at 1,000 records
+  without saying so. It now has no limit unless one is given, and its
+  filters may be list options as `render.cms` takes them (`date>=today&status!=cancelled&order=date`) (#85).
+- **`owner=me` lists only your own records on a public type.** For members
+  and visitors the template's own `owner=me` was dropped, so a member saw
+  everyone's records (#89).
+
 ## 2.2.5
 
 Nothing for sites to do.

@@ -558,7 +558,8 @@ class reservation {
   with `owner`, a logged in person sees their own. A page listing someone's
   own records (an account page) filters with `owner=me`:
   `render.cms.order('owner=me&order=newest')` shows the logged in person
-  what they made, editors included, and visitors nothing. Records print what
+  what they made, editors included, and visitors nothing, on a public type
+  too. Records print what
   visitors typed as text: every field is escaped unless the type lists it in
   `html`, and a link a visitor typed (`print.@href.website`) can't be a
   `javascript:`, `data:` or `vbscript:` URL, also when an entity, a tab, a
@@ -630,7 +631,7 @@ class reservation {
      ```php
      function agenda() {                       // render.booking.agenda
          $days = array();
-         foreach (cms_records::find('booking', array(), 'date,time') as $b) $days[$b['date']][] = $b;
+         foreach (cms_records::find('booking', 'date>=today&status!=cancelled&order=date,time') as $b) $days[$b['date']][] = $b;
          $rows = array();
          foreach ($days as $day => $bookings) $rows[] = array('day' => $day, 'bookings' => cms_records::listed('booking', $bookings));
          return $rows;
@@ -659,9 +660,14 @@ class reservation {
 - **The model's own code** writes with `cms_records::create($type, $values)`,
   `update($type, $id, $values)` and `delete($type, $id)` (these may write
   readonly and hidden fields and `owner`, and still pass `check()`), and reads
-  with `get($type, $id)` and `find($type, array('field' => 'value'), $order)`
-  (`$order` as in list options: `'date,-time'`), and hands records to a
-  template through `listed($type, $rows)` (see staff pages above).
+  with `get($type, $id)` and `find($type, $filters, $order, $limit)`.
+  `$filters` is `array('field' => 'value')` (equal values) or list options
+  as `render.cms` takes them, `'date>=today&status!=cancelled'`, with
+  `order=` and `limit=` in them too; `$order` is as in list options
+  (`'date,-time'`, oldest first by default). `find()` returns every record
+  that matches unless `$limit` (or `limit=`) says how many, so ask for
+  only what the page shows. It hands records to a template through
+  `listed($type, $rows)` (see staff pages above).
   A field whose default is `array()` is a list (line items), stored as JSON
   and handed back as a list; inside `render.cms.<type>` its rows repeat like
   any nested rows.

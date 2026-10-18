@@ -263,21 +263,34 @@ class cms_records {
 		return $bean ? self::decode($info, cms_store::export_item($bean)) : null;
 	}
 
-	// records matching field = value filters, oldest first, for model code
-	static function find($collection, $filters = array(), $order = 'oldest', $limit = 1000) {
+	// records for model code, oldest first, all of them unless a limit is
+	// given. $filters is field => value, or list options as render.cms
+	// takes them: 'date>=today&status!=cancelled&order=date,time&limit=7'
+	static function find($collection, $filters = array(), $order = 'oldest', $limit = 0) {
 		$info = self::required($collection);
 		cms_store::connect();
 		if (!cms_store::table_exists($info['type'])) return array();
 		$columns = cms_store::columns($info['type']);
 		$sql = ' 1 = 1 ';
 		$bindings = array();
+		if (is_string($filters)) {
+			$list = cms_store::list_options($filters);
+			foreach ($list['conditions'] as $condition) {
+				if (!preg_match('/^[a-z0-9_]+$/', $condition[0]) || !array_key_exists($condition[0], $columns)) throw new InvalidArgumentException("$collection has no field '{$condition[0]}'");
+			}
+			list($more, $bindings) = cms_store::conditions_sql($list['conditions'], $columns);
+			$sql .= $more;
+			if (isset($list['options']['order'])) $order = $list['options']['order'];
+			if (isset($list['options']['limit'])) $limit = $list['options']['limit'];
+			$filters = array();
+		}
 		foreach ($filters as $field => $value) {
 			if (!preg_match('/^[a-z0-9_]+$/', $field) || !array_key_exists($field, $columns)) throw new InvalidArgumentException("$collection has no field '$field'");
 			$value = cms_types::clean(cms_types::of_column($columns[$field]), $value, $field);
 			$sql .= $value === null ? " AND `$field` IS NULL " : " AND `$field` = :f_$field ";
 			if ($value !== null) $bindings[":f_$field"] = $value;
 		}
-		$sql .= ' ORDER BY '.cms_store::order_sql($order, $columns).' LIMIT '.max(1, (int)$limit);
+		$sql .= ' ORDER BY '.cms_store::order_sql($order, $columns).((int)$limit > 0 ? ' LIMIT '.(int)$limit : '');
 		$rows = array();
 		foreach (R::find($info['type'], $sql, $bindings) as $bean) $rows[] = self::decode($info, cms_store::export_item($bean));
 		return $rows;

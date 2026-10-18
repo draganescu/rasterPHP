@@ -53,8 +53,7 @@ class reservation
 	// staff edit them here as in any render.cms list.
 	function agenda() {
 		$evenings = array();
-		foreach (cms_records::find('reservation', array(), 'date,name') as $booking) {
-			if ($booking['status'] === 'cancelled' || $booking['date'] < date('Y-m-d')) continue;
+		foreach (cms_records::find('reservation', 'date>=today&status!=cancelled&order=date,name') as $booking) {
 			$evenings[$booking['date']][] = $booking;
 		}
 		$rows = array();

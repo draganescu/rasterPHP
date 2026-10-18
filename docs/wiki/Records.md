@@ -88,7 +88,7 @@ Records show wherever a template renders them, like any collection:
 </tbody></table>
 ```
 
-Visitors see nothing here, not even the example row. Staff see every booking, and in edit mode each one has **Confirm** and **Cancel** buttons. Name and date can be edited in place. Status can't, but it updates when a button changes it. With `'owner' => true`, the same block on `/account` shows a logged in visitor their own bookings.
+Visitors see nothing here, not even the example row. Staff see every booking, and in edit mode each one has **Confirm** and **Cancel** buttons. Name and date can be edited in place. Status can't, but it updates when a button changes it. With `'owner' => true`, the same block on `/account` shows a logged in visitor their own bookings. A list with `owner=me` shows each person only their own records, editors included, even on a public type.
 
 Every form that saves data needs a page like this one. Without it, what visitors send is stored and nobody sees it (`raster lint` warns). Protect it for editors in the settings, `config::set('protected')->to(array('staff' => 'editor'))`. Staff find it in the in-page editor's **Admin** menu, so the site needs no link to it.
 
@@ -122,7 +122,7 @@ Totals, an agenda grouped by day, values worked out per row, or records of sever
 ```php
 function agenda() {                           // render.booking.agenda
     $days = array();
-    foreach (cms_records::find('booking', array(), 'date,time') as $b) $days[$b['date']][] = $b;
+    foreach (cms_records::find('booking', 'date>=today&status!=cancelled&order=date,time') as $b) $days[$b['date']][] = $b;
     $rows = array();
     foreach ($days as $day => $bookings) $rows[] = array('day' => $day, 'bookings' => cms_records::listed('booking', $bookings));
     return $rows;
@@ -162,6 +162,8 @@ cms_records::create('reservation', array('name' => 'Ana', 'date' => '2026-10-05'
 cms_records::update('reservation', 12, array('status' => 'confirmed'));
 cms_records::get('reservation', 12);
 cms_records::find('reservation', array('date' => '2026-10-05'));
+cms_records::find('reservation', 'date>=today&status!=cancelled&order=date');  // list options
+cms_records::find('reservation', array(), 'newest', 10);  // a limit; without one, every match
 cms_records::refuse('fully_booked');   // stop, with a named problem
 ```
 

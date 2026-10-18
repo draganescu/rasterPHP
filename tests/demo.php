@@ -2257,6 +2257,19 @@ test('R18', 'a model view of records stays editable: listed() rows, nested in th
 	$info = cms_records::info('reservation');
 	check(cms_records::locked($info, 'seats_left') && !cms_records::locked($info, 'name'), 'fields the type does not store are read-only');
 	same(array(), array_diff(array_keys(cms_records::listed('reservation', array(array('id' => 1, 'name' => 'x')))), array(0)), 'listed() returns the rows and nothing else');
+
+	// the agenda asks find() for the coming evenings only, so 1,000 past
+	// bookings don't push them out (#85)
+	database::instance('cms');
+	R::begin();
+	for ($i = 0; $i < 1001; $i++) R::exec('INSERT INTO reservationdata (name, date, guests, status) VALUES (?, ?, 1, ?)', array("Past $i", '2020-01-01', 'confirmed'));
+	R::commit();
+	try {
+		$page = http('GET', "$base/staff", null, array("Cookie: $staff"))[1];
+		has(staff_section($page, 'By evening'), 'Tom Tomorrow', 'the agenda still shows the coming evenings');
+	} finally {
+		R::exec('DELETE FROM reservationdata WHERE date = ? AND name LIKE ?', array('2020-01-01', 'Past %'));
+	}
 });
 test('R19', 'a record\'s own page is where editors edit what a model view links to', function () {
 	database::instance('cms');
@@ -2442,6 +2455,46 @@ test(array('R7', 'R9', 'R10', 'R11'), 'hidden fields, lists, transactions and li
 		cms_records::forget();
 		database::instance('cms');
 		if (cms_store::table_exists('ticketdata')) R::exec('DROP TABLE ticketdata');
+	}
+});
+
+test('R5', 'owner=me on a public type lists only the viewer\'s own records, members included (#89)', function () use ($base, $root) {
+	$dir = "$root/demo/models/zzreviews";
+	$views = "$root/demo/views/cafe";
+	@mkdir($dir);
+	try {
+		with_file("$dir/zzreviews.php", "<?php\nclass zzreviews {\n\tstatic function types() {\n\t\treturn array('zzreview' => array('fields' => array('title' => '', 'email' => ''), 'hidden' => array('email'), 'public' => true, 'owner' => true));\n\t}\n}\n", function () use ($base, $views) {
+			cms_records::forget();
+			database::instance('cms');
+			login($base, 'maria@example.com', 'reset password');
+			$maria = (int)R::findOne('user', ' email = ? ', array('maria@example.com'))->id;
+			$staff = (int)R::findOne('user', ' email = ? ', array('staff@cafe.test'))->id;
+			cms_records::create('zzreview', array('title' => 'Maria one', 'email' => 'm@example.com', 'owner' => $maria));
+			cms_records::create('zzreview', array('title' => 'Maria two', 'email' => 'm@example.com', 'owner' => $maria));
+			cms_records::create('zzreview', array('title' => 'Staff one', 'email' => 's@example.com', 'owner' => $staff));
+			with_file("$views/zz-myreviews.html", "<html><body><!-- render.cms.zzreview('owner=me&order=oldest') --><p><!-- print.title -->T<!-- /print.title --></p><!-- /render.cms.zzreview('owner=me&order=oldest') --></body></html>", function () use ($base) {
+				$member = login($base, 'maria@example.com', 'reset password');
+				$page = http('GET', "$base/zz-myreviews", null, array("Cookie: $member"))[1];
+				has($page, '<p>Maria one</p>', 'a member sees their own');
+				has($page, '<p>Maria two</p>');
+				lacks($page, 'Staff one', 'and not another account\'s');
+				$editor = login($base, 'staff@cafe.test', 'staff password');
+				$page = http('GET', "$base/zz-myreviews", null, array("Cookie: $editor"))[1];
+				has($page, 'Staff one', 'an editor sees their own');
+				lacks($page, 'Maria', 'and only their own');
+				lacks(http('GET', "$base/zz-myreviews")[1], '<p>', 'a visitor has none');
+			});
+			with_file("$views/zzreview.html", "<html><body><!-- render.cms.zzreview('order=oldest') --><p><!-- print.title -->T<!-- /print.title --></p><!-- /render.cms.zzreview('order=oldest') --></body></html>", function () use ($base) {
+				$member = login($base, 'maria@example.com', 'reset password');
+				has(http('GET', "$base/zzreview/zzreview_items/email/nobody@example.com", null, array("Cookie: $member"))[1], '<p>Staff one</p>', 'a URL still can\'t filter by a hidden field');
+				has(http('GET', "$base/zzreview/zzreview_items/owner/999", null, array("Cookie: $member"))[1], '<p>Maria one</p>', 'nor by owner');
+			});
+		});
+	} finally {
+		@rmdir($dir);
+		cms_records::forget();
+		database::instance('cms');
+		if (cms_store::table_exists('zzreviewdata')) R::exec('DROP TABLE zzreviewdata');
 	}
 });
 

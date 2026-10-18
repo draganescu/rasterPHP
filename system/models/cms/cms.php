@@ -338,6 +338,7 @@ class cms
 		// (see cms_store::list_options)
 		$options = array();
 		$compare = array();
+		$asked_mine = false;
 		if (!empty($arguments) && is_string($arguments[0])) {
 			$list = cms_store::list_options($arguments[0]);
 			$options = $list['options'];
@@ -347,6 +348,7 @@ class cms
 				if ($value !== '' || !isset($expected_properties[$field])) $expected_properties[$field] = $value;
 			}
 			foreach ($list['conditions'] as $condition) {
+				if ($condition === array('owner', '=', 'me')) $asked_mine = true;
 				if ($condition[1] === '=') $filters[$condition[0]] = $condition[2];
 				else $compare[] = $condition;
 			}
@@ -424,14 +426,17 @@ class cms
 			$filters['owner'] = (string)$user['id'];
 		}
 		// a record's hidden fields are no filter for visitors (no asking
-		// "did this email book?")
+		// "did this email book?"), and neither is owner, except the
+		// template's own owner=me (#89)
 		if ($record && !cms::loggedin()) {
-			$secret = array_merge($record['hidden'], array('owner'));
+			$secret = array_merge($record['hidden'], $asked_mine ? array() : array('owner'));
+			if ($asked_mine && isset($uri_filters['owner'])) raster_cache::skip();
 			foreach ($secret as $hidden) {
 				// a filter the URL asks for and the list ignores
 				if (isset($uri_filters[$hidden])) raster_cache::skip();
 				unset($filters[$hidden]);
 			}
+			$secret[] = 'owner';
 			$compare = array_filter($compare, function ($c) use ($secret) { return !in_array($c[0], $secret, true); });
 		}
 		foreach ($filters as $key => $value) {
