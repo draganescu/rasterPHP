@@ -3,6 +3,26 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.1
+
+Nothing for sites to do. A script that passes a command an option it
+doesn't take now stops with exit 2 instead of running; fix the option name.
+
+- **Export stops when a page answers an error.** A page that answered 5xx,
+  or didn't answer, during `php bin/raster export` used to be left out with
+  a warning, the copy an earlier export wrote was removed, and the command
+  exited 0. Now it lists each such page, writes and removes nothing (the
+  manifest stays as it was) and exits 1 (#99).
+- **Commands refuse options they don't take.** Any `--word` argument is an
+  option, and each command checks its options against the ones its help
+  names. A typo like `send … --dryrun` used to be ignored, so the mail went
+  out; now it gives an error naming the options the command takes, prints
+  its help lines and exits 2. The help now lists every option the commands
+  read (#101).
+- **`schema --dry-run`.** `--rename` and `--drop` run all their checks and
+  say what they would do without changing anything; `--apply --dry-run`
+  applies nothing and says so.
+
 ## 2.2.0
 
 Nothing for sites to do.
