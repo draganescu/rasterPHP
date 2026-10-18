@@ -44,12 +44,14 @@ class raster_schema {
 			$tables[] = $this->compare(isset($collection['model']) ? 'record' : 'collection', $collection['type'], $fields, $meta);
 		}
 
-		// tables in the database that no template uses
+		// tables in the database that no template uses; the ones the
+		// bundled and the app's models declare with schema() are theirs
+		$declared = $this->system_tables();
 		$known = array_map(function ($t) { return $t['table']; }, $tables);
 		$unused = array();
 		foreach (R::inspect() as $table) {
 			if (!preg_match('/(page|data)$/', $table)) continue;
-			if (in_array($table, $known) || in_array($table, array('usersdata', 'rasterdata'))) continue;
+			if (in_array($table, $known) || in_array($table, array('usersdata', 'rasterdata')) || isset($declared[$table])) continue;
 			$unused[] = $table;
 		}
 
@@ -61,7 +63,7 @@ class raster_schema {
 		// tables the bundled models use (accounts, subscribers). A fluid
 		// database creates them when needed; a frozen one needs --apply.
 		$system = array();
-		foreach ($this->system_tables() as $name => $fields) {
+		foreach ($declared as $name => $fields) {
 			$columns = cms_store::table_exists($name) ? cms_store::columns($name) : array();
 			$missing = array_values(array_diff(array_keys($fields), array_keys($columns)));
 			$narrow = $this->narrow($fields, $columns);
@@ -278,6 +280,20 @@ class raster_schema {
 	}
 
 	function drop($table, $column = null, $force = false, $dry_run = false) {
+		foreach (array($table, (string)$column) as $name) {
+			if (!preg_match('/^[a-z0-9_]*$/', $name)) throw new InvalidArgumentException("Invalid name '$name'");
+		}
+		// only CMS page and collection tables, a column as much as the whole
+		// table; what a model declares (schema(), types()) is the model's,
+		// --force or not
+		$what = $column === null ? "Only CMS page and collection tables can be dropped" : "Only columns of CMS page and collection tables can be dropped";
+		if (!preg_match('/^[a-z0-9]+(page|data)$/', $table) || in_array($table, array('usersdata', 'rasterdata'))) throw new InvalidArgumentException($what);
+		$declared = $this->system_tables();
+		if (isset($declared[$table])) throw new InvalidArgumentException("$what; $table is declared by a model's schema()");
+		$record = cms_records::for_table($table);
+		if ($record && ($column === null || array_key_exists($column, cms_records::columns($record)))) {
+			throw new InvalidArgumentException(($column === null ? "$table holds the records" : "$table.$column is declared")." of the type {$record['name']} in models/{$record['model']}; change its types() instead");
+		}
 		// refuse to drop what the templates still use
 		if (!$force) {
 			foreach ($this->status()['tables'] as $used) {
@@ -287,17 +303,11 @@ class raster_schema {
 			}
 		}
 		if ($column === null) {
-			if (!preg_match('/^[a-z0-9]+(page|data)$/', $table) || in_array($table, array('usersdata', 'rasterdata'))) {
-				throw new InvalidArgumentException("Only CMS page and collection tables can be dropped");
-			}
 			cms_store::connect();
 			if (!cms_store::table_exists($table)) throw new InvalidArgumentException("There is no table $table");
 			if ($dry_run) return "would drop table $table";
 			R::exec("DROP TABLE `$table`");
 			return "dropped table $table";
-		}
-		foreach (array($table, $column) as $name) {
-			if (!preg_match('/^[a-z0-9_]+$/', $name)) throw new InvalidArgumentException("Invalid name '$name'");
 		}
 		if (in_array($column, cms_store::$system_fields)) throw new InvalidArgumentException("$column is managed by Raster");
 		cms_store::connect();

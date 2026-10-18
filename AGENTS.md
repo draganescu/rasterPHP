@@ -109,7 +109,7 @@ an agent can read it and be sure.
 | `<!-- print.model.method /-->` | Same, with no default. |
 | `<!-- print.@src.model.method --><img src="a.jpg"><!-- /print.@src.model.method -->` | Sets the attribute of the tag it wraps (`+` instead of `@` appends). `false`, `null` or an empty string keep the mock-up's value. With `cms`, a page field such as a photo. |
 | `<!-- render.model.method --> … <!-- /render.model.method -->` | Repeated once per row the method returns. Inside, `print.key` is a key of the row. |
-| `<!-- remove --> … <!-- /remove -->` | Mock-up content. Removed before anything runs. Can't be nested. |
+| `<!-- remove --> … <!-- /remove -->` | Mock-up content. Removed before anything runs, so fields and collections inside it are not part of the content model. Can't be nested. |
 | `<!-- res.name --> … <!-- /res.name -->` | A reusable fragment. |
 | `<!-- dry.view.name /-->` | Inserts fragment `res.name` from `view.html` (e.g. `dry._layout.header`). |
 | `<!-- print.if.flag --> … <!-- /print.if.flag -->` | Shown only when the template flag is true (`template::set('flag')->to(true)`). `if.live` is true on the running site and `if.static` in a static export. |
@@ -465,7 +465,9 @@ item of a collection is the mock-up content.
     a mock-up changes type (`14` becomes `14 lei`), `schema` shows the
     column as retyped and `schema --apply` converts it if every stored
     value fits; otherwise it names the values that don't.
-- **Items** get a `slug` made from their title, headline or name. They also
+- **Items** get a `slug` made from their title, headline or name (else
+  their first text field; never a record's hidden fields, which a public
+  URL must not carry). They also
   have `enabled` (`0` makes a draft) and `published_at` (a future date
   schedules the item). Visitors don't see drafts or scheduled items; editors
   do.
@@ -478,9 +480,13 @@ item of a collection is the mock-up content.
   `schema` shows orphaned columns and suggests
   `--rename=table.old:new`, which moves the content across.
   `--drop=table.column` or `--drop=table` deletes something no template uses;
-  `--force` overrides that check. `--dry-run` says what `--rename`, `--drop`
-  and `--apply` would change and changes nothing. `--check` exits 1 when the
-  templates and the database differ (for CI).
+  `--force` overrides that check. Either takes only CMS page and collection
+  tables: the accounts and subscribers, a table a model declares with
+  `schema()`, and a record type's table and the columns its `types()`
+  declares are never dropped, `--force` or not, and are never listed as
+  unused. `--dry-run` says what `--rename`, `--drop` and `--apply` would
+  change and changes nothing. `--check` exits 1 when the templates and the
+  database differ (for CI).
 
 ## Records: types a model declares
 
@@ -501,7 +507,7 @@ class reservation {
             'owner'    => true,                // remember who made it; they may read their own
             'public'   => false,               // the default: only editors (and owners) see records
             'readonly' => array('status'),     // shown to editors, written only by the model
-            'hidden'   => array(),             // never shown to editors or agents (payment ids, tokens)
+            'hidden'   => array(),             // never shown to editors or agents, nor made a slug (payment ids, tokens)
             'html'     => array(),             // fields printed as HTML; the rest print escaped
             'actions'  => array('confirm' => 'editor', 'refund' => 'admin'),
         ));   // a type's name is lowercase letters and digits; no field x next to x_id
@@ -1025,7 +1031,11 @@ of lists and filter pages come along; drafts and the editor don't.
   `the_events.php` are loaded after the framework's own).
 - **Values in scripts and styles:** `"/*- print.model.method /-*/"` is the
   same as `<!-- print.model.method /-->`, written so the file stays valid
-  JavaScript or CSS.
+  JavaScript or CSS. `lint`, `schema`, `describe` and MCP read it as the
+  engine does (the marks are `script_form` in `raster annotations`), so a
+  `print.cms` field written this way is a field like any other. A plain
+  comment that only starts like it, `/*- header */`, is no annotation and
+  hides none of the ones after it.
 - **Render into memory:** a render method whose result has the key
   `'__' => true` next to its rows is rendered but not printed; read the HTML later from
   `template::instance()->render_results['model']['method']`.

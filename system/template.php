@@ -8,6 +8,16 @@ class template {
 	private static $instances = array();
   protected function __construct() {}
   protected function __clone() {}
+
+  // In scripts and styles an annotation is written /*- print.x.y /-*/, so
+  // the file stays valid JavaScript or CSS. The inspector reads these marks
+  // from here too (raster_inspector::tokenize), so lint, schema and MCP see
+  // the annotations the engine sees.
+  static $script_form = array('/*-' => '<!--', '-*/' => '-->');
+
+  static function unscript($html) {
+  	return str_replace(array_keys(self::$script_form), array_values(self::$script_form), $html);
+  }
   
 
   public $replace = array();
@@ -234,7 +244,7 @@ class template {
 		
 		$template->output = $template->template_data;
 		$template->dry_template();
-		$template->output = str_replace(array('/*-', '-*/'), array('<!--', '-->'), $template->output);
+		$template->output = self::unscript($template->output);
 		
 		
 		$template->base_tag = $template->base_uri.$template->views_path.'/'.$template->theme.'/';
