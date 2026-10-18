@@ -28,6 +28,9 @@
 class cms_records {
 
 	static $cache = null;
+	// bundled models whose types are left out, with the type and the model
+	// that took the name: booking => array('type' => 'booking', 'by' => 'salon')
+	static $left_out = array();
 	// names a type declaration understands
 	static $keys = array('fields', 'types', 'public', 'owner', 'create', 'staff_add', 'readonly', 'hidden', 'actions', 'html');
 	// the model methods with a meaning of their own, never actions
@@ -45,33 +48,57 @@ class cms_records {
 	static function types() {
 		if (self::$cache !== null) return self::$cache;
 		self::$cache = array();
+		self::$left_out = array();
+		$own = array();
+		$bundled = array();
 		foreach (controller::models() as $model => $found) {
 			if (empty($found['declares']['types'])) continue;
 			// a bundled model's types count where a view uses the model
 			// (render.booking.form); the site's own always count, and so do
 			// the ones a site's the_<name> override declares itself
-			$own = !$found['bundled'] || ($found['parent'] && strpos((string)file_get_contents($found['file']), 'function types(') !== false);
-			if (!$own && !controller::uses($model)) continue;
-			try {
-				// models/the_x/the_x.php overrides x, and its types belong to x
-				$class = controller::model_class($model);
-				// only a static types() declares records; a model may well have
-				// an ordinary method with that name
-				if (!$class || !method_exists($class, 'types') || !(new ReflectionMethod($class, 'types'))->isStatic()) continue;
-				$declared = call_user_func(array($class, 'types'));
-			} catch (Throwable $e) {
-				log::warning("records: $model::types(): ".$e->getMessage());
-				continue;
+			if (!$found['bundled'] || ($found['parent'] && strpos((string)file_get_contents($found['file']), 'function types(') !== false)) $own[] = $model;
+			elseif (controller::uses($model)) $bundled[] = $model;
+		}
+		// the site's types first: a bundled model one of whose names (its own,
+		// or a type's) the site already took declares none of its types, so
+		// a site's booking type keeps working as it was
+		foreach (array_merge($own, $bundled) as $model) {
+			$read = self::declared($model);
+			if (!$read) continue;
+			list($class, $declared) = $read;
+			if (in_array($model, $bundled, true)) {
+				$taken = array_values(array_intersect(array_merge(array($model), array_keys($declared)), array_keys(self::$cache)));
+				if ($taken) {
+					self::$left_out[$model] = array('type' => $taken[0], 'by' => self::$cache[$taken[0]]['model']);
+					continue;
+				}
 			}
-			foreach ((array)$declared as $name => $declaration) {
-				// letters and digits only: the table is <name>data, and the name
-				// must come back from it
-				if (!is_string($name) || !preg_match('/^[a-z][a-z0-9]*$/', $name) || !is_array($declaration)) continue;
-				self::$cache[$name] = self::normalize($name, $declaration, $model, $class);
-			}
+			foreach ($declared as $name => $declaration) self::$cache[$name] = self::normalize($name, $declaration, $model, $class);
 		}
 		ksort(self::$cache);
 		return self::$cache;
+	}
+
+	// array(class, name => declaration) of a model's types(), or null
+	protected static function declared($model) {
+		try {
+			// models/the_x/the_x.php overrides x, and its types belong to x
+			$class = controller::model_class($model);
+			// only a static types() declares records; a model may well have
+			// an ordinary method with that name
+			if (!$class || !method_exists($class, 'types') || !(new ReflectionMethod($class, 'types'))->isStatic()) return null;
+			$declared = call_user_func(array($class, 'types'));
+		} catch (Throwable $e) {
+			log::warning("records: $model::types(): ".$e->getMessage());
+			return null;
+		}
+		$valid = array();
+		foreach ((array)$declared as $name => $declaration) {
+			// letters and digits only: the table is <name>data, and the name
+			// must come back from it
+			if (is_string($name) && preg_match('/^[a-z][a-z0-9]*$/', $name) && is_array($declaration)) $valid[$name] = $declaration;
+		}
+		return array($class, $valid);
 	}
 
 	// the types are read again, and the models they come from looked up again

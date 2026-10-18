@@ -2914,6 +2914,332 @@ test('find() refuses ?param and handles owner=me (#176)', function () {
 	}
 });
 
+// ## Bundled booking: setup and slots
+
+// A view that uses the bundled booking model, so its types count. $fn runs
+// with it; the view, the booking tables and what was read of them are gone
+// after.
+function booking_site($fn) {
+	$view = APPBASE.config::get('views_path', 'views').'/'.config::get('theme', 'default').'/zzbook.html';
+	$slots = "render.booking.slots('date=?date&resource=?resource&service=?service&people=?people')";
+	$days = "render.booking.days('resource=?resource&service=?service')";
+	$services = "render.booking.services('resource=?resource')";
+	file_put_contents($view, "<html><head><title>Book</title></head><body>"
+		."<ul><!-- $slots --><li class=\"slot\"><!-- print.time -->19:00<!-- /print.time -->-<!-- print.ends -->21:00<!-- /print.ends --></li><!-- /$slots --></ul>"
+		."<ol><!-- $days --><li class=\"day\"><!-- print.date -->2026-10-20<!-- /print.date --></li><!-- /$days --></ol>"
+		."<p><!-- render.booking.resources --><b class=\"resource\"><!-- print.name -->Ana<!-- /print.name --></b><!-- /render.booking.resources --></p>"
+		."<p><!-- $services --><i class=\"service\"><!-- print.name -->Cut<!-- /print.name --></i><!-- /$services --></p>"
+		."</body></html>");
+	controller::forget_models();
+	cms_records::forget();
+	cms_store::connect();
+	if (class_exists('booking', false)) booking::forget();
+	try {
+		return $fn();
+	} finally {
+		foreach (array('bookingresource', 'bookinghours', 'bookingclosed', 'bookingservice', 'booking') as $type) R::getDatabaseAdapter()->exec("DROP TABLE IF EXISTS {$type}data");
+		cms_store::forget();
+		@unlink($view);
+		controller::forget_models();
+		cms_records::forget();
+		if (class_exists('booking', false)) booking::forget();
+	}
+}
+// a page of the site as a request renders it, and how the command ended
+function booking_render($url) {
+	global $root, $db;
+	$env = 'RASTER_DB='.escapeshellarg($db).' RASTER_ENV=development';
+	return (string)shell_exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' render '.escapeshellarg($url).' 2>&1; echo "[exit $?]"');
+}
+// what a setup write was refused for, or array() when it was stored
+function booking_refused($type, $values, $id = 0) {
+	try {
+		$id ? cms_records::update($type, $id, $values) : cms_records::create($type, $values);
+	} catch (cms_refused $e) {
+		return $e->problems;
+	}
+	return array();
+}
+
+test('booking types count only where views use the model', function () use ($root) {
+	controller::forget_models();
+	cms_records::forget();
+	check(cms_records::info('bookingresource') === null, 'bookingresource is declared without a view that uses booking');
+	$dir = sys_get_temp_dir().'/raster-booking-loads-'.getmypid();
+	@mkdir($dir);
+	file_put_contents("$dir/prepend.php", '<?php register_shutdown_function(function () { file_put_contents('.var_export("$dir/out.json", true).', json_encode(get_included_files())); });');
+	$env = 'RASTER_ENV=production RASTER_DB='.escapeshellarg(test_db("$dir/db.sqlite"));
+	shell_exec("$env ".escapeshellarg(PHP_BINARY).' -d auto_prepend_file='.escapeshellarg("$dir/prepend.php").' '.escapeshellarg("$root/bin/raster").' render /about 2>&1');
+	$included = json_decode((string)@file_get_contents("$dir/out.json"), true);
+	array_map('unlink', glob("$dir/*") ?: array());
+	@rmdir($dir);
+	check(is_array($included), 'no report from the render');
+	same(array(), array_values(array_filter($included, function ($f) { return strpos($f, '/system/models/booking/') !== false; })), 'booking files loaded:');
+	booking_site(function () {
+		same('booking', cms_records::info('bookinghours')['model']);
+		same('time', cms_records::info('bookinghours')['types']['starts']);
+		same(true, booking::ready());
+	});
+});
+
+test('a site booking model or type keeps the name', function () {
+	$app = APPBASE.config::get('models_path', 'models');
+	booking_site(function () use ($app) {
+		// the site's own booking model, in a process of its own: this one has
+		// the bundled class already
+		temp_model("$app/booking", array('booking.php' => "<?php\nclass booking\n{\n\tstatic function types() {\n\t\treturn array('booking' => array('fields' => array('name' => '')));\n\t}\n}\n"));
+		try {
+			$out = race_php('require_once BASE."tools/inspector.php"; echo json_encode(array(controller::model("booking")["bundled"], cms_records::info("bookingresource") === null, cms_records::info("booking")["model"], array_column((new raster_inspector())->lint_models(), "message")));', 1);
+		} finally {
+			remove_dir("$app/booking");
+			controller::forget_models();
+		}
+		$out = json_decode($out[0], true);
+		check(is_array($out), 'the process said: '.json_encode($out));
+		same(false, $out[0], 'bundled:');
+		same(true, $out[1], 'bookingresource is undeclared:');
+		same('booking', $out[2]);
+		check(has_problem(array_map(function ($m) { return array('message' => $m); }, $out[3]), 'models/booking shadows the bundled booking'), 'lint: '.json_encode($out[3]));
+		// a type named booking in another model
+		temp_model("$app/zzsalon", array('zzsalon.php' => "<?php\nclass zzsalon\n{\n\tstatic function types() {\n\t\treturn array('booking' => array('fields' => array('name' => '', 'stylist' => '')));\n\t}\n}\n"));
+		try {
+			controller::forget_models();
+			cms_records::forget();
+			same('zzsalon', cms_records::info('booking')['model']);
+			check(cms_records::info('bookinghours') === null, 'the bundled types are declared beside the site\'s booking');
+			same(false, booking::ready());
+			check(has_problem((new raster_inspector())->lint_models(), "zzsalon declares a type 'booking'"), 'lint warns about the type');
+			$page = booking_render('/zzbook?date='.date('Y-m-d', strtotime('next tuesday')));
+			check(strpos($page, '[exit 0]') !== false, 'the page renders: '.$page);
+			check(strpos($page, 'class="slot"') === false && strpos($page, 'class="resource"') === false, 'no rows: '.$page);
+		} finally {
+			remove_dir("$app/zzsalon");
+			controller::forget_models();
+			cms_records::forget();
+		}
+	});
+});
+
+test('booking: sittings: the starts of the hours rows', function () {
+	booking_site(function () {
+		$tue = date('Y-m-d', strtotime('next tuesday'));
+		cms_records::create('bookingresource', array('name' => 'Dining room', 'people' => 20));
+		cms_records::create('bookinghours', array('days' => 'tue,wed,thu,fri,sat,sun', 'starts' => '19:00', 'ends' => '21:00', 'every' => 120));
+		$day = booking::day($tue, 'dining-room');
+		same(array('19:00', '21:00'), array_column($day, 'time'));
+		same(array('21:00', '23:00'), array_column($day, 'ends'));
+		same(array($tue, $tue), array_column($day, 'date'));
+		same('20', $day[0]['left_people']);
+		same('', $day[0]['left_bookings']);
+		same('0', $day[0]['full']);
+		same('free', $day[0]['state']);
+		same(array(), booking::day(date('Y-m-d', strtotime('next monday')), 'dining-room'));
+		// 19 seated at 19:00 leave one place: a party of two doesn't fit
+		$day = booking::day($tue, 'dining-room', '', 2, array(array('time' => '19:00', 'ends' => '21:00', 'people' => 19)));
+		same(array('1', '1', 'full'), array($day[0]['left_people'], $day[0]['full'], $day[0]['state']));
+		same(array('20', '0'), array($day[1]['left_people'], $day[1]['full']));
+		same(array(), booking::day($tue, 'no-such-room'));
+	});
+});
+
+test('booking: appointments: a grid, the union of rows, mixed service lengths', function () {
+	booking_site(function () {
+		$tue = date('Y-m-d', strtotime('next tuesday'));
+		cms_records::create('bookingresource', array('name' => 'Ana', 'bookings' => 1));
+		cms_records::create('bookingresource', array('name' => 'Mihai', 'bookings' => 1));
+		cms_records::create('bookinghours', array('resource' => 'ana', 'days' => 'tue', 'starts' => '09:00', 'ends' => '11:00', 'every' => 30));
+		cms_records::create('bookinghours', array('resource' => 'ana', 'days' => 'tue', 'starts' => '10:00', 'ends' => '12:00', 'every' => 15));
+		cms_records::create('bookingservice', array('name' => 'Colour', 'minutes' => 90, 'resources' => 'ana'));
+		$want = array('09:00', '09:30');
+		for ($t = 600; $t <= 720; $t += 15) $want[] = booking::clock($t);
+		$starts = booking::starts($tue, 'ana');
+		same($want, array_column($starts, 'time'));
+		// a start in both rows keeps the smaller every
+		same(15, $starts[2]['every'], '10:00 every:');
+		same(30, $starts[1]['every'], '09:30 every:');
+		same(array(), booking::starts($tue, 'mihai'));
+		$colour = array_column(booking::day($tue, 'ana', 'colour'), 'ends', 'time');
+		same('13:00', $colour['11:30']);
+		same('10:30', $colour['09:00']);
+		same(false, booking::offers('colour', 'mihai'));
+		same(true, booking::offers('colour', 'ana'));
+		same(90, booking::length('ana', 'colour', 15));
+		same(15, booking::length('ana', '', 15));
+		// a colour 10:00-11:30 takes Ana's one chair until 11:30
+		$state = array_column(booking::day($tue, 'ana', '', 1, array(array('time' => '10:00', 'ends' => '11:30', 'people' => 1))), 'state', 'time');
+		same(array('free', 'full', 'full', 'free'), array($state['09:30'], $state['10:00'], $state['11:15'], $state['11:30']));
+	});
+});
+
+test('booking: peak counts the busiest minute, not the sum', function () {
+	$rows = array(
+		array('time' => '10:00', 'ends' => '10:30', 'people' => 2),
+		array('time' => '11:00', 'ends' => '11:30', 'people' => 2),
+		array('time' => '09:00', 'ends' => '10:00', 'people' => 5),
+	);
+	same(array('people' => 2, 'bookings' => 1), booking::peak($rows, 600, 690));
+	// 09:00-10:00 ends where 10:00-10:30 starts: never both at once
+	same(array('people' => 5, 'bookings' => 1), booking::peak($rows, 570, 615));
+	same(array('people' => 0, 'bookings' => 0), booking::peak($rows, 630, 660));
+	$rows[] = array('time' => '09:50', 'ends' => '10:10', 'people' => 2);
+	same(array('people' => 7, 'bookings' => 2), booking::peak($rows, 570, 615));
+	// a span ending at midnight is read as 24:00
+	same(array('people' => 3, 'bookings' => 1), booking::peak(array(array('time' => '23:30', 'ends' => '00:00', 'people' => 3)), 1410, 1440));
+});
+
+test('booking: closed days and seasons', function () {
+	booking_site(function () {
+		$tue = date('Y-m-d', strtotime('next tuesday'));
+		$day = function ($n) use ($tue) { return date('Y-m-d', strtotime("$tue +$n days")); };
+		foreach (array('Ana', 'Mihai', 'Terrace') as $name) cms_records::create('bookingresource', array('name' => $name, 'bookings' => 1));
+		cms_records::create('bookinghours', array('starts' => '09:00', 'ends' => '10:00', 'every' => 30));
+		cms_records::create('bookingclosed', array('date' => $tue, 'note' => 'Holiday'));
+		cms_records::create('bookingclosed', array('date' => $day(1), 'resource' => 'ana'));
+		cms_records::create('bookingclosed', array('date' => $day(2), 'until' => $day(4)));
+		same(array(), booking::starts($tue, 'ana'));
+		same(array(), booking::starts($tue, 'mihai'));
+		same(true, booking::is_closed($tue, 'mihai'));
+		same(array(), booking::starts($day(1), 'ana'));
+		same(array('09:00', '09:30', '10:00'), array_column(booking::starts($day(1), 'mihai'), 'time'));
+		foreach (array(2, 3, 4) as $n) same(true, booking::is_closed($day($n), 'mihai'), "day $n:");
+		same(false, booking::is_closed($day(5), 'mihai'));
+		same(3, count(booking::starts($day(5), 'ana')));
+		$year = (int)date('Y') + 1;
+		cms_records::create('bookinghours', array('resource' => 'terrace', 'starts' => '12:00', 'ends' => '12:00', 'every' => 60, 'from' => "$year-06-01", 'until' => "$year-08-31"));
+		check(in_array('12:00', array_column(booking::starts("$year-07-07", 'terrace'), 'time'), true), 'the season applies in July');
+		check(!in_array('12:00', array_column(booking::starts("$year-09-01", 'terrace'), 'time'), true), 'the season is over in September');
+		check(!in_array('12:00', array_column(booking::starts("$year-07-07", 'ana'), 'time'), true), 'the terrace row is the terrace\'s');
+	});
+});
+
+test('booking: slots skip what is too soon or too far', function () {
+	booking_site(function () {
+		$tue = date('Y-m-d', strtotime('next tuesday'));
+		cms_records::create('bookingresource', array('name' => 'Dining room', 'people' => 20));
+		cms_records::create('bookinghours', array('starts' => '18:00', 'ends' => '19:00', 'every' => 30));
+		$now = booking::starts_at($tue, '18:00');
+		same(array('19:00'), array_column(booking::day($tue, 'dining-room', '', 1, array(), $now), 'time'));
+		config::set('booking_notice')->to(90);
+		try {
+			same(array(), booking::day($tue, 'dining-room', '', 1, array(), $now));
+		} finally {
+			config::set('booking_notice')->to(null);
+		}
+		check(count(booking::day(date('Y-m-d', strtotime('+60 days')), 'dining-room')) === 3, 'today + 60 days has slots');
+		same(array(), booking::day(date('Y-m-d', strtotime('+61 days')), 'dining-room'));
+		same(array(), booking::day(date('Y-m-d', strtotime('-1 day')), 'dining-room'));
+		config::set('booking_horizon')->to(70);
+		try {
+			check(count(booking::day(date('Y-m-d', strtotime('+61 days')), 'dining-room')) === 3, 'booking_horizon 70 reaches day 61');
+		} finally {
+			config::set('booking_horizon')->to(null);
+		}
+		same(array(), booking::day('2026-02-30', 'dining-room'));
+		same(array(), booking::day('<b>', 'dining-room'));
+	});
+});
+
+test('booking: the time zone across DST', function () {
+	booking_site(function () {
+		with_timezone('Europe/Bucharest', function () {
+			cms_records::create('bookingresource', array('name' => 'Night'));
+			cms_records::create('bookinghours', array('starts' => '02:00', 'ends' => '04:30', 'every' => 30));
+			$spring = array_column(booking::starts('2027-03-28', 'night'), 'time');
+			same(array('02:00', '02:30', '04:00', '04:30'), $spring, 'the spring day:');
+			$autumn = array_column(booking::starts('2026-10-25', 'night'), 'time');
+			same(1, count(array_keys($autumn, '03:00')), 'the autumn day: '.json_encode($autumn));
+			same(10800, booking::starts_at('2026-10-25', '04:00') - booking::starts_at('2026-10-25', '02:00'));
+			$now = booking::starts_at('2027-03-28', '02:30');
+			// wall 04:00 is 30 real minutes after 02:30 that day
+			same(array('04:30'), array_column(booking::day('2027-03-28', 'night', '', 1, array(), $now), 'time'));
+		});
+	});
+});
+
+test('booking: a span ends by midnight', function () {
+	booking_site(function () {
+		$tue = date('Y-m-d', strtotime('next tuesday'));
+		cms_records::create('bookingresource', array('name' => 'Late', 'bookings' => 1));
+		cms_records::create('bookinghours', array('starts' => '22:00', 'ends' => '23:30', 'every' => 30));
+		cms_records::create('bookingservice', array('name' => 'Colour', 'minutes' => 90));
+		cms_records::create('bookingservice', array('name' => 'Cut', 'minutes' => 30));
+		same(array('22:00' => '23:30', '22:30' => '00:00'), array_column(booking::day($tue, 'late', 'colour'), 'ends', 'time'));
+		same('00:00', array_column(booking::day($tue, 'late', 'cut'), 'ends', 'time')['23:30']);
+		same(1440, booking::minutes('00:00', true));
+		same(0, booking::minutes('00:00'));
+		same(1140, booking::minutes('19:00:00'));
+		same('00:00', booking::clock(1440));
+		same('09:05', booking::clock(545));
+	});
+});
+
+test('booking: setup records are checked', function () {
+	booking_site(function () {
+		same(array('every_invalid'), booking_refused('bookinghours', array('starts' => '09:00', 'ends' => '10:00', 'every' => 0)));
+		same(array('hours_invalid'), booking_refused('bookinghours', array('starts' => '11:00', 'ends' => '10:00')));
+		same(array('hours_invalid'), booking_refused('bookinghours', array('starts' => '09:00')));
+		same(array('days_invalid'), booking_refused('bookinghours', array('starts' => '09:00', 'ends' => '10:00', 'days' => 'mon,funday')));
+		same(array('days_invalid'), booking_refused('bookinghours', array('starts' => '09:00', 'ends' => '10:00', 'days' => '')));
+		same(array('season_invalid'), booking_refused('bookinghours', array('starts' => '09:00', 'ends' => '10:00', 'from' => '2027-08-31', 'until' => '2027-06-01')));
+		same(array('limit_invalid'), booking_refused('bookingresource', array('name' => 'Ana', 'people' => -1)));
+		same(array('limit_invalid'), booking_refused('bookingresource', array('name' => 'Ana', 'bookings' => -2)));
+		same(array('minutes_invalid'), booking_refused('bookingservice', array('name' => 'Cut', 'minutes' => 0)));
+		same(array('closed_invalid'), booking_refused('bookingclosed', array('note' => 'no date')));
+		same(array('closed_invalid'), booking_refused('bookingclosed', array('date' => '2027-01-05', 'until' => '2027-01-01')));
+		same(array(), booking_refused('bookinghours', array('starts' => '09:00', 'ends' => '10:00', 'days' => 'Mon, tue')));
+		same(array(), booking_refused('bookingclosed', array('date' => '2027-01-05')));
+		same(array(), booking::setup()['resources']);
+		$ana = cms_records::create('bookingresource', array('name' => 'Ana'));
+		// a write forgets the setup it read
+		same(array('ana'), array_keys(booking::setup()['resources']));
+		same(array('limit_invalid'), booking_refused('bookingresource', array('people' => -1), $ana['id']));
+		$hours = booking::setup()['hours'];
+		same(array('every_invalid'), booking_refused('bookinghours', array('every' => -5), $hours[0]['id']));
+	});
+});
+
+test('render.booking.slots, days, resources and services read the URL', function () {
+	booking_site(function () {
+		$tue = date('Y-m-d', strtotime('next tuesday'));
+		cms_records::create('bookingresource', array('name' => 'Ana', 'bookings' => 1));
+		cms_records::create('bookingresource', array('name' => 'Mihai', 'bookings' => 1));
+		cms_records::create('bookingresource', array('name' => 'Old', 'bookings' => 1, 'active' => false));
+		cms_records::create('bookinghours', array('days' => 'tue,wed,thu,fri,sat,sun', 'starts' => '09:00', 'ends' => '11:00', 'every' => 30));
+		cms_records::create('bookingservice', array('name' => 'Cut', 'minutes' => 30));
+		cms_records::create('bookingservice', array('name' => 'Colour', 'minutes' => 90, 'resources' => 'ana'));
+		$page = booking_render("/zzbook?date=$tue&resource=ana&service=cut");
+		check(strpos($page, '[exit 0]') !== false, 'the page renders: '.$page);
+		check(strpos($page, '<li class="slot">09:00-09:30</li>') !== false, 'the 09:00 slot: '.$page);
+		same(5, substr_count($page, 'class="slot"'), 'slots:');
+		preg_match_all('#<li class="day">(\d{4}-\d\d-\d\d)</li>#', $page, $m);
+		same(14, count($m[1]), 'days:');
+		foreach ($m[1] as $date) check(date('D', strtotime($date)) !== 'Mon', "$date is a Monday");
+		preg_match_all('#<b class="resource">([^<]*)</b>#', $page, $m);
+		same(array('Ana', 'Mihai'), $m[1]);
+		preg_match_all('#<i class="service">([^<]*)</i>#', $page, $m);
+		same(array('Cut', 'Colour'), $m[1]);
+		preg_match_all('#<i class="service">([^<]*)</i>#', booking_render('/zzbook?resource=mihai'), $m);
+		same(array('Cut'), $m[1]);
+		// several stylists and none chosen, or a stylist with services and none
+		// chosen: no times yet
+		same(0, substr_count(booking_render("/zzbook?date=$tue"), 'class="slot"'));
+		same(0, substr_count(booking_render("/zzbook?date=$tue&resource=ana"), 'class="slot"'));
+		same(array('Cut'), array_column((new booking())->services('resource=mihai'), 'name'));
+		same(array('Ana'), array_column((new booking())->resources('service=colour'), 'name'));
+		same('bookingresource', (new booking())->resources()[0]['raster_record']);
+		same(array(), (new booking())->slots("date=$tue&resource=ana&service=cut&people=0"));
+		// a salon grid over the whole horizon stays quick
+		cms_records::create('bookinghours', array('resource' => 'ana', 'starts' => '09:00', 'ends' => '18:00', 'every' => 15));
+		cms_records::create('bookinghours', array('resource' => 'mihai', 'starts' => '09:00', 'ends' => '18:00', 'every' => 15));
+		$start = microtime(true);
+		$days = (new booking())->days('limit=60&resource=ana&service=colour');
+		$took = microtime(true) - $start;
+		check($took < 1, "days took $took s");
+		same(60, count($days));
+		check((int)$days[0]['slots_free'] > 0, 'slots_free: '.json_encode($days[0]));
+	});
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";
 foreach ($skipped as $skip) echo "  - $skip\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";
