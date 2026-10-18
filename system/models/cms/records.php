@@ -48,8 +48,10 @@ class cms_records {
 		foreach (controller::models() as $model => $found) {
 			if (empty($found['declares']['types'])) continue;
 			// a bundled model's types count where a view uses the model
-			// (render.booking.form); the site's own always count
-			if ($found['bundled'] && !controller::uses($model)) continue;
+			// (render.booking.form); the site's own always count, and so do
+			// the ones a site's the_<name> override declares itself
+			$own = !$found['bundled'] || ($found['parent'] && strpos((string)file_get_contents($found['file']), 'function types(') !== false);
+			if (!$own && !controller::uses($model)) continue;
 			try {
 				// models/the_x/the_x.php overrides x, and its types belong to x
 				$class = controller::model_class($model);

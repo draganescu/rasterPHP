@@ -393,6 +393,39 @@ test('bundled types count only where views use them', function () {
 	}
 });
 
+test('an override\'s own types count without a view', function () {
+	$app = APPBASE.config::get('models_path', 'models');
+	temp_model(BASE.'models/zzpost', array('zzpost.php' => "<?php\nclass zzpost\n{\n}\n"));
+	temp_model("$app/the_zzpost", array('the_zzpost.php' => "<?php\nclass the_zzpost extends zzpost\n{\n\tstatic function types() {\n\t\treturn array('zzoutbox' => array('fields' => array('to' => '')));\n\t}\n}\n"));
+	try {
+		controller::forget_models();
+		cms_records::forget();
+		check(isset(cms_records::types()['zzoutbox']), 'the_zzpost\'s zzoutbox does not count');
+	} finally {
+		remove_dir(BASE.'models/zzpost');
+		remove_dir("$app/the_zzpost");
+		controller::forget_models();
+		cms_records::forget();
+	}
+});
+
+test('the MCP vocabulary sees a model added while the server runs', function () {
+	$app = APPBASE.config::get('models_path', 'models');
+	$names = function () {
+		$answer = (new mcp())->call_tool('vocabulary', array());
+		return json_encode($answer);
+	};
+	try {
+		check(strpos($names(), 'zznew') === false, 'zznew is there before it is written');
+		temp_model("$app/zznew", array('zznew.php' => "<?php\nclass zznew\n{\n\tfunction hello() {}\n}\n"));
+		check(strpos($names(), 'zznew') !== false, 'zznew is not in the second answer');
+	} finally {
+		remove_dir("$app/zznew");
+		controller::forget_models();
+		cms_records::forget();
+	}
+});
+
 test('a site model named like a bundled one wins and lint says so', function () use ($root, $db) {
 	$app = APPBASE.config::get('models_path', 'models');
 	temp_model("$app/newsletter", array('newsletter.php' => "<?php\nclass newsletter\n{\n}\n"));
