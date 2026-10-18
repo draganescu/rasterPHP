@@ -308,7 +308,13 @@ setup. AGENTS.md gets a worked staff page.
 
 Time zone is the site's `timezone` (Phase 1 groundwork, #84).
 
-## The demo café moves onto it
+## Our own examples move onto it
+
+Nothing in this repository keeps a booking model of its own once this
+ships: the bundled model is what our examples show. (The same goes for
+`shop/`, which moves onto the bundled store model in Phase 4.) The rule
+that a site's own `booking` model wins is only for sites outside this
+repository, so their upgrade breaks nothing.
 
 `demo/models/reservation` is removed. The café gets one resource (Dining
 room, 20 people), hours for its two sittings Tue–Sun, a Monday closed rule
@@ -317,8 +323,11 @@ manage page, and `/staff` built from the recipe. `cafe::subscribe_guest`
 listens to `booking.requested` instead of `reservation.booked`. The demo
 also gets a small salon-style section (two stylists, two services) so both
 kinds are exercised. Existing reservation rows in a site's database are not
-migrated (the demo's data is seed data); sites with their own `reservation`
-model keep it, untouched.
+migrated (the demo's data is seed data). Sites outside this repository with
+their own `reservation` or `booking` model keep it, untouched; AGENTS.md
+and the wiki's Records page stop teaching sites to write a booking model
+and point to the bundled one (their worked example becomes another record
+type).
 
 ## Tests
 
