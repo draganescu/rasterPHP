@@ -216,9 +216,14 @@ class newsletter
 		self::connect();
 		self::$sent = 0;
 		self::$failures = array();
-		// the tables as `raster schema --apply` makes them, also on a frozen database
+		// the tables as `raster schema --apply` makes them, also on a frozen
+		// database: missing columns added, and on MySQL the small ones that
+		// 2.2.0 and earlier made (tinyint recipients, varchar(191) subject)
+		// widened, since frozen RedBean would never grow them
 		foreach (array('newsletterissue', 'newsletterdelivery') as $table) {
-			cms_types::ensure($table, array_map(array('cms_types', 'of_default'), self::schema()[$table]));
+			$types = array_map(array('cms_types', 'of_default'), self::schema()[$table]);
+			cms_types::ensure($table, $types);
+			cms_types::widen($table, $types);
 		}
 		$issue = self::issue($url);
 		if ($issue && !$issue->incomplete && !$again) return false;

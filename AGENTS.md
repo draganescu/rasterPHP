@@ -775,7 +775,10 @@ class reservation {
     reached everyone, else its `newsletterissue` row (`recipients`,
     `incomplete`); `newsletter::$sent` and `newsletter::$failures`
     (email => error) say what this run did. It makes its two tables, with
-    the types `schema --apply` gives them, also on a frozen database.
+    the types `schema --apply` gives them, also on a frozen database, and
+    on MySQL widens the small columns an older Raster made for them
+    (`recipients` as TINYINT, `subject` as VARCHAR(191)), as `--apply`
+    does, so sites need no step for it.
 
 **mail**: emails are views. `mail::send_view('_email/welcome', $to,
 array('name' => 'Ada'))` uses the view's `<title>` as the subject.
