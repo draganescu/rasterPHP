@@ -377,7 +377,11 @@ class booking
 			$values = array('status' => $status);
 			if ($status === 'confirmed') $values += self::issue($booking);
 			$saved = cms_records::update('booking', $id, $values);
-			cms_records::dispatch('booking.'.$status, self::payload($saved, $who));
+			// each name written out, so lint and the vocabulary know who sends it
+			$payload = self::payload($saved, $who);
+			if ($status === 'confirmed') cms_records::dispatch('booking.confirmed', $payload);
+			elseif ($status === 'declined') cms_records::dispatch('booking.declined', $payload);
+			else cms_records::dispatch('booking.cancelled', $payload);
 			return $saved;
 		});
 	}
