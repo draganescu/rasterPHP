@@ -86,9 +86,40 @@ class raster_inspector {
 	// ##Tokens
 	// Finds every HTML comment and classifies it. Comments that are not
 	// directives are ignored unless they look like a misspelled directive.
+	// The script form the engine reads in scripts and styles,
+	// "/*- print.x.y /-*/" (template::$script_form), counts as a comment too.
 	static function tokenize($html) {
 		$tokens = array();
-		preg_match_all('/<!--(.*?)-->/s', $html, $matches, PREG_OFFSET_CAPTURE);
+		$opens = array('<!--');
+		$closes = array('-->');
+		foreach (template::$script_form as $mark => $means) {
+			if ($means === '<!--') $opens[] = $mark;
+			if ($means === '-->') $closes[] = $mark;
+		}
+		// a body holds no opener, so a "/*-" that ends with a plain "*/" (a CSS
+		// or JS comment) cannot run on to a later "-->" and swallow the
+		// annotation there: a comment starts at the last opener before its
+		// closer. Found by walking the markers, not with one regex over the
+		// bodies, which runs out of PCRE stack on a long comment.
+		$is_open = array_flip($opens);
+		$markers = array();
+		foreach (array_merge($opens, $closes) as $marker) $markers[] = preg_quote($marker, '/');
+		if (preg_match_all('/'.implode('|', $markers).'/', $html, $marks, PREG_OFFSET_CAPTURE) === false) {
+			throw new Exception('Could not read the comments in this view: '.preg_last_error_msg());
+		}
+		$matches = array(array(), array());
+		$start = null;
+		foreach ($marks[0] as $mark) {
+			if (isset($is_open[$mark[0]])) {
+				$start = $mark;
+			} elseif ($start !== null) {
+				$body_at = $start[1] + strlen($start[0]);
+				$end = $mark[1] + strlen($mark[0]);
+				$matches[0][] = array(substr($html, $start[1], $end - $start[1]), $start[1]);
+				$matches[1][] = array(substr($html, $body_at, $mark[1] - $body_at), $body_at);
+				$start = null;
+			}
+		}
 		foreach ($matches[0] as $i => $match) {
 			$raw = $match[0];
 			$offset = $match[1];
@@ -130,8 +161,9 @@ class raster_inspector {
 			// the engine matches exact strings, spacing included
 			$canonical = $token['type'] === 'close' ? '<!-- /'.$token['name'].' -->'
 				: ($token['type'] === 'self' ? '<!-- '.$token['name'].' /-->' : '<!-- '.$token['name'].' -->');
-			$token['canonical'] = $canonical;
-			$token['exact'] = ($raw === $canonical);
+			$token['script'] = template::unscript($raw) !== $raw;
+			$token['canonical'] = self::spelled($token, $canonical);
+			$token['exact'] = ($raw === $token['canonical']);
 			$tokens[] = $token;
 		}
 		return $tokens;
@@ -202,7 +234,7 @@ class raster_inspector {
 				// names that block and `lint --fix` writes the full name in, so the
 				// engine only ever sees the full form.
 				if (self::shortens($last, $token)) {
-					$full = '<!-- /'.$last['name'].' -->';
+					$full = self::spelled($token, '<!-- /'.$last['name'].' -->');
 					$problems[] = self::problem('error', $token, "{$token['raw']} is ignored by the template engine, which needs the full name; write $full", self::edit($token, $full));
 				} else {
 					$opened_at = null;
@@ -233,6 +265,13 @@ class raster_inspector {
 			$problems[] = self::problem('error', $token, "{$token['raw']} is never closed; add <!-- /{$token['name']} --> or make it self-closing ({$token['keyword']}.x /-->)");
 		}
 		return array($root['children'], $problems);
+	}
+
+	// A tag in the form the token was written in: in a script or a style,
+	// <!-- print.x /--> is written /*- print.x /-*/
+	static function spelled($token, $tag) {
+		if (empty($token['script'])) return $tag;
+		return str_replace(array_values(template::$script_form), array_keys(template::$script_form), $tag);
 	}
 
 	// Whether a closing tag is a shortened form of this opening's: the keyword
@@ -1320,6 +1359,7 @@ class raster_inspector {
 
 	protected function uses_collections($blocks) {
 		foreach ($blocks as $block) {
+			if ($block['keyword'] === 'remove') continue;
 			if ($block['keyword'] === 'render' && strpos($block['ref'], 'cms.') === 0) return true;
 			if (!empty($block['children']) && $this->uses_collections($block['children'])) return true;
 		}
@@ -1328,6 +1368,8 @@ class raster_inspector {
 
 	protected function collect_content($blocks, &$fields, &$collections, $view, $reserved) {
 		foreach ($blocks as $block) {
+			// mock-up content is removed before anything runs, as in lint_blocks
+			if ($block['keyword'] === 'remove') continue;
 			$attribute = $block['keyword'] === 'print' ? self::attribute_call($block['ref']) : null;
 			$ref = in_array($block['keyword'], array('print', 'render')) ? self::model_reference($attribute ? $attribute['ref'] : $block['ref']) : false;
 			if ($ref && $ref['model'] === 'cms') {
@@ -1358,6 +1400,7 @@ class raster_inspector {
 		if (!in_array($view, $collection['views'])) $collection['views'][] = $view;
 		$walk = function ($blocks) use (&$walk, &$collection) {
 			foreach ($blocks as $child) {
+				if ($child['keyword'] === 'remove') continue;
 				if ($child['keyword'] === 'print') {
 					$key = raster_inspector::data_key($child['ref']);
 					if (!$key['builtin'] && strpos($key['key'], '.') === false && !isset($collection['fields'][$key['key']])) {

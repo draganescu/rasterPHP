@@ -213,7 +213,7 @@ Prints `$_SESSION['cart_count']`, or nothing if it isn't set. This value is **no
 <!-- /render.cms.news -->
 ```
 
-Everything inside is deleted before any model runs, so annotations inside a `remove` block are never called. Remove blocks can't be nested inside each other.
+Everything inside is deleted before any model runs, so annotations inside a `remove` block are never called, and the CMS fields and collections in it don't exist. Remove blocks can't be nested inside each other.
 
 ## res and dry: shared fragments
 
@@ -255,7 +255,7 @@ An HTML comment inside `<script>` or `<style>` would break the code. There, writ
 </script>
 ```
 
-This is the same as `<!-- print.theme.accent /-->`, but the file stays valid JavaScript or CSS for editors and mock-ups.
+This is the same as `<!-- print.theme.accent /-->`, but the file stays valid JavaScript or CSS for editors and mock-ups. `lint` checks it like any annotation, and a `print.cms` field written this way is a field like any other.
 
 ## Evaluation order
 
