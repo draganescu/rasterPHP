@@ -209,7 +209,7 @@ When you rename an annotation, Raster notices the likely rename and suggests the
 | `php bin/raster schema --check` | exits with code 1 when templates and database differ, for automated checks |
 | `--json` | the same information as JSON |
 
-`--drop` refuses to delete something a template still uses unless you add `--force`.
+`--drop` refuses to delete something a template still uses unless you add `--force`. It only deletes CMS page and collection tables and their columns: the accounts, the subscribers, a table a model declares, and a record type's table and declared fields stay, even with `--force`.
 
 In production (frozen database), a field you added to a template shows its default until you run `schema --apply` there.
 

@@ -3,7 +3,7 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
-## 2.2.1
+## 2.2.2
 
 Nothing for sites to do. Records that already have a slug keep it.
 
@@ -13,6 +13,25 @@ Nothing for sites to do. Records that already have a slug keep it.
   hidden `secret` or `email` showed that value in its URL, and editors and
   agents got it back as the record's slug. Hidden fields, `owner` and
   `created_at` are now skipped when a slug is made (#93).
+
+## 2.2.1
+
+Nothing for sites to do.
+
+- **Lint and schema read annotations the way pages do (#108).** An
+  annotation written in script form (`/*- … -*/`) inside a script or a
+  style was skipped by `lint`, `schema`, `describe` and MCP, so a typo there
+  passed lint and a CMS field written that way was called an orphan, and
+  `--drop` could delete its column. Annotations inside `<!-- remove -->`
+  blocks counted as real, so `schema --apply` made tables and columns for
+  things no page shows. Both now match what the engine does, and a long
+  comment no longer hides the annotations after it.
+- **`schema --drop` only drops what the templates own (#109).** A column
+  drop now goes through the same check as a table drop: CMS page and
+  collection tables only. Tables a model declares with `schema()`, record
+  type tables and the columns a type declares are refused, even with
+  `--force`, so `--drop=user.password` no longer drops the password column.
+  A `schema()` table is no longer listed as unused.
 
 ## 2.2.0
 
