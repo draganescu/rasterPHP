@@ -118,11 +118,13 @@ class newsletter
 		self::connect();
 		$subscriber = self::table_ready() ? R::findOne('subscriber', ' email = ? ', array(strtolower(trim((string)$subscribed['email'])))) : null;
 		if (!$subscriber || $subscriber->status !== 'pending' || !$subscriber->token) return null;
-		$sent = mail::send_view('_email/newsletter_confirm', $subscriber->email, array(
+		// through the site's the_mail, when it has one
+		$mail = controller::model_class('mail');
+		$sent = $mail::send_view('_email/newsletter_confirm', $subscriber->email, array(
 			'confirm_url' => self::page_url('newsletter_confirm_page', 'newsletter-confirm', $subscriber->token),
 			'name' => (string)$subscriber->name,
 		));
-		if (!$sent) log::error('Newsletter confirmation email failed: '.mail::$last_error);
+		if (!$sent) log::error('Newsletter confirmation email failed: '.$mail::$last_error);
 		return null;
 	}
 
@@ -236,11 +238,12 @@ class newsletter
 		$issue->subject = (string)$subject;
 		$issue->incomplete = 1;
 		R::store($issue);
-		mail::keep_open();
+		$mail = controller::model_class('mail');
+		$mail::keep_open();
 		try {
 			foreach (self::recipients($issue) as $subscriber) {
 				if (!self::deliver($html, $subject, $subscriber->email, $subscriber->token)) {
-					self::$failures[$subscriber->email] = mail::$last_error;
+					self::$failures[$subscriber->email] = $mail::$last_error;
 					continue;
 				}
 				$delivery = R::dispense('newsletterdelivery');
@@ -251,7 +254,7 @@ class newsletter
 				self::$sent++;
 			}
 		} finally {
-			mail::close();
+			$mail::close();
 		}
 		$issue->recipients = R::count('newsletterdelivery', ' issue = ? ', array((int)$issue->id));
 		$issue->incomplete = self::$failures ? 1 : 0;
@@ -284,7 +287,8 @@ class newsletter
 	static function deliver($html, $subject, $email, $token) {
 		$unsubscribe = self::page_url('newsletter_unsubscribe_page', 'newsletter-unsubscribe', $token);
 		$body = str_replace(self::MARKER, htmlspecialchars($unsubscribe, ENT_QUOTES), $html);
-		return mail::send($email, $subject, $body, null, array(
+		$mail = controller::model_class('mail');
+		return $mail::send($email, $subject, $body, null, array(
 			'List-Unsubscribe' => '<'.$unsubscribe.'>',
 			'List-Unsubscribe-Post' => 'List-Unsubscribe=One-Click',
 		));

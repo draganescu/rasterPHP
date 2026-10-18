@@ -250,6 +250,8 @@ class raster_cache {
 	// views, models or the database edited directly. Returns the new version
 	// and how many cached pages were deleted.
 	static function clear() {
+		// and what controller::models() keeps of the models and views
+		@unlink(self::dir().'models.json');
 		$removed = self::bump();
 		return array('version' => self::version(), 'removed' => $removed);
 	}

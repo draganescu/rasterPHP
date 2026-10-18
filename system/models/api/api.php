@@ -40,12 +40,11 @@
       // models that must not be reachable over /api (mcp has its own endpoint)
       if (in_array($model, (array)config::get('api_blocked', array('mcp', 'api')))) $this->fail(404, 'unknown model');
 
-      // bundled models (and overrides of them) only when listed in
-      // api_system_models
-      $paths = controller::build_model_paths($model);
-      $bundled = file_exists($paths['system_path']);
-      if ($bundled && !in_array($model, (array)config::get('api_system_models', array('cms')))) $this->fail(404, 'unknown model');
-      if (!$bundled && !file_exists($paths['app_path']) && !file_exists($paths['extended_path'])) $this->fail(404, 'unknown model');
+      // bundled models (and overrides of them, and a site model with a
+      // bundled model's name) only when listed in api_system_models
+      $found = controller::model($model);
+      if (!$found) $this->fail(404, 'unknown model');
+      if (($found['bundled'] || $found['shadows']) && !in_array($model, (array)config::get('api_system_models', array('cms')))) $this->fail(404, 'unknown model');
 
       if (!controller::load_model($model)) $this->fail(404, 'unknown model');
       $obj = controller::get_object($model);

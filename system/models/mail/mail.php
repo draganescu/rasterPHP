@@ -75,7 +75,8 @@ class mail
 		}
 		$html = controller::render_view($view, $vars);
 		$subject = preg_match('/<title>(.*?)<\/title>/is', $html, $m) ? html_entity_decode(trim(strip_tags($m[1])), ENT_QUOTES) : 'Message from '.config::get('host');
-		return self::send($to, $subject, $html, null, $headers);
+		// static: a site's the_mail sends it, when it has one
+		return static::send($to, $subject, $html, null, $headers);
 	}
 
 	static function text_version($html) {
@@ -92,46 +93,46 @@ class mail
 	}
 
 	static function send($to, $subject, $html, $text = null, $headers = array()) {
-		self::$last_error = null;
-		$to = self::clean_header($to);
-		if (!filter_var(self::address($to), FILTER_VALIDATE_EMAIL)) {
-			self::$last_error = "Invalid recipient: $to";
+		static::$last_error = null;
+		$to = static::clean_header($to);
+		if (!filter_var(static::address($to), FILTER_VALIDATE_EMAIL)) {
+			static::$last_error = "Invalid recipient: $to";
 			return false;
 		}
-		$text = $text === null ? self::text_version($html) : $text;
+		$text = $text === null ? static::text_version($html) : $text;
 		$boundary = 'raster-'.bin2hex(random_bytes(8));
 		$host = preg_replace('/:\d+$/', '', (string)config::get('host', 'localhost'));
 		$all = array(
-			'From' => self::from(),
+			'From' => static::from(),
 			'To' => $to,
-			'Subject' => '=?UTF-8?B?'.base64_encode(self::clean_header($subject)).'?=',
+			'Subject' => '=?UTF-8?B?'.base64_encode(static::clean_header($subject)).'?=',
 			'Date' => date('r'),
 			'Message-ID' => '<'.bin2hex(random_bytes(12)).'@'.$host.'>',
 			'MIME-Version' => '1.0',
 			'Content-Type' => 'multipart/alternative; boundary="'.$boundary.'"',
 		);
-		foreach ($headers as $name => $value) $all[self::clean_header($name)] = self::clean_header($value);
+		foreach ($headers as $name => $value) $all[static::clean_header($name)] = static::clean_header($value);
 		$body = "--$boundary\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n"
 			.chunk_split(base64_encode($text))
 			."--$boundary\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n"
 			.chunk_split(base64_encode($html))
 			."--$boundary--\r\n";
 
-		$dsn = self::transport();
+		$dsn = static::transport();
 		$scheme = strtolower((string)strstr($dsn, ':', true));
 		try {
 			switch ($scheme) {
-				case 'log': $sent = self::via_log($all, $body); break;
-				case 'mail': $sent = self::via_mail($all, $body); break;
+				case 'log': $sent = static::via_log($all, $body); break;
+				case 'mail': $sent = static::via_mail($all, $body); break;
 				case 'smtp':
-				case 'smtps': $sent = self::via_smtp($dsn, $all, $body); break;
+				case 'smtps': $sent = static::via_smtp($dsn, $all, $body); break;
 				default: throw new RuntimeException("Unknown mail transport '$dsn'");
 			}
 			if (!$sent) throw new RuntimeException('The '.$scheme.' transport did not accept the message');
 		} catch (Exception $e) {
-			self::$last_error = $e->getMessage();
+			static::$last_error = $e->getMessage();
 			log::error('Mail: '.$e->getMessage());
-			event::dispatch('mail.failed', array('to' => $to, 'subject' => (string)$subject, 'error' => self::$last_error));
+			event::dispatch('mail.failed', array('to' => $to, 'subject' => (string)$subject, 'error' => static::$last_error));
 			return false;
 		}
 		event::dispatch('mail.sent', array('to' => $to, 'subject' => (string)$subject));

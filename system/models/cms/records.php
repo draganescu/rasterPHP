@@ -45,36 +45,39 @@ class cms_records {
 	static function types() {
 		if (self::$cache !== null) return self::$cache;
 		self::$cache = array();
-		$root = APPBASE.config::get('models_path', 'models');
-		foreach (glob($root.'/*', GLOB_ONLYDIR) ?: array() as $dir) {
-			$folder = basename($dir);
-			$file = "$dir/$folder.php";
-			if (!is_file($file) || strpos(file_get_contents($file), 'function types(') === false) continue;
-			// models/the_x/the_x.php overrides x, and its types belong to x
-			$model = strpos($folder, 'the_') === 0 ? substr($folder, 4) : $folder;
+		foreach (controller::models() as $model => $found) {
+			if (empty($found['declares']['types'])) continue;
+			// a bundled model's types count where a view uses the model
+			// (render.booking.form); the site's own always count, and so do
+			// the ones a site's the_<name> override declares itself
+			$own = !$found['bundled'] || ($found['parent'] && strpos((string)file_get_contents($found['file']), 'function types(') !== false);
+			if (!$own && !controller::uses($model)) continue;
 			try {
-				if (!class_exists($folder)) require_once $file;
+				// models/the_x/the_x.php overrides x, and its types belong to x
+				$class = controller::model_class($model);
 				// only a static types() declares records; a model may well have
 				// an ordinary method with that name
-				if (!class_exists($folder) || !method_exists($folder, 'types') || !(new ReflectionMethod($folder, 'types'))->isStatic()) continue;
-				$declared = call_user_func(array($folder, 'types'));
+				if (!$class || !method_exists($class, 'types') || !(new ReflectionMethod($class, 'types'))->isStatic()) continue;
+				$declared = call_user_func(array($class, 'types'));
 			} catch (Throwable $e) {
-				log::warning("records: $folder::types(): ".$e->getMessage());
+				log::warning("records: $model::types(): ".$e->getMessage());
 				continue;
 			}
 			foreach ((array)$declared as $name => $declaration) {
 				// letters and digits only: the table is <name>data, and the name
 				// must come back from it
 				if (!is_string($name) || !preg_match('/^[a-z][a-z0-9]*$/', $name) || !is_array($declaration)) continue;
-				self::$cache[$name] = self::normalize($name, $declaration, $model, $folder);
+				self::$cache[$name] = self::normalize($name, $declaration, $model, $class);
 			}
 		}
 		ksort(self::$cache);
 		return self::$cache;
 	}
 
+	// the types are read again, and the models they come from looked up again
 	static function forget() {
 		self::$cache = null;
+		controller::forget_models();
 	}
 
 	protected static function normalize($name, $d, $model, $class) {

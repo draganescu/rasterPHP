@@ -85,6 +85,136 @@ class controller {
 		return $paths;
 	}
 
+	// ##Models
+	// One lookup finds every model, for the request and the tools alike:
+	// models/<name>/ is the site's own and is used whole; else
+	// models/the_<name>/ overrides system/models/<name>/; else the bundled
+	// model. Gives array(name, class, file, parent, bundled, shadows, dirs)
+	// or null. parent is the bundled file an override extends, shadows says
+	// the site's model hides a bundled one, dirs are where its helpers and
+	// sql/ live, the override's first.
+	static $found = array();
+	static $declared = null;
+	static $used = null;
+
+	static function model($name) {
+		$name = (string)$name;
+		if (array_key_exists($name, self::$found)) return self::$found[$name];
+		if (!preg_match('/^[a-z][a-z0-9_]*$/', $name)) return null;
+		$app = APPBASE.config::get('models_path', 'models');
+		$bundled = BASE.'models/'.$name;
+		$has_bundled = is_file("$bundled/$name.php");
+		$found = null;
+		if (is_file("$app/$name/$name.php")) {
+			$found = array('class' => $name, 'file' => "$app/$name/$name.php", 'parent' => null, 'bundled' => false, 'shadows' => $has_bundled, 'dirs' => array("$app/$name"));
+		} elseif (is_file("$app/the_$name/the_$name.php")) {
+			$found = array('class' => "the_$name", 'file' => "$app/the_$name/the_$name.php", 'parent' => $has_bundled ? "$bundled/$name.php" : null, 'bundled' => $has_bundled, 'shadows' => false, 'dirs' => $has_bundled ? array("$app/the_$name", $bundled) : array("$app/the_$name"));
+		} elseif ($has_bundled) {
+			$found = array('class' => $name, 'file' => "$bundled/$name.php", 'parent' => null, 'bundled' => true, 'shadows' => false, 'dirs' => array($bundled));
+		}
+		return self::$found[$name] = $found ? array('name' => $name) + $found : null;
+	}
+
+	// loads a model's file (and the bundled one an override extends) and
+	// gives the class to call: 'the_mail', 'mail', or null. Bundled code
+	// sends mail through it, so a site's the_mail is the one that sends:
+	//   $mail = controller::model_class('mail'); $mail::send_view(...);
+	static function model_class($name) {
+		$found = controller::model($name);
+		if (!$found) return null;
+		if ($found['parent']) require_once $found['parent'];
+		require_once $found['file'];
+		return class_exists($found['class'], false) ? $found['class'] : null;
+	}
+
+	// every model by name, the site's first, with what it declares
+	// (declares: types, schema, api, requires) and the events it listens to
+	// (listens: event => method or methods). Kept in data/cache/models.json
+	// while Raster's version and the model files stay the same; only the
+	// files that have listens() are loaded to make it.
+	static function models() {
+		if (self::$declared !== null) return self::$declared;
+		$names = array();
+		$stamp = array(trim((string)@file_get_contents(BASE.'VERSION')));
+		foreach (array(APPBASE.config::get('models_path', 'models'), BASE.'models') as $root) {
+			foreach (glob($root.'/*', GLOB_ONLYDIR) ?: array() as $dir) {
+				$folder = basename($dir);
+				$file = "$dir/$folder.php";
+				if (!is_file($file)) continue;
+				$stamp[] = $file.' '.filemtime($file).' '.filesize($file);
+				$names[strpos($folder, 'the_') === 0 ? substr($folder, 4) : $folder] = true;
+			}
+		}
+		$key = sha1(implode("\n", $stamp));
+		self::$declared = controller::cached('models', $key);
+		if (self::$declared !== null) return self::$declared;
+		$models = array();
+		foreach (array_keys($names) as $name) {
+			$found = controller::model($name);
+			if (!$found) continue;
+			$source = file_get_contents($found['file']).($found['parent'] ? file_get_contents($found['parent']) : '');
+			$declares = array();
+			foreach (array('types', 'schema', 'api', 'requires') as $hook) $declares[$hook] = strpos($source, "function $hook(") !== false;
+			$listens = array();
+			if (strpos($source, 'function listens(') !== false) {
+				$class = controller::model_class($name);
+				if ($class && method_exists($class, 'listens')) $listens = (array)call_user_func(array($class, 'listens'));
+			}
+			$models[$name] = $found + array('declares' => $declares, 'listens' => $listens);
+		}
+		return self::$declared = controller::cache('models', $key, $models);
+	}
+
+	// does a view of any theme name the model (render.<name>.,
+	// print.<name>., print.@attr.<name>., or the /*- -*/ form)? A bundled
+	// model's types count only then. Kept in models.json while no view changes.
+	static function uses($name) {
+		if (self::$used === null) {
+			$root = APPBASE.config::get('views_path', 'views');
+			$views = array();
+			if (is_dir($root)) {
+				foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS)) as $file) {
+					if (preg_match('/(\.html|\.rss|\.atom|\.xml|\.json|\.txt|'.preg_quote(config::get('views_ext', '.html'), '/').')$/', $file->getFilename())) $views[$file->getPathname()] = $file->getMTime().' '.$file->getSize();
+				}
+			}
+			$key = sha1(json_encode($views));
+			self::$used = controller::cached('uses', $key);
+			if (self::$used === null) {
+				$used = array();
+				foreach (array_keys($views) as $file) {
+					preg_match_all('/(?:<!--|\/\*-)\s*(?:render|print)\.(?:[@+][A-Za-z0-9_\-:]+\.)?([a-z0-9_]+)\./', (string)file_get_contents($file), $m);
+					foreach ($m[1] as $model) $used[$model] = true;
+				}
+				self::$used = controller::cache('uses', $key, array_keys($used));
+			}
+		}
+		return in_array((string)$name, self::$used, true);
+	}
+
+	// what the lookups found is kept for the request; the tests change models
+	// in the middle of one
+	static function forget_models() {
+		self::$found = array();
+		self::$declared = null;
+		self::$used = null;
+	}
+
+	// a part of data/cache/models.json, when it was made under the same key
+	protected static function cached($part, $key) {
+		$saved = json_decode((string)@file_get_contents(raster_cache::dir().'models.json'), true);
+		return isset($saved[$part]['key'], $saved[$part]['value']) && $saved[$part]['key'] === $key && is_array($saved[$part]['value']) ? $saved[$part]['value'] : null;
+	}
+
+	// keeps it; on a disk Raster can't write to, the next request looks again
+	protected static function cache($part, $key, $value) {
+		$file = raster_cache::dir().'models.json';
+		$saved = json_decode((string)@file_get_contents($file), true);
+		if (!is_array($saved)) $saved = array();
+		$saved[$part] = array('key' => $key, 'value' => $value);
+		raster_cache::write($file, json_encode($saved));
+		return $value;
+	}
+
 	// The respond method is attached to the launch event and its main role
 	// is to look up the current url and find a matching view
 	function respond() {
@@ -328,12 +458,19 @@ class controller {
 
 		if(!is_callable(array($object, $name))) return false;
 
+		// named queries without a model name are the model's own while it runs,
+		// and the caller's again after (a model called from inside another)
+		$db = null;
 		if (class_exists('database', false) && database::configured()) {
 			$db = database::instance(  );
+			$previous = $db->current_model;
 			$db->current_model = $model;
 		}
-
-		$data = call_user_func_array(array($object, $name), $arguments);
+		try {
+			$data = call_user_func_array(array($object, $name), $arguments);
+		} finally {
+			if ($db) $db->current_model = $previous;
+		}
 		
 		event::dispatch('executed_'.$event_name, array('arguments' => $arguments, 'result' => $data));
 		
@@ -488,28 +625,9 @@ class controller {
 		if($model == 'if') return true;
 		if($model == 'self') return true;
 		
-		$possible_paths = controller::build_model_paths($model);
-
-		$model_path = null;
-		$base_model = $model;
-		if( file_exists($possible_paths['system_path']) ) {
-			$model_path = $possible_paths['system_path'];
-		}
-		if( file_exists($possible_paths['extended_path']) ) {
-			if (!is_null($model_path)) require_once $model_path;
-			$model_path = $possible_paths['extended_path'];
-			$model = 'the_'.$model;
-		}
-		if( file_exists($possible_paths['app_path']) ) {
-			$model_path = $possible_paths['app_path'];
-		}
-
-		if(is_null($model_path)) return false;
-		
-		require_once $model_path;
-		if (!class_exists($model, false)) return false;
-		$object = new $model();
-		$controller->objects[$base_model] = $object;
+		$class = controller::model_class($model);
+		if (!$class) return false;
+		$controller->objects[$model] = new $class();
 		
 		return true;
 		
