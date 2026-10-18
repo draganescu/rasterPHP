@@ -187,28 +187,43 @@
 		for (var n = start.nextSibling; n && n !== end; n = n.nextSibling) nodes.push(n);
 		return nodes;
 	}
+	// whether nodes hold markup, which makes an item's field rich text
+	function tagged(nodes) { return nodes.some(function (n) { return n.nodeType === 1; }); }
 	function meaningful(node) { return !(node.nodeType === 3 && !node.textContent.trim()) && node.nodeType !== 8; }
 	function isBlock(node) {
 		if (node.nodeType !== 1) return false;
-		return /^(P|DIV|UL|OL|H[1-6]|BLOCKQUOTE|TABLE|SECTION|ARTICLE|FIGURE|PRE)$/.test(node.tagName);
+		return /^(P|DIV|UL|OL|DL|H[1-6]|BLOCKQUOTE|TABLE|SECTION|ARTICLE|ASIDE|HEADER|FOOTER|NAV|FIGURE|PRE|HR|FORM)$/.test(node.tagName);
 	}
 	// the element to make editable for the nodes between two marks: their
-	// parent when they are all it holds, or a wrapper around them
-	function region(start, end) {
+	// parent when they are all it holds, or a wrapper around them; for rich
+	// text a <div> when the parent takes paragraphs and the marks have their
+	// own line, so the field takes paragraphs too
+	function region(start, end, rich) {
 		if (!start || !end || start.parentNode !== end.parentNode) return null;
 		var parent = start.parentNode, inside = between(start, end);
 		var outside = Array.prototype.filter.call(parent.childNodes, function (n) { return n !== start && n !== end && inside.indexOf(n) < 0 && meaningful(n); });
 		if (!outside.length && parent !== document.body && !/^(MAIN|BODY|SECTION|ARTICLE|LI|TD)$/.test(parent.tagName)) return parent;
-		var wrapper = document.createElement(inside.some(isBlock) ? 'div' : 'span');
+		var blocks = inside.some(isBlock) || (rich && takesBlocks(parent) && ownLine(start, end));
+		var wrapper = document.createElement(blocks ? 'div' : 'span');
 		wrapper.setAttribute('data-raster-wrap', '');
 		parent.insertBefore(wrapper, end);
 		inside.forEach(function (n) { wrapper.appendChild(n); });
 		return wrapper;
 	}
+	// whether nothing but blocks sits beside the marks, up to the next block
+	// either way, so they don't share a line with other text
+	function ownLine(start, end) {
+		var n;
+		for (n = start.previousSibling; n && !isBlock(n); n = n.previousSibling) if (meaningful(n)) return false;
+		for (n = end.nextSibling; n && !isBlock(n); n = n.nextSibling) if (meaningful(n)) return false;
+		return true;
+	}
 	// whether a region may hold paragraphs, or is a list or a table, where
 	// Enter is the browser's (a new bullet, a new row); a <p>, a heading, an
-	// <li> or a <span> can't, so a rich field there gets line breaks (#114)
+	// <li> or a <span> can't, so a rich field there gets line breaks (#114).
+	// A wrapper's <div> takes them where its parent does, whatever it holds
 	function takesBlocks(el) {
+		if (el.hasAttribute('data-raster-wrap')) return el.tagName === 'DIV' && !!el.parentNode && el.parentNode.nodeType === 1 && takesBlocks(el.parentNode);
 		return /^(DIV|BLOCKQUOTE|SECTION|ARTICLE|ASIDE|MAIN|HEADER|FOOTER|NAV|FIGURE|FIGCAPTION|TD|TH|DD|FORM|FIELDSET|DETAILS|UL|OL|MENU|DL|TABLE|THEAD|TBODY|TFOOT|TR)$/.test(el.tagName);
 	}
 	function lineBreak() {
@@ -260,8 +275,8 @@
 				field.kind = field.el && field.el.tagName === 'IMG' ? 'image' : 'attr';
 				field.attr = info.attr;
 			} else {
-				field.el = region(pair.s, pair.e);
-				field.kind = (info.rich || (info.kind === 'item_field' && /<[a-z][^>]*>/i.test(field.el ? field.el.innerHTML : ''))) ? 'rich' : 'text';
+				field.kind = (info.rich || (info.kind === 'item_field' && tagged(between(pair.s, pair.e)))) ? 'rich' : 'text';
+				field.el = region(pair.s, pair.e, field.kind === 'rich');
 			}
 			if (!field.el) return;
 			field.inline = !takesBlocks(field.el);
@@ -1252,8 +1267,8 @@
 				if (m) {
 					var end = c.nextSibling;
 					while (end && !(end.nodeType === 8 && end.data === 'raster:/m')) end = end.nextSibling;
-					var r = region(c, end);
-					if (r) { r.setAttribute('data-raster-name', m[1]); r.setAttribute('data-raster-field', 'new'); r.setAttribute('data-raster-edit', /<[a-z]/i.test(r.innerHTML) ? 'rich' : 'text'); }
+					var rich = tagged(between(c, end)), r = region(c, end, rich);
+					if (r) { r.setAttribute('data-raster-name', m[1]); r.setAttribute('data-raster-field', 'new'); r.setAttribute('data-raster-edit', rich ? 'rich' : 'text'); }
 				} else if (ma) {
 					var target = nextElement(c);
 					if (target) { target.setAttribute('data-raster-name', ma[1]); target.setAttribute('data-raster-attr', ma[2]); target.setAttribute('data-raster-field', 'new'); }

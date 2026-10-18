@@ -43,6 +43,10 @@ const booked = later(30), phoned = later(60);
 		const context = await browser.newContext({ viewport: { width: 1280, height: 860 } });
 		const page = await context.newPage();
 		page.on('pageerror', e => errors.push(e.message));
+		// file choosers stay intercepted all along: a waitForEvent alone turns
+		// interception on without waiting, so a key pressed right after it can
+		// open the chooser before then, and the event never comes
+		page.on('filechooser', () => {});
 		await page.goto(base + '/login');
 		await page.fill('input[name=login]', 'staff@cafe.test');
 		await page.fill('input[name=password]', 'staff password');
@@ -73,7 +77,7 @@ const booked = later(30), phoned = later(60);
 		// not a paragraph inside the paragraph (#114)
 		const about = path.join(root, 'demo/views/cafe/about.html');
 		const aboutView = fs.readFileSync(about, 'utf8');
-		fs.writeFileSync(about, aboutView.replace('<h2>Opening hours</h2>', '<p class="lead"><!-- print.cms.lead -->We roast <em>our own</em> beans.<!-- /print.cms.lead --></p><ul class="features"><!-- print.cms.features --><li>Fast</li><li>Cheap</li><!-- /print.cms.features --></ul><h2>Opening hours</h2>'));
+		fs.writeFileSync(about, aboutView.replace('<h2>Opening hours</h2>', '<p class="lead"><!-- print.cms.lead -->We roast <em>our own</em> beans.<!-- /print.cms.lead --></p><ul class="features"><!-- print.cms.features --><li>Fast</li><li>Cheap</li><!-- /print.cms.features --></ul><article class="note"><!-- print.cms.note -->Fresh <em>bread</em> daily.<!-- /print.cms.note --></article><h2>Opening hours</h2>'));
 		try {
 			await page.goto(base + '/about');
 			await page.waitForTimeout(500);
@@ -129,6 +133,24 @@ const booked = later(30), phoned = later(60);
 			await page.waitForTimeout(900);
 			html = await (await fetch(base + '/about')).text();
 			check(html.includes('<ul class="features"><li>Fast</li><li>Cheap</li><li>Third</li></ul>'), 'Enter in a list field adds a bullet: ' + (html.match(/<ul class="features">[\s\S]*?<\/ul>/) || [''])[0]);
+			// a field printed straight into an <article> is wrapped in a span
+			// by the editor, but takes paragraphs and lists, as the article does
+			const note = page.locator('article.note [data-raster-field]');
+			await note.click();
+			await page.waitForTimeout(200);
+			check(await inShadow(page, h => !!h.shadowRoot.querySelector('.format button[aria-label=List]')), 'a field in an article offers a list');
+			await page.keyboard.press('Control+End');
+			await note.evaluate(el => {
+				const data = new DataTransfer();
+				data.setData('text/html', '<p>Pasted one.</p><p>Pasted two.</p>');
+				data.setData('text/plain', 'Pasted one. Pasted two.');
+				el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+			});
+			await page.mouse.click(5, 5);
+			await page.waitForTimeout(900);
+			html = await (await fetch(base + '/about')).text();
+			// the browser runs the first pasted paragraph on into the line it lands in
+			check(/<article class="note">Fresh <em>bread<\/em> daily\.(<p>)?Pasted one\.(<\/p>)?<p>Pasted two\.<\/p><\/article>/.test(html), 'a paragraph pasted into a field in an article stays a paragraph: ' + (html.match(/<article class="note">[\s\S]*?<\/article>/) || [''])[0]);
 		} finally {
 			fs.writeFileSync(about, aboutView);
 		}
@@ -179,6 +201,33 @@ const booked = later(30), phoned = later(60);
 				await page.waitForTimeout(900);
 			}
 			check(!(await (await fetch(base + '/menu')).text()).includes('Macchiato'), 'the Macchiatos are gone');
+		} finally {
+			fs.writeFileSync(menuFile, menuView);
+		}
+		// a new item's field printed straight into its <article> takes paragraphs
+		fs.writeFileSync(menuFile, menuView.replace('<p><!-- print.description -->Double ristretto, steamed milk.<!-- /print.description --></p>', '<!-- print.description -->Double <em>ristretto</em>, steamed milk.<!-- /print.description -->'));
+		try {
+			await page.goto(base + '/menu');
+			await page.waitForTimeout(500);
+			const card = page.locator('.raster-ghost').first();
+			await card.click();
+			await page.keyboard.type('Lungo');
+			const description = card.locator('[data-raster-name=description]');
+			check(await description.evaluate(el => el.hasAttribute('data-raster-wrap') && el.parentNode.tagName === 'ARTICLE'), 'the new item\'s description is a wrapper in the article');
+			await description.click();
+			await page.keyboard.press('Control+End');
+			await page.keyboard.press('Enter');
+			await page.keyboard.type('Second');
+			await inShadow(page, h => [...h.shadowRoot.querySelectorAll('.handle button')].find(b => b.textContent === 'Add').click());
+			await page.waitForTimeout(1000);
+			html = await (await fetch(base + '/menu')).text();
+			check(/Lungo[\s\S]*?Double <em>ristretto<\/em>, steamed milk\.<p>Second<\/p>/.test(html) || /Lungo[\s\S]*?<p>Double <em>ristretto<\/em>, steamed milk\.<\/p><p>Second<\/p>/.test(html), 'Enter in a new item\'s field in an article saved a paragraph: ' + (html.match(/Lungo[\s\S]*?<p class="price">/) || [''])[0]);
+			await page.mouse.move(2, 2);
+			await page.locator('[data-raster-item]', { hasText: 'Lungo' }).first().hover({ position: { x: 20, y: 20 }, force: true });
+			await page.waitForTimeout(300);
+			await inShadow(page, h => h.shadowRoot.querySelector('.handle button[aria-label=Delete]').click());
+			await page.waitForTimeout(900);
+			check(!(await (await fetch(base + '/menu')).text()).includes('Lungo'), 'the Lungo is gone');
 		} finally {
 			fs.writeFileSync(menuFile, menuView);
 		}
