@@ -2916,8 +2916,9 @@ test('find() refuses ?param and handles owner=me (#176)', function () {
 
 // ## Bundled booking: setup and slots
 
-// A view that uses the bundled booking model, so its types count. $fn runs
-// with it; the view, the booking tables and what was read of them are gone
+// A view that uses the bundled booking model, so its types count, with the
+// guest's manage page (booking.html) and the six emails. $fn runs with
+// them; the views, the booking tables and what was read of them are gone
 // after.
 function booking_site($fn) {
 	$view = APPBASE.config::get('views_path', 'views').'/'.config::get('theme', 'default').'/zzbook.html';
@@ -2933,6 +2934,29 @@ function booking_site($fn) {
 		."<input type=\"date\" name=\"date\" required><input name=\"time\" required><input type=\"number\" name=\"people\"><input name=\"resource\">"
 		."<textarea name=\"notes\"></textarea><button>Book</button></form><!-- /render.booking.form -->"
 		."</body></html>");
+	// the guest's manage page, and the emails, each with its name as the subject
+	$theme = dirname($view);
+	$alerts = '';
+	foreach (array('link_invalid', 'too_late', 'cancelled', 'rescheduled', 'fully_booked', 'not_a_slot') as $alert) {
+		$alerts .= "<!-- print.validation.alert('$alert') --><p>ALERT $alert</p><!-- /print.validation.alert('$alert') -->";
+	}
+	$manage = "render.booking.slots('date=?date&for=manage')";
+	file_put_contents("$theme/booking.html", "<html><head><title>Your booking</title></head><body>$alerts"
+		."<!-- render.booking.manage --><p class=\"booking\"><!-- print.name -->Ana<!-- /print.name --> <!-- print.email -->ana@example.test<!-- /print.email -->"
+		." <!-- print.date -->2026-10-20<!-- /print.date --> <!-- print.time -->19:00<!-- /print.time --> <!-- print.status -->requested<!-- /print.status --></p>"
+		."<form method=\"post\"><input type=\"hidden\" name=\"do\" value=\"cancel\"><button>Cancel</button></form>"
+		."<form method=\"post\"><input type=\"hidden\" name=\"do\" value=\"change\"><input name=\"time\"><button>Change</button></form><!-- /render.booking.manage -->"
+		."<ul><!-- $manage --><li class=\"slot\"><!-- print.time -->19:00<!-- /print.time --></li><!-- /$manage --></ul>"
+		."</body></html>");
+	$emails = array('booking_requested', 'booking_new', 'booking_confirmed', 'booking_declined', 'booking_cancelled', 'booking_changed');
+	foreach ($emails as $email) {
+		file_put_contents("$theme/_email/$email.html", "<html><head><title>$email</title></head><body><p><!-- print.self.name -->Ana<!-- /print.self.name -->,"
+			." <!-- print.self.date -->2026-10-20<!-- /print.self.date --> <!-- print.self.time -->19:00<!-- /print.self.time --> <!-- print.self.resource_name -->room<!-- /print.self.resource_name -->"
+			." <!-- print.self.status -->requested<!-- /print.self.status --> by <!-- print.self.who -->guest<!-- /print.self.who --></p>"
+			."<p>Manage: <!-- print.self.manage_url -->none<!-- /print.self.manage_url --></p></body></html>");
+	}
+	// staff emails go to the sender, as on a site that sets only that
+	putenv('RASTER_MAIL_FROM=staff@zz.test');
 	controller::forget_models();
 	cms_records::forget();
 	cms_store::connect();
@@ -2940,9 +2964,12 @@ function booking_site($fn) {
 	try {
 		return $fn();
 	} finally {
+		putenv('RASTER_MAIL_FROM');
 		foreach (array('bookingresource', 'bookinghours', 'bookingclosed', 'bookingservice', 'booking') as $type) R::getDatabaseAdapter()->exec("DROP TABLE IF EXISTS {$type}data");
 		cms_store::forget();
 		@unlink($view);
+		@unlink("$theme/booking.html");
+		foreach ($emails as $email) @unlink("$theme/_email/$email.html");
 		controller::forget_models();
 		cms_records::forget();
 		if (class_exists('booking', false)) booking::forget();
@@ -3853,6 +3880,479 @@ test('booking: the booking form takes the day from the URL', function () {
 		$page = booking_render('/zzbook');
 		check(strpos($page, '[exit 0]') !== false && strpos($page, '<form method="post"') !== false, $page);
 		same(array(), (new booking())->slots('date='.date('Y-m-d', strtotime('next tuesday'))));
+	});
+});
+
+// ## Bundled booking: the guest
+
+// A server of its own for the guest's pages: its mail goes where
+// booking_mails() reads it, from staff@zz.test, and it links to itself.
+function booking_server($env = array()) {
+	global $root, $db, $maildir;
+	$port = free_port();
+	$log = sys_get_temp_dir().'/raster-booking-'.getmypid().'-'.$port.'.log';
+	$env = array_merge(array('PATH' => getenv('PATH'), 'RASTER_DB' => $db, 'RASTER_ENV' => 'development', 'RASTER_MAIL' => "log://$maildir-booking",
+		'RASTER_MAIL_FROM' => 'staff@zz.test', 'RASTER_URL' => "http://127.0.0.1:$port/"), $env);
+	$process = proc_open(array(PHP_BINARY, '-d', 'log_errors=1', '-d', "error_log=$log", '-S', "127.0.0.1:$port", "$root/index.php"),
+		array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, $env);
+	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
+	register_shutdown_function(function () use ($process, $log) { proc_terminate($process); @unlink($log); });
+	return array("http://127.0.0.1:$port", $log);
+}
+// The mails $fn sent, from this process and from booking_server()'s, in
+// order: array('to', 'view' (the subject), 'text', 'raw')
+function booking_mails($fn) {
+	global $maildir;
+	$dir = "$maildir-booking";
+	@mkdir($dir);
+	array_map('unlink', glob("$dir/*.eml") ?: array());
+	$was = getenv('RASTER_MAIL');
+	putenv("RASTER_MAIL=log://$dir");
+	try {
+		$fn();
+	} finally {
+		putenv("RASTER_MAIL=$was");
+	}
+	// a server sends after its answer
+	for ($i = 0, $seen = -1; $i < 20; $i++) {
+		$count = count(glob("$dir/*.eml") ?: array());
+		if ($count === $seen) break;
+		$seen = $count;
+		usleep(150000);
+	}
+	$files = glob("$dir/*.eml") ?: array();
+	sort($files);
+	$mails = array();
+	foreach ($files as $file) {
+		$raw = file_get_contents($file);
+		preg_match('/^To: (.*)$/m', $raw, $to);
+		preg_match('/^Subject: (.*)$/m', $raw, $subject);
+		$text = preg_match('/Content-Type: text\/plain; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n(.*?)\r\n--/s', $raw, $m) ? base64_decode($m[1]) : '';
+		$mails[] = array('to' => trim($to[1]), 'view' => mb_decode_mimeheader(trim($subject[1])), 'text' => $text, 'raw' => $raw);
+	}
+	return $mails;
+}
+// "view to" of each mail, for same()
+function booking_sent($mails) {
+	return array_map(function ($m) { return $m['view'].' '.$m['to']; }, $mails);
+}
+// the raw token of a mail's manage link
+function booking_token($mail) {
+	return preg_match('/token=([a-f0-9]{64})/', $mail['text'], $m) ? $m[1] : null;
+}
+// the manage page as a request in this process: $get is the URL's query,
+// $post (when given) what its form sent. Gives the rows, the alerts raised
+// and where it redirected to.
+function booking_manage($get, $post = null) {
+	$saved = array($_GET, $_POST, isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : 'GET');
+	$_GET = $get;
+	$_POST = $post === null ? array() : $post + array('raster_form' => 'booking.manage');
+	$_SERVER['REQUEST_METHOD'] = $post === null ? 'GET' : 'POST';
+	$template = template::instance();
+	$call = $template->current_call;
+	$template->current_call = 'booking.manage';
+	$raised = new ReflectionProperty('validation', 'raised');
+	$raised->setAccessible(true);
+	$raised->setValue(validation::get(), array());
+	booking::forget();
+	try {
+		$rows = (new booking())->manage();
+		return array($rows, array_keys($raised->getValue(validation::get())));
+	} finally {
+		list($_GET, $_POST, $_SERVER['REQUEST_METHOD']) = $saved;
+		$template->current_call = $call;
+		$raised->setValue(validation::get(), array());
+	}
+}
+// what booking events were sent while $fn ran, as array(event, payload)
+$booking_seen = array();
+function test_booking_seen($payload) {
+	global $booking_seen;
+	$event = new ReflectionProperty('event', 'current_event');
+	$event->setAccessible(true);
+	$booking_seen[] = array($event->getValue(event::instance()), $payload);
+}
+function booking_events($fn) {
+	global $booking_seen;
+	$booking_seen = array();
+	$names = array('booking.requested', 'booking.confirmed', 'booking.declined', 'booking.cancelled', 'booking.rescheduled');
+	foreach ($names as $name) event::bind($name)->to(null, 'test_booking_seen');
+	try {
+		$fn();
+	} finally {
+		foreach ($names as $name) event::unbind($name)->from(null, 'test_booking_seen');
+	}
+	return $booking_seen;
+}
+list($booking_base, $booking_log) = booking_server();
+
+test('booking: every guest email carries a fresh link; only its hash is kept', function () use ($booking_base) {
+	booking_site(function () use ($booking_base) {
+		$tue = booking_cafe();
+		cms_records::ensure(cms_records::info('booking'), true);
+		$mails = booking_mails(function () use ($booking_base, $tue) {
+			list($status, , $headers) = form_post("$booking_base/zzbook", array('raster_form' => 'booking.form', 'name' => 'Link Guest', 'email' => 'link@example.test', 'date' => $tue, 'time' => '19:00', 'people' => '2'));
+			same(303, $status);
+			check(strpos((string)location($headers), 'done=booked') !== false, location($headers));
+		});
+		same(array('booking_requested link@example.test', 'booking_new staff@zz.test'), booking_sent($mails));
+		$raw = booking_token($mails[0]);
+		check($raw !== null, 'no link: '.$mails[0]['text']);
+		check(strpos($mails[0]['text'], "$booking_base/booking?token=$raw") !== false, $mails[0]['text']);
+		check(strpos($mails[1]['text'], 'token=') === false, 'staff got a link: '.$mails[1]['text']);
+		$b = cms_records::find('booking', array('email' => 'link@example.test'))[0];
+		same(array(hash('sha256', $raw)), $b['token_hashes']);
+		check(strpos(json_encode($b), $raw) === false, 'the raw token is stored');
+		$mails = booking_mails(function () use ($b) { cms_records::act('booking', $b['id'], 'confirm', array(), true); });
+		same(array('booking_confirmed link@example.test'), booking_sent($mails));
+		$second = booking_token($mails[0]);
+		check($second !== null && $second !== $raw, 'a fresh link');
+		same(array(hash('sha256', $raw), hash('sha256', $second)), cms_records::get('booking', $b['id'])['token_hashes']);
+		foreach (array($raw, $second) as $token) {
+			list($rows, $alerts) = booking_manage(array('token' => $token));
+			same(array(), $alerts);
+			same(array('Link Guest', 'confirmed', 'Dining room'), array($rows[0]['name'], $rows[0]['status'], $rows[0]['resource_name']));
+			check(!array_key_exists('token_hashes', $rows[0]) && !array_key_exists('token_expires', $rows[0]), json_encode($rows[0]));
+		}
+	});
+});
+
+test('booking: the raw token is in no event, log or cache', function () use ($booking_log, $db) {
+	booking_site(function () use ($booking_log, $db) {
+		$tue = booking_cafe();
+		cms_records::ensure(cms_records::info('booking'), true);
+		$raw = null;
+		$events = booking_events(function () use ($tue, &$raw) {
+			$mails = booking_mails(function () use ($tue) { booking_staff(array('email' => 'quiet@example.test', 'date' => $tue, 'time' => '19:00')); });
+			$raw = booking_token($mails[0]);
+		});
+		check($raw !== null, 'no link');
+		same('booking.requested', $events[0][0]);
+		$payload = $events[0][1];
+		same('staff', $payload['who']);
+		check(!array_key_exists('token_hashes', $payload) && !array_key_exists('token_expires', $payload), json_encode($payload));
+		check(!preg_match('/[a-f0-9]{64}/', json_encode($payload)), 'a token in the payload: '.json_encode($payload));
+		cache_empty();
+		list($prod, $prod_log) = booking_server(array('RASTER_ENV' => 'production'));
+		foreach (array(1, 2) as $n) {
+			list($status, $body, $headers) = http('GET', "$prod/booking?token=$raw");
+			same(200, $status, $body);
+			check(strpos($body, 'quiet@example.test') !== false, 'the booking: '.$body);
+			check(b_header($headers, 'X-Raster-Cache') !== 'hit', "cached the $n. time");
+			same('same-origin', b_header($headers, 'Referrer-Policy'));
+		}
+		foreach (array_merge(cached_pages(), array($booking_log, $prod_log)) as $file) {
+			check(strpos((string)@file_get_contents($file), $raw) === false, "the token is in $file");
+		}
+		same(array(), array_values(array_filter(cached_pages(), function ($f) { return strpos(basename($f), 'version') === false; })), 'a page was cached');
+		cache_empty();
+	});
+});
+
+test('booking: a GET to the manage link changes nothing', function () use ($booking_base) {
+	booking_site(function () use ($booking_base) {
+		$tue = booking_cafe();
+		$mails = booking_mails(function () use ($tue) { booking_guest(array('email' => 'scan@example.test', 'date' => $tue, 'time' => '19:00')); });
+		$raw = booking_token($mails[0]);
+		$b = cms_records::find('booking', array('email' => 'scan@example.test'))[0];
+		$mails = booking_mails(function () use ($booking_base, $raw) {
+			same(200, http('GET', "$booking_base/booking?token=$raw")[0]);
+			http('HEAD', "$booking_base/booking?token=$raw");
+			same(200, http('GET', "$booking_base/booking?token=$raw&do=cancel")[0]);
+		});
+		same(array(), booking_sent($mails));
+		same('requested', cms_records::get('booking', $b['id'])['status']);
+		// another site's form
+		$mails = booking_mails(function () use ($booking_base, $raw) {
+			same(403, form_post("$booking_base/booking?token=$raw", array('raster_form' => 'booking.manage', 'do' => 'cancel'), array('Origin: https://evil.test'))[0]);
+		});
+		same(array(), booking_sent($mails));
+		same('requested', cms_records::get('booking', $b['id'])['status']);
+		$mails = booking_mails(function () use ($booking_base, $raw) {
+			list($status, , $headers) = form_post("$booking_base/booking?token=$raw", array('raster_form' => 'booking.manage', 'do' => 'cancel'));
+			same(303, $status);
+			same("$booking_base/booking?done=cancelled", location($headers));
+		});
+		same('cancelled', cms_records::get('booking', $b['id'])['status']);
+		same(array('booking_cancelled scan@example.test', 'booking_cancelled staff@zz.test'), booking_sent($mails));
+		// after the cancel, the page that says so
+		list($status, $body) = http('GET', "$booking_base/booking?done=cancelled");
+		check(strpos($body, 'ALERT cancelled') !== false && strpos($body, 'ALERT link_invalid') === false, $body);
+	});
+});
+
+test('booking: expired, used and foreign links are invalid', function () {
+	booking_site(function () {
+		$tue = booking_cafe();
+		$link = function ($email) use ($tue) {
+			$mails = booking_mails(function () use ($tue, $email) { booking_guest(array('email' => $email, 'date' => $tue, 'time' => '19:00')); });
+			return array(booking_token($mails[0]), cms_records::find('booking', array('email' => $email))[0]);
+		};
+		list($raw, $b) = $link('old@example.test');
+		same(array(), booking_manage(array('token' => $raw))[1]);
+		cms_records::update('booking', $b['id'], array('token_expires' => date('Y-m-d H:i:s', time() - 60)));
+		same(array(array(), array('link_invalid')), booking_manage(array('token' => $raw)));
+		same(null, booking::by_token($raw));
+		list($raw, $b) = $link('cancel@example.test');
+		cms_records::act('booking', $b['id'], 'cancel', array(), true);
+		same(array(array(), array('link_invalid')), booking_manage(array('token' => $raw)));
+		list($raw, $b) = $link('decline@example.test');
+		cms_records::act('booking', $b['id'], 'decline', array(), true);
+		same(array('link_invalid'), booking_manage(array('token' => $raw))[1]);
+		same(array('link_invalid'), booking_manage(array('token' => 'xyz'))[1]);
+		same(array('link_invalid'), booking_manage(array('token' => str_repeat('a', 64)))[1]);
+		same(array('link_invalid'), booking_manage(array())[1]);
+		same(array(array(), array()), booking_manage(array('done' => 'cancelled')));
+	});
+});
+
+test('booking: cutoff: too_late within booking_cutoff', function () use ($booking_base) {
+	booking_site(function () use ($booking_base) {
+		$start = time() + 100 * 60;
+		$date = date('Y-m-d', $start);
+		$time = date('H:i', $start);
+		cms_records::create('bookingresource', array('name' => 'Dining room', 'people' => 20));
+		cms_records::create('bookinghours', array('resource' => 'dining-room', 'starts' => $time, 'ends' => $time, 'every' => 1));
+		$mails = booking_mails(function () use ($date, $time) { booking_staff(array('email' => 'late@example.test', 'date' => $date, 'time' => $time)); });
+		$raw = booking_token($mails[0]);
+		$b = cms_records::find('booking', array('email' => 'late@example.test'))[0];
+		list($status, $body) = http('GET', "$booking_base/booking?token=$raw");
+		check(strpos($body, 'late@example.test') !== false && strpos($body, 'ALERT too_late') !== false, $body);
+		list($status, $body) = form_post("$booking_base/booking?token=$raw", array('raster_form' => 'booking.manage', 'do' => 'cancel'));
+		same(200, $status);
+		check(strpos($body, 'ALERT too_late') !== false, $body);
+		same('requested', cms_records::get('booking', $b['id'])['status']);
+		config::set('booking_cutoff')->to(60);
+		try {
+			list(, $alerts) = booking_manage(array('token' => $raw), array('do' => 'cancel'));
+			same(array(), $alerts);
+		} finally {
+			config::set('booking_cutoff')->to(null);
+		}
+		same('cancelled', cms_records::get('booking', $b['id'])['status']);
+	});
+});
+
+test('booking: guest reschedule goes back to requested; old links follow the booking', function () use ($booking_base) {
+	booking_site(function () use ($booking_base) {
+		$tue = booking_cafe();
+		$wed = date('Y-m-d', strtotime("$tue +1 day"));
+		$mails = booking_mails(function () use ($tue) { booking_guest(array('email' => 'move@example.test', 'date' => $tue, 'time' => '19:00', 'people' => 4)); });
+		$first = booking_token($mails[0]);
+		$b = cms_records::find('booking', array('email' => 'move@example.test'))[0];
+		cms_records::act('booking', $b['id'], 'confirm', array(), true);
+		same('16', booking_left($tue, '19:00'));
+		$events = array();
+		$mails = booking_mails(function () use ($booking_base, $first, $wed, &$events) {
+			// the page lists the new day's times for this booking
+			$page = http('GET', "$booking_base/booking?token=$first&date=$wed")[1];
+			check(strpos($page, '<li class="slot">21:00</li>') !== false, 'the new day: '.$page);
+			list($status, , $headers) = form_post("$booking_base/booking?token=$first&date=$wed", array('raster_form' => 'booking.manage', 'do' => 'change', 'time' => '21:00'));
+			same(303, $status);
+			same("$booking_base/booking?done=rescheduled", location($headers));
+		});
+		$moved = cms_records::get('booking', $b['id']);
+		same(array('requested', $wed, '21:00', "$wed 21:00:00"), array($moved['status'], $moved['date'], $moved['time'], $moved['token_expires']));
+		same(array('booking_changed move@example.test', 'booking_new staff@zz.test'), booking_sent($mails));
+		same('20', booking_left($tue, '19:00'));
+		list($rows) = booking_manage(array('token' => $first));
+		same(array($wed, '21:00'), array($rows[0]['date'], $rows[0]['time']));
+		// the event, in this process
+		$events = booking_events(function () use ($first, $tue) {
+			booking_mails(function () use ($first, $tue) { booking_manage(array('token' => $first, 'date' => $tue), array('do' => 'change', 'time' => '19:00')); });
+		});
+		same(array('booking.rescheduled', 'guest'), array($events[0][0], $events[0][1]['who']));
+		// into a full sitting: nothing written, nothing sent
+		booking_staff(array('date' => $wed, 'time' => '19:00', 'people' => 20));
+		$before = cms_records::get('booking', $b['id']);
+		$mails = booking_mails(function () use ($first, $wed) {
+			list($rows, $alerts) = booking_manage(array('token' => $first, 'date' => $wed), array('do' => 'change', 'time' => '19:00'));
+			same(array('fully_booked'), $alerts);
+			same('19:00', $rows[0]['time']);
+		});
+		same(array(), booking_sent($mails));
+		same($before, cms_records::get('booking', $b['id']));
+		// the same slot again
+		$mails = booking_mails(function () use ($first, $tue) {
+			same(array(), booking_manage(array('token' => $first, 'date' => $tue), array('do' => 'change', 'time' => '19:00'))[1]);
+		});
+		same(array(), booking_sent($mails));
+		same($before, cms_records::get('booking', $b['id']));
+	});
+});
+
+test('booking: a logged in guest manages their own booking', function () use ($booking_base) {
+	booking_site(function () use ($booking_base) {
+		$tue = booking_cafe();
+		cms_records::ensure(cms_records::info('booking'), true);
+		$member = function ($email) use ($booking_base) {
+			list(, , $headers) = form_post("$booking_base/register", array('raster_form' => 'authentication.register', 'name' => 'Member', 'email' => $email, 'password' => 'correct horse 1', 'password_again' => 'correct horse 1'));
+			return preg_replace('/^Set-Cookie:\s*([^;]+).*$/i', '$1', current(preg_grep('/^Set-Cookie/i', $headers)));
+		};
+		$mine = $member('zzbook-owner-'.getmypid().'@example.test');
+		$other = $member('zzbook-other-'.getmypid().'@example.test');
+		booking_mails(function () use ($booking_base, $mine, $tue) {
+			$page = http('GET', "$booking_base/zzbook", null, array("Cookie: $mine"))[1];
+			check(preg_match('/name="csrf" value="([a-f0-9]+)"/', $page, $m) === 1, 'no csrf: '.$page);
+			same(303, form_post("$booking_base/zzbook", array('raster_form' => 'booking.form', 'csrf' => $m[1], 'name' => 'Owner', 'email' => 'owner@example.test', 'date' => $tue, 'time' => '19:00', 'people' => '2'), array("Cookie: $mine"))[0]);
+		});
+		$b = cms_records::find('booking', array('email' => 'owner@example.test'))[0];
+		check((int)$b['owner'] > 0, 'no owner');
+		$page = http('GET', "$booking_base/booking?booking={$b['id']}", null, array("Cookie: $mine"))[1];
+		check(strpos($page, 'owner@example.test') !== false && strpos($page, 'ALERT link_invalid') === false, $page);
+		$page = http('GET', "$booking_base/booking?booking={$b['id']}", null, array("Cookie: $other"))[1];
+		check(strpos($page, 'owner@example.test') === false && strpos($page, 'ALERT link_invalid') !== false, $page);
+		check(strpos(http('GET', "$booking_base/booking?booking={$b['id']}")[1], 'ALERT link_invalid') !== false, 'logged out');
+		$page = http('GET', "$booking_base/booking?booking={$b['id']}", null, array("Cookie: $mine"))[1];
+		check(preg_match('/name="csrf" value="([a-f0-9]+)"/', $page, $m) === 1, 'no csrf: '.$page);
+		list($status, , $headers) = form_post("$booking_base/booking?booking={$b['id']}", array('raster_form' => 'booking.manage', 'csrf' => $m[1], 'do' => 'cancel'), array("Cookie: $mine"));
+		same(303, $status);
+		same("$booking_base/booking?booking={$b['id']}&done=cancelled", location($headers));
+		same('cancelled', cms_records::get('booking', $b['id'])['status']);
+	});
+});
+
+test('booking: every email is sent once per change', function () {
+	booking_site(function () {
+		$tue = booking_cafe();
+		$b = booking_guest(array('email' => 'once@example.test', 'date' => $tue, 'time' => '19:00'));
+		$mails = booking_mails(function () use ($b) {
+			cms_records::act('booking', $b['id'], 'confirm', array(), true);
+			same(array('already_confirmed'), booking_problems(function () use ($b) { cms_records::act('booking', $b['id'], 'confirm', array(), true); }));
+		});
+		same(array('booking_confirmed once@example.test'), booking_sent($mails));
+		$events = booking_events(function () use ($b, &$mails) {
+			$mails = booking_mails(function () use ($b) { booking_staff(array('time' => '21:00'), $b['id']); });
+		});
+		same(array('booking_changed once@example.test'), booking_sent($mails));
+		check(booking_token($mails[0]) !== null, 'the changed email has a link');
+		same(array(array('booking.rescheduled', 'staff', 'confirmed')), array_map(function ($e) { return array($e[0], $e[1]['who'], $e[1]['status']); }, $events));
+		$mails = booking_mails(function () use ($b) { booking_staff(array('notes' => 'by the window', 'phone' => '0721'), $b['id']); });
+		same(array(), booking_sent($mails));
+		$mails = booking_mails(function () use ($tue) { booking_staff(array('date' => $tue, 'time' => '21:00')); });
+		same(array(), booking_sent($mails));
+		$quiet = cms_records::find('booking', array('name' => 'Phone booking'))[0];
+		same(array(), $quiet['token_hashes']);
+		$mails = booking_mails(function () use ($tue) { booking_staff(array('name' => 'Phoned', 'email' => 'phoned@example.test', 'date' => $tue, 'time' => '21:00')); });
+		same(array('booking_requested phoned@example.test'), booking_sent($mails));
+		check(booking_token($mails[0]) !== null, 'no link');
+		// a staff move of a cancelled booking tells nobody
+		cms_records::act('booking', $b['id'], 'cancel', array(), true);
+		$mails = booking_mails(function () use ($b) { booking_staff(array('time' => '19:00'), $b['id']); });
+		same(array(), booking_sent($mails));
+	});
+});
+
+test('booking: booking events wait for the commit', function () {
+	booking_site(function () {
+		$tue = booking_cafe();
+		cms_records::ensure(cms_records::info('booking'), true);
+		$mails = array();
+		$events = booking_events(function () use ($tue, &$mails) {
+			$mails = booking_mails(function () use ($tue) {
+				booking_problems(function () use ($tue) {
+					cms_records::transaction(function () use ($tue) {
+						cms_records::create('booking', array('name' => 'Rolled back', 'email' => 'rolled@example.test', 'date' => $tue, 'time' => '19:00'));
+						cms_records::refuse('changed_my_mind');
+					});
+				});
+			});
+		});
+		same(array(), $events);
+		same(array(), booking_sent($mails));
+		same(array(), cms_records::find('booking', array('email' => 'rolled@example.test')));
+		// committed, they come
+		$events = booking_events(function () use ($tue, &$mails) {
+			$mails = booking_mails(function () use ($tue) {
+				cms_records::transaction(function () use ($tue) {
+					cms_records::create('booking', array('name' => 'Kept', 'email' => 'kept@example.test', 'date' => $tue, 'time' => '19:00'));
+				});
+			});
+		});
+		same(array('booking.requested'), array_column($events, 0));
+		same(array('booking_requested kept@example.test'), booking_sent($mails));
+	});
+});
+
+test('booking: a site can unbind a booking email', function () {
+	booking_site(function () {
+		$tue = booking_cafe();
+		$b = booking_guest(array('email' => 'unbound@example.test', 'date' => $tue, 'time' => '19:00'));
+		event::unbind('booking.confirmed')->from('booking', 'confirmed_mail');
+		try {
+			$mails = booking_mails(function () use ($b) { cms_records::act('booking', $b['id'], 'confirm', array(), true); });
+		} finally {
+			event::bind('booking.confirmed')->to('booking', 'confirmed_mail');
+		}
+		same(array(), booking_sent($mails));
+		same('confirmed', cms_records::get('booking', $b['id'])['status']);
+		$other = booking_guest(array('email' => 'bound@example.test', 'date' => $tue, 'time' => '19:00'));
+		$mails = booking_mails(function () use ($other) { cms_records::act('booking', $other['id'], 'confirm', array(), true); });
+		same(array('booking_confirmed bound@example.test'), booking_sent($mails));
+	});
+});
+
+test("booking: bundled listeners are not bound to a site's own booking model", function () {
+	$app = APPBASE.config::get('models_path', 'models');
+	$bound = 'echo json_encode(call_user_func_array("array_merge", array_values(event::bindings())));';
+	$out = json_decode(race_php($bound, 1)[0], true);
+	check(in_array('booking.confirmed_mail', $out, true) && in_array('booking.saved', $out, true), 'the bundled model: '.json_encode($out));
+	temp_model("$app/booking", array('booking.php' => "<?php\nclass booking\n{\n\tstatic function types() {\n\t\treturn array('booking' => array('fields' => array('name' => '')));\n\t}\n}\n"));
+	try {
+		$out = json_decode(race_php($bound, 1)[0], true);
+	} finally {
+		remove_dir("$app/booking");
+		controller::forget_models();
+	}
+	check(is_array($out), 'no bindings');
+	same(array(), array_values(preg_grep('/^booking\./', $out)), 'bound to the site model:');
+});
+
+test('booking: requires(): emails, pages, settings and records', function () {
+	booking_site(function () {
+		$theme = APPBASE.config::get('views_path', 'views').'/'.config::get('theme', 'default');
+		$messages = function ($view) {
+			return array_map(function ($p) { return $p['severity'].': '.$p['message']; }, (new raster_inspector())->lint_file($view));
+		};
+		// no resource yet
+		check(preg_grep('/^warning: .*bookingresource/', $messages('zzbook.html')) !== array(), 'no records: '.json_encode($messages('zzbook.html')));
+		booking_cafe();
+		same(array(), array_values(preg_grep('/bookingresource/', $messages('zzbook.html'))));
+		$new = "$theme/_email/booking_new.html";
+		$html = file_get_contents($new);
+		unlink($new);
+		try {
+			check(preg_grep('/^error: render\.booking\.form sends an email written in .*booking_new\.html/', $messages('zzbook.html')) !== array(), json_encode($messages('zzbook.html')));
+			check(preg_grep('/^error: render\.booking\.manage sends an email written in .*booking_new\.html/', $messages('booking.html')) !== array(), json_encode($messages('booking.html')));
+		} finally {
+			file_put_contents($new, $html);
+		}
+		same(array(), array_values(preg_grep('/^error/', $messages('zzbook.html'))));
+		check(in_array('booking', controller::required('pages'), true), 'pages: '.json_encode(controller::required('pages')));
+		$urls = array_column((new feed())->pages(), 'url');
+		check(!preg_grep('#/booking$#', $urls) && preg_grep('#/zzbook$#', $urls), 'sitemap: '.json_encode($urls));
+		config::set('booking_manage_page')->to('my-booking');
+		try {
+			same(array('my-booking'), array_values(array_intersect(array('booking', 'my-booking'), controller::required('pages'))));
+		} finally {
+			config::set('booking_manage_page')->to(null);
+		}
+		require_once BASE.'tools/describe.php';
+		config::set('booking_cutoff')->to(90);
+		try {
+			$settings = raster_describe::site(array('settings'))['settings'];
+		} finally {
+			config::set('booking_cutoff')->to(null);
+		}
+		same(90, $settings['booking_cutoff']);
+		check(!preg_grep('/protected/', $messages('booking.html')), json_encode($messages('booking.html')));
+		$protected = config::get('protected');
+		config::set('protected')->to(array('account' => 'member', 'booking' => 'editor'));
+		try {
+			check(preg_grep('/^warning: .*render\.booking\.manage.*protected/', $messages('booking.html')) !== array(), json_encode($messages('booking.html')));
+		} finally {
+			config::set('protected')->to($protected);
+		}
 	});
 });
 

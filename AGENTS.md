@@ -227,6 +227,10 @@ static function requires() {
   (`feed.pages`) and `raster export` leave them out; `sitemap_skip` and
   `export_skip` add to them.
 - `settings`: `describe` lists their values.
+- `records`: a region and the record types it needs at least one of
+  (`'render.booking.form' => array('bookingresource')`). `lint` warns on a
+  view with the region while there is none, and says nothing when it can't
+  reach the database.
 - `requires()` is asked when it is needed, never kept in `models.json`, so
   it may read config: a page moved by its setting is left out where it is.
   `controller::required('pages')` merges what every model in use declares;
@@ -314,7 +318,8 @@ class cafe {
   `event::unbind(…)->from(…)`.
 - Listeners get the payload array and run in order: the framework's own
   bindings in `system/config/events.php` (routing, the CMS and account
-  checks, the newsletter's confirmation email), then `the_events.php`, then
+  checks, the newsletter's confirmation email, the booking emails), then
+  `the_events.php`, then
   `listens()`, then the framework's core handlers (controller and log). A
   listener returning `false` makes
   `event::dispatch()` return `false`; the sender decides what that means.
@@ -338,6 +343,9 @@ alike:
 | `authentication.login_failed` | `login` |
 | `newsletter.subscribed` | `email`, `name`, `status` (`pending` or `confirmed`), `source` (after the commit; the framework's listener `newsletter.confirmation_mail` emails a pending address) |
 | `newsletter.confirmed`, `newsletter.unsubscribed` | `email`, `name` |
+| `booking.requested` | a booking was made (by a guest on the form, or by staff in the page, over MCP or in model code): its fields but `token_hashes` and `token_expires`, and `who` (`guest` or `staff`). After the commit, as are the four below |
+| `booking.confirmed`, `booking.declined`, `booking.cancelled` | the same, after the status change (`cancelled` by the guest's link has `who` `guest`) |
+| `booking.rescheduled` | the same, after a move of an active booking (its `date`, `time`, `resource` or `service`; a guest's goes back to `requested`) |
 | `cms.item_saved` | `collection`, `created` (true for new items), `item` |
 | `cms.item_deleted` | `collection`, `item` |
 | `cms.page_saved` | `type`, `slug`, `changed` (field names), `fields` |
@@ -946,8 +954,16 @@ link follow.
     `?done=booked`, or shows the form again with the alerts below. Shown
     first, it is filled from the URL's `date`, `time`, `resource`, `service`
     and `people` (a field the form doesn't have comes back as a hidden
-    input), and it raises `not_open` while no resource is active.
+    input), and it raises `not_open` while no resource is active. The
+    guest gets `booking_requested` with their link, staff `booking_new`.
+    `lint` warns on it while there is no `bookingresource` yet.
+  - `render.booking.manage`: the guest's page (the `booking` view, or
+    `booking_manage_page`), one row: the booking without its hidden fields,
+    with `resource_name` and `service_name`. See **The guest's link**.
   - Slots and days are never page-cached, and count the bookings made.
+    On the manage page, `render.booking.slots('date=?date&for=manage')`
+    lists a day's times for the managed booking: its resource, service and
+    people, and its own place not counted against it.
 - Bookings are the `booking` type: `name`, `email`, `phone`, `date`, `time`,
   `people` (1 by default), `resource` (a slug), `service` (a slug or empty),
   `notes`, and what the model works out (readonly): `ends`, `status`,
@@ -1024,12 +1040,74 @@ link follow.
   over minutes `[$from, $to)` (spans are half-open: one ending at 10:00 and
   one starting then never meet). `booking::move($id, $values, $who)` moves
   a booking (`date`, `time`, `resource`, `service`, `people`) in one write;
-  a guest's move (`$who` `'guest'`) gets the guest rules and goes back to
-  `requested`, staff's keeps the status. `booking::reason($booking)` says
-  why it needs attention. Model code that writes bookings with
-  `cms_records::create/update` is trusted like staff.
+  a guest's move (`$who` `'guest'`) gets the guest rules and the cutoff and
+  goes back to `requested`, staff's keeps the status; either sends
+  `booking.rescheduled` and the guest a new link. `booking::reason($booking)`
+  says why it needs attention, `booking::by_token($raw)` gives the booking a
+  link is for (or null). Model code that writes bookings with
+  `cms_records::create/update` is trusted like staff, and its new bookings
+  get `booking.requested` with `who` `staff`.
+- The guest's link. Each email to the guest carries a new one in
+  `manage_url`: `<booking_manage_page>?token=<64 hex>`, 32 random bytes sent
+  only in that email. The booking keeps their sha256 (the newest 20, in
+  the hidden `token_hashes`), so the first email's link still works after
+  the confirmation and follows the booking when it moves. A link works
+  until the booking starts (`token_expires`) and is dead once it is
+  declined or cancelled (their emails have no link); a dead, unknown or
+  malformed one raises `link_invalid`.
+  - A GET shows the booking and changes nothing, so a mail scanner opening
+    the link does no harm. The page's forms post to the page itself (the
+    token stays in the URL, never in a hidden field), with `do=cancel`, or
+    `do=change` and the new `time` (the day from `?date=`, from a GET form
+    that keeps `token`). The cross-site check applies.
+  - Within `booking_cutoff` minutes of the start the page raises
+    `too_late` (tell the guest to phone) and refuses both.
+  - A guest's change is checked as a guest's booking (`fully_booked`,
+    `too_soon`, …, raised on the page), goes back to `requested` and emails
+    `booking_changed` to the guest and `booking_new` to staff; the same time
+    again writes and sends nothing. Afterwards the page redirects to
+    `?done=cancelled` / `?done=rescheduled` without the token, and shows
+    only that alert.
+  - A logged in guest manages their own booking (its `owner`) by
+    `?booking=<id>`, without a token; the redirect keeps `?booking=`.
+  - The page is never page-cached, sends `Referrer-Policy: same-origin`, and
+    is left out of the sitemap and `raster export`. The raw token is in no
+    event, log, record or cache: the model hands it to its own email
+    listener within the request. Don't protect `booking` for staff
+    (`protected`): `lint` warns, since guests would get the login page.
+- Emails, after the answer (the site writes the views, and `lint` reports a
+  missing one where `render.booking.form` or `render.booking.manage` is):
+
+  | View | To | When |
+  |---|---|---|
+  | `_email/booking_requested` | guest | a booking is made, by the guest or by staff |
+  | `_email/booking_new` | staff | the guest made a booking or moved it |
+  | `_email/booking_confirmed` | guest | confirmed |
+  | `_email/booking_declined` | guest | declined |
+  | `_email/booking_cancelled` | guest, and staff when the guest cancelled | cancelled |
+  | `_email/booking_changed` | guest | moved, by staff or the guest |
+
+  Each gets the booking's fields (not the hidden ones), `who`,
+  `manage_url` (empty when there is no link), `resource_name`,
+  `service_name`, `site_url` and `book_url` (`booking_page`). Staff's go to
+  `booking_staff_email`, else the sender (`RASTER_MAIL_FROM`, `mail_from`).
+  A booking with no email sends the guest nothing. Each change sends each
+  email once; a status that didn't change (`already_confirmed`) sends
+  nothing. An edit that isn't a move (a phone number, a note) sends
+  nothing. A booking staff add or move in the page or over MCP gets the
+  guest's email and link through the model's `cms.item_saved` listener
+  (`booking.saved`), with `who` `staff`; staff aren't emailed about their
+  own. The listeners are framework bindings (`system/config/events.php`),
+  bound only for the bundled model, never a site's own `booking`; unbind
+  one to send your own:
+  `event::unbind('booking.confirmed')->from('booking', 'confirmed_mail')`
+  (also `requested_mail`, `declined_mail`, `cancelled_mail`,
+  `rescheduled_mail`).
 - Settings: `booking_notice` (60 minutes ahead), `booking_horizon` (60 days
-  ahead), `booking_max_people` (12 in a guest's booking).
+  ahead), `booking_max_people` (12 in a guest's booking), `booking_cutoff`
+  (120 minutes before the start a guest may still cancel or change),
+  `booking_page` (`book`, the form, for `book_url`), `booking_manage_page`
+  (`booking`), `booking_staff_email` (the sender).
 
 **mail**: emails are views. `mail::send_view('_email/welcome', $to,
 array('name' => 'Ada'))` uses the view's `<title>` as the subject.
@@ -1372,6 +1450,9 @@ Set in `config/the_app.php` with `config::set('name')->to(value)`.
 | `booking_notice` | 60 | minutes ahead a guest may book |
 | `booking_horizon` | 60 | days ahead a guest may book |
 | `booking_max_people` | 12 | people in one booking, for guests; staff may book more |
+| `booking_cutoff` | 120 | minutes before the start a guest may still cancel or change by their link |
+| `booking_page`, `booking_manage_page` | `book`, `booking` | the booking form's page (`book_url` in emails) and the guest's manage page (their links) |
+| `booking_staff_email` | the sender (`RASTER_MAIL_FROM`, `mail_from`) | where staff's booking emails go |
 | `newsletter_double_opt_in` | true | false subscribes without a confirmation |
 | `newsletter_confirm_page`, `newsletter_unsubscribe_page` | `newsletter-confirm`, `newsletter-unsubscribe` | |
 | `mail`, `mail_from` | see `RASTER_MAIL` | transport and sender |

@@ -15,6 +15,15 @@ event::bind('route_set')->to('cms','setup');
 event::bind('route_set')->to('authentication','setup');
 // A newsletter sign-up waiting for confirmation gets its email, after the commit
 event::bind('newsletter.subscribed')->to('newsletter', 'confirmation_mail');
+// Bookings email the guest (and staff, when the guest acted) at each step,
+// after the commit; a booking staff add or move in the page gets its guest
+// a link. Only the bundled booking model: a site's own keeps its own ways.
+$booking = controller::model('booking');
+if ($booking && $booking['bundled']) {
+	event::bind('cms.item_saved')->to('booking', 'saved');
+	foreach (array('requested', 'confirmed', 'declined', 'cancelled', 'rescheduled') as $step) event::bind("booking.$step")->to('booking', $step.'_mail');
+}
+unset($booking, $step);
 // The CMS editing toolbar for logged in editors
 event::bind('before_output')->to('cms','inject_toolbar');
 // Alerts (<!-- print.validation.alert('name') -->) show or hide at the end

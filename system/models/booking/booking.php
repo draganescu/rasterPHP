@@ -32,6 +32,10 @@
 *   <!-- render.booking.resources('service=?service') -->  the active ones
 *   <!-- render.booking.services('resource=?resource') -->  the active ones
 *   <!-- render.booking.form -->  the booking form; ?done=booked when stored
+*   <!-- render.booking.manage -->  the guest's page, by the link in their
+*     emails (?token=) or, logged in, ?booking=<id>: the booking, and forms
+*     posting do=cancel, or do=change with a time (the day from ?date=, its
+*     times from render.booking.slots('date=?date&for=manage'))
 * For staff (editors) only, nothing for anyone else:
 *   <!-- render.booking.agenda('from=today&days=7&resource=?resource') -->
 *     days: date, closed, slots (as above), bookings (editable in place,
@@ -51,12 +55,24 @@
 * not_a_slot, service_unavailable, too_soon, too_far, already_booked,
 * fully_booked, already_confirmed, already_declined, already_cancelled; a
 * confirm is also refused with why the booking needs attention (closed,
-* resource_inactive, service_unavailable, not_a_slot, over_capacity).
+* resource_inactive, service_unavailable, not_a_slot, over_capacity). On the
+* manage page: link_invalid, too_late, and cancelled or rescheduled after.
+*
+* Emails, views the site writes: _email/booking_requested, booking_confirmed,
+* booking_declined, booking_cancelled and booking_changed to the guest (with
+* print.self.manage_url, their link), booking_new and booking_cancelled to
+* staff when the guest acted. Events, after the commit: booking.requested,
+* booking.confirmed, booking.declined, booking.cancelled, booking.rescheduled
+* (the booking's fields and who: guest or staff).
 *
 * Settings:
 *   config::set('booking_notice')->to(60);      minutes ahead a guest may book
 *   config::set('booking_horizon')->to(60);     days ahead a guest may book
 *   config::set('booking_max_people')->to(12);  people in a guest's booking
+*   config::set('booking_cutoff')->to(120);     minutes before the start a guest may still cancel or change
+*   config::set('booking_page')->to('book');    the form's page, for book_url in emails
+*   config::set('booking_manage_page')->to('booking');  the guest's page their links open
+*   config::set('booking_staff_email')->to('staff@example.com');  else the sender
 */
 class booking
 {
@@ -70,6 +86,14 @@ class booking
 	static $acting = 'staff';
 	// bookings staff moved in this request, id => true
 	static $moved = array();
+	// the guest's new links, id => raw token: this request only, for the
+	// model's own email listener, never stored, logged or sent with an event
+	static $links = array();
+	// while the model makes its own writes (the form, the actions, moves):
+	// saved() leaves those alone
+	static $writing = false;
+	// the booking the manage page is about, by its ?token= or ?booking=
+	static $managed = array();
 
 	static function types() {
 		return array(
@@ -177,6 +201,7 @@ class booking
 		if (!$before || $moved || $after['status'] !== $before['status']) $values['changed_at'] = date('Y-m-d H:i:s');
 		// a guest's link works until the booking starts
 		if ((!$before || $moved) && (string)$after['date'] !== '' && (string)$after['time'] !== '') $values['token_expires'] = $after['date'].' '.$after['time'].':00';
+		if ($before) unset(self::$moved[(int)$before['id']]);
 		if ($before && $placed && self::is_staff()) self::$moved[(int)$before['id']] = true;
 		return $values;
 	}
@@ -320,35 +345,65 @@ class booking
 	// a moment ago isn't confirmed from a page that still showed it.
 
 	static function confirm($booking, $input) {
-		return self::set_status($booking['id'], 'confirmed');
+		return self::set_status($booking['id'], 'confirmed', 'staff');
 	}
 
 	static function decline($booking, $input) {
-		return self::set_status($booking['id'], 'declined');
+		return self::set_status($booking['id'], 'declined', 'staff');
 	}
 
 	static function cancel($booking, $input) {
-		return self::set_status($booking['id'], 'cancelled');
+		return self::set_status($booking['id'], 'cancelled', 'staff');
 	}
 
-	protected static function set_status($id, $status) {
+	// A status change and its event (booking.confirmed, …) in one
+	// transaction. A confirmed guest gets a new link with it; a declined or
+	// cancelled booking's links are dead, so its email has none. A guest
+	// ($who 'guest', from the manage page) may only cancel, before the cutoff.
+	protected static function set_status($id, $status, $who) {
+		return self::writing($who, $id, function () use ($id, $status, $who) {
+			$booking = cms_records::get('booking', $id);
+			if (!$booking) throw new InvalidArgumentException("No booking $id");
+			if ($who === 'guest') self::guest_may($booking);
+			if ($booking['status'] === 'cancelled') cms_records::refuse('already_cancelled');
+			if ($booking['status'] === 'declined') cms_records::refuse('already_declined');
+			if ($booking['status'] === 'confirmed' && $status !== 'cancelled') cms_records::refuse('already_confirmed');
+			// a booking that no longer fits is confirmed once it does again
+			$reason = $status === 'confirmed' ? self::reason($booking) : '';
+			if ($reason !== '') cms_records::refuse($reason);
+			$values = array('status' => $status);
+			if ($status === 'confirmed') $values += self::issue($booking);
+			$saved = cms_records::update('booking', $id, $values);
+			cms_records::dispatch('booking.'.$status, self::payload($saved, $who));
+			return $saved;
+		});
+	}
+
+	// Runs the model's own write $work for $who ('guest' or 'staff') in one
+	// transaction, so its events wait for the commit. A link issued for a
+	// write that didn't happen is dropped.
+	protected static function writing($who, $id, $work) {
 		$acting = self::$acting;
-		self::$acting = 'staff';
+		$writing = self::$writing;
+		self::$acting = $who === 'guest' ? 'guest' : 'staff';
+		self::$writing = true;
 		try {
-			return cms_records::transaction(function () use ($id, $status) {
-				$booking = cms_records::get('booking', $id);
-				if (!$booking) throw new InvalidArgumentException("No booking $id");
-				if ($booking['status'] === 'cancelled') cms_records::refuse('already_cancelled');
-				if ($booking['status'] === 'declined') cms_records::refuse('already_declined');
-				if ($booking['status'] === 'confirmed' && $status !== 'cancelled') cms_records::refuse('already_confirmed');
-				// a booking that no longer fits is confirmed once it does again
-				$reason = $status === 'confirmed' ? self::reason($booking) : '';
-				if ($reason !== '') cms_records::refuse($reason);
-				return cms_records::update('booking', $id, array('status' => $status));
-			});
+			return cms_records::transaction($work);
+		} catch (Throwable $e) {
+			unset(self::$links[(int)$id]);
+			throw $e;
 		} finally {
 			self::$acting = $acting;
+			self::$writing = $writing;
 		}
+	}
+
+	// what a guest's link may still do: nothing once the booking is over or
+	// gone (link_invalid), nor within booking_cutoff minutes of its start,
+	// when the page tells them to phone (too_late)
+	protected static function guest_may($booking) {
+		if (!self::is_live($booking)) cms_records::refuse('link_invalid');
+		if (self::is_late($booking)) cms_records::refuse('too_late');
 	}
 
 	// Moves a booking: date, time, resource, service and people from
@@ -358,19 +413,177 @@ class booking
 	// writes nothing.
 	static function move($id, $values, $who) {
 		$changes = array_intersect_key((array)$values, array_flip(array('date', 'time', 'resource', 'service', 'people')));
-		$acting = self::$acting;
-		self::$acting = $who === 'guest' ? 'guest' : 'staff';
-		try {
-			return cms_records::transaction(function () use ($id, $changes, $who) {
-				$booking = cms_records::get('booking', $id);
-				if (!$booking) throw new InvalidArgumentException("No booking $id");
-				if (!self::changed($changes, array_intersect_key($booking, $changes), array_keys($changes))) return $booking;
-				if ($who === 'guest') $changes['status'] = 'requested';
-				return cms_records::update('booking', $id, $changes);
-			});
-		} finally {
-			self::$acting = $acting;
+		return self::writing($who, $id, function () use ($id, $changes, $who) {
+			$booking = cms_records::get('booking', $id);
+			if (!$booking) throw new InvalidArgumentException("No booking $id");
+			if ($who === 'guest') self::guest_may($booking);
+			if (!self::changed($changes, array_intersect_key($booking, $changes), array_keys($changes))) return $booking;
+			if ($who === 'guest') $changes['status'] = 'requested';
+			// the guest's links follow the booking to its new start
+			if (in_array($booking['status'], self::$active, true)) $changes += self::issue(array_merge($booking, $changes));
+			$saved = cms_records::update('booking', $id, $changes);
+			if (in_array($saved['status'], self::$active, true)) cms_records::dispatch('booking.rescheduled', self::payload($saved, $who));
+			return $saved;
+		});
+	}
+
+	// ##The guest's link
+	// Each email to the guest carries a new link to manage the booking:
+	// 32 random bytes, sent only in that email. The booking keeps the sha256
+	// of the newest 20 (token_hashes), so the first email's link still works
+	// after the confirmation. A link lasts until the booking starts
+	// (token_expires) and dies once it is declined or cancelled. Raster has
+	// no site secret to sign links with, so they are random.
+
+	// The values to write with a change so the guest gets a new link
+	// (token_hashes, token_expires), or array() when the booking has no
+	// email. The raw token waits in self::$links for the email listener.
+	static function issue($booking) {
+		if (trim((string)$booking['email']) === '') return array();
+		$raw = bin2hex(random_bytes(32));
+		$hashes = isset($booking['token_hashes']) ? array_values((array)$booking['token_hashes']) : array();
+		$hashes[] = hash('sha256', $raw);
+		self::$links[(int)$booking['id']] = $raw;
+		return array(
+			'token_hashes' => array_slice($hashes, -20),
+			'token_expires' => $booking['date'].' '.self::clock(self::minutes($booking['time'])).':00',
+		);
+	}
+
+	// the booking a link is for, or null: a malformed or unknown token, a
+	// link past the booking's start, or a booking declined or cancelled
+	static function by_token($raw) {
+		if (!is_string($raw) || !preg_match('/^[a-f0-9]{64}$/', $raw) || !self::ready() || !cms_store::table_exists('bookingdata')) return null;
+		$hash = hash('sha256', $raw);
+		foreach (database::instance('booking')->by_token('%'.$hash.'%') as $row) {
+			$hashes = json_decode((string)$row['token_hashes'], true);
+			foreach (is_array($hashes) ? $hashes : array() as $kept) {
+				if (!is_string($kept) || !hash_equals($kept, $hash)) continue;
+				$booking = cms_records::get('booking', $row['id']);
+				return $booking && self::is_live($booking) ? $booking : null;
+			}
 		}
+		return null;
+	}
+
+	// a booking a guest can still reach: active and not started
+	protected static function is_live($booking) {
+		if (!in_array($booking['status'], self::$active, true)) return false;
+		$expires = (string)$booking['token_expires'] !== '' ? strtotime((string)$booking['token_expires']) : self::starts_at($booking['date'], self::clock(self::minutes($booking['time'])));
+		return $expires !== false && $expires > time();
+	}
+
+	// within booking_cutoff minutes of the start, in real minutes
+	protected static function is_late($booking) {
+		return self::starts_at($booking['date'], self::clock(self::minutes($booking['time']))) < time() + (int)config::get('booking_cutoff', 120) * 60;
+	}
+
+	// The booking the manage page shows: the one ?token= is for, or the
+	// logged in guest's own by ?booking=<id>. Null when neither; read once
+	// per request (forget() reads it again).
+	static function managed() {
+		$token = util::get('token');
+		$id = util::get('booking');
+		$key = is_string($token) && $token !== '' ? "token:$token" : (is_string($id) && $id !== '' ? "booking:$id" : '');
+		if ($key === '' || !self::ready()) return null;
+		if (array_key_exists($key, self::$managed)) return self::$managed[$key];
+		$booking = null;
+		if (strpos($key, 'token:') === 0) {
+			$booking = self::by_token($token);
+		} elseif (ctype_digit($id) && cms_store::table_exists('bookingdata')) {
+			$me = cms_records::owner_me(cms_records::info('booking'));
+			$found = $me === null ? null : cms_records::get('booking', (int)$id);
+			if ($found && (string)$found['owner'] === $me && self::is_live($found)) $booking = $found;
+		}
+		return self::$managed[$key] = $booking;
+	}
+
+	// what an event or an email gets of a booking: every field but the
+	// hidden ones, and who made the change (guest or staff)
+	static function payload($booking, $who) {
+		return cms_records::shown(cms_records::info('booking'), $booking) + array('who' => $who === 'guest' ? 'guest' : 'staff');
+	}
+
+	// ##Emails and events
+	// The model's listeners (system/config/events.php) send the emails; a
+	// site unbinds one in config/the_events.php to send its own:
+	//   event::unbind('booking.confirmed')->from('booking', 'confirmed_mail');
+
+	// cms.item_saved: a booking staff added or moved in the page or over MCP
+	// gets its guest a link and its event (who: staff). Staff aren't
+	// emailed about their own bookings.
+	function saved($saved) {
+		if (self::$writing || !is_array($saved) || !isset($saved['collection'], $saved['item']['id']) || $saved['collection'] !== 'booking' || !self::ready()) return null;
+		$id = (int)$saved['item']['id'];
+		$moved = isset(self::$moved[$id]);
+		unset(self::$moved[$id]);
+		if (!$saved['created'] && !$moved) return null;
+		self::writing('staff', $id, function () use ($id, $saved) {
+			$booking = cms_records::get('booking', $id);
+			if (!$booking || !in_array($booking['status'], self::$active, true)) return;
+			$values = self::issue($booking);
+			if ($values) $booking = cms_records::update('booking', $id, $values);
+			cms_records::dispatch($saved['created'] ? 'booking.requested' : 'booking.rescheduled', self::payload($booking, 'staff'));
+		});
+		return null;
+	}
+
+	function requested_mail($booking) {
+		return self::mail($booking, 'booking_requested', 'booking_new');
+	}
+
+	function confirmed_mail($booking) {
+		return self::mail($booking, 'booking_confirmed', null);
+	}
+
+	function declined_mail($booking) {
+		return self::mail($booking, 'booking_declined', null);
+	}
+
+	function cancelled_mail($booking) {
+		return self::mail($booking, 'booking_cancelled', 'booking_cancelled');
+	}
+
+	function rescheduled_mail($booking) {
+		return self::mail($booking, 'booking_changed', 'booking_new');
+	}
+
+	// The guest's email, with their new link when the change made one, and
+	// staff's when the guest made the change. The views get the booking's
+	// fields, manage_url, resource_name, service_name, site_url and book_url.
+	protected static function mail($booking, $guest, $staff) {
+		if (!is_array($booking) || !isset($booking['id']) || !self::ready()) return null;
+		$id = (int)$booking['id'];
+		$setup = self::setup();
+		$vars = $booking;
+		$vars['manage_url'] = isset(self::$links[$id]) ? util::url(config::get('booking_manage_page', 'booking'), array('token' => self::$links[$id])) : '';
+		unset(self::$links[$id]);
+		$vars['resource_name'] = isset($setup['resources'][$booking['resource']]) ? $setup['resources'][$booking['resource']]['name'] : '';
+		$vars['service_name'] = isset($setup['services'][$booking['service']]) ? $setup['services'][$booking['service']]['name'] : '';
+		$vars['site_url'] = util::url('');
+		$vars['book_url'] = util::url(config::get('booking_page', 'book'));
+		if (trim((string)$booking['email']) !== '') self::send('_email/'.$guest, $booking['email'], $vars);
+		if (!$staff || !isset($booking['who']) || $booking['who'] !== 'guest') return null;
+		$vars['manage_url'] = '';
+		$to = trim((string)config::get('booking_staff_email', ''));
+		if ($to === '') $to = trim((string)(getenv('RASTER_MAIL_FROM') ?: config::get('mail_from', '')));
+		if ($to === '') log::warning('booking: no address for staff emails: set booking_staff_email or mail_from');
+		else self::send('_email/'.$staff, $to, $vars);
+		return null;
+	}
+
+	// a booking stays made when its email can't go: the failure is logged,
+	// without the address or the link
+	protected static function send($view, $to, $vars) {
+		$mail = controller::model_class('mail');
+		try {
+			if ($mail::send_view($view, $to, $vars)) return true;
+		} catch (Exception $e) {
+			log::error("booking: $view: ".$e->getMessage());
+			return false;
+		}
+		log::error("booking: $view was not sent");
+		return false;
 	}
 
 	// ##The setup
@@ -381,6 +594,22 @@ class booking
 	static function ready() {
 		$info = cms_records::info('bookingresource');
 		return $info !== null && $info['model'] === 'booking';
+	}
+
+	// what a site taking bookings needs: the emails' views, the manage page
+	// (left out of the sitemap and an export), the settings, and at least
+	// one resource before the form can take a booking
+	static function requires() {
+		$emails = array('_email/booking_requested', '_email/booking_new', '_email/booking_confirmed', '_email/booking_declined', '_email/booking_cancelled', '_email/booking_changed');
+		return array(
+			'emails' => array(
+				'render.booking.form' => $emails,
+				'render.booking.manage' => array('_email/booking_cancelled', '_email/booking_changed', '_email/booking_new'),
+			),
+			'pages' => array(config::get('booking_manage_page', 'booking')),
+			'settings' => array('booking_page', 'booking_manage_page', 'booking_staff_email', 'booking_notice', 'booking_horizon', 'booking_cutoff', 'booking_max_people'),
+			'records' => array('render.booking.form' => array('bookingresource')),
+		);
 	}
 
 	// array('resources' => slug => row, 'hours' => rows, 'closed' => rows,
@@ -404,6 +633,7 @@ class booking
 
 	static function forget() {
 		self::$setup = null;
+		self::$managed = array();
 	}
 
 	// ##Time
@@ -614,6 +844,17 @@ class booking
 		raster_cache::skip();
 		if (!self::ready()) return array();
 		$options = self::options($options);
+		if (isset($options['for']) && $options['for'] === 'manage') {
+			// the managed booking's own resource, service and people, and its
+			// place not counted against it
+			$booking = self::managed();
+			if (!$booking || !isset($options['date'])) return array();
+			$taken = array();
+			foreach (self::taken($options['date'], $booking['resource']) as $row) {
+				if ((int)$row['id'] !== (int)$booking['id']) $taken[] = $row;
+			}
+			return self::day($options['date'], $booking['resource'], $booking['service'], $booking['people'], $taken);
+		}
 		$chosen = self::chosen($options);
 		if (!$chosen || !isset($options['date'])) return array();
 		return self::day($options['date'], $chosen[0], $chosen[1], $chosen[2], self::taken($options['date'], $chosen[0]));
@@ -687,13 +928,74 @@ class booking
 			$chosen = self::options('date=?date&time=?time&resource=?resource&service=?service&people=?people');
 			return $chosen ? template::instance()->form_state($chosen) : false;
 		}
-		$acting = self::$acting;
-		self::$acting = 'guest';
-		try {
-			return cms_records::submit('booking', 'booked');
-		} finally {
-			self::$acting = $acting;
+		// the booking, its link and booking.requested go together
+		$result = self::writing('guest', 0, function () {
+			$item = cms_records::submit('booking', false);
+			if (!is_array($item)) return $item;
+			$booking = cms_records::get('booking', $item['id']);
+			$values = self::issue($booking);
+			if ($values) $booking = cms_records::update('booking', $booking['id'], $values);
+			cms_records::dispatch('booking.requested', self::payload($booking, 'guest'));
+			return true;
+		});
+		if ($result !== true) return $result;
+		util::done('booked');
+		return false;
+	}
+
+	// The guest's manage page, by the link in their emails (?token=) or,
+	// logged in, by ?booking=<id>: the booking without its hidden fields,
+	// with resource_name and service_name. A GET changes nothing. Its form
+	// posts do=cancel, or do=change with the new time (and the day from
+	// ?date=, as render.booking.slots('date=?date&for=manage') lists it).
+	// Alerts: link_invalid, too_late; cancelled and rescheduled after the
+	// change, on the page without the token.
+	function manage() {
+		// the link is a key: no cache keeps it, and no Referer takes it along
+		raster_cache::skip();
+		if (PHP_SAPI !== 'cli' && !headers_sent()) header('Referrer-Policy: same-origin');
+		if (!self::ready()) return array();
+		$v = validation::get();
+		$booking = self::managed();
+		if (!$booking) {
+			// after a change the page has ?done= and no link any more
+			if (!is_string(util::get('done')) || util::get('done') === '') $v->raise('link_invalid');
+			return array();
 		}
+		// back to this page without the token (the owner's keeps ?booking=)
+		$back = config::get('link_uri').ltrim(strtok((string)config::get('uri_string'), '?'), '/');
+		if (!is_string(util::get('token')) || util::get('token') === '') $back .= '?booking='.(int)$booking['id'];
+		if ($v->submitted()) {
+			try {
+				if (util::post('do') === 'cancel') {
+					self::set_status($booking['id'], 'cancelled', 'guest');
+					return self::manage_done('cancelled', $back);
+				}
+				if (util::post('do') === 'change') {
+					$date = util::get('date') ?: (util::post('date') ?: $booking['date']);
+					$moved = self::move($booking['id'], array('date' => (string)$date, 'time' => (string)util::post('time')), 'guest');
+					if ($moved['date'] !== $booking['date'] || $moved['time'] !== $booking['time']) return self::manage_done('rescheduled', $back);
+				}
+			} catch (cms_refused $e) {
+				foreach ($e->problems as $problem) $v->raise($problem);
+			}
+			$booking = cms_records::get('booking', $booking['id']);
+		} elseif (self::is_late($booking)) {
+			$v->raise('too_late');
+		}
+		$setup = self::setup();
+		$row = cms_records::shown(cms_records::info('booking'), $booking);
+		$row['resource_name'] = isset($setup['resources'][$booking['resource']]) ? $setup['resources'][$booking['resource']]['name'] : '';
+		$row['service_name'] = isset($setup['services'][$booking['service']]) ? $setup['services'][$booking['service']]['name'] : '';
+		return array(cms_records::for_template(cms_records::info('booking'), $row));
+	}
+
+	// util::done exits in a request; on the command line the page shows
+	// nothing more
+	protected static function manage_done($done, $back) {
+		self::forget();
+		util::done($done, $back);
+		return array();
 	}
 
 	// ##For staff
