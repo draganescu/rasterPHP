@@ -274,7 +274,7 @@ php tests/demo.php                        # the whole matrix
 | N8 | raster doctor: .htaccess rules, `allow_deprecated` |
 | N9 | `raster export`: pages, items, lists, feeds, the 404 page, assets and every language as static files; what needs PHP is reported |
 | N10 | `print.if.live` / `print.if.static`: forms on the live site, what shows instead in the export; an unwrapped form stops the export |
-| N11 | exporting again writes only files that changed, removes what the site no longer has, and does nothing when nothing changed |
+| N11 | exporting again writes only files that changed, removes what the site no longer has, and does nothing when nothing changed; a new day always exports again |
 | N12 | raster vocabulary, and --json |
 | N13 | raster describe, and --sections |
 | N14 | `raster render <url> --as=<account or role>`, and a query string in the URL |

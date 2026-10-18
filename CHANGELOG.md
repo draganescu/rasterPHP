@@ -3,6 +3,16 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.15
+
+Nothing for sites to do.
+
+**A new day exports again.** `raster export` counts the date (in the site's `timezone`) as part of what the site is made of. A nightly export now drops events that `date>=today` no longer lists, where before it said "Nothing changed since the last export". Pages that come out the same are still not written again.
+
+**`raster update` stops when it can't replace a file.** A framework file it can't write or remove now stops the update with exit 1 and the file's name, and the files already replaced are put back. Before, it said "Updated" while some files were still old. `update <folder>` also refuses a folder that doesn't hold `system/boot.php`, even with `--force`.
+
+**The comment at the top of `bin/raster`** lists the same commands and options as `raster help`.
+
 ## 2.2.14
 
 Behind nginx: regenerate the config with `php bin/raster deploy --config=nginx`, or add `client_max_body_size 13m;` to it. Make sure the php.ini PHP-FPM reads has `upload_max_filesize = 12M` and `post_max_size = 13M`.

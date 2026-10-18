@@ -1294,7 +1294,9 @@ of lists and filter pages come along; drafts and the editor don't.
 - **Exporting again** to the same folder writes only files that changed and
   removes the ones the site no longer has, so a deploy uploads just those.
   When nothing the site is made of changed (content, templates, models,
-  theme, media), it does nothing. `.raster-export.json` in the folder keeps
+  theme, media) and it is the same day, it does nothing. A new day in the
+  site's time zone always exports again, so `date>=today` lists and what
+  prints from the clock stay current. `.raster-export.json` in the folder keeps
   track; files the export didn't write are left alone. `--clean` starts the
   folder over.
 
@@ -1498,7 +1500,11 @@ command-line output). They win over the settings above.
   `update <file.tar.gz>`; `--dry-run` shows what would change). It refuses
   when framework files were edited since they were installed
   (`system/checksums.json` records them); `--force` goes ahead. Replaced
-  files are kept in `application/data/backups/`.
+  files are kept in `application/data/backups/`. A folder or archive must
+  hold `system/boot.php` to count as a release; anything else is refused,
+  `--force` or not. A framework file it can't write or remove stops the
+  update with exit 1 and the file's name, and the old files are put back,
+  so nothing is half updated or recorded as installed.
 - It then runs `php bin/raster upgrade` for every app: the steps in
   `system/upgrades/<version>.php` the app still needs (renamed annotations,
   moved files). The version an app is at is in `config/raster-version`.

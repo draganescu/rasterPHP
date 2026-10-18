@@ -1,25 +1,28 @@
 #!/usr/bin/env php
 <?php
-// Raster command line
+// Raster command line. `php bin/raster help` says what each command does;
+// these are the same commands and options (tests/run.php checks they agree).
 //
-//   php bin/raster lint [--json] [--theme=name] [--all-themes]
-//   php bin/raster schema [--json] [--check] [--apply] [--rename=table.old:new] [--drop=table.column] [--force] [--dry-run]
-//   php bin/raster user <username> [--password=secret]
-//   php bin/raster login-link <email|username> [--next=/path]
-//   php bin/raster mcp
-//   php bin/raster serve [--port=8000]
-//   php bin/raster render <url> [--as=<email|username|role>]
-//   php bin/raster cache clear
-//   php bin/raster export <folder> [--url=…] [--skip=…] [--clean]
-//   php bin/raster new <folder>
-//   php bin/raster update [latest|<version>|<branch>|<folder>|<file.tar.gz>] [--dry-run] [--force]
-//   php bin/raster upgrade [--dry-run]
-//   php bin/raster doctor [--json]
-//   php bin/raster deploy --config=apache|nginx|caddy [--host=…] [--root=…] [--socket=…]
+//   php bin/raster serve [--port=8000] [--host=localhost]
+//   php bin/raster lint [--json] [--fix] [--theme=name] [--all-themes]
 //   php bin/raster annotations [--json]
 //   php bin/raster vocabulary [--json]
 //   php bin/raster describe [--json] [--sections=a,b]
+//   php bin/raster schema [--json] [--apply] [--check] [--rename=table.old:new] [--drop=table.column|table] [--force] [--dry-run]
+//   php bin/raster user <email|name> [--password=…] [--role=admin|editor|member] [--name=…]
+//   php bin/raster users
+//   php bin/raster login-link <email|name> [--next=/path]
 //   php bin/raster make model <name> --from=<view> [--form=<method>] [--dry-run] [--force]
+//   php bin/raster send <url> [--to=email] [--subject=…] [--dry-run] [--again]
+//   php bin/raster mcp
+//   php bin/raster render <url> [--as=<email|username|role>]
+//   php bin/raster cache clear
+//   php bin/raster export <folder> [--url=…] [--skip=/path] [--clean]
+//   php bin/raster doctor [--json]
+//   php bin/raster deploy --config=apache|nginx|caddy [--host=…] [--root=…] [--socket=…]
+//   php bin/raster new <folder>
+//   php bin/raster update [latest|2.1.0|<branch>|<folder>|<file.tar.gz>] [--dry-run] [--force]
+//   php bin/raster upgrade [--dry-run]
 //   php bin/raster version
 
 if (PHP_SAPI !== 'cli') exit;

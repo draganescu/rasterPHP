@@ -118,7 +118,11 @@ class raster_project
 	// a folder holding a Raster release: a local path (a checkout or an
 	// unpacked archive), a .tar.gz file, or a version or branch on GitHub
 	static function fetch($source, $work) {
-		if (is_dir($source)) return realpath($source);
+		if (is_dir($source)) {
+			// the check an archive gets: --force overrides edited files, not this
+			if (!is_file("$source/system/boot.php")) throw new RuntimeException("$source does not hold a Raster release");
+			return realpath($source);
+		}
 		if (preg_match('/\.(tar\.gz|tgz)$/', $source) && is_file($source)) return self::unpack($source, $work);
 		$repo = getenv('RASTER_REPO') ?: self::REPO;
 		if ($source === 'latest') {
@@ -175,7 +179,9 @@ class raster_project
 	}
 
 	// copies the framework files over, after keeping the old ones in
-	// <app>/data/backups/; returns the backup folder
+	// <app>/data/backups/; returns the backup folder. A file it can't write
+	// or remove stops it, and the old files are put back: the project is
+	// never left half updated and recorded as installed.
 	static function update($root, $release, $backup_app) {
 		$plan = self::plan($root, $release);
 		$backup = $root.'/'.$backup_app.'/data/backups/raster-'.self::version($root).'-'.date('Ymd-His');
@@ -183,24 +189,50 @@ class raster_project
 			self::copy_file($root.'/'.$path, $backup.'/'.$path);
 		}
 		if (is_file($root.'/system/checksums.json')) self::copy_file($root.'/system/checksums.json', $backup.'/system/checksums.json');
-		foreach ($plan['remove'] as $path) {
-			unlink($root.'/'.$path);
+		try {
+			foreach ($plan['remove'] as $path) {
+				if (!@unlink($root.'/'.$path)) throw new RuntimeException("Could not remove $path");
+			}
+			foreach (array_merge($plan['add'], $plan['change']) as $path) {
+				self::copy_file($release.'/'.$path, $root.'/'.$path, $path);
+			}
+		} catch (RuntimeException $e) {
+			$kept = substr($backup, strlen($root) + 1);
+			try { self::restore($root, $backup, $plan); }
+			catch (RuntimeException $failed) {
+				throw new RuntimeException($e->getMessage().'. Putting the old files back failed too ('.$failed->getMessage()."): they are in $kept/");
+			}
+			throw new RuntimeException($e->getMessage().'. Nothing was updated: the framework files are as they were (a copy is in '.$kept.'/)');
 		}
-		foreach (array_merge($plan['add'], $plan['change']) as $path) {
-			self::copy_file($release.'/'.$path, $root.'/'.$path);
-		}
-		// folders the release no longer has
-		foreach (array_reverse(self::folders($root.'/system')) as $dir) {
-			if (count(scandir($dir)) === 2) rmdir($dir);
-		}
+		self::remove_empty_folders($root);
 		if (is_file($root.'/bin/raster')) chmod($root.'/bin/raster', 0755);
 		self::record($root);
 		return is_dir($backup) ? $backup : null;
 	}
 
-	static function copy_file($from, $to) {
-		if (!is_dir(dirname($to))) mkdir(dirname($to), 0775, true);
-		copy($from, $to);
+	// undoes a stopped update: the backup's files back, the release's new ones gone
+	static function restore($root, $backup, $plan) {
+		foreach (array_merge($plan['change'], $plan['remove']) as $path) {
+			if (is_file($root.'/'.$path) && sha1_file($root.'/'.$path) === sha1_file($backup.'/'.$path)) continue;
+			self::copy_file($backup.'/'.$path, $root.'/'.$path, $path);
+		}
+		foreach ($plan['add'] as $path) {
+			if (file_exists($root.'/'.$path) && !@unlink($root.'/'.$path)) throw new RuntimeException("Could not remove $path");
+		}
+		self::remove_empty_folders($root);
+	}
+
+	// folders under system/ the files no longer need
+	static function remove_empty_folders($root) {
+		foreach (array_reverse(self::folders($root.'/system')) as $dir) {
+			if (count(scandir($dir)) === 2) rmdir($dir);
+		}
+	}
+
+	// $name is what an error calls the file (its path in the project)
+	static function copy_file($from, $to, $name = null) {
+		if (!is_dir(dirname($to))) @mkdir(dirname($to), 0775, true);
+		if (!@copy($from, $to)) throw new RuntimeException('Could not write '.($name === null ? $to : $name));
 	}
 
 	static function folders($dir) {
