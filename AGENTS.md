@@ -93,8 +93,9 @@ media/                        uploads from the CMS
   mock-up. Asset paths are relative to the theme folder: every HTML page
   gets a `<base>` pointing at it, right after its `<head>` (attributes or
   not), unless the page has its own `<base>`. `href="#prices"` and
-  `href="?sort=price"` get the page's own address in front, so they stay
-  on the page; `//cdn.example.com/x.html` is left as written.
+  `href="?sort=price"` on `<a>` and `<area>` get the page's own address
+  in front, so they stay on the page; an SVG `<use href="#icon">` and
+  `//cdn.example.com/x.html` are left as written.
 - Routes, for URLs that should render a differently named view
   (`application/config/the_routes.php`):
   `controller::route('blog/post')->to('post');`. Patterns are regular

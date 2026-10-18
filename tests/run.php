@@ -519,7 +519,7 @@ test('template defaults become content', function () use ($base) {
 });
 test('in-page links stay on the page, and every <head> gets the base (#117)', function () use ($base, $root) {
 	$view = "$root/application/views/default/zz-anchors.html";
-	file_put_contents($view, "<!doctype html>\n<html>\n<head prefix=\"og: https://ogp.me/ns#\">\n<link rel=\"stylesheet\" href=\"style.css\">\n</head>\n<body><header>x</header>\n<a href=\"#prices\">Prices</a> <a href='?sort=price'>Sort</a> <a href=\"//cdn.example.com/guide.html\">Guide</a> <a href=\"about.html\">About</a>\n</body>\n</html>\n");
+	file_put_contents($view, "<!doctype html>\n<html>\n<head prefix=\"og: https://ogp.me/ns#\">\n<link rel=\"stylesheet\" href=\"style.css\">\n</head>\n<body><header>x</header>\n<a href=\"#prices\">Prices</a> <a href='?sort=price'>Sort</a> <a href=\"//cdn.example.com/guide.html\">Guide</a> <a href=\"about.html\">About</a>\n<svg><use href=\"#icon-cart\"/><use xlink:href='#icon-x'/></svg> <map name=\"m\"><area href=\"#top\" alt=\"top\"></map> <a class=\"x\"\nhref=\"#more\">More</a>\n</body>\n</html>\n");
 	try {
 		list($status, $body) = http('GET', "$base/zz-anchors?sort=name");
 		same(200, $status);
@@ -529,6 +529,11 @@ test('in-page links stay on the page, and every <head> gets the base (#117)', fu
 		check(strpos($body, "href='$base/zz-anchors?sort=price'") !== false, 'the query is on this page');
 		check(strpos($body, 'href="//cdn.example.com/guide.html"') !== false, 'another site\'s link is left as written');
 		check(strpos($body, 'href="'.$base.'/about"') !== false, '.html links are still rewritten');
+		check(strpos($body, 'href="'.$base.'/zz-anchors?sort=name#top"') !== false, 'an <area> is a link too');
+		check(strpos($body, 'href="'.$base.'/zz-anchors?sort=name#more"') !== false, 'an <a> with href on another line');
+		// an icon sprite is in this document: a full URL would make it external
+		check(strpos($body, '<use href="#icon-cart"/>') !== false, 'svg <use href> is left as written');
+		check(strpos($body, "<use xlink:href='#icon-x'/>") !== false, 'svg <use xlink:href> is left as written');
 	} finally {
 		unlink($view);
 	}

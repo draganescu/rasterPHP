@@ -656,12 +656,14 @@ class controller {
 		$template->output = preg_replace("/(href|action|src)=(\"|')(?!\/\/)([a-zA-Z0-9\-\._\?\,\'\/\\\+&amp;%\$#\=~]*)\?".template::get('tpl_uri')."=(.*?)(\"|')/", '$1="'.template::get('link_uri').'$4"', $template->output);
 		$template->output = preg_replace("/(href|action|src)=(\"|')(?!\/\/)([a-zA-Z0-9\-\._\?\,\'\/\\\+&amp;%\$#\=~]*)\.html/", '$1=$2'.template::get('link_uri').'$3', $template->output);
 		// href="#prices" and href="?sort=price" are this page, not the theme
-		// folder the <base> points at (#117)
+		// folder the <base> points at (#117). Only on <a> and <area>: an SVG
+		// <use href="#icon"> is already this document, and a full URL that
+		// differs from the address bar would make it an external file
 		if ($template->format === 'html' && !$template->is_email) {
 			$page = template::get('link_uri').implode('/', array_map('rawurlencode', explode('/', ltrim((string)config::get('uri_string'), '/'))));
 			$query = $_GET ? '?'.http_build_query($_GET) : '';
-			$template->output = preg_replace_callback('/\bhref=(["\'])([#?])/', function ($m) use ($page, $query) {
-				return 'href='.$m[1].htmlspecialchars($page.($m[2] === '#' ? $query : ''), ENT_QUOTES).$m[2];
+			$template->output = preg_replace_callback('/(<(?:a|area)\s(?:[^>]*?\s)?)href=(["\'])([#?])/i', function ($m) use ($page, $query) {
+				return $m[1].'href='.$m[2].htmlspecialchars($page.($m[3] === '#' ? $query : ''), ENT_QUOTES).$m[3];
 			}, $template->output);
 		}
 		// links to feed and data views: href="news.rss" -> /news.rss
