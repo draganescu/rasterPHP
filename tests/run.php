@@ -1089,6 +1089,38 @@ test('frozen database: accounts and newsletter after schema --apply', function (
 		array_map('unlink', glob("$db*") ?: array());
 	}
 });
+test('the comment at the top of bin/raster lists what raster help lists (#49)', function () use ($root) {
+	// per command: the options and the <placeholders> it names
+	$names = function ($text) {
+		preg_match_all('/--([a-z\-]+)/', $text, $options);
+		preg_match_all('/<[^>]+>/', $text, $placeholders);
+		$names = array_values(array_unique(array_merge($options[1], $placeholders[0])));
+		sort($names);
+		return $names;
+	};
+	$header = array();
+	preg_match_all('#^//   php bin/raster (\S+)(.*)$#m', file_get_contents("$root/bin/raster"), $lines, PREG_SET_ORDER);
+	foreach ($lines as $line) $header[$line[1]] = $names($line[2]);
+	$help = array();
+	$command = null;
+	foreach (explode("\n", (string)shell_exec(escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' help')) as $line) {
+		// a command's lines are its own and the indented ones below it; the
+		// usage is what comes before the description's wide gap
+		if (preg_match('#^  php bin/raster (\S+)#', $line, $m)) $command = $m[1];
+		elseif (!preg_match('#^ {8}#', $line)) $command = null;
+		if ($command === null) continue;
+		$parts = preg_split('/\s{2,}/', trim($line));
+		$usage = preg_match('#^(php bin/raster|--)#', $parts[0]) ? $parts[0] : '';
+		// options named only in a description are taken too, as bin/raster does
+		preg_match_all('/--[a-z\-]+/', $line, $options);
+		$help[$command] = array_merge(isset($help[$command]) ? $help[$command] : array(), array($usage), $options[0]);
+	}
+	foreach ($help as $command => $texts) $help[$command] = $names(implode(' ', $texts));
+	ksort($header);
+	ksort($help);
+	same(array_keys($help), array_keys($header), 'the same commands');
+	foreach ($help as $command => $expected) same($expected, $header[$command], "$command:");
+});
 
 // ## What is never served: one list, three servers
 
