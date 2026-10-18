@@ -3,7 +3,7 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
-## 2.2.3
+## 2.2.4
 
 Nothing for sites to do. A script that passes a command an option it
 doesn't take now stops with exit 2 instead of running; fix the option name.
@@ -22,6 +22,27 @@ doesn't take now stops with exit 2 instead of running; fix the option name.
 - **`schema --dry-run`.** `--rename` and `--drop` run all their checks and
   say what they would do without changing anything; `--apply --dry-run`
   applies nothing and says so.
+
+## 2.2.3
+
+Nothing for sites to do. On a frozen database, `schema --apply` adds the new
+`newsletterdelivery` table and `newsletterissue.incomplete` column, and
+`send` adds them itself the first time it runs.
+
+- **An interrupted newsletter send goes on where it stopped (#86).** `php
+  bin/raster send` recorded the issue only after the last subscriber, so a
+  run that died part way mailed everyone again on the rerun, and failed
+  addresses were never retried. Each delivery is now recorded as the mail is
+  handed over, and the issue stays incomplete until everyone has it: a plain
+  rerun mails only the subscribers who don't have it yet, failed ones
+  included. `--again` still mails everyone. The sending lives in
+  `newsletter::send_issue()`, so a model can send an issue too.
+- **One SMTP connection per send.** `mail::keep_open()` and `mail::close()`
+  keep the connection open between mails instead of logging in again for
+  each one.
+- **The mail password no longer shows in `send` output.** The summary,
+  `--dry-run` and `--to` print the transport through `mail::destination()`,
+  without its user, password or options.
 
 ## 2.2.2
 

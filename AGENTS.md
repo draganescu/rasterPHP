@@ -770,7 +770,24 @@ class reservation {
   subscribers. Scripts, forms and `<nav>` are removed, and links become
   absolute. Put `<a href="<!-- print.newsletter.unsubscribe_url /-->">` in the
   page so each reader gets their own unsubscribe link. A page is sent once
-  unless you pass `--again`.
+  unless you pass `--again`. Each address is noted (table
+  `newsletterdelivery`) as its mail is handed over, so running the command
+  again after it stopped, or after some addresses failed, mails only the
+  confirmed subscribers who don't have it yet; the page counts as sent once
+  a run reached everyone. `--again` mails everyone. A mail handed over just
+  as the process was killed isn't noted yet, so that one reader may get it
+  twice. One SMTP connection serves the whole run, and the transport is
+  printed without its user, password or options.
+  - From code: `newsletter::send_issue($url, $html, $subject, $again)`
+    sends a page rendered with `RASTER_SENDING=1` and passed through
+    `newsletter::prepare_issue()`. It returns false when the issue already
+    reached everyone, else its `newsletterissue` row (`recipients`,
+    `incomplete`); `newsletter::$sent` and `newsletter::$failures`
+    (email => error) say what this run did. It makes its two tables, with
+    the types `schema --apply` gives them, also on a frozen database, and
+    on MySQL widens the small columns an older Raster made for them
+    (`recipients` as TINYINT, `subject` as VARCHAR(191)), as `--apply`
+    does, so sites need no step for it.
 
 **mail**: emails are views. `mail::send_view('_email/welcome', $to,
 array('name' => 'Ada'))` uses the view's `<title>` as the subject.
@@ -781,6 +798,10 @@ array('name' => 'Ada'))` uses the view's `<title>` as the subject.
   - `smtp://user:pass@host:587` requires STARTTLS (add `?insecure=1` to allow
     plain SMTP; `localhost` is allowed as is), and `smtps://…:465` uses TLS.
 - Sender: `RASTER_MAIL_FROM`.
+- Many mails at once: `mail::keep_open()` keeps the SMTP connection for the
+  mails that follow (`RSET` between them, a new connection if the server
+  dropped it) until `mail::close()`. `mail::destination()` is the transport
+  without user, password or options, for printing.
 
 **feed**:
 - `render.feed.items('news')`: the newest published items, with every field

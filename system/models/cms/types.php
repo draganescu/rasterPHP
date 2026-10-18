@@ -112,6 +112,34 @@ class cms_types {
 		if (isset($types['slug']) && !array_key_exists('slug', $have)) self::index_slug($table);
 	}
 
+	// Columns of a table that MySQL sized by the values of the first row
+	// stored in fluid mode (varchar(191) for text, tinyint for a number), and
+	// that a frozen database never grows: field => the type ($types) they
+	// should be. SQLite's columns take any length.
+	static function narrow($table, $types) {
+		if (R::getDatabaseAdapter()->getDatabase()->getDatabaseType() !== 'mysql' || !cms_store::table_exists($table)) return array();
+		$columns = cms_store::columns($table);
+		$narrow = array();
+		foreach ($types as $field => $type) {
+			if (!isset($columns[$field])) continue;
+			$declared = strtolower((string)$columns[$field]);
+			if ($type === 'text' && preg_match('/^(varchar|char|tinytext)\b/', $declared)) $narrow[$field] = 'text';
+			if ($type === 'int' && preg_match('/^(tinyint|smallint|mediumint)\b/', $declared)) $narrow[$field] = 'int';
+		}
+		return $narrow;
+	}
+
+	// Declares the narrow columns (see narrow) as their type; returns them.
+	// Every value fits: TEXT and INT hold more than what they were.
+	static function widen($table, $types) {
+		$narrow = self::narrow($table, $types);
+		foreach ($narrow as $field => $type) {
+			R::getDatabaseAdapter()->exec("ALTER TABLE `$table` MODIFY `$field` ".self::sql($type));
+		}
+		if ($narrow) cms_store::forget();
+		return $narrow;
+	}
+
 	// An index on the slug, so opening an item and picking a free slug don't
 	// read the whole table. Made with a new table, and by schema --apply for
 	// tables made before 2.1.10. True when it was missing and is made now.

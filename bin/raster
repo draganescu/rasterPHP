@@ -461,35 +461,30 @@ switch ($command) {
 		}
 		if (isset($options['to'])) {
 			$ok = newsletter::deliver($html, $subject, (string)$options['to'], '');
-			echo $ok ? "Sent \"$subject\" to {$options['to']} (".mail::transport().")\n" : $paint('error', '31').': '.mail::$last_error."\n";
+			echo $ok ? "Sent \"$subject\" to {$options['to']} (".mail::destination().")\n" : $paint('error', '31').': '.mail::$last_error."\n";
 			exit($ok ? 0 : 1);
 		}
-		newsletter::connect();
-		$sent_before = in_array('newsletterissue', R::inspect()) ? R::findOne('newsletterissue', ' url = ? ', array($url)) : null;
-		if ($sent_before && !isset($options['again'])) {
+		// a page is sent once; a run that stopped or failed for some goes on
+		// with the readers who don't have it yet
+		$sent_before = newsletter::issue($url);
+		$again = isset($options['again']);
+		if ($sent_before && !$sent_before->incomplete && !$again) {
 			fwrite(STDERR, "$url was already sent on {$sent_before->sent_at} to {$sent_before->recipients} subscribers. Use --again to send it again.\n");
 			exit(1);
 		}
-		$subscribers = newsletter::subscribers();
+		$resume = $sent_before && !$again;
 		if (isset($options['dry-run'])) {
-			echo "Would send \"$subject\" to ".count($subscribers)." subscriber(s) via ".mail::transport()."\n";
+			echo "Would send \"$subject\" to ".count(newsletter::recipients($resume ? $sent_before : null))." subscriber(s)".($resume ? " who don't have it yet" : '')." via ".mail::destination()."\n";
 			exit(0);
 		}
-		$ok = 0; $failed = 0;
-		foreach ($subscribers as $subscriber) {
-			if (newsletter::deliver($html, $subject, $subscriber->email, $subscriber->token)) $ok++;
-			else { $failed++; fwrite(STDERR, "  {$subscriber->email}: ".mail::$last_error."\n"); }
+		$issue = newsletter::send_issue($url, $html, $subject, $again);
+		if (!$issue) {
+			fwrite(STDERR, "$url was already sent. Use --again to send it again.\n");
+			exit(1);
 		}
-		$was_frozen = database::$frozen;
-		R::freeze(false);
-		$issue = R::dispense('newsletterissue');
-		$issue->url = $url;
-		$issue->subject = $subject;
-		$issue->recipients = $ok;
-		$issue->sent_at = R::isoDateTime();
-		R::store($issue);
-		R::freeze($was_frozen);
-		echo "Sent \"$subject\" to $ok subscriber(s)".($failed ? ", $failed failed" : '')." via ".mail::transport()."\n";
+		foreach (newsletter::$failures as $email => $error) fwrite(STDERR, "  $email: $error\n");
+		$failed = count(newsletter::$failures);
+		echo "Sent \"$subject\" to ".newsletter::$sent.($resume ? " more subscriber(s), {$issue->recipients} in all" : ' subscriber(s)').($failed ? ", $failed failed (run send again to retry them)" : '')." via ".mail::destination()."\n";
 		exit($failed ? 1 : 0);
 
 	case 'upgrade':
@@ -714,7 +709,9 @@ Raster command line
                                          a model for the records a form sends: its type,
                                          an empty check() and the form handler
   php bin/raster send <url> [--to=email] [--subject=...] [--dry-run] [--again]
-                                         email a page to newsletter subscribers
+                                         email a page to newsletter subscribers; run it
+                                         again after a stop or a failure and it mails only
+                                         those who don't have it yet (--again: everyone)
   php bin/raster mcp                     MCP server over stdio for local agents
   php bin/raster render <url>            print the HTML of a URL (never from the page cache)
         --as=<email|username|role>       as that person sees it: --as=editor shows the

@@ -80,7 +80,7 @@ php bin/raster users
 php bin/raster send <url> [--to=email] [--subject="…"] [--dry-run] [--again]
 ```
 
-Sends a page of the site as a newsletter issue. Needs `RASTER_URL` (or the `site_url` setting). See [Newsletter](Newsletter#sending-an-issue).
+Sends a page of the site as a newsletter issue. Run it again after a stop or a failure and it mails only the subscribers who don't have it yet. Needs `RASTER_URL` (or the `site_url` setting). See [Newsletter](Newsletter#sending-an-issue).
 
 ## Publishing
 

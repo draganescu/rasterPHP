@@ -177,6 +177,7 @@ You'll see these names in `raster schema` and in the database. You rarely need t
 | `newsdata`, `teamdata`, … | the items of each CMS collection (`<name>data`) |
 | `user` | accounts |
 | `subscriber` | newsletter subscribers |
-| `newsletterissue` | which pages were sent as newsletter issues |
+| `newsletterissue` | which pages were sent as newsletter issues, and whether every reader has them |
+| `newsletterdelivery` | which addresses each issue was handed over to |
 
 Page tables are named after the URL: `/about` uses `aboutpage`. Longer paths get a short hash in the name so different pages never share a table.

@@ -211,6 +211,8 @@ php tests/demo.php                        # the whole matrix
 | H11 | `newsletter_confirm_page`, and the name is stored |
 | H12 | `raster send` refuses a page without a title |
 | H13 | sign-ups at once leave one subscriber; signing up again while pending resends the same link; the confirmation email comes from a listener on `newsletter.subscribed`, after the commit |
+| H14 | an interrupted `raster send` goes on where it stopped: a plain rerun mails only the readers who don't have it yet |
+| H15 | readers a send failed get it on a plain rerun; one SMTP connection for the run; the mail password is never printed |
 | I1 | emails are views; subject from the title; text version |
 | I2 | values escaped in emails; images absolute |
 | I3 | SMTP: AUTH, sender, recipient |
