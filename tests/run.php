@@ -1657,6 +1657,23 @@ test('cms_records::find filters and sorts by fields named like SQL words', funct
 		same(array('Lima', 'Rome'), array_column(cms_records::find('zzword', array('from' => 'Paris'), 'when'), 'title'));
 		same(array('Rome'), array_column(cms_records::find('zzword', array('from' => 'Paris', 'group' => 3), '-group'), 'title'));
 		same(array('Rome', 'Lima', 'Oslo'), array_column(cms_records::find('zzword', array(), '-when'), 'title'));
+		// list options, as render.cms takes them (#85)
+		same(array('Lima', 'Rome'), array_column(cms_records::find('zzword', 'when>=2026-11-01', 'when'), 'title'));
+		same(array('Rome', 'Lima'), array_column(cms_records::find('zzword', 'from!=Berlin&order=-when'), 'title'), 'order from the options');
+		same(array('Oslo'), array_column(cms_records::find('zzword', 'group<3&from=Berlin'), 'title'));
+		same(array('Rome'), array_column(cms_records::find('zzword', 'when>=2026-10-15&order=-when&limit=1'), 'title'), 'limit from the options');
+		same(array(), cms_records::find('zzword', 'when>=today&when<2026-01-01'), 'today is a date');
+		try {
+			cms_records::find('zzword', 'whenn>=2026-11-01');
+			check(false, 'a field the type does not have');
+		} catch (InvalidArgumentException $e) { same("zzword has no field 'whenn'", $e->getMessage()); }
+		// every record unless a limit is given (#85)
+		R::begin();
+		for ($i = 0; $i < 1005; $i++) R::exec('INSERT INTO zzworddata (title, `when`, `from`, `group`) VALUES (?, ?, ?, ?)', array("Old $i", '2020-01-01', 'Paris', 0));
+		R::commit();
+		same(1008, count(cms_records::find('zzword')), 'no cap at 1,000');
+		same(array('Rome'), array_column(cms_records::find('zzword', array(), '-when', 1), 'title'), 'the limit argument');
+		same(array('Oslo', 'Lima', 'Rome'), array_column(cms_records::find('zzword', 'when>=2026-01-01', 'when'), 'title'), 'the coming ones, past 1,000 old ones');
 	} finally {
 		unlink("$dir/zzwords.php");
 		rmdir($dir);
