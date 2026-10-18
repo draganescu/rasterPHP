@@ -86,6 +86,8 @@ class cms_editor {
 			'admin' => self::admin_pages(),
 			'strings' => self::strings(),
 			'lang' => class_exists('i18n') ? i18n::detect() : '',
+			// the site's clock, in its time zone: scheduled items go live by it
+			'now' => date('Y-m-d H:i:s'),
 		);
 		$script = '<script id="raster-editor-config" type="application/json">'
 			.json_encode($config, JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR)

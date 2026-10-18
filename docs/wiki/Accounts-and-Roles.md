@@ -62,6 +62,7 @@ Each page is a form inside a `render.authentication.<name>` block, with messages
 ### Forgot password: `render.authentication.forgot`
 
 - Field: `email`. Sends the email `_email/password_reset.html`, which can print `<!-- print.self.reset_url /-->` and `<!-- print.self.name /-->`.
+- Asked again within 5 minutes (`mail::RESEND_AFTER`), it answers the same and sends nothing: the link already sent still works.
 - Alert: `reset_sent`. It shows whether or not the account exists, so the form can't be used to find out who has an account.
 - The link works for one hour, and only once.
 

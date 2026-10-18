@@ -207,6 +207,38 @@ test('doctor in production', function () use ($site) {
 	has($out, '✓ Site address');
 });
 
+test('doctor in production warns when no time zone is set (#84)', function () use ($site) {
+	// PHP's settings without date.timezone, as most hosts ship them
+	$ini = "$site/../no-timezone";
+	@mkdir("$ini/conf.d", 0775, true);
+	$strip = function ($file) { return preg_replace('/^\s*date\.timezone\s*=.*$/mi', '', (string)file_get_contents($file)); };
+	file_put_contents("$ini/php.ini", php_ini_loaded_file() ? $strip(php_ini_loaded_file()) : '');
+	foreach (array_filter(array_map('trim', explode(',', (string)php_ini_scanned_files()))) as $file) file_put_contents("$ini/conf.d/".basename($file), $strip($file));
+	$doctor = function ($zone) use ($site, $ini) {
+		$env = array_merge(getenv(), array('RASTER_APP' => 'application', 'RASTER_DB' => "$site/application/data/test.sqlite", 'NO_COLOR' => '1', 'RASTER_ENV' => 'production', 'RASTER_URL' => 'https://site.example/', 'RASTER_MAIL' => 'smtp://mail.example:587', 'PHP_INI_SCAN_DIR' => "$ini/conf.d"));
+		unset($env['RASTER_MCP_TOKEN']);
+		$config = "$site/application/config/the_app.php";
+		$was = file_get_contents($config);
+		if ($zone !== null) file_put_contents($config, $was."\nconfig::set('timezone')->to('$zone');\n");
+		try {
+			$process = proc_open(array(PHP_BINARY, '-c', "$ini/php.ini", "$site/bin/raster", 'doctor'), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $site, $env);
+			$out = stream_get_contents($pipes[1]).stream_get_contents($pipes[2]);
+			return array(proc_close($process), $out);
+		} finally {
+			file_put_contents($config, $was);
+		}
+	};
+	list($code, $out) = $doctor(null);
+	has($out, 'No time zone is set');
+	has($out, "config::set('timezone')");
+	list($code, $out) = $doctor('Europe/Bucharest');
+	same(0, $code, $out);
+	lacks($out, 'time zone');
+	list($code, $out) = $doctor('Europe/Atlantis');
+	same(1, $code, $out);
+	has($out, "Unknown timezone 'Europe/Atlantis'");
+});
+
 test('a new site can keep code out of the web', function () use ($site) {
 	// the .htaccess a site is made with carries every rule, whatever app
 	// folders it has, and deploy prints it back

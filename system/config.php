@@ -157,6 +157,13 @@ class config {
 		// determining what type of environment this runs on
 		$config->set_environment(  );
 
+		// the site's time zone: today, scheduled items and every stamp use it
+		$zone = config::get('timezone');
+		if ($zone) {
+			if (in_array($zone, timezone_identifiers_list(DateTimeZone::ALL_WITH_BC), true)) date_default_timezone_set($zone);
+			else log::warning("Unknown timezone '$zone'; PHP's own (".date_default_timezone_get().') is used');
+		}
+
 		// outside development PHP's own messages (paths, arguments) go to the
 		// log, never to visitors, whatever php.ini says. The command line
 		// keeps them: `raster render` boots the same way.

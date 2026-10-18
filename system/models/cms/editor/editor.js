@@ -56,10 +56,20 @@
 		return name.charAt(0).toUpperCase() + name.slice(1);
 	}
 	var lang = C.lang || document.documentElement.lang || undefined;
+	// Stored times are the site's wall clock (its time zone setting), and are
+	// read here as if they were the browser's. The site's now, read the same
+	// way, is Date.now() + skew, so a badge and the Schedule box agree with
+	// what visitors see whatever zone the editor is in.
+	var skew = 0;
+	if (C.now) {
+		var serverNow = new Date(String(C.now).replace(' ', 'T'));
+		if (!isNaN(serverNow)) skew = serverNow - Date.now();
+	}
+	function siteNow() { return new Date(Date.now() + skew); }
 	function when(date) {
 		var d = new Date(String(date).replace(' ', 'T'));
 		if (isNaN(d)) return String(date);
-		var diff = (d - new Date()) / 1000, abs = Math.abs(diff);
+		var diff = (d - siteNow()) / 1000, abs = Math.abs(diff);
 		try {
 			var rtf = new Intl.RelativeTimeFormat(lang, { numeric: 'auto' });
 			if (abs < 60) return rtf.format(0, 'second');
@@ -67,7 +77,7 @@
 			if (abs < 86400) return rtf.format(Math.round(diff / 3600), 'hour');
 			if (abs < 604800) return rtf.format(Math.round(diff / 86400), 'day');
 		} catch (e) {}
-		return d.toLocaleDateString(lang, { day: 'numeric', month: 'short', year: d.getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
+		return d.toLocaleDateString(lang, { day: 'numeric', month: 'short', year: d.getFullYear() === siteNow().getFullYear() ? undefined : 'numeric' });
 	}
 	function day(date) {
 		var d = new Date(String(date).replace(' ', 'T'));
@@ -209,7 +219,7 @@
 	}
 	function itemState(info) {
 		if (String(info.enabled) === '0') return 'draft';
-		if (info.published_at && new Date(String(info.published_at).replace(' ', 'T')) > new Date()) return 'scheduled';
+		if (info.published_at && new Date(String(info.published_at).replace(' ', 'T')) > siteNow()) return 'scheduled';
 		return 'live';
 	}
 
@@ -1136,8 +1146,8 @@
 		});
 	}
 	function localInput(value) {
-		var d = value ? new Date(String(value).replace(' ', 'T')) : new Date(Date.now() + 86400000);
-		if (isNaN(d)) d = new Date(Date.now() + 86400000);
+		var d = value ? new Date(String(value).replace(' ', 'T')) : new Date(Date.now() + skew + 86400000);
+		if (isNaN(d)) d = new Date(Date.now() + skew + 86400000);
 		var pad = function (n) { return String(n).padStart(2, '0'); };
 		return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
 	}

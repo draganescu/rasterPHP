@@ -231,6 +231,10 @@ $rows = database::instance('products')->in_category('chairs', 200); // from anyw
   over an entry there with the same name.
 - A name with no query throws `BadMethodCallException`, and `lint` reports
   `database::instance(…)->name(…)` calls that have no query.
+- **Times are PHP's, in the site's time zone** (setting `timezone`). A query
+  that needs now or today takes it as an argument, `date('Y-m-d H:i:s')`
+  from PHP, never SQLite's `date('now')` or MySQL's `NOW()`, which follow
+  the database server's clock (UTC on SQLite).
 
 Write a query this way rather than with `R::getAll(…)`, `R::exec(…)` or
 `database::instance()->query('SELECT …')`: the model's code then reads as
@@ -298,7 +302,7 @@ alike:
 | `cms.item_deleted` | `collection`, `item` |
 | `cms.page_saved` | `type`, `slug`, `changed` (field names), `fields` |
 | `content_changed` | none (sent by `util::content_changed()`; inside a transaction, once after the commit) |
-| `mail.sent` / `mail.failed` | `to`, `subject` / and `error` |
+| `mail.sent` / `mail.failed` | `to`, `subject` / and `error` (in a web request, after the answer) |
 
 The request sends `launch`, `finding_route`, `route_set`, `route_found`,
 `route_not_found`, `before_drying`, `dried_<view>`, `after_drying`,
@@ -451,8 +455,9 @@ item of a collection is the mock-up content.
     `<form method="get">` filters a list with no model code, and the form
     keeps what was chosen.
   - `field>=value`, also `>`, `<`, `<=` and `!=` (which keeps empty fields).
-    `today` is the date the page is shown (`2026-10-03`): `date>=today` is
-    what is coming, `date<today` what is past. Values compare as the
+    `today` is the date the page is shown (`2026-10-03`), in the site's
+    time zone (setting `timezone`): `date>=today` is what is coming,
+    `date<today` what is past. Values compare as the
     field's type (see **Types**): `price<10` compares numbers. A value
     that can't be of the type (`?max=lots` for a number) matches nothing.
   - A new item added to the list in the page starts with the values its
@@ -486,7 +491,10 @@ item of a collection is the mock-up content.
   URL must not carry). They also
   have `enabled` (`0` makes a draft) and `published_at` (a future date
   schedules the item). Visitors don't see drafts or scheduled items; editors
-  do.
+  do. `published_at`, `created_at` and `updated_at` are the site's wall
+  clock in its time zone (setting `timezone`, else PHP's, UTC on most
+  servers); the editor's Schedule box and its live/scheduled badge use the
+  site's clock too, whatever zone the editor's browser is in.
 - **Relationships are by value.** `print.@href.raster_filter@author` links to
   the items with the same `author`. For real references, write a model.
 - **Page edits are versioned:** every save is a new revision. Values can be
@@ -732,7 +740,9 @@ tables in its `schema()` always count.
     `password`; respects `?next=/path`.
   - `register`: `name`, `email`, `password`.
   - `forgot`: `email`. Sends `_email/password_reset.html`, with
-    `print.self.reset_url` and `print.self.name`.
+    `print.self.reset_url` and `print.self.name`. Asked again within 5
+    minutes (`mail::RESEND_AFTER`), it answers the same and sends nothing:
+    the link already sent still works.
   - `reset`: `password`, opened from that email's link.
   - `account`: `name`, `email`, `password`, `current_password`.
   - `logout`: a form with a button.
@@ -787,8 +797,11 @@ tables in its `schema()` always count.
     listener on `newsletter.subscribed` (status `pending`); a site that
     sends its own unbinds it in `config/the_events.php`:
     `event::unbind('newsletter.subscribed')->from('newsletter', 'confirmation_mail');`.
-    Signing up again while pending sends the same link again: every
-    confirmation email sent still works.
+    Signing up again while pending answers the same; within 5 minutes
+    (`mail::RESEND_AFTER`) of the last confirmation email it sends nothing,
+    later it sends the same link again: every confirmation email sent still
+    works. When it was sent is `subscriber.confirm_sent_at` (`schema
+    --apply` adds it; until then a frozen database sends every time).
 - Alerts: `check_email`, `subscribed`, `confirmed`, `confirm_invalid`,
   `unsubscribed`, `unsubscribe_invalid`.
 - **Sending an issue:** `php bin/raster send /news/news_item/my-post
@@ -823,7 +836,25 @@ array('name' => 'Ada'))` uses the view's `<title>` as the subject.
   - `mail://` uses PHP's mail() (the production default).
   - `smtp://user:pass@host:587` requires STARTTLS (add `?insecure=1` to allow
     plain SMTP; `localhost` is allowed as is), and `smtps://…:465` uses TLS.
-- Sender: `RASTER_MAIL_FROM`.
+- Sender: `RASTER_MAIL_FROM`. A name in it, or in the recipient, that isn't
+  plain ASCII is sent encoded (`Raster =?UTF-8?B?Q2Fmw6k=?=
+  <hello@cafe.test>`), and so is the subject, in words of at most 75
+  characters. `mail://` gives sendmail the sender's address with `-f`, so
+  bounces go to it.
+- **Mail goes out after the answer.** In a web request `mail::send()` and
+  `send_view()` check the recipient and the transport, keep the message and
+  return true; once the visitor has the page (the session written,
+  `fastcgi_finish_request()` where PHP has it), `mail::send_kept()` sends
+  every kept mail over one connection. A slow or silent mail server can't
+  hold a form: SMTP waits `mail::TIMEOUT` (5) seconds at most, and once the
+  server can't be reached the rest of the request's mails fail at once. A
+  failure is logged and sends `mail.failed` (`to`, `subject`, `error`), so
+  that event, not `send()`'s result, says a kept mail didn't go. The
+  command line (`raster send`, scripts, MCP over stdio) and code between
+  `keep_open()` and `close()` send at once, and `send()` returns whether
+  the mail was handed over.
+- Links in emails: `util::url('letters/confirm', array('token' => $t))` is
+  the absolute address of a page of the site, with its query.
 - Many mails at once: `mail::keep_open()` keeps the SMTP connection for the
   mails that follow (`RSET` between them, a new connection if the server
   dropped it) until `mail::close()`. `mail::destination()` is the transport
@@ -1132,6 +1163,7 @@ Set in `config/the_app.php` with `config::set('name')->to(value)`.
 | `registration` | true | false turns sign-up off |
 | `login_page`, `after_login`, `reset_page` | `login`, none, `reset` | account pages |
 | `password_min_length` | 8 | |
+| `timezone` | PHP's (`date.timezone`, UTC on most servers) | the site's time zone, `'Europe/Bucharest'`: `today`, scheduled items and every stamp follow it; an unknown name is logged and PHP's kept. `doctor` warns in production when neither this nor php.ini's `date.timezone` is set |
 | `newsletter_double_opt_in` | true | false subscribes without a confirmation |
 | `newsletter_confirm_page`, `newsletter_unsubscribe_page` | `newsletter-confirm`, `newsletter-unsubscribe` | |
 | `mail`, `mail_from` | see `RASTER_MAIL` | transport and sender |

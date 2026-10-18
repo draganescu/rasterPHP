@@ -3,6 +3,10 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.8
+
+Set `timezone` in production (`config::set('timezone')->to('Europe/Bucharest')`); `doctor` warns when neither it nor php.ini's `date.timezone` is set. `today`, scheduled items, stamps and the editor's Schedule box and badge follow it. `mail::send()` returns true once a message is kept: in a web request mail now goes out after the page answers, with SMTP waiting at most 5 seconds. Delivery failures are logged and send `mail.failed` (listeners on `mail.sent`/`mail.failed` run after the answer). Names in From and To and long subjects are sent as encoded words, and `mail://` passes `-f` with the sender's address. Signing up again within 5 minutes sends no second email, nor does asking for a password reset again. The link already sent still works. Run `schema --apply` (new `subscriber.confirm_sent_at`). `authentication::url()` and `newsletter::page_url()` are deprecated for `util::url($page, $query)`.
+
 ## 2.2.7
 
 Nothing for sites to do.

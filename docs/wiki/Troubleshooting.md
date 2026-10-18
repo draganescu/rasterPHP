@@ -57,7 +57,7 @@ Because of that same `<base>` tag, `#section` points at the theme folder. Write 
 
 - **In development** they're not sent: look in `application/data/mail/`.
 - **In production**, check `RASTER_URL` is set (emails with links aren't sent without it), `RASTER_MAIL` points at a real SMTP server, and `RASTER_MAIL_FROM` is an address your provider may send from.
-- `mail::$last_error` holds the last failure. Listen to the `mail.failed` event to log them.
+- Look in the log: every failed send is written there. In a web request mail goes out after the page answers, so the form shows no error when the mail server refuses it; `mail::$last_error` holds the last failure only on the command line. Listen to the `mail.failed` event to log or alert on them.
 - An SMTP server that doesn't offer encryption is refused; use `smtps://` or, only if you must, `?insecure=1`.
 
 ## Changes don't show for visitors, but do when I'm logged in

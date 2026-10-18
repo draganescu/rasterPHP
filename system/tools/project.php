@@ -448,8 +448,16 @@ class raster_project
 		}
 		if ($intended) $add('ok', "$intended use(s) of deprecated features kept on purpose", 'config allow_deprecated');
 
+		// the time zone today and scheduled items follow
+		$zone = config::get('timezone');
+		if ($zone && !in_array($zone, timezone_identifiers_list(DateTimeZone::ALL_WITH_BC), true)) {
+			$add('fail', "Unknown timezone '$zone'", 'Use a name like Europe/Bucharest (PHP\'s list of time zones)');
+		}
+
 		// production settings
 		if ($environment === 'production') {
+			// get_cfg_var() is what php.ini says; ini_get() has PHP's default (UTC from 8.2)
+			if (!$zone && !get_cfg_var('date.timezone')) $add('warn', 'No time zone is set', "today, scheduled items and dates follow the server's clock (".date_default_timezone_get().")\nSet config::set('timezone')->to('Europe/Bucharest') in config/the_app.php");
 			$add(config::get('trusted_url') ? 'ok' : 'fail', 'Site address', config::get('trusted_url') ? config::get('link_uri') : 'Set RASTER_URL (or config site_url): emails with links are not sent without it');
 			if (config::get('trusted_url') && strpos((string)config::get('link_uri'), 'https://') !== 0) $add('warn', 'The site address is not https');
 			$transport = mail::transport();

@@ -124,6 +124,7 @@ Set with `config::set('name')->to(value)` in `config/the_app.php`.
 | `after_login` | none | where to go after logging in |
 | `reset_page` | `reset` | the page password-reset emails link to |
 | `password_min_length` | `8` | |
+| `timezone` | PHP's (`date.timezone` in php.ini, UTC on most servers) | the site's time zone, such as `'Europe/Bucharest'`: `today` in lists, scheduled items and every date Raster stores follow it. An unknown name is logged and PHP's zone is kept. `doctor` warns in production when neither this nor `date.timezone` is set |
 | `newsletter_double_opt_in` | `true` | `false` subscribes without a confirmation email |
 | `newsletter_confirm_page` | `newsletter-confirm` | |
 | `newsletter_unsubscribe_page` | `newsletter-unsubscribe` | |

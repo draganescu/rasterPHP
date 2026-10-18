@@ -22,7 +22,7 @@ Emails go out through the `mail` model, so set up [Sending email](Sending-Email)
 - Fields: `email`, and optionally `name`.
 - With double opt-in (the default), the visitor gets the email `_email/newsletter_confirm.html`, which must contain the confirmation link `<!-- print.self.confirm_url /-->`. They are subscribed only after clicking it. The alert is `check_email`.
 - Someone who's already subscribed sees the same `check_email` answer, so the form can't reveal who is on the list.
-- Someone who signs up again before confirming gets the same link again, so whichever email they open, the link works.
+- Someone who signs up again before confirming sees the same answer. Within 5 minutes of the last confirmation email (`mail::RESEND_AFTER`) nothing is sent, so a double click or an impatient second try doesn't fill their inbox; later they get the same link again, so whichever email they open, the link works.
 - The same address sent twice at once (a double click) is stored once.
 - Also possible: `email_invalid`.
 
@@ -141,4 +141,4 @@ event::unbind('newsletter.subscribed')->from('newsletter', 'confirmation_mail');
 
 Double opt-in is strongly recommended: it proves the address belongs to the person, and many countries' laws expect it.
 
-Subscribers are stored in the `subscriber` table, with their status (`pending`, `confirmed`, `unsubscribed`) and dates.
+Subscribers are stored in the `subscriber` table, with their status (`pending`, `confirmed`, `unsubscribed`) and dates. `confirm_sent_at` is when the last confirmation email went out; on a frozen (production) database run `php bin/raster schema --apply` once to add it. Until then every sign-up sends the email again.

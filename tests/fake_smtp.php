@@ -1,8 +1,9 @@
 <?php
 // A tiny SMTP server for tests:
-//   php tests/fake_smtp.php <port> <transcript-file> [plain|starttls|smtps] [cert.pem] [host]
+//   php tests/fake_smtp.php <port> <transcript-file> [plain|starttls|smtps|silent] [cert.pem] [host]
 // plain never offers STARTTLS; starttls offers and performs it; smtps is TLS
-// from the first byte. It accepts AUTH LOGIN and appends every session
+// from the first byte; silent takes connections and never says a word, as a
+// hung mail server does (it notes each one as "CONNECTED"). It accepts AUTH LOGIN and appends every session
 // (commands and message) to the transcript file. Addresses listed in
 // <transcript-file>.refuse, one a line, are answered 450 greylisted.
 if ($argc < 3) exit("usage: fake_smtp.php <port> <file> [mode] [cert]\n");
@@ -13,6 +14,14 @@ $context = stream_context_create(array('ssl' => array('local_cert' => $cert, 've
 $server = stream_socket_server('tcp://'.$host.':'.(int)$argv[1], $errno, $errstr, STREAM_SERVER_BIND | STREAM_SERVER_LISTEN, $context);
 if (!$server) exit("cannot listen: $errstr\n");
 $log = $argv[2];
+if ($mode === 'silent') {
+	$held = array();
+	while ($client = @stream_socket_accept($server, -1)) {
+		$held[] = $client;
+		file_put_contents($log, "CONNECTED\n", FILE_APPEND);
+	}
+	exit;
+}
 while ($client = @stream_socket_accept($server, -1)) {
 	$session = "MODE: $mode\n";
 	if ($mode === 'smtps' && !@stream_socket_enable_crypto($client, true, STREAM_CRYPTO_METHOD_TLS_SERVER)) {

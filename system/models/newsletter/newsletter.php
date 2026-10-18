@@ -36,7 +36,9 @@ class newsletter
 	// the tables this model uses, for `raster schema --apply`
 	static function schema() {
 		return array(
-			'subscriber' => array('email' => '', 'name' => '', 'status' => '', 'token' => '', 'source' => '', 'created_at' => '', 'confirmed_at' => '', 'unsubscribed_at' => ''),
+			// confirm_sent_at: when the confirmation was last mailed, so signing up
+			// again at once mails nothing
+			'subscriber' => array('email' => '', 'name' => '', 'status' => '', 'token' => '', 'source' => '', 'created_at' => '', 'confirmed_at' => '', 'unsubscribed_at' => '', 'confirm_sent_at' => ''),
 			// incomplete: 1 until every reader has the issue (rows from before it existed are complete)
 			'newsletterissue' => array('url' => '', 'subject' => '', 'recipients' => 0, 'sent_at' => '', 'incomplete' => 0),
 			// one row per address an issue was handed over to
@@ -48,9 +50,15 @@ class newsletter
 		return cms_store::table_exists('subscriber');
 	}
 
+	// deprecated for util::url() (system/tools/deprecations.php)
 	static function page_url($setting, $default, $token = null) {
-		$url = rtrim(config::get('link_uri'), '/').'/'.ltrim((string)config::get($setting, $default), '/');
-		return $token === null ? $url : $url.'?token='.$token;
+		return util::url(config::get($setting, $default), $token === null ? array() : array('token' => $token));
+	}
+
+	// whether subscriber.confirm_sent_at can be written: a frozen database
+	// has it once `schema --apply` made it
+	protected static function stamps_confirmations() {
+		return !R::getRedBean()->isFrozen() || array_key_exists('confirm_sent_at', cms_store::columns('subscriber'));
 	}
 
 	static function find_by_token($token) {
@@ -96,7 +104,11 @@ class newsletter
 				$subscriber->created_at = R::isoDateTime();
 			}
 			$subscriber->name = trim((string)$name);
-			if ($subscriber->status !== 'pending' || !$subscriber->token) $subscriber->token = bin2hex(random_bytes(20));
+			if ($subscriber->status !== 'pending' || !$subscriber->token) {
+				$subscriber->token = bin2hex(random_bytes(20));
+				// a new link is mailed whenever it was asked for
+				if (self::stamps_confirmations()) $subscriber->confirm_sent_at = null;
+			}
 			$subscriber->source = (string)$source;
 			if ($double) {
 				$subscriber->status = 'pending';
@@ -120,11 +132,18 @@ class newsletter
 		if (!$subscriber || $subscriber->status !== 'pending' || !$subscriber->token) return null;
 		// through the site's the_mail, when it has one
 		$mail = controller::model_class('mail');
+		// asked again within a few minutes: the link already sent still works
+		$stamped = self::stamps_confirmations();
+		if ($stamped && $mail::sent_lately($subscriber->confirm_sent_at)) return null;
 		$sent = $mail::send_view('_email/newsletter_confirm', $subscriber->email, array(
-			'confirm_url' => self::page_url('newsletter_confirm_page', 'newsletter-confirm', $subscriber->token),
+			'confirm_url' => util::url(config::get('newsletter_confirm_page', 'newsletter-confirm'), array('token' => $subscriber->token)),
 			'name' => (string)$subscriber->name,
 		));
 		if (!$sent) log::error('Newsletter confirmation email failed: '.$mail::$last_error);
+		elseif ($stamped) {
+			$subscriber->confirm_sent_at = R::isoDateTime();
+			R::store($subscriber);
+		}
 		return null;
 	}
 
@@ -178,7 +197,7 @@ class newsletter
 
 	// in an issue: each reader's link. On the web: the unsubscribe page.
 	function unsubscribe_url() {
-		return getenv('RASTER_SENDING') ? self::MARKER : self::page_url('newsletter_unsubscribe_page', 'newsletter-unsubscribe');
+		return getenv('RASTER_SENDING') ? self::MARKER : util::url(config::get('newsletter_unsubscribe_page', 'newsletter-unsubscribe'));
 	}
 
 	// ##Sending, used by `php bin/raster send`
@@ -285,7 +304,7 @@ class newsletter
 
 	// sends a prepared issue to one address; returns true when handed over
 	static function deliver($html, $subject, $email, $token) {
-		$unsubscribe = self::page_url('newsletter_unsubscribe_page', 'newsletter-unsubscribe', $token);
+		$unsubscribe = util::url(config::get('newsletter_unsubscribe_page', 'newsletter-unsubscribe'), array('token' => $token));
 		$body = str_replace(self::MARKER, htmlspecialchars($unsubscribe, ENT_QUOTES), $html);
 		$mail = controller::model_class('mail');
 		return $mail::send($email, $subject, $body, null, array(
