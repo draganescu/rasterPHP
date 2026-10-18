@@ -504,12 +504,17 @@ item of a collection is the mock-up content.
     `raster_page_size` (10).
   - `/news/news_items/tag/php` lists the items where `tag` is `php`.
 - **Options:** `render.cms.news('featured=1&order=newest&limit=3')`, pairs
-  joined by `&`. They work the same in `pagination.links('cms.news', '…')`.
+  joined by `&`. They work the same in `pagination.links('cms.news', '…')`:
+  the list and its pager are built from the same conditions, so the pager
+  counts the rows the list shows, drafts for editors, `owner=me` and a
+  private type's records for whoever may read them (visitors get no pager
+  over private records).
   - `order` is `newest`, `oldest`, `<field>` or `-<field>` (descending), or
     several separated by commas: `order=date,time`, `order=-date,-time`.
     `oldest` is the order items were added, not a date: to sort by a date
     field, name it.
-  - `limit=3` shows at most 3.
+  - `limit=3` shows at most 3, the same 3 on every page: a limit list is
+    one page, and never moves with a paged list beside it.
   - `field=value` is a filter, and adds that field if it's new.
   - `field=?name` takes the value from the URL's `?name=`; when the URL has
     none, or it is empty, that filter is left out. So a plain

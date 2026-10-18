@@ -83,7 +83,7 @@ Pass options as one string, in the style of a URL query:
 | `order=<field>` | by that field, A to Z |
 | `order=-<field>` | by that field, Z to A |
 | `order=date,time` | by several fields, each may have its `-` |
-| `limit=<n>` | at most n items (otherwise the page size, see below) |
+| `limit=<n>` | at most n items, the same ones on every page (otherwise the page size, see below) |
 | `<field>=<value>` | only items whose field equals the value |
 | `<field>=?<name>` | equals the URL's `?<name>=`; left out when the URL has none or it is empty |
 | `<field>>=<value>` | also `>`, `<`, `<=`, and `!=` (which keeps items where the field is empty) |

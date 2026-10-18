@@ -4410,6 +4410,67 @@ test('lint warns about raw find() rows on any page (#125)', function () {
 	}
 });
 
+test('the pager counts what the list shows (#88)', function () {
+	global $root, $db;
+	$app = APPBASE.config::get('models_path', 'models');
+	$view = APPBASE.config::get('views_path', 'views').'/'.config::get('theme', 'default').'/zzpager.html';
+	temp_model("$app/zzmine", array('zzmine.php' => "<?php\nclass zzmine\n{\n\tstatic function types() {\n\t\treturn array('zzmine' => array('fields' => array('title' => ''), 'owner' => true));\n\t}\n}\n"));
+	$pager = function ($filter, $class) {
+		$links = "render.pagination.links('cms.zzmine'".($filter === '' ? '' : ", '$filter'").")";
+		return "<!-- $links --><nav class=\"$class\"><!-- print.current -->1<!-- /print.current --> of <!-- print.total -->1<!-- /print.total --></nav><!-- /$links -->";
+	};
+	file_put_contents($view, "<html><head><title>Pager</title></head><body>"
+		."<!-- render.cms.zzmine('owner=me&order=title') --><p class=\"mine\"><!-- print.title -->x<!-- /print.title --></p><!-- /render.cms.zzmine('owner=me&order=title') -->"
+		.$pager('owner=me', 'mine').$pager('', 'all').$pager('limit=3', 'top')
+		."<!-- render.cms.zzmine('order=title&limit=3') --><i class=\"top\"><!-- print.title -->x<!-- /print.title --></i><!-- /render.cms.zzmine('order=title&limit=3') -->"
+		."</body></html>");
+	try {
+		controller::forget_models();
+		cms_records::forget();
+		reconnect();
+		$member = authentication::create_user('zzpager-member@example.test', 'a long password', 'member', 'Member');
+		$other = authentication::create_user('zzpager-other@example.test', 'a long password', 'member', 'Other');
+		for ($i = 1; $i <= 12; $i++) cms_records::create('zzmine', array('title' => sprintf('Mine %02d', $i), 'owner' => $member));
+		for ($i = 1; $i <= 9; $i++) cms_records::create('zzmine', array('title' => "Theirs $i", 'owner' => $other));
+		// two of theirs are drafts: only editors see and count them
+		R::exec("UPDATE zzminedata SET enabled = 0 WHERE title IN ('Theirs 8', 'Theirs 9')");
+		$render = function ($url, $as = null) use ($root, $db) {
+			$env = 'RASTER_DB='.escapeshellarg($db).' RASTER_ENV=development';
+			$cmd = "$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' render '.escapeshellarg($url).($as ? ' '.escapeshellarg("--as=$as") : '').' 2>&1';
+			return (string)shell_exec($cmd);
+		};
+		$nav = function ($html, $class) {
+			return preg_match('#<nav class="'.$class.'">(\d+) of (\d+)</nav>#', $html, $m) ? "$m[1] of $m[2]" : '';
+		};
+		$page = $render('/zzpager', 'zzpager-member@example.test');
+		// ten to a page (raster_page_size)
+		same(10, substr_count($page, '<p class="mine"'), $page);
+		same('1 of 2', $nav($page, 'mine'), 'owner=me counts the member\'s 12');
+		same('1 of 2', $nav($page, 'all'), 'the member reads their own 12 only');
+		same('', $nav($page, 'top'), 'a limit list is one page');
+		$visitor = $render('/zzpager');
+		same('', $nav($visitor, 'all'), 'a visitor gets no pager over private records');
+		same('', $nav($visitor, 'mine'));
+		$staff = $render('/zzpager', 'editor');
+		same('1 of 3', $nav($staff, 'all'), 'editors count all 21, drafts included');
+		same('2 of 3', $nav($render('/zzpager/zzmine_page/2', 'editor'), 'all'));
+		preg_match_all('#<i class="top">([^<]*)</i>#', $page, $top);
+		$second = $render('/zzpager/zzmine_page/2', 'zzpager-member@example.test');
+		preg_match_all('#<i class="top">([^<]*)</i>#', $second, $top2);
+		same(array('Mine 01', 'Mine 02', 'Mine 03'), $top[1]);
+		same($top[1], $top2[1], 'a limit list doesn\'t take the page offset');
+		preg_match_all('#<p class="mine">([^<]*)</p>#', $second, $last);
+		same(array('Mine 11', 'Mine 12'), $last[1], 'the last page of my bookings');
+	} finally {
+		R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS zzminedata');
+		R::exec("DELETE FROM user WHERE email LIKE 'zzpager-%'");
+		@unlink($view);
+		remove_dir("$app/zzmine");
+		controller::forget_models();
+		cms_records::forget();
+	}
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";
 foreach ($skipped as $skip) echo "  - $skip\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";
