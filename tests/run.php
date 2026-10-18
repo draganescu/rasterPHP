@@ -4391,6 +4391,42 @@ test('booking: requires(): emails, pages, settings and records', function () {
 	});
 });
 
+test('editor: marks settle in one pass over the page, however long (#53)', function () {
+	$template = template::instance();
+	$saved = $template->marks;
+	try {
+		$template->marks = array();
+		for ($i = 1; $i <= 12; $i++) $template->mark(array('kind' => 'field'));
+		$m = function ($id) { return '<!--raster:s '.$id.'-->x<!--raster:e '.$id.'-->'; };
+		$html = '<html><head><title>'.$m(1).'</title></head><BODY class="a">'.$m(2)
+			.'<a title="'.$m(3).'">'.$m(4).'</a><script>var a = "'.$m(5).'";</script>'.$m(6)
+			.'<TEXTAREA>'.$m(7).'</textarea><select><option>'.$m(8).'</option></select><p>'.$m(9)
+			.'<style>'.$m(10).'</STYLE><!--raster:a 11--><img src="a.jpg"><img alt="<!--raster:a 12-->"></p></body></html>';
+		$out = cms_editor::settle($html);
+		$hidden = array();
+		foreach ($template->marks as $id => $mark) if (!empty($mark['hidden'])) $hidden[] = $id;
+		same(array(1, 3, 5, 7, 8, 10, 12), $hidden);
+		foreach (array(2, 4, 6, 9) as $id) check(strpos($out, $m($id)) !== false, "mark $id kept: $out");
+		check(strpos($out, '<!--raster:a 11--><img') !== false && strpos($out, 'raster:s 1-->') === false, $out);
+		// a long list: one forward pass, not a copy of the page per mark
+		$template->marks = array();
+		$rows = '';
+		for ($i = 0; $i < 2000; $i++) {
+			$item = $template->mark(array('kind' => 'item'));
+			$title = $template->mark(array('kind' => 'item_field'));
+			$photo = $template->mark(array('kind' => 'item_attr'));
+			$rows .= '<!--raster:s '.$item.'--><li class="dish"><h3>'.$m($title).'</h3><!--raster:a '.$photo.'--><img src="d.jpg" alt="Dish"></li><!--raster:e '.$item.'-->';
+		}
+		$start = microtime(true);
+		$out = cms_editor::settle('<html><head><title>Menu</title></head><body><ul>'.$rows.'</ul></body></html>');
+		$took = microtime(true) - $start;
+		same(0, count(array_filter($template->marks, function ($mark) { return !empty($mark['hidden']); })));
+		check($took < 0.25, 'settle took '.round($took * 1000).' ms for 6,000 marks');
+	} finally {
+		$template->marks = $saved;
+	}
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";
 foreach ($skipped as $skip) echo "  - $skip\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";
