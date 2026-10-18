@@ -24,8 +24,9 @@ config::set('raster_page_size')->to(5);
 config::set('reservation_page_size')->to(50);
 config::set('feed_limit')->to(5);
 
-// the sitemap leaves out private and utility pages
-config::set('sitemap_skip')->to(array('login', 'account', 'register', 'forgot', 'password/new', 'letters/confirm', 'letters/stop', 'lab', '404', '503', 'reservation'));
+// the sitemap leaves out private pages, the account and newsletter pages
+// (wherever the settings above put them), and these utility pages
+config::set('sitemap_skip')->to(array('lab', '404', '503', 'reservation'));
 
 // a friendlier 404 page (views/cafe/404.html)
 config::set('error_document_404')->to('404');

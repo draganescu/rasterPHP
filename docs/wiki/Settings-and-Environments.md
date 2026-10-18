@@ -117,7 +117,7 @@ Set with `config::set('name')->to(value)` in `config/the_app.php`.
 | `<name>_page_size` | none | items per page in collection `<name>` |
 | `raster_media_folder` | `media` | where editor uploads go |
 | `feed_limit` | `20` | items in `feed.items` |
-| `sitemap_skip` | login, account, reset, forgot, register, newsletter pages | views left out of `feed.pages` |
+| `sitemap_skip` | none | views left out of `feed.pages`, besides protected pages and the account and newsletter pages, which are always left out |
 | `protected` | none | `array('path' => 'role')`: pages that need an account |
 | `registration` | `true` | `false` turns sign-up off |
 | `login_page` | `login` | where protected pages send visitors |

@@ -13,7 +13,9 @@
   *
   * Anything not listed answers 404, whatever the method would return. The
   * roles are visitor (anyone), member, editor and admin. Bundled models
-  * follow the same rule: cms lists its editor endpoints.
+  * follow the same rule: cms lists its editor endpoints. A method listed
+  * for any role but visitor answers 403 {"error":"cross-site"} to a request
+  * another site started, on every verb.
   *
   * A method that throws answers {"error":"server error"} with a 500, and the
   * error goes to the log with the URL; a database that can't be reached
@@ -35,16 +37,7 @@
 
       $method = util::param($model, false);
       if(!$method || strpos($method, '_') === 0) $this->fail(404, 'unspecified method');
-      // an override (the_feed) is only ever reached by the name it overrides
-      if (!preg_match('/^[a-z0-9_]+$/', $model) || strpos($model, 'the_') === 0) $this->fail(404, 'unknown model');
-      // models that must not be reachable over /api (mcp has its own endpoint)
-      if (in_array($model, (array)config::get('api_blocked', array('mcp', 'api')))) $this->fail(404, 'unknown model');
-
-      // bundled models (and overrides of them, and a site model with a
-      // bundled model's name) only when listed in api_system_models
-      $found = controller::model($model);
-      if (!$found) $this->fail(404, 'unknown model');
-      if (($found['bundled'] || $found['shadows']) && !in_array($model, (array)config::get('api_system_models', array('cms')))) $this->fail(404, 'unknown model');
+      if (!self::reachable($model)) $this->fail(404, 'unknown model');
 
       if (!controller::load_model($model)) $this->fail(404, 'unknown model');
       $obj = controller::get_object($model);
@@ -57,6 +50,10 @@
       // (the_cms) adds to what the bundled model lists, it never drops it
       $offered = array_merge(self::offered($model), self::offered(get_class($obj)));
       if (!isset($offered[$method])) $this->fail(404, 'unknown method');
+      // a staff or member method never runs for a request another site
+      // started, whatever the verb: the session cookie (SameSite=Lax) comes
+      // along when someone follows a link from elsewhere
+      if ($offered[$method] !== 'visitor' && controller::is_foreign()) $this->fail(403, 'cross-site');
       // a database that can't be reached is an outage, not an empty table:
       // a webhook told "no such order" would never be sent again. Checked
       // before the role, since who is asking can't be known without it.
@@ -86,6 +83,20 @@
         echo json_encode($result);
       }
       exit;
+    }
+
+    // Can /api reach the model by this name? Not an override's own name
+    // (the_feed is reached as feed), nothing in api_blocked (mcp has its own
+    // endpoint), only a model that exists, and a bundled one (overridden, or
+    // hidden by a site model of the same name) only when api_system_models
+    // lists it. The vocabulary asks the same.
+    static function reachable($name) {
+      $name = (string)$name;
+      if (!preg_match('/^[a-z0-9_]+$/', $name) || strpos($name, 'the_') === 0) return false;
+      if (in_array($name, (array)config::get('api_blocked', array('mcp', 'api')))) return false;
+      $found = controller::model($name);
+      if (!$found) return false;
+      return !($found['bundled'] || $found['shadows']) || in_array($name, (array)config::get('api_system_models', array('cms')));
     }
 
     // What a model class offers over /api: array(method => role), empty

@@ -137,6 +137,17 @@ class authentication
 		));
 	}
 
+	// what a site with accounts needs: the reset email's view, the pages
+	// that only work with PHP behind them (the sitemap and a static export
+	// leave them out) and the settings that change them
+	static function requires() {
+		return array(
+			'emails' => array('render.authentication.forgot' => array('_email/password_reset')),
+			'pages' => array(config::get('login_page', 'login'), 'register', 'forgot', config::get('reset_page', 'reset'), 'account'),
+			'settings' => array('registration', 'login_page', 'after_login', 'reset_page', 'password_min_length', 'protected'),
+		);
+	}
+
 	static function has_users() {
 		return self::table_ready() && R::count('user') > 0;
 	}
