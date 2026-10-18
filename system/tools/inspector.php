@@ -925,6 +925,36 @@ class raster_inspector {
 				$problems[] = self::problem_at('error', $html, $at, "$tag sends an email written in ".self::short($this->theme_dir($theme).'/'.$view.$this->ext).", which does not exist");
 			}
 		}
+		// and the records staff must make first (a booking form needs a
+		// resource); without a database to ask, nothing is said
+		foreach (controller::required('records') as $tag => $types) {
+			$at = strpos($html, '<!-- '.$tag.' -->');
+			if ($at === false) continue;
+			foreach ((array)$types as $type) {
+				if ($this->record_count($type) !== 0) continue;
+				$problems[] = self::problem_at('warning', $html, $at, "$tag needs at least one $type record, and there is none yet: staff add one in a page that renders render.cms.$type, or over MCP (create_item)");
+			}
+		}
+		// the guest's manage page answers links from emails: an editors' page
+		// would send every guest to the login
+		$at = strpos($html, '<!-- render.booking.manage -->');
+		if ($at !== false && $this->admin_view($this->linting)) {
+			$problems[] = self::problem_at('warning', $html, $at, "render.booking.manage is the guests' page, but config 'protected' keeps this view for staff: protect staff pages by their own names (staff, booking_item), never booking");
+		}
+	}
+
+	// how many records of a declared type there are, or null when that
+	// can't be known (no such type, no database)
+	protected function record_count($type) {
+		$info = cms_records::info($type);
+		if (!$info) return null;
+		try {
+			cms_store::connect();
+			if (!database::configured()) return null;
+			return cms_store::table_exists($info['type']) ? (int)R::count($info['type']) : 0;
+		} catch (Exception $e) {
+			return null;
+		}
 	}
 
 	// the routes in config/the_routes.php: pattern, view, theme, line

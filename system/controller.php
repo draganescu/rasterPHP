@@ -174,6 +174,8 @@ class controller {
 			$views = array();
 			if (is_dir($root)) {
 				foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS)) as $file) {
+					// a link to nothing has no time or size to read
+					if (!is_file($file->getPathname())) continue;
 					if (preg_match('/(\.html|\.rss|\.atom|\.xml|\.json|\.txt|'.preg_quote(config::get('views_ext', '.html'), '/').')$/', $file->getFilename())) $views[$file->getPathname()] = $file->getMTime().' '.$file->getSize();
 				}
 			}
