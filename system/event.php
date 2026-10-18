@@ -20,10 +20,11 @@
 //   event::bind('reservation.booked')->to('cafe', 'subscribe_guest');
 //
 // Listeners run in the order they were bound: the framework's own bindings
-// in system/config/events.php first, then config/the_events.php, then
-// models' listens(), then the framework's core() bindings (controller, log),
-// which always run last. Each
-// gets the payload array. A listener that returns false makes dispatch()
+// in system/config/events.php and the bundled models' listens() first, then
+// config/the_events.php, then the site's models' listens(), then the
+// framework's core() bindings (controller, log), which always run last. So
+// a site listener sees what a bundled one did, and the_events.php can unbind
+// any of the framework's. Each gets the payload array. A listener that returns false makes dispatch()
 // return false; the code that dispatched decides what that means (for
 // loading_model_<name> it stops the model from loading).
 //
@@ -114,12 +115,16 @@ class event {
 		return array_merge($app, $core);
 	}
 
-	// Binds what models declare in `static function listens()`. Called at
-	// boot, after config/the_events.php. controller::models() keeps the
-	// lists in data/cache/models.json, so a request loads no model to bind
-	// it; an override's listens() (the_feed's) counts for feed.
-	static function discover() {
+	// Binds what models declare in `static function listens()`: the bundled
+	// models' (discover(true)) at the end of system/config/events.php, with
+	// the framework's bindings, so they run before the site's and
+	// config/the_events.php can unbind them; the site's own models' at boot,
+	// after config/the_events.php. controller::models() keeps the lists in
+	// data/cache/models.json, so a request loads no model to bind it; an
+	// override's listens() (the_feed's) counts for feed, a bundled model.
+	static function discover($bundled = false) {
 		foreach (controller::models() as $model => $found) {
+			if ($found['bundled'] !== $bundled) continue;
 			foreach ((array)$found['listens'] as $event => $methods) {
 				foreach ((array)$methods as $method) event::bind($event)->to($model, $method);
 			}
