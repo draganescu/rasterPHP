@@ -1535,6 +1535,32 @@ test('N11', 'exporting again writes only what changed', function () use ($tmp, $
 	$manifest = json_decode(file_get_contents("$out/.raster-export.json"), true);
 	check(isset($manifest['files']['about/index.html']) && !empty($manifest['fingerprint']));
 });
+test('N11', 'a new day exports again: a list of what is coming drops what is past', function () use ($tmp, $base, $views) {
+	// Etc/GMT+12 is UTC-12 and Pacific/Kiritimati UTC+14: their dates always
+	// differ, so moving the site's time zone moves it to another day
+	$yesterday = array('CAFE_TIMEZONE' => 'Etc/GMT+12');
+	$tomorrow = array('CAFE_TIMEZONE' => 'Pacific/Kiritimati');
+	$day = (new DateTime('now', new DateTimeZone('Etc/GMT+12')))->format('Y-m-d');
+	$out = "$tmp/daily";
+	with_file("$views/coming.html", "<!doctype html><html><body><!-- render.cms.events('date>=today&order=date') --><p><!-- print.title -->Jazz night<!-- /print.title --> <!-- print.date -->2026-10-10<!-- /print.date --></p><!-- /render.cms.events('date>=today&order=date') --></body></html>", function () use ($base, $out, $yesterday, $tomorrow, $day) {
+		$gig = mcp($base, 'create_item', array('collection' => 'events', 'fields' => array('title' => 'Last night gig', 'date' => $day, 'summary' => 'x')));
+		try {
+			list($code, $output) = raster(array('export', $out, '--url=https://cafe.example/'), $yesterday);
+			same(0, $code, $output);
+			has(file_get_contents("$out/coming/index.html"), 'Last night gig', 'on its day the event is coming');
+			has(raster(array('export', $out, '--url=https://cafe.example/'), $yesterday)[1], 'Nothing changed since the last export');
+			$about = filemtime("$out/about/index.html");
+			sleep(1);
+			list($code, $output) = raster(array('export', $out, '--url=https://cafe.example/'), $tomorrow);
+			same(0, $code, $output);
+			lacks($output, 'Nothing changed since the last export');
+			lacks(file_get_contents("$out/coming/index.html"), 'Last night gig', 'the next day it is past');
+			same($about, filemtime("$out/about/index.html"), 'pages that did not change are not written again');
+		} finally {
+			mcp($base, 'delete_item', array('collection' => 'events', 'id' => $gig['id']));
+		}
+	});
+});
 test('N16', 'a page that answers an error stops the export, and the last export stays', function () use ($tmp, $root, $views) {
 	$out = "$tmp/failing";
 	same(0, raster(array('export', $out, '--url=https://cafe.example/'))[0]);

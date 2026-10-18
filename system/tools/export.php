@@ -127,9 +127,11 @@ class raster_export {
 
 	// everything the pages are made of: the app's files (templates, models,
 	// config, translations, theme), uploads, the database, content changes
-	// (util::content_changed), the framework's version and these options
+	// (util::content_changed), the framework's version, these options and
+	// the day in the site's time zone: `date>=today` and anything printed
+	// from the clock change with it, so a new day always exports again
 	function fingerprint() {
-		$parts = array($this->url, json_encode($this->skip), raster_cache::version(), @file_get_contents(BASE.'VERSION'));
+		$parts = array($this->url, json_encode($this->skip), raster_cache::version(), @file_get_contents(BASE.'VERSION'), date('Y-m-d'));
 		$folders = array(rtrim(APPBASE, '/'), dirname(BASE).'/'.trim(config::get('raster_media_folder', 'media'), '/'));
 		foreach ($folders as $folder) {
 			if (!is_dir($folder)) continue;
