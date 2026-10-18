@@ -246,10 +246,22 @@ test('missing pages and items are 404', function () use ($base) {
 	same(404, http('GET', "$base/news/news_item/999")[0]);
 	same(404, http('GET', "$base/_layout")[0]);
 });
-test('collection urls only for views that render the collection', function () use ($base) {
+test('collection urls only for views that render the collection', function () use ($base, $root) {
 	same(404, http('GET', "$base/about/zzz_page/9")[0]);
 	same(404, http('GET', "$base/_layout/x_page")[0]);
 	same(200, http('GET', "$base/news/news_page/1")[0]);
+	// a view in a _ folder that renders a collection is still a partial
+	$view = "$root/application/views/default/_email/zz_digest.html";
+	file_put_contents($view, "<h1>zz digest</h1><!-- render.cms.news --><p><!-- print.headline -->x<!-- /print.headline --></p><!-- /render.cms.news -->");
+	try {
+		foreach (array('/_email/zz_digest', '/_email/zz_digest/news_page/1', '/_email/zz_digest/news_items/headline/x', '/_email/zz_digest/news_page/1.rss') as $url) {
+			list($status, $body) = http('GET', $base.$url);
+			same(404, $status, $url);
+			check(strpos((string)$body, 'zz digest') === false, "$url shows the partial");
+		}
+	} finally {
+		unlink($view);
+	}
 });
 test('users collection is never rendered', function () {
 	$cms = new cms();

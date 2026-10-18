@@ -36,7 +36,7 @@ The query string (`?page=2`) never changes which file is used.
 
 **Other formats.** Besides `.html`, a view can be `.rss`, `.atom`, `.xml`, `.json` or `.txt`. The URL keeps the extension, and the right `Content-Type` header is sent. Values printed into these views are escaped for the format (XML escaping for feeds, JSON escaping for JSON) so the file stays valid. See [Feeds, sitemaps and data views](Feeds-Sitemaps-and-Data-Views).
 
-**Files that are never pages.** A file or folder whose name starts with `_` can't be visited. Use this for:
+**Files that are never pages.** A file or folder whose name starts with `_` can't be visited, not even through a collection URL: `/_email/digest/news_page/1` is a 404 even when `_email/digest.html` renders `news`. Use this for:
 
 - `_layout.html` and other files holding shared fragments
 - `_email/` for email templates

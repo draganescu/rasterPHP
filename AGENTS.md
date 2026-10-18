@@ -68,7 +68,9 @@ media/                        uploads from the CMS
   for the format: XML-escaped in feeds, JSON-escaped in JSON views. HTML views
   print values as they are.
 - Files and folders starting with `_` are never pages: `_layout.html` for
-  partials, `_email/` for emails.
+  partials, `_email/` for emails. Collection URLs follow the same rule:
+  `/_email/digest/news_page/1` is a 404 even when `_email/digest.html`
+  renders `news` (one check, `controller::is_partial()`).
 - Unknown URLs return 404, and so does any path with a segment starting
   with a dot (`/./about`, `/.env`); `a//b` is `a/b`. View files themselves (`.html`, `.rss`, `.xml`,
   `.json`, `.txt` under `application/views/`) are never served raw (403); other
