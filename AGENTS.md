@@ -1340,6 +1340,10 @@ of lists and filter pages come along; drafts and the editor don't.
     instead of ending the server;
   - over HTTP: POST to `/mcp` with `Authorization: Bearer $RASTER_MCP_TOKEN`.
     It's off until that token is set.
+  - Both answer a batch (a list of messages) with a list. A message that
+    isn't an object with a string `method` gets `-32600 Invalid request`,
+    a tool that isn't offered `-32602`, and the server goes on.
+    `serverInfo.version` is Raster's version (`system/VERSION`).
 - **Tools for the site itself:**
   - `describe` — how URLs reach views, the pages and collections the markup
     declares, the admin pages, the settings that change behaviour, and whether

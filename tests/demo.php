@@ -1083,8 +1083,8 @@ test(array('M1', 'M2', 'M3'), 'the MCP endpoint', function () use ($base) {
 	// writing templates stays off over HTTP until the site turns it on
 	check(!in_array('write_view', $names), 'write_view is not offered over HTTP');
 	$refused = json_decode($call(array('jsonrpc' => '2.0', 'id' => 30, 'method' => 'tools/call', 'params' => array('name' => 'write_view', 'arguments' => array('view' => 'x.html', 'content' => 'x'))))[1], true);
-	check(!empty($refused['result']['isError']), 'and calling it anyway is an error');
-	has($refused['result']['content'][0]['text'], 'Unknown tool');
+	same(-32602, $refused['error']['code'], 'and calling it anyway is an error');
+	has($refused['error']['message'], 'Unknown tool');
 	same(count($names), count(array_unique($names)), 'no tool is listed twice');
 	$batch = json_decode($call(array(array('jsonrpc' => '2.0', 'id' => 4, 'method' => 'ping'), array('jsonrpc' => '2.0', 'id' => 5, 'method' => 'nope')))[1], true);
 	same(-32601, $batch[1]['error']['code']);

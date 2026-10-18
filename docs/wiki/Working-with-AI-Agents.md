@@ -33,6 +33,8 @@ The client starts this command itself and talks to it through its input and outp
 
 For other clients, add a server with the command `php` and the arguments `bin/raster mcp`, run from the project folder. Set `RASTER_APP` or `RASTER_ENV` in its environment if needed.
 
+A malformed message gets a JSON-RPC error back, and the server goes on.
+
 ### Over HTTP, for agents elsewhere
 
 The endpoint is `POST /mcp` on your site. It's **off** until you set a token:

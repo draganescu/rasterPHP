@@ -756,6 +756,44 @@ test('mcp over stdio', function () use ($root, $db) {
 	same(7, $response['id']);
 	same('/about', $response['result']['structuredContent']['url']);
 });
+test('a malformed MCP message is answered and the stdio server goes on (#134)', function () use ($root, $db) {
+	$lines = array(
+		'{"jsonrpc":"2.0","id":1,"method":["x"]}',
+		'{"jsonrpc":"2.0","id":2,"method":"ping"}',
+		'[{"jsonrpc":"2.0","id":3,"method":"ping"},{"jsonrpc":"2.0","id":4,"method":"nope"}]',
+		'[1,2]',
+		'[]',
+		'"just a string"',
+		'{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"no_such_tool"}}',
+		'{"jsonrpc":"2.0","id":6,"method":"initialize","params":{}}',
+	);
+	$process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'PATH' => getenv('PATH')));
+	fwrite($pipes[0], implode("\n", $lines)."\n");
+	fclose($pipes[0]);
+	$out = array_values(array_filter(explode("\n", stream_get_contents($pipes[1]))));
+	$errors = stream_get_contents($pipes[2]);
+	same(0, proc_close($process), $errors);
+	same(count($lines), count($out), 'one answer a line: '.implode("\n", $out).$errors);
+	$answers = array_map(function ($line) { return json_decode($line, true); }, $out);
+	same(-32600, $answers[0]['error']['code'], 'a method that is not a string');
+	same(1, $answers[0]['id']);
+	same(2, $answers[1]['id'], 'the next ping is answered');
+	same(array(3, 4), array_column($answers[2], 'id'), 'a batch gets a list back');
+	same(-32601, $answers[2][1]['error']['code']);
+	same(array(-32600, -32600), array_map(function ($a) { return $a['error']['code']; }, $answers[3]), 'a batch of non-messages');
+	same(-32600, $answers[4]['error']['code'], 'an empty batch');
+	same(-32600, $answers[5]['error']['code'], 'a message that is not an object');
+	same(-32602, $answers[6]['error']['code'], 'an unknown tool is a JSON-RPC error');
+	check(strpos((string)$answers[6]['error']['message'], 'no_such_tool') !== false, 'missing '.'no_such_tool');
+	same(trim(file_get_contents($root.'/system/VERSION')), $answers[7]['result']['serverInfo']['version']);
+});
+test('a malformed MCP message over HTTP gets JSON-RPC errors (#134)', function () use ($base) {
+	list($status, $body) = http('POST', "$base/mcp", '[1,2]', array('Authorization: Bearer test-token', 'Content-Type: application/json'));
+	same(200, $status, $body);
+	same(array(-32600, -32600), array_map(function ($a) { return $a['error']['code']; }, json_decode($body, true)));
+	list($status, $body) = http('POST', "$base/mcp", '{"jsonrpc":"2.0","id":1,"method":{"a":1}}', array('Authorization: Bearer test-token'));
+	same(-32600, json_decode($body, true)['error']['code'], $body);
+});
 
 
 // ## Forms, accounts, newsletter, feeds

@@ -17,7 +17,6 @@ require_once BASE.'models/cms/cms.php';
 */
 class mcp
 {
-	const SERVER_VERSION = '1.0.0';
 	static $protocol_versions = array('2025-06-18', '2025-03-26', '2024-11-05');
 
 	// ##HTTP transport, bound to the finding_route event
@@ -45,13 +44,7 @@ class mcp
 		if (!is_array($body)) {
 			$this->http_reply(400, $this->error(null, -32700, 'Parse error'));
 		}
-		// a batch is a list of messages
-		if (array_keys($body) === range(0, count($body) - 1)) {
-			$responses = array_values(array_filter(array_map(array($this, 'handle'), $body)));
-			if (!$responses) $this->http_reply(202, null);
-			$this->http_reply(200, $responses);
-		}
-		$response = $this->handle($body);
+		$response = $this->answer($body);
 		if ($response === null) $this->http_reply(202, null);
 		$this->http_reply(200, $response);
 	}
@@ -86,7 +79,7 @@ class mcp
 			$line = trim($line);
 			if ($line === '') continue;
 			$message = json_decode($line, true);
-			$response = is_array($message) ? $this->handle($message) : $this->error(null, -32700, 'Parse error');
+			$response = json_last_error() !== JSON_ERROR_NONE ? $this->error(null, -32700, 'Parse error') : $this->answer($message);
 			if ($response !== null) {
 				fwrite($out, json_encode($response, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)."\n");
 				fflush($out);
@@ -95,14 +88,28 @@ class mcp
 	}
 
 	// ##JSON-RPC
+	// One message or a batch (a list of them), from either transport: the
+	// answer, a list of answers, or null when there is nothing to send back.
+	public function answer($body) {
+		if (is_array($body) && $body && array_keys($body) === range(0, count($body) - 1)) {
+			$responses = array_values(array_filter(array_map(array($this, 'handle'), $body)));
+			return $responses ?: null;
+		}
+		return $this->handle($body);
+	}
+
 	public function handle($message) {
 		mcp::load_tools();
-		$id = array_key_exists('id', $message) ? $message['id'] : null;
-		$method = isset($message['method']) ? $message['method'] : null;
+		// anything but an object with a method is refused before it is read:
+		// one bad line must not end the stdio server
+		$id = is_array($message) && array_key_exists('id', $message) && is_scalar($message['id']) ? $message['id'] : null;
+		if (!is_array($message) || !isset($message['method']) || !is_string($message['method'])) {
+			return $this->error($id, -32600, 'Invalid request');
+		}
+		$method = $message['method'];
 		$params = isset($message['params']) && is_array($message['params']) ? $message['params'] : array();
 		$is_notification = !array_key_exists('id', $message);
 
-		if ($method === null) return $is_notification ? null : $this->error($id, -32600, 'Invalid request');
 		if (strpos($method, 'notifications/') === 0) return null;
 
 		switch ($method) {
@@ -111,7 +118,7 @@ class mcp
 				return $this->result($id, array(
 					'protocolVersion' => in_array($requested, self::$protocol_versions) ? $requested : self::$protocol_versions[0],
 					'capabilities' => array('tools' => array('listChanged' => false)),
-					'serverInfo' => array('name' => 'raster', 'version' => self::SERVER_VERSION),
+					'serverInfo' => array('name' => 'raster', 'version' => trim((string)@file_get_contents(BASE.'VERSION'))),
 					'instructions' => 'This is a Raster site: views are plain HTML and the dynamic parts are HTML comments. Call describe first — it returns how URLs reach views, the content model the markup declares, and whether the templates lint clean. Before writing an annotation, check vocabulary (the models and their signatures) and annotations (the grammar); both are read from the code, so neither can be out of date. To change a template use check_view then write_view, which refuses markup that does not lint, and render_url to see the result. Content edits go through get_page/update_page and the item tools: page edits keep revisions, and fields that are not in the templates cannot be written — to add a field, edit the template. In production pages are cached for visitors who are not logged in: Raster\'s own tools clear that cache, but views, theme files, models, config or the database changed any other way do not, so call clear_cache after such a change. render_url never reads the cache, so a fresh render_url does not mean visitors see the change. The in-page editor only marks what the CMS prints: keep lists staff edit on render.cms.<name>, using its options for filters from the URL (field=?param), dates (date>=today) and sorting (order=date,time); for what those cannot say (totals, grouping by day, several types), the render method of a model returns its records through cms_records::listed($type, $rows), which keeps them editable; after changing such a page, call render_url with as="editor" to see that editing still works.',
 				));
 			case 'ping':
@@ -119,8 +126,12 @@ class mcp
 			case 'tools/list':
 				return $this->result($id, array('tools' => $this->tools()));
 			case 'tools/call':
-				$name = isset($params['name']) ? $params['name'] : '';
+				$name = isset($params['name']) && is_string($params['name']) ? $params['name'] : '';
 				$arguments = isset($params['arguments']) && is_array($params['arguments']) ? $params['arguments'] : array();
+				// a tool that isn't offered is the caller's mistake, not the tool's
+				if (!in_array($name, array_map(function ($t) { return $t['name']; }, $this->tools()), true)) {
+					return $this->error($id, -32602, "Unknown tool '$name'. tools/list has the names.");
+				}
 				return $this->result($id, $this->call_tool($name, $arguments));
 			default:
 				return $is_notification ? null : $this->error($id, -32601, "Method not found: $method");
