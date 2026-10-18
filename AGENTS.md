@@ -1375,7 +1375,10 @@ of lists and filter pages come along; drafts and the editor don't.
     as that person, outside production only, and for staff also says what the in-page editor marks:
     editable fields, items, and each list with whether it gets a card for a
     new item. It runs in its own process, so a page that dies can't take the
-    server down. It never reads the page cache.
+    server down: the command line PHP (next to PHP-FPM's, over HTTP), with
+    the server's whole environment, and what the page logs read after the
+    page, so a page that logs a lot still answers. It never reads the page
+    cache.
   - `clear_cache` — throws the page cache away. Call it after changing
     views, theme files, models or config any way but `write_view`, or the
     database directly; Raster's own tools already clear it.

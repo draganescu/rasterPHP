@@ -819,6 +819,46 @@ test('MCP over HTTP finds the token where Apache and PHP-FPM put it (#106)', fun
 		@rmdir($dir);
 	}
 });
+test('render_url runs PHP itself under PHP-FPM (#107)', function () use ($root) {
+	// under PHP-FPM, PHP_BINARY is php-fpm, which can't run bin/raster
+	foreach (array('fpm-fcgi', 'cgi-fcgi', 'apache2handler') as $sapi) {
+		$php = mcp::php_binary($sapi);
+		check(is_file($php) && is_executable($php), "$sapi: no PHP to run: $php");
+		check(strpos(basename($php), 'fpm') === false, "$sapi: $php");
+		same('cli', shell_exec(escapeshellarg($php).' -r '.escapeshellarg('echo PHP_SAPI;')), $php);
+	}
+	same(PHP_BINARY, mcp::php_binary('cli'));
+});
+test('render_url keeps the environment and reads a page that logs a lot (#107)', function () use ($root) {
+	$app = APPBASE.config::get('models_path', 'models');
+	$views = APPBASE.config::get('views_path', 'views').'/'.config::get('theme');
+	temp_model("$app/zzloud", array('zzloud.php' => "<?php\nclass zzloud\n{\n\tfunction env() { return (string)getenv('ZZ_SITE_SETTING'); }\n\tfunction noise() { for (\$i = 0; \$i < 3000; \$i++) error_log(str_repeat('x', 60).\" \$i\"); return 'done'; }\n}\n"));
+	file_put_contents("$views/zz-loud.html", "<p>env=<!-- print.zzloud.env /--> <!-- print.zzloud.noise /--></p>\n");
+	putenv('ZZ_SITE_SETTING=from-the-environment');
+	// a server of its own, given up on after a while: a hang fails the test
+	// instead of stopping the run
+	$process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, getenv());
+	try {
+		fwrite($pipes[0], json_encode(array('jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => array('name' => 'render_url', 'arguments' => array('url' => '/zz-loud'))))."\n");
+		fclose($pipes[0]);
+		$read = array($pipes[1]); $none = null;
+		check(stream_select($read, $none, $none, 30) === 1, 'render_url gave no answer in 30 s');
+		$answer = json_decode(stream_get_contents($pipes[1]), true)['result'];
+		check(empty($answer['isError']), json_encode($answer));
+		$page = $answer['structuredContent'];
+		same(true, $page['ok'], json_encode($page));
+		check(strpos((string)$page['html'], 'env=from-the-environment') !== false, 'missing '.'env=from-the-environment');
+		check(strpos((string)$page['html'], 'done') !== false, 'missing '.'done');
+		check(strpos((string)$page['errors'], 'x 2999') !== false, 'missing '.'x 2999');
+	} finally {
+		if (proc_get_status($process)['running']) proc_terminate($process, 9);
+		proc_close($process);
+		putenv('ZZ_SITE_SETTING');
+		@unlink("$views/zz-loud.html");
+		remove_dir("$app/zzloud");
+		controller::forget_models();
+	}
+});
 
 
 // ## Forms, accounts, newsletter, feeds

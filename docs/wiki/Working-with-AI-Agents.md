@@ -68,7 +68,7 @@ curl -s https://example.com/mcp \
 | `list_views`, `read_view` | list and read templates |
 | `check_view` | lint a template that isn't saved yet; nothing is written |
 | `write_view` | save a template, **only if it lints without errors**; otherwise the file is untouched and the problems come back. The answer says what the change does to the content model. |
-| `render_url` | a page's status and HTML, without a web server. Runs in its own process, so a broken page can't crash the MCP server. Never reads the page cache. |
+| `render_url` | a page's status and HTML, without a web server. Runs in its own process, with the server's environment, so a broken page can't crash the MCP server; works over HTTP under PHP-FPM too. Never reads the page cache. |
 | `clear_cache` | throws the [page cache](Settings-and-Environments#the-page-cache) away, after views, theme files, models or the database were changed without Raster's own tools. In production, visitors who aren't logged in see cached pages until then. |
 
 The four view tools take an optional `theme`: the name of a folder directly under `views/` (letters, digits, `_` and `-`), the site's own theme when left out. A path such as `../..`, a folder inside a theme, or a theme folder that is a link pointing out of `views/` is refused with an error, and so is a view file that is a link pointing out of the theme (`list_views` leaves it out; a link that stays inside the theme works). An agent with the token can't read or write files elsewhere on the server.

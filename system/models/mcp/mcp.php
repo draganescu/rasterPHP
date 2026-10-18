@@ -626,29 +626,43 @@ class mcp
 		return array('ok' => true, 'page_cache' => raster_cache::enabled()) + $cleared;
 	}
 
+	// The PHP that runs bin/raster. Over HTTP under PHP-FPM, PHP_BINARY is
+	// php-fpm itself, which can't; the command line PHP of the same version
+	// sits next to it in PHP_BINDIR (php8.2 on Debian, else php).
+	static function php_binary($sapi = PHP_SAPI) {
+		if ($sapi === 'cli' && PHP_BINARY !== '') return PHP_BINARY;
+		foreach (array('php'.PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION, 'php') as $name) {
+			if (is_executable(PHP_BINDIR.'/'.$name)) return PHP_BINDIR.'/'.$name;
+		}
+		return 'php';
+	}
+
 	protected function tool_render_url($arguments) {
 		$url = (string)$this->arg($arguments, 'url');
 		if ($url === '' || $url[0] !== '/') throw new InvalidArgumentException("'url' is a path on this site and starts with /, e.g. /about");
 		$limit = max(200, min(200000, (int)$this->arg($arguments, 'limit', 20000)));
 		$root = dirname(rtrim(BASE, '/'));
 		// a separate process: a page that dies, redirects or exits cannot take
-		// this server down between calls
-		$env = array('RASTER_APP' => boot::$appname, 'PATH' => (string)getenv('PATH'), 'HOME' => (string)getenv('HOME'), 'NO_COLOR' => '1');
-		foreach (array('RASTER_DB', 'RASTER_URL', 'RASTER_ENV', 'RASTER_MAIL', 'RASTER_MAIL_FROM') as $name) {
-			$value = getenv($name);
-			if ($value !== false) $env[$name] = $value;
-		}
-		$command = array(PHP_BINARY, "$root/bin/raster", 'render', $url);
+		// this server down between calls. It gets the whole environment, as
+		// `raster send` does, since a site's config may read its own variables.
+		$env = array_merge(getenv(), array('RASTER_APP' => boot::$appname, 'NO_COLOR' => '1'));
+		$command = array(mcp::php_binary(), "$root/bin/raster", 'render', $url);
 		$as = (string)$this->arg($arguments, 'as', '');
 		if ($as !== '' && config::get('environment') === 'production') {
 			throw new InvalidArgumentException("'as' only works outside production: render as staff on a development copy of the site");
 		}
 		if ($as !== '') $command[] = '--as='.$as;
-		$process = proc_open($command, array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, $env);
-		if (!is_resource($process)) throw new RuntimeException('Could not start a process to render '.$url);
+		// what the page logs goes to a file: read from a second pipe after the
+		// page, a page that logs more than a pipe holds would wait on this
+		// server while it waits on the page
+		$log = tempnam(sys_get_temp_dir(), 'raster-render-');
+		$process = proc_open($command, array(0 => array('file', '/dev/null', 'r'), 1 => array('pipe', 'w'), 2 => array('file', $log, 'w')), $pipes, $root, $env);
+		if (!is_resource($process)) { @unlink($log); throw new RuntimeException('Could not start a process to render '.$url); }
 		$html = stream_get_contents($pipes[1]);
-		$errors = trim(stream_get_contents($pipes[2]));
+		fclose($pipes[1]);
 		$exit = proc_close($process);
+		$errors = trim((string)file_get_contents($log));
+		@unlink($log);
 		$status = preg_match('/HTTP (\d{3})/', $errors, $m) ? (int)$m[1] : ($exit === 0 ? 200 : null);
 		$answer = array('url' => $url, 'ok' => $exit === 0, 'status' => $status);
 		if ($as !== '') {
