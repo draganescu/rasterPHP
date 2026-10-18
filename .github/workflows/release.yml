@@ -49,7 +49,9 @@ jobs:
         run: |
           php bin/raster new "$RUNNER_TEMP/site"
           cd "$RUNNER_TEMP/site"
-          php bin/raster update master --dry-run
+          # a release PR is a version ahead of master: --force lets the dry
+          # run go "back" to it, which is all this step needs to fetch
+          php bin/raster update master --dry-run --force
 
   # The same suites on MySQL: RASTER_DB names the server, and each suite
   # makes its own databases there and drops them at the end.
