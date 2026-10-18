@@ -327,8 +327,7 @@ class raster_inspector {
 	// Finds the file that would be loaded for a model (controller::model)
 	// and lists its public methods.
 	function model_info($model) {
-		static $cache = array();
-		if (isset($cache[$model])) return $cache[$model];
+		if (isset(self::$known[$model])) return self::$known[$model];
 		$found = controller::model($model);
 		$info = false;
 		foreach ($found ? array($found['file']) : array() as $file) {
@@ -383,7 +382,18 @@ class raster_inspector {
 			}
 			break;
 		}
-		return $cache[$model] = $info;
+		return self::$known[$model] = $info;
+	}
+
+	// What model_info() and raised_names() read is kept for the process,
+	// since lint asks for the same models over and over; the stdio MCP server
+	// lives longer than a lint and forgets it before every call.
+	static $known = array();
+	static $raised = null;
+
+	static function forget() {
+		self::$known = array();
+		self::$raised = null;
 	}
 
 	// methods of a system model file, for overrides
@@ -805,8 +815,7 @@ class raster_inspector {
 
 	// every raise('x') and done('x') in the models, so alerts can be checked
 	function raised_names() {
-		static $names = null;
-		if ($names !== null) return $names;
+		if (self::$raised !== null) return self::$raised;
 		$names = array();
 		foreach (array(BASE.'models', APPBASE.config::get('models_path', 'models')) as $dir) {
 			if (!is_dir($dir)) continue;
@@ -830,7 +839,7 @@ class raster_inspector {
 		foreach (cms_records::types() as $info) {
 			foreach ($info['types'] as $field => $type) if ($type !== 'text') $names[] = $field.'_invalid';
 		}
-		return $names = array_unique($names);
+		return self::$raised = array_unique($names);
 	}
 
 	// ##Forms

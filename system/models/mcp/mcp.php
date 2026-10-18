@@ -98,13 +98,58 @@ class mcp
 		while (($line = fgets($in)) !== false) {
 			$line = trim($line);
 			if ($line === '') continue;
+			// PHP can't load a class again, so once a file this process
+			// loaded has changed (a model's api(), types() or listens()), a
+			// fresh process answers each message instead
+			if ($this->changed_since_loaded()) {
+				fwrite($out, $this->answer_fresh($line));
+				fflush($out);
+				continue;
+			}
 			$message = json_decode($line, true);
 			$response = json_last_error() !== JSON_ERROR_NONE ? $this->error(null, -32700, 'Parse error') : $this->answer($message);
+			$this->changed_since_loaded();
 			if ($response !== null) {
 				fwrite($out, json_encode($response, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)."\n");
 				fflush($out);
 			}
 		}
+	}
+
+	// the PHP files this process has loaded, as they were when it first saw them
+	protected $loaded = array();
+
+	protected function changed_since_loaded() {
+		clearstatcache();
+		$changed = false;
+		foreach (get_included_files() as $file) {
+			$stamp = @filemtime($file).' '.@filesize($file);
+			if (!isset($this->loaded[$file])) $this->loaded[$file] = $stamp;
+			elseif ($this->loaded[$file] !== $stamp) $changed = true;
+		}
+		return $changed;
+	}
+
+	// one line answered by `php bin/raster mcp` started for it: its reply
+	// lines, as it wrote them
+	protected function answer_fresh($line) {
+		$root = dirname(rtrim(BASE, '/'));
+		$log = tempnam(sys_get_temp_dir(), 'raster-mcp-');
+		$env = array_merge(getenv(), array('RASTER_APP' => boot::$appname));
+		$process = proc_open(array(mcp::php_binary(), "$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('file', $log, 'w')), $pipes, $root, $env);
+		if (!is_resource($process)) {
+			@unlink($log);
+			return json_encode($this->error(null, -32603, 'Could not start a fresh MCP process'))."\n";
+		}
+		fwrite($pipes[0], $line."\n");
+		fclose($pipes[0]);
+		$reply = stream_get_contents($pipes[1]);
+		fclose($pipes[1]);
+		proc_close($process);
+		$errors = trim((string)file_get_contents($log));
+		@unlink($log);
+		if ($errors !== '') log::warning('MCP: '.substr($errors, 0, 500));
+		return $reply;
 	}
 
 	// ##JSON-RPC
@@ -243,6 +288,9 @@ class mcp
 		// models, views and types an agent writes between calls
 		cms_store::forget();
 		cms_records::forget();
+		raster_inspector::forget();
+		$this->content_model = null;
+		clearstatcache();
 		// what a tool's code prints would break the answer over stdio
 		$level = ob_get_level();
 		ob_start();
@@ -288,13 +336,12 @@ class mcp
 		return $default;
 	}
 
+	// the content model, read once a call: write_view may change it
+	protected $content_model = null;
+
 	protected function model() {
-		static $model = null;
-		if ($model === null) {
-			$inspector = new raster_inspector();
-			$model = $inspector->content_model();
-		}
-		return $model;
+		if ($this->content_model === null) $this->content_model = (new raster_inspector())->content_model();
+		return $this->content_model;
 	}
 
 	protected function find_page($reference) {

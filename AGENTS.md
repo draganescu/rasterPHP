@@ -1348,6 +1348,12 @@ of lists and filter pages come along; drafts and the editor don't.
     isn't an object with a string `method` gets `-32600 Invalid request`,
     a tool that isn't offered `-32602`, and the server goes on.
     `serverInfo.version` is Raster's version (`system/VERSION`).
+  - The stdio server lives for the session, and each call reads the
+    templates, models and record types again, so what an agent writes
+    counts on its next call. PHP can't load a class twice: once a PHP file
+    the server has loaded changes (a model's `api()`, `types()` or
+    `listens()`, config), a fresh `bin/raster mcp` answers every later
+    call, under 100 ms each. Restart the server to make it fast again.
 - **Tools for the site itself:**
   - `describe` — how URLs reach views, the pages and collections the markup
     declares, the admin pages, the settings that change behaviour, and whether

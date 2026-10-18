@@ -33,7 +33,7 @@ The client starts this command itself and talks to it through its input and outp
 
 For other clients, add a server with the command `php` and the arguments `bin/raster mcp`, run from the project folder. Set `RASTER_APP` or `RASTER_ENV` in its environment if needed.
 
-A malformed message gets a JSON-RPC error back, and the server goes on.
+The server keeps running for the whole session, and every call reads the templates and models again, so a field or collection a view gains, or a method a model gains, counts on the next call. PHP can't load a class twice, so once a PHP file the server has already loaded changes (a model's `api()` or `types()`, a config file), each later call is answered by a fresh process: still right, a little slower (under 100 ms a call). Restart the server to make it fast again. A malformed message gets a JSON-RPC error back, and the server goes on.
 
 ### Over HTTP, for agents elsewhere
 
