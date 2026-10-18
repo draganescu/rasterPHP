@@ -4393,7 +4393,7 @@ test('booking: requires(): emails, pages, settings and records', function () {
 
 test('lint warns about raw find() rows on any page (#125)', function () {
 	$app = APPBASE.config::get('models_path', 'models');
-	temp_model("$app/zzraw", array('zzraw.php' => "<?php\nclass zzraw\n{\n\tstatic function types() {\n\t\treturn array('zzraw' => array('fields' => array('name' => '', 'newsletter' => false)));\n\t}\n\tfunction rows() {\n\t\treturn cms_records::find('zzraw');\n\t}\n\tfunction text() {\n\t\treturn array_map(function (\$r) { return cms_records::for_template(cms_records::info('zzraw'), \$r); }, cms_records::find('zzraw'));\n\t}\n\tfunction listed() {\n\t\treturn cms_records::listed('zzraw', cms_records::find('zzraw'));\n\t}\n}\n"));
+	temp_model("$app/zzraw", array('zzraw.php' => "<?php\nclass zzraw\n{\n\tstatic function types() {\n\t\treturn array('zzraw' => array('fields' => array('name' => '', 'newsletter' => false)));\n\t}\n\tfunction rows() {\n\t\treturn cms_records::find('zzraw');\n\t}\n\tfunction text() {\n\t\treturn array_map(function (\$r) { return cms_records::for_template(cms_records::info('zzraw'), \$r); }, cms_records::find('zzraw'));\n\t}\n\tfunction escaped() {\n\t\t\$rows = array();\n\t\tforeach (cms_records::find('zzraw') as \$r) \$rows[] = array('name' => util::e(\$r['name']), 'newsletter' => \$r['newsletter'] ? '1' : '0');\n\t\treturn \$rows;\n\t}\n\tfunction listed() {\n\t\treturn cms_records::listed('zzraw', cms_records::find('zzraw'));\n\t}\n}\n"));
 	try {
 		controller::forget_models();
 		cms_records::forget();
@@ -4403,6 +4403,7 @@ test('lint warns about raw find() rows on any page (#125)', function () {
 		check(has_problem($lint('rows'), 'so a false bool prints the mock-up and what visitors typed prints as HTML'), 'a page for visitors: '.json_encode($lint('rows')));
 		same(array(), $lint('listed'), 'listed() rows');
 		same(array(), $lint('text'), 'rows made text with for_template(), as the booking manage page does');
+		same(array(), $lint('escaped'), 'rows a model builds and escapes itself (the shop\'s receipt)');
 	} finally {
 		remove_dir("$app/zzraw");
 		controller::forget_models();

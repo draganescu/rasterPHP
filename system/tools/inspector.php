@@ -745,15 +745,16 @@ class raster_inspector {
 
 	// the record type a model method reads with cms_records::find() or get()
 	// and hands to the template without cms_records::listed(), or null. With
-	// $text, rows made text by cms_records::for_template() are fine too
-	// (they print as records do, but aren't editable).
+	// $text, rows a method makes text itself, with cms_records::for_template()
+	// or util::e(), are fine too (they print as records do, but aren't
+	// editable).
 	function record_rows($file, $method, $text = false) {
 		$source = @file_get_contents($file);
 		if ($source === false || !preg_match('/function\s+'.preg_quote($method, '/').'\s*\(/', $source, $m, PREG_OFFSET_CAPTURE)) return null;
 		$body = substr($source, $m[0][1]);
 		// up to the next method
 		if (preg_match('/\n\s*(?:(?:public|protected|private|static|final)\s+)*function\s/', $body, $next, PREG_OFFSET_CAPTURE, 1)) $body = substr($body, 0, $next[0][1]);
-		if (strpos($body, 'cms_records::listed(') !== false || ($text && strpos($body, 'cms_records::for_template(') !== false)) return null;
+		if (strpos($body, 'cms_records::listed(') !== false || ($text && (strpos($body, 'cms_records::for_template(') !== false || strpos($body, 'util::e(') !== false))) return null;
 		if (!preg_match_all('/cms_records::(?:find|get)\(\s*[\'"]([a-z][a-z0-9]*)[\'"]/', $body, $found)) return null;
 		foreach ($found[1] as $type) {
 			if (cms_records::info($type)) return $type;
