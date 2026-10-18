@@ -1025,7 +1025,9 @@ of lists and filter pages come along; drafts and the editor don't.
   same as `<!-- print.model.method /-->`, written so the file stays valid
   JavaScript or CSS. `lint`, `schema`, `describe` and MCP read it as the
   engine does (the marks are `script_form` in `raster annotations`), so a
-  `print.cms` field written this way is a field like any other.
+  `print.cms` field written this way is a field like any other. A plain
+  comment that only starts like it, `/*- header */`, is no annotation and
+  hides none of the ones after it.
 - **Render into memory:** a render method whose result has the key
   `'__' => true` next to its rows is rendered but not printed; read the HTML later from
   `template::instance()->render_results['model']['method']`.

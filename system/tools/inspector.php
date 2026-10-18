@@ -96,7 +96,11 @@ class raster_inspector {
 			if ($means === '<!--') $opens[] = preg_quote($mark, '/');
 			if ($means === '-->') $closes[] = preg_quote($mark, '/');
 		}
-		preg_match_all('/(?:'.implode('|', $opens).')(.*?)(?:'.implode('|', $closes).')/s', $html, $matches, PREG_OFFSET_CAPTURE);
+		// a body holds no opener, so a "/*-" that ends with a plain "*/" (a CSS
+		// or JS comment) cannot run on to a later "-->" and swallow the
+		// annotation there: the match restarts at the innermost opener
+		$opener = implode('|', $opens);
+		preg_match_all('/(?:'.$opener.')((?:(?!'.$opener.').)*?)(?:'.implode('|', $closes).')/s', $html, $matches, PREG_OFFSET_CAPTURE);
 		foreach ($matches[0] as $i => $match) {
 			$raw = $match[0];
 			$offset = $match[1];

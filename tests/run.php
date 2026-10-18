@@ -186,11 +186,15 @@ test('content model from the demo theme', function () {
 test('lint and the content model read script-form annotations and skip remove blocks', function () {
 	check(has_problem(lint_html('<script>var t = "/*- print.site.no_such_method /-*/";</script>'), "no public method 'no_such_method'"), 'a script-form call is linted');
 	same(array(), array_values(array_filter(lint_html('<style>/*- print.site.year /-*/ /* ok -*/</style>'), function ($p) { return $p['severity'] === 'error'; })), 'a valid one is clean');
+	// a CSS or JS comment that starts with /*- but ends with */ is no annotation
+	// and must not run on to the next --> and swallow a real one
+	$stray = lint_html('<style>/*- header */ h1{color:red}</style><h1><!-- print.site.year -->T<!-- /print.site.year --></h1>');
+	same(array(), array_values(array_filter($stray, function ($p) { return $p['severity'] === 'error'; })), 'an unclosed /*- comment hides nothing: '.json_encode($stray));
 	$fix = lint_html('<script>var t = "/*-print.site.year /-*/";</script>');
 	check(has_problem($fix, 'write it exactly as /*- print.site.year /-*/'), 'its fix keeps the script form: '.json_encode($fix));
 	$dir = sys_get_temp_dir().'/raster-probe-'.getmypid();
 	@mkdir("$dir/probe", 0775, true);
-	file_put_contents("$dir/probe/probe.html", '<h1><!-- print.cms.heading -->Hi<!-- /print.cms.heading --></h1>'
+	file_put_contents("$dir/probe/probe.html", '<style>/*- header */ h1{color:red}</style><h1><!-- print.cms.heading -->Hi<!-- /print.cms.heading --></h1>'
 		.'<script>var tagline = "/*- print.cms.tagline /-*/";</script>'
 		.'<!-- remove --><p><!-- print.cms.old_blurb -->x<!-- /print.cms.old_blurb --></p>'
 		.'<!-- render.cms.ghosts --><b><!-- print.name -->Boo<!-- /print.name --></b><!-- /render.cms.ghosts --><!-- /remove -->'
