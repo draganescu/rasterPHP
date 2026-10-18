@@ -34,7 +34,10 @@ class cms_records {
 	// names a type declaration understands
 	static $keys = array('fields', 'types', 'public', 'owner', 'create', 'staff_add', 'readonly', 'hidden', 'actions', 'html');
 	// the model methods with a meaning of their own, never actions
-	static $hooks = array('types', 'check', 'schema', 'listens', 'api', 'requires');
+	static $hooks = array('types', 'check', 'fill', 'schema', 'listens', 'api', 'requires');
+	// who is writing while fill() and check() run: visitor (a form), editor
+	// (the in-page editor, MCP) or model (the model's own code); see writer()
+	static $writer = null;
 	// events held back until the transaction they happened in commits
 	static $depth = 0;
 	static $queued = array();
@@ -446,6 +449,23 @@ class cms_records {
 	}
 
 	// ##The check
+
+	// The fields the model works out itself, merged into a write before
+	// check(): array(field => value), from the model's static fill($type,
+	// $after, $before) (a booking's end from its start and service).
+	static function fill($info, $after, $before) {
+		$class = $info['class'];
+		if (!method_exists($class, 'fill') || !(new ReflectionMethod($class, 'fill'))->isStatic()) return array();
+		$values = call_user_func(array($class, 'fill'), $info['name'], $after, $before);
+		return is_array($values) ? array_intersect_key($values, $info['fields']) : array();
+	}
+
+	// who makes the write fill() and check() are asked about: 'visitor',
+	// 'editor' or 'model', null outside a write. A check that treats staff
+	// differently (notice for guests only) reads it.
+	static function writer() {
+		return self::$writer;
+	}
 
 	// Asks the model whether a write may happen. $after is the whole record
 	// as it would be stored (null when deleting), $before as it was (null

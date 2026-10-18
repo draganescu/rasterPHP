@@ -2929,6 +2929,9 @@ function booking_site($fn) {
 		."<ol><!-- $days --><li class=\"day\"><!-- print.date -->2026-10-20<!-- /print.date --></li><!-- /$days --></ol>"
 		."<p><!-- render.booking.resources --><b class=\"resource\"><!-- print.name -->Ana<!-- /print.name --></b><!-- /render.booking.resources --></p>"
 		."<p><!-- $services --><i class=\"service\"><!-- print.name -->Cut<!-- /print.name --></i><!-- /$services --></p>"
+		."<!-- render.booking.form --><form method=\"post\"><input name=\"name\" required><input type=\"email\" name=\"email\"><input name=\"phone\">"
+		."<input type=\"date\" name=\"date\" required><input name=\"time\" required><input type=\"number\" name=\"people\"><input name=\"resource\">"
+		."<textarea name=\"notes\"></textarea><button>Book</button></form><!-- /render.booking.form -->"
 		."</body></html>");
 	controller::forget_models();
 	cms_records::forget();
@@ -3237,6 +3240,619 @@ test('render.booking.slots, days, resources and services read the URL', function
 		check($took < 1, "days took $took s");
 		same(60, count($days));
 		check((int)$days[0]['slots_free'] > 0, 'slots_free: '.json_encode($days[0]));
+	});
+});
+
+// ## Bundled booking: the booking type
+
+// The café: a Dining room for 20, sittings at 19:00 and 21:00 Tuesday to
+// Sunday. Gives the next Tuesday.
+function booking_cafe() {
+	cms_records::create('bookingresource', array('name' => 'Dining room', 'people' => 20));
+	cms_records::create('bookinghours', array('resource' => 'dining-room', 'days' => 'tue,wed,thu,fri,sat,sun', 'starts' => '19:00', 'ends' => '21:00', 'every' => 120));
+	return date('Y-m-d', strtotime('next tuesday'));
+}
+// The salon: Ana and Mihai take one booking at a time, starts every 15
+// minutes from 09:00 to 17:30 Tuesday to Saturday; Cut (30) from both,
+// Colour (90) from Ana. Gives the next Tuesday.
+function booking_salon() {
+	foreach (array('Ana', 'Mihai') as $name) {
+		cms_records::create('bookingresource', array('name' => $name, 'bookings' => 1));
+		cms_records::create('bookinghours', array('resource' => strtolower($name), 'days' => 'tue,wed,thu,fri,sat', 'starts' => '09:00', 'ends' => '17:30', 'every' => 15));
+	}
+	cms_records::create('bookingservice', array('name' => 'Cut', 'minutes' => 30, 'resources' => 'ana,mihai'));
+	cms_records::create('bookingservice', array('name' => 'Colour', 'minutes' => 90, 'resources' => 'ana'));
+	return date('Y-m-d', strtotime('next tuesday'));
+}
+// a booking as a guest's form stores it (each guest with an address of
+// their own), and as staff store it in the page or over MCP
+function booking_guest($values, $id = 0) {
+	static $n = 0;
+	$n++;
+	if (!$id) $values = array_merge(array('name' => "Guest $n", 'email' => "guest$n@example.test"), $values);
+	return cms_store::save_item('bookingdata', $id, $values, cms_records::writable(cms_records::info('booking')), 'visitor');
+}
+function booking_staff($values, $id = 0) {
+	if (!$id) $values = array_merge(array('name' => 'Phone booking'), $values);
+	return cms_store::save_item('bookingdata', $id, $values, cms_records::writable(cms_records::info('booking')), 'editor');
+}
+// the problems $fn was refused for, or array() when it went through
+function booking_problems($fn) {
+	try {
+		$fn();
+	} catch (cms_refused $e) {
+		return $e->problems;
+	}
+	return array();
+}
+// whether a write would be refused, without storing it
+function booking_would_refuse($fn) {
+	try {
+		cms_records::transaction(function () use ($fn) {
+			$fn();
+			throw new RuntimeException('roll back');
+		});
+	} catch (cms_refused $e) {
+		return $e->problems;
+	} catch (RuntimeException $e) {
+		return array();
+	}
+}
+// $fn as a logged in editor of this process
+function booking_as_editor($fn) {
+	$user = new ReflectionProperty('authentication', 'user');
+	$user->setAccessible(true);
+	$user->setValue(null, array('id' => 0, 'name' => 'Staff', 'email' => '', 'username' => '', 'role' => 'editor'));
+	try {
+		return $fn();
+	} finally {
+		$user->setValue(null, false);
+	}
+}
+// one slot's places left, as the template gets them
+function booking_left($date, $time, $resource = 'dining-room') {
+	foreach ((new booking())->slots("date=$date&resource=$resource") as $slot) {
+		if ($slot['time'] === $time) return $slot['left_people'];
+	}
+	return null;
+}
+
+test('booking: records fill their own fields, and check() knows who writes', function () {
+	$app = APPBASE.config::get('models_path', 'models');
+	temp_model("$app/zzfill", array('zzfill.php' => "<?php\nclass zzfill\n{\n\tstatic \$seen = array();\n"
+		."\tstatic function types() {\n\t\treturn array('zzfill' => array('fields' => array('title' => '', 'words' => 0, 'tags' => array()), 'readonly' => array('words')));\n\t}\n"
+		."\tstatic function fill(\$type, \$after, \$before) {\n\t\treturn array('words' => str_word_count(\$after['title']), 'tags' => array(cms_records::writer()), 'nope' => 'x');\n\t}\n"
+		."\tstatic function check(\$type, \$after, \$before) {\n\t\tself::\$seen[] = array(cms_records::writer(), \$after['words']);\n\t\treturn \$after && \$after['words'] > 5 ? array('too_long') : array();\n\t}\n}\n"));
+	temp_model("$app/zzfillbad", array('zzfillbad.php' => "<?php\nclass zzfillbad\n{\n\tstatic function types() {\n\t\treturn array('zzfillbad' => array('fields' => array('title' => '')));\n\t}\n\tfunction fill(\$type, \$after, \$before) {\n\t\treturn array('title' => 'never');\n\t}\n}\n"));
+	try {
+		controller::forget_models();
+		cms_records::forget();
+		cms_store::connect();
+		$item = cms_records::create('zzfill', array('title' => 'two words'));
+		same(array(2, array('model')), array($item['words'], $item['tags']));
+		// the editor can't write words, but the model fills it on the editor's write
+		$item = cms_store::save_item('zzfilldata', $item['id'], array('title' => 'now three words'), array('title'), 'editor');
+		same(3, $item['words']);
+		same(array('editor'), $item['tags']);
+		same(array(array('model', 2), array('editor', 3)), zzfill::$seen);
+		same(null, cms_records::writer());
+		// a refusal puts the writer back too
+		try {
+			cms_store::save_item('zzfilldata', 0, array('title' => 'one two three four five six'), array('title'), 'visitor');
+			check(false, 'six words were stored');
+		} catch (cms_refused $e) {
+			same(array('too_long'), $e->problems);
+		}
+		same(null, cms_records::writer());
+		check(!cms_records::is_action_method('zzfill', 'fill'), 'fill is never an action');
+		// an ordinary fill() is no hook: it fills nothing, and lint says so
+		same('', cms_records::create('zzfillbad', array('title' => ''))['title']);
+		check(has_problem((new raster_inspector())->lint_types(), 'zzfillbad::fill() must be static'), 'lint');
+	} finally {
+		foreach (array('zzfilldata', 'zzfillbaddata') as $table) R::getDatabaseAdapter()->exec("DROP TABLE IF EXISTS $table");
+		cms_store::forget();
+		remove_dir("$app/zzfill");
+		remove_dir("$app/zzfillbad");
+		controller::forget_models();
+		cms_records::forget();
+	}
+});
+
+test('booking: a booking is a request that holds its place', function () use ($base) {
+	booking_site(function () use ($base) {
+		$tue = booking_cafe();
+		$b = booking_guest(array('date' => $tue, 'time' => '19:00', 'people' => 2));
+		same('requested', $b['status']);
+		same('21:00', $b['ends']);
+		same('dining-room', $b['resource']);
+		same(2, $b['people']);
+		check($b['changed_at'] !== '' && $b['changed_at'] !== null, 'changed_at is set');
+		check(!array_key_exists('token_hashes', $b), 'a guest gets no hidden fields back');
+		$info = cms_records::info('booking');
+		same(array('ends', 'status', 'changed_at'), $info['readonly']);
+		same(array('token_hashes', 'token_expires'), $info['hidden']);
+		same(array('confirm' => 'editor', 'decline' => 'editor', 'cancel' => 'editor'), $info['actions']);
+		same(array('visitor', true, true, false), array($info['create'], $info['staff_add'], $info['owner'], $info['public']));
+		same('18', booking_left($tue, '19:00'));
+		same('20', booking_left($tue, '21:00'));
+		// a guest can't write the model's fields
+		foreach (array('status' => 'confirmed', 'ends' => '23:59') as $field => $value) {
+			try {
+				booking_guest(array('date' => $tue, 'time' => '21:00', $field => $value));
+				check(false, "a guest wrote $field");
+			} catch (InvalidArgumentException $e) {
+				check(!($e instanceof cms_refused), $e->getMessage());
+			}
+		}
+		// nor through the form, which leaves them out
+		list($status, , $headers) = form_post("$base/zzbook", array('raster_form' => 'booking.form', 'name' => 'Form Guest', 'email' => 'form@example.test',
+			'date' => $tue, 'time' => '21:00', 'people' => '3', 'status' => 'confirmed', 'ends' => '23:59'));
+		same(303, $status);
+		check(strpos((string)location($headers), 'done=booked') !== false, 'redirect: '.location($headers));
+		$stored = cms_records::find('booking', array('email' => 'form@example.test'));
+		same(1, count($stored));
+		same(array('requested', '23:00', 3), array($stored[0]['status'], $stored[0]['ends'], $stored[0]['people']));
+		same($tue.' 21:00:00', $stored[0]['token_expires']);
+	});
+});
+
+test('booking: capacity: people at the busiest minute', function () {
+	booking_site(function () {
+		$tue = booking_cafe();
+		$wed = date('Y-m-d', strtotime("$tue +1 day"));
+		$first = booking_guest(array('date' => $tue, 'time' => '19:00', 'people' => 8));
+		booking_guest(array('date' => $tue, 'time' => '19:00', 'people' => 8));
+		$four = booking_guest(array('date' => $tue, 'time' => '19:00', 'people' => 4));
+		same('0', booking_left($tue, '19:00'));
+		same(array('fully_booked'), booking_problems(function () use ($tue) { booking_guest(array('date' => $tue, 'time' => '19:00', 'people' => 1)); }));
+		// the 19:00 sitting ends when the 21:00 one starts
+		same(array(), booking_problems(function () use ($tue) { booking_guest(array('date' => $tue, 'time' => '21:00', 'people' => 12)); }));
+		// cancelled and declined bookings free their places
+		cms_records::act('booking', $first['id'], 'cancel', array(), true);
+		cms_records::act('booking', $four['id'], 'decline', array(), true);
+		same('12', booking_left($tue, '19:00'));
+		same(array(), booking_problems(function () use ($tue) { booking_guest(array('date' => $tue, 'time' => '19:00', 'people' => 12)); }));
+		same(array('fully_booked'), booking_problems(function () use ($wed) { booking_staff(array('date' => $wed, 'time' => '19:00', 'people' => 21)); }));
+		same(array(), booking_problems(function () use ($wed) { booking_staff(array('date' => $wed, 'time' => '19:00', 'people' => 20)); }));
+	});
+});
+
+// The MCP stdio server is one process across many calls, while the setup
+// changes in the browser beside it: each booking reads the setup again.
+test('booking: a long-lived process checks a booking against the setup as it is now', function () {
+	booking_site(function () {
+		$tue = booking_cafe();
+		$wed = date('Y-m-d', strtotime("$tue +1 day"));
+		// the table is there for the other process to write
+		cms_records::create('bookingclosed', array('date' => '2020-01-01', 'note' => 'Long ago'));
+		$mcp = new mcp();
+		$book = function ($date, $people) use ($mcp) {
+			$answer = $mcp->call_tool('create_item', array('collection' => 'booking', 'fields' => array('name' => 'Agent', 'date' => $date, 'time' => '19:00', 'people' => $people)));
+			return empty($answer['isError']) ? 'stored' : $answer['content'][0]['text'];
+		};
+		same('stored', $book($tue, 8));
+		check(isset(booking::setup()['resources']['dining-room']), 'the setup is read');
+		// another process writes the setup
+		R::exec('UPDATE bookingresourcedata SET people = 10 WHERE slug = ?', array('dining-room'));
+		check(strpos($book($tue, 8), 'fully_booked') !== false, 'fully_booked');
+		R::exec('INSERT INTO bookingcloseddata (date, note) VALUES (?, ?)', array($wed, 'Holiday'));
+		check(strpos($book($wed, 2), 'not_a_slot') !== false, 'not_a_slot');
+		R::exec('UPDATE bookingresourcedata SET active = 0 WHERE slug = ?', array('dining-room'));
+		check(strpos($book($tue, 1), 'resource_inactive') !== false, 'resource_inactive');
+		same(1, count(cms_records::find('booking')));
+	});
+});
+
+test('booking: capacity: a bookings limit across slot boundaries', function () {
+	booking_site(function () {
+		$tue = booking_salon();
+		$cut = function ($time) use ($tue) {
+			return function () use ($tue, $time) { booking_guest(array('date' => $tue, 'time' => $time, 'resource' => 'ana', 'service' => 'cut')); };
+		};
+		$colour = booking_guest(array('date' => $tue, 'time' => '10:00', 'resource' => 'ana', 'service' => 'colour'));
+		same('11:30', $colour['ends']);
+		same(array('fully_booked'), booking_problems($cut('09:45')));
+		same(array(), booking_problems($cut('09:30')));
+		same(array('fully_booked'), booking_problems($cut('11:15')));
+		same(array(), booking_problems($cut('11:30')));
+		// Mihai's chair is his own
+		same(array(), booking_problems(function () use ($tue) { booking_guest(array('date' => $tue, 'time' => '10:00', 'resource' => 'mihai', 'service' => 'cut')); }));
+		// what the slots show as full is what check() refuses
+		$slots = (new booking())->slots("date=$tue&resource=ana&service=cut");
+		same(35, count($slots));
+		foreach ($slots as $slot) {
+			$refused = booking_would_refuse($cut($slot['time']));
+			same($slot['full'] === '1', $refused === array('fully_booked'), "{$slot['time']} full {$slot['full']}, refused ".json_encode($refused).':');
+		}
+		// both limits: two bookings at once fill a studio for four
+		cms_records::create('bookingresource', array('name' => 'Studio', 'people' => 4, 'bookings' => 2));
+		cms_records::create('bookinghours', array('resource' => 'studio', 'starts' => '18:00', 'ends' => '18:00', 'every' => 60));
+		$studio = function () use ($tue) { booking_guest(array('date' => $tue, 'time' => '18:00', 'resource' => 'studio')); };
+		same(array(), booking_problems($studio));
+		same(array(), booking_problems($studio));
+		same(array('fully_booked'), booking_problems($studio));
+	});
+});
+
+test('booking: start rules', function () {
+	booking_site(function () {
+		$tue = date('Y-m-d', strtotime('next tuesday'));
+		$refused = function ($values) { return booking_problems(function () use ($values) { booking_guest($values); }); };
+		same(array('not_open'), $refused(array('date' => $tue, 'time' => '19:00')));
+		booking_cafe();
+		same(array('not_a_slot'), $refused(array('date' => $tue, 'time' => '19:30')));
+		same(array('not_a_slot'), $refused(array('date' => date('Y-m-d', strtotime('next monday')), 'time' => '19:00')));
+		same(array('too_many'), $refused(array('date' => $tue, 'time' => '19:00', 'people' => 13)));
+		same(array('people_invalid'), $refused(array('date' => $tue, 'time' => '19:00', 'people' => 0)));
+		same(array('email_invalid'), $refused(array('date' => $tue, 'time' => '19:00', 'email' => '')));
+		same(array('email_invalid'), $refused(array('date' => $tue, 'time' => '19:00', 'email' => 'not an address')));
+		same(array('name_invalid'), $refused(array('date' => $tue, 'time' => '19:00', 'name' => '  ')));
+		same(array(), $refused(array('date' => $tue, 'time' => '19:00', 'email' => 'twice@example.test')));
+		same(array('already_booked'), $refused(array('date' => $tue, 'time' => '19:00', 'email' => 'twice@example.test')));
+		$closed = cms_records::create('bookingclosed', array('date' => $tue));
+		same(array('not_a_slot'), $refused(array('date' => $tue, 'time' => '21:00')));
+		cms_records::delete('bookingclosed', $closed['id']);
+		// with several resources, the guest names one
+		booking_salon();
+		same(array('resource_invalid'), $refused(array('date' => $tue, 'time' => '19:00')));
+		same(array('resource_invalid'), $refused(array('date' => $tue, 'time' => '19:00', 'resource' => 'nobody')));
+		same(array('service_unavailable'), $refused(array('date' => $tue, 'time' => '10:00', 'resource' => 'mihai', 'service' => 'colour')));
+		same(array('service_unavailable'), $refused(array('date' => $tue, 'time' => '10:00', 'resource' => 'ana')));
+		same(array('service_unavailable'), $refused(array('date' => $tue, 'time' => '19:00', 'resource' => 'dining-room', 'service' => 'cut')));
+		same(array(), $refused(array('date' => $tue, 'time' => '10:00', 'resource' => 'ana', 'service' => 'colour')));
+		// a span that would end after midnight is not a slot
+		cms_records::create('bookingresource', array('name' => 'Late', 'bookings' => 1));
+		cms_records::create('bookinghours', array('resource' => 'late', 'starts' => '23:00', 'ends' => '23:00', 'every' => 90));
+		same(array('not_a_slot'), $refused(array('date' => $tue, 'time' => '23:00', 'resource' => 'late')));
+		// notice and horizon
+		$soon = time() + 1800;
+		cms_records::create('bookingresource', array('name' => 'Counter', 'people' => 4));
+		cms_records::create('bookinghours', array('resource' => 'counter', 'starts' => date('H:i', $soon), 'ends' => date('H:i', $soon), 'every' => 1));
+		same(array('too_soon'), $refused(array('date' => date('Y-m-d', $soon), 'time' => date('H:i', $soon), 'resource' => 'counter')));
+		same(array('too_far'), $refused(array('date' => date('Y-m-d', strtotime('+61 days', $soon)), 'time' => date('H:i', $soon), 'resource' => 'counter')));
+		same(array(), $refused(array('date' => date('Y-m-d', strtotime('+3 days', $soon)), 'time' => date('H:i', $soon), 'resource' => 'counter')));
+		$mihai = booking::setup()['resources']['mihai'];
+		cms_records::update('bookingresource', $mihai['id'], array('active' => false));
+		same(array('resource_inactive'), $refused(array('date' => $tue, 'time' => '10:00', 'resource' => 'mihai', 'service' => 'cut')));
+	});
+});
+
+test('booking: an inactive resource is not counted when a booking fills its resource and people', function () {
+	booking_site(function () {
+		// the café switched its terrace off for winter: the dining room is
+		// still the one resource a guest books
+		$tue = booking_cafe();
+		cms_records::create('bookingresource', array('name' => 'Terrace', 'people' => 10, 'active' => false));
+		same(2, count((new booking())->slots("date=$tue")));
+		$made = booking_guest(array('date' => $tue, 'time' => '19:00', 'people' => 2));
+		same(array('dining-room', 2), array($made['resource'], $made['people']));
+	});
+	booking_site(function () {
+		// a salon counts no people, even with a café's room switched off
+		$tue = booking_salon();
+		cms_records::create('bookingresource', array('name' => 'Terrace', 'people' => 10));
+		cms_records::create('bookinghours', array('resource' => 'terrace', 'starts' => '19:00', 'ends' => '19:00', 'every' => 60));
+		$kept = booking_staff(array('date' => $tue, 'time' => '19:00', 'resource' => 'terrace', 'people' => 6));
+		cms_records::update('bookingresource', booking::setup()['resources']['terrace']['id'], array('active' => false));
+		$made = booking_guest(array('date' => $tue, 'time' => '10:00', 'resource' => 'ana', 'service' => 'cut', 'people' => 3));
+		same(1, $made['people']);
+		// a booking on the switched-off room keeps its people
+		same(6, booking::cancel($kept, array())['people']);
+	});
+});
+
+test('booking: staff skip notice and horizon, never capacity', function () {
+	booking_site(function () {
+		$tue = booking_cafe();
+		$soon = time() + 600;
+		cms_records::create('bookinghours', array('resource' => 'dining-room', 'starts' => date('H:i', $soon), 'ends' => date('H:i', $soon), 'every' => 1));
+		$at = array('date' => date('Y-m-d', $soon), 'time' => date('H:i', $soon));
+		$staff = function ($values) { return booking_problems(function () use ($values) { booking_staff($values); }); };
+		same(array('too_soon'), booking_problems(function () use ($at) { booking_guest($at); }));
+		same(array(), $staff($at));
+		same(array(), $staff(array('date' => date('Y-m-d', strtotime('+90 days', $soon))) + $at));
+		same(array(), $staff(array('date' => $tue, 'time' => '19:00', 'people' => 13)));
+		// a walk-in, written down after
+		same(array(), $staff(array('date' => date('Y-m-d', strtotime('-1 day', $soon))) + $at));
+		// no email for a booking taken over the phone, but a real one if any
+		same(array('email_invalid'), $staff(array('date' => $tue, 'time' => '21:00', 'email' => 'nope')));
+		same(array('fully_booked'), $staff(array('date' => $tue, 'time' => '19:00', 'people' => 8)));
+		same(array('people_invalid'), $staff(array('date' => $tue, 'time' => '21:00', 'people' => 0)));
+		$made = mcp_call('create_item', array('collection' => 'booking', 'fields' => array('name' => 'Agent booking', 'date' => $tue, 'time' => '21:00', 'people' => 13)));
+		check(empty($made['isError']), json_encode($made));
+		same('requested', $made['structuredContent']['status']);
+		$full = mcp_call('create_item', array('collection' => 'booking', 'fields' => array('name' => 'Agent booking', 'date' => $tue, 'time' => '21:00', 'people' => 8)));
+		check(!empty($full['isError']) && strpos(json_encode($full), 'fully_booked') !== false, json_encode($full));
+		$confirmed = cms_records::act('booking', $made['structuredContent']['id'], 'confirm', array(), true);
+		same('confirmed', $confirmed['status']);
+	});
+});
+
+test('booking: confirm, decline and cancel', function () {
+	booking_site(function () {
+		$tue = booking_cafe();
+		$b = booking_guest(array('date' => $tue, 'time' => '19:00', 'people' => 6));
+		$act = function ($id, $action) { return booking_problems(function () use ($id, $action) { cms_records::act('booking', $id, $action, array(), true); }); };
+		same('confirmed', cms_records::act('booking', $b['id'], 'confirm', array(), true)['status']);
+		same(array('already_confirmed'), $act($b['id'], 'confirm'));
+		same(array('already_confirmed'), $act($b['id'], 'decline'));
+		same('14', booking_left($tue, '19:00'));
+		same('cancelled', cms_records::act('booking', $b['id'], 'cancel', array(), true)['status']);
+		same('20', booking_left($tue, '19:00'));
+		same(array('already_cancelled'), $act($b['id'], 'confirm'));
+		same(array('already_cancelled'), $act($b['id'], 'cancel'));
+		same(array('already_cancelled'), $act($b['id'], 'decline'));
+		// staff can't write a status back by hand either
+		same(array('already_cancelled'), booking_problems(function () use ($b) { cms_records::update('booking', $b['id'], array('status' => 'requested')); }));
+		$d = booking_guest(array('date' => $tue, 'time' => '21:00'));
+		same('declined', cms_records::act('booking', $d['id'], 'decline', array(), true)['status']);
+		same(array('already_declined'), $act($d['id'], 'confirm'));
+		same(array('already_declined'), $act($d['id'], 'cancel'));
+		// an action reads the booking again: the page that showed it may be old
+		$stale = booking_guest(array('date' => $tue, 'time' => '21:00'));
+		cms_records::act('booking', $stale['id'], 'cancel', array(), true);
+		same(array('already_cancelled'), booking_problems(function () use ($stale) { booking::confirm($stale, array()); }));
+		check(cms_records::get('booking', $d['id'])['changed_at'] !== '', 'changed_at follows the status');
+		// only editors run them
+		same(array('not_allowed'), booking_problems(function () use ($stale) { cms_records::act('booking', $stale['id'], 'confirm'); }));
+	});
+});
+
+test('booking: rules run only when the slot changes, and on confirm', function () {
+	booking_site(function () {
+		$tue = booking_cafe();
+		$b = booking_guest(array('date' => $tue, 'time' => '19:00', 'people' => 2));
+		$other = booking_guest(array('date' => $tue, 'time' => '19:00', 'people' => 2));
+		cms_records::create('bookingclosed', array('date' => $tue, 'note' => 'Private party'));
+		$saved = booking_staff(array('phone' => '0721 000 000', 'notes' => 'window seat'), $b['id']);
+		same('window seat', $saved['notes']);
+		same(array('not_a_slot'), booking_problems(function () use ($b) { booking_staff(array('people' => 3), $b['id']); }));
+		same(array('closed'), booking_problems(function () use ($b) { cms_records::act('booking', $b['id'], 'confirm', array(), true); }));
+		same('cancelled', cms_records::act('booking', $b['id'], 'cancel', array(), true)['status']);
+		same('declined', cms_records::act('booking', $other['id'], 'decline', array(), true)['status']);
+	});
+});
+
+test('booking: moving a booking frees its old place in the same write', function () {
+	booking_site(function () {
+		$tue = booking_cafe();
+		$wed = date('Y-m-d', strtotime("$tue +1 day"));
+		booking_guest(array('date' => $tue, 'time' => '19:00', 'people' => 8));
+		booking_guest(array('date' => $tue, 'time' => '19:00', 'people' => 8));
+		$four = booking_guest(array('date' => $tue, 'time' => '19:00', 'people' => 4));
+		cms_records::act('booking', $four['id'], 'confirm', array(), true);
+		same('0', booking_left($tue, '19:00'));
+		// it doesn't count against itself
+		same(3, booking_staff(array('people' => 3), $four['id'])['people']);
+		booking_staff(array('people' => 4), $four['id']);
+		$moved = booking::move($four['id'], array('time' => '21:00', 'name' => 'ignored'), 'staff');
+		same(array('confirmed', '21:00', '23:00'), array($moved['status'], $moved['time'], $moved['ends']));
+		same('4', booking_left($tue, '19:00'));
+		same('16', booking_left($tue, '21:00'));
+		check(isset(booking::$moved[$four['id']]), 'a staff move is noted');
+		// the in-page editor's change of time works out the end again
+		$back = booking_staff(array('time' => '19:00'), $four['id']);
+		same(array('19:00', '21:00', 'confirmed'), array($back['time'], $back['ends'], $back['status']));
+		same('0', booking_left($tue, '19:00'));
+		same(array('fully_booked'), booking_problems(function () use ($four) { booking_staff(array('people' => 5), $four['id']); }));
+		// a guest's move asks staff again
+		cms_records::update('booking', $four['id'], array('changed_at' => '2020-01-01 10:00:00'));
+		$guest = booking::move($four['id'], array('date' => $wed, 'time' => '21:00'), 'guest');
+		same(array('requested', $wed, '21:00'), array($guest['status'], $guest['date'], $guest['time']));
+		check($guest['changed_at'] > '2020-01-01 10:00:00', 'changed_at: '.$guest['changed_at']);
+		same($wed.' 21:00:00', $guest['token_expires']);
+		same('staff', booking::$acting);
+		// a guest move is checked as a guest's
+		same(array('too_many'), booking_problems(function () use ($four) { booking::move($four['id'], array('people' => 13), 'guest'); }));
+		same('4', booking_left($tue, '19:00'));
+	});
+});
+
+test('booking: needs attention', function () {
+	booking_site(function () {
+		$tue = booking_cafe();
+		$wed = date('Y-m-d', strtotime("$tue +1 day"));
+		$thu = date('Y-m-d', strtotime("$tue +2 days"));
+		$fri = date('Y-m-d', strtotime("$tue +3 days"));
+		cms_records::create('bookingresource', array('name' => 'Terrace', 'people' => 10));
+		cms_records::create('bookinghours', array('resource' => 'terrace', 'starts' => '12:00', 'ends' => '12:00', 'every' => 120));
+		cms_records::create('bookingresource', array('name' => 'Ana', 'bookings' => 1));
+		cms_records::create('bookinghours', array('resource' => 'ana', 'starts' => '10:00', 'ends' => '12:00', 'every' => 30));
+		cms_records::create('bookingservice', array('name' => 'Colour', 'minutes' => 90, 'resources' => 'ana'));
+		$closed = booking_staff(array('date' => $tue, 'time' => '19:00', 'resource' => 'dining-room', 'people' => 2));
+		$moved = booking_staff(array('date' => $wed, 'time' => '21:00', 'resource' => 'dining-room', 'people' => 2));
+		$over = booking_staff(array('date' => $thu, 'time' => '19:00', 'resource' => 'dining-room', 'people' => 16));
+		$fine = booking_staff(array('date' => $fri, 'time' => '19:00', 'resource' => 'dining-room', 'people' => 2));
+		$terrace = booking_staff(array('date' => $tue, 'time' => '12:00', 'resource' => 'terrace', 'people' => 2));
+		$colour = booking_staff(array('date' => $tue, 'time' => '10:00', 'resource' => 'ana', 'service' => 'colour'));
+		$setup = booking::setup();
+		cms_records::create('bookingclosed', array('date' => $tue, 'resource' => 'dining-room'));
+		cms_records::update('bookinghours', $setup['hours'][0]['id'], array('ends' => '20:00'));
+		cms_records::update('bookingresource', $setup['resources']['dining-room']['id'], array('people' => 10));
+		cms_records::update('bookingresource', $setup['resources']['terrace']['id'], array('active' => false));
+		cms_records::update('bookingservice', $setup['services']['colour']['id'], array('active' => false));
+		$why = array();
+		foreach (array($closed, $moved, $over, $fine, $terrace, $colour) as $b) $why[] = booking::reason(cms_records::get('booking', $b['id']));
+		same(array('closed', 'not_a_slot', 'over_capacity', '', 'resource_inactive', 'service_unavailable'), $why);
+		$b = new booking();
+		same('0', $b->count('attention'), 'logged out:');
+		same('0', $b->count());
+		same(array(), $b->agenda());
+		same(array(), $b->attention());
+		booking_as_editor(function () use ($b, $tue, $thu, $fri) {
+			same('5', $b->count('attention'));
+			same('6', $b->count());
+			same('0', $b->count('status=confirmed'));
+			$listed = $b->attention();
+			same(array('service_unavailable', 'resource_inactive', 'closed', 'not_a_slot', 'over_capacity'), array_column($listed, 'attention'));
+			$days = $b->agenda('from=today&days=14');
+			$reasons = array();
+			foreach ($days as $day) foreach ($day['bookings'] as $row) $reasons[$row['name'].' '.$row['date'].' '.$row['time']] = $row['attention'];
+			same(6, count($reasons));
+			same('over_capacity', $reasons["Phone booking $thu 19:00"]);
+			same('', $reasons["Phone booking $fri 19:00"]);
+			$tuesday = array_values(array_filter($days, function ($day) use ($tue) { return $day['date'] === $tue; }))[0];
+			same(array('Ana', 'Terrace', 'Dining room'), array_column($tuesday['bookings'], 'resource_name'));
+			same('Colour', $tuesday['bookings'][0]['service_name']);
+			// the Dining room's agenda: its slots and whether it is closed
+			$room = $b->agenda('from=today&days=14&resource=dining-room');
+			$closed = array_column($room, 'closed', 'date');
+			same('1', $closed[$tue]);
+			same('0', $closed[$thu]);
+			$thursday = array_values(array_filter($room, function ($day) use ($thu) { return $day['date'] === $thu; }))[0];
+			same(array('19:00'), array_column($thursday['slots'], 'time'));
+			same(array('0', '1', 'full'), array($thursday['slots'][0]['left_people'], $thursday['slots'][0]['full'], $thursday['slots'][0]['state']));
+		});
+	});
+});
+
+test('booking: concurrent last place: one gets it, the rest fully_booked', function () {
+	booking_site(function () {
+		$tue = booking_cafe();
+		// the table is made before the race: on MySQL a new table commits
+		booking_guest(array('date' => $tue, 'time' => '19:00', 'people' => 8));
+		booking_guest(array('date' => $tue, 'time' => '19:00', 'people' => 8));
+		$out = race_php('try { $b = cms_store::save_item("bookingdata", 0, array("name" => "Racer $n", "email" => "racer$n@example.test", "date" => '.var_export($tue, true).', "time" => "19:00", "people" => 4), cms_records::writable(cms_records::info("booking")), "visitor"); echo "id ", $b["id"]; } catch (cms_refused $e) { echo implode(",", $e->problems); }', 6);
+		same(1, count(preg_grep('/^id \d+$/', $out)), 'one booking: '.json_encode($out));
+		same(5, count(array_keys($out, 'fully_booked')), 'refused: '.json_encode($out));
+		reconnect();
+		$total = 0;
+		foreach (cms_records::find('booking', array('date' => $tue, 'time' => '19:00')) as $b) $total += $b['people'];
+		same(20, $total);
+	});
+});
+
+test('booking: agenda and attention rows are records', function () {
+	$view = APPBASE.config::get('views_path', 'views').'/'.config::get('theme', 'default').'/zzstaff.html';
+	booking_site(function () use ($view) {
+		$tue = booking_cafe();
+		booking_guest(array('date' => $tue, 'time' => '19:00', 'people' => 2, 'name' => 'Ana Popescu', 'phone' => '0721 123 456'));
+		$agenda = "render.booking.agenda('from=today&days=10')";
+		file_put_contents($view, "<html><head><title>Staff</title></head><body><h1>Requests: <!-- print.booking.count('status=requested') -->3<!-- /print.booking.count('status=requested') --></h1>"
+			."<!-- $agenda --><h2><!-- print.date -->2026-10-20<!-- /print.date --></h2><ul><!-- print.bookings --><li class=\"booking\"><!-- print.name -->Ana<!-- /print.name --> <!-- print.time -->19:00<!-- /print.time --></li><!-- /print.bookings --></ul><!-- /$agenda -->"
+			."</body></html>");
+		try {
+			booking_as_editor(function () {
+				foreach ((new booking())->agenda('from=today&days=10') as $day) {
+					foreach ($day['bookings'] as $row) {
+						same('booking', $row['raster_record']);
+						check(strpos($row['raster_detail_link'], '/booking/booking_item/ana-popescu') !== false, $row['raster_detail_link']);
+						check(!array_key_exists('token_hashes', $row) && !array_key_exists('token_expires', $row), 'hidden fields reach the agenda');
+					}
+				}
+			});
+			global $root, $db;
+			$out = (string)shell_exec('RASTER_DB='.escapeshellarg($db).' RASTER_ENV=development '.escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' render /zzstaff --as=editor 2>&1');
+			check(strpos($out, 'Requests: 1</h1>') !== false, 'the count: '.$out);
+			check(strpos($out, '<li class="booking"') !== false && strpos($out, 'Ana Popescu') !== false, 'the agenda: '.$out);
+			check(preg_match('#<script id="raster-editor-config" type="application/json">(.*?)</script>#s', $out, $m) === 1, 'no editor: '.$out);
+			$items = array_filter(json_decode($m[1], true)['marks'], function ($mark) { return isset($mark['kind']) && $mark['kind'] === 'item' && $mark['collection'] === 'booking'; });
+			same(1, count($items), 'booking items the editor can edit:');
+			$item = array_values($items)[0];
+			same(array('confirm', 'decline', 'cancel'), $item['actions']);
+			check(in_array('status', $item['readonly'], true) && !array_key_exists('token_hashes', $item['values']), json_encode($item));
+			// visitors get no rows
+			$out = booking_render('/zzstaff');
+			check(strpos($out, 'Ana Popescu') === false && strpos($out, 'Requests: 0</h1>') !== false, 'a visitor: '.$out);
+		} finally {
+			@unlink($view);
+		}
+	});
+});
+
+test('booking: the_booking adds a field', function () use ($base) {
+	$app = APPBASE.config::get('models_path', 'models');
+	booking_site(function () use ($app, $base) {
+		temp_model("$app/the_booking", array('the_booking.php' => "<?php\nclass the_booking extends booking\n{\n\tstatic function types() {\n\t\t\$types = parent::types();\n\t\t\$types['booking']['fields']['dietary'] = '';\n\t\treturn \$types;\n\t}\n}\n"));
+		$view = APPBASE.config::get('views_path', 'views').'/'.config::get('theme', 'default').'/zzbook.html';
+		$html = file_get_contents($view);
+		file_put_contents($view, str_replace('<textarea name="notes">', '<input name="dietary"><textarea name="notes">', $html));
+		try {
+			controller::forget_models();
+			cms_records::forget();
+			same('the_booking', cms_records::info('booking')['class']);
+			check(array_key_exists('dietary', cms_records::info('booking')['fields']), 'dietary is declared');
+			$tue = booking_cafe();
+			list($status, $body) = form_post("$base/zzbook", array('raster_form' => 'booking.form', 'name' => 'Vegan Guest', 'email' => 'vegan@example.test', 'date' => $tue, 'time' => '19:00', 'people' => '2', 'dietary' => 'vegan'));
+			same(303, $status, $body);
+			$stored = cms_records::find('booking', array('email' => 'vegan@example.test'));
+			same('vegan', $stored[0]['dietary']);
+			same('21:00', $stored[0]['ends']);
+		} finally {
+			file_put_contents($view, $html);
+			remove_dir("$app/the_booking");
+			controller::forget_models();
+			cms_records::forget();
+		}
+	});
+});
+
+test('booking: resources and services in use keep their slugs', function () {
+	booking_site(function () {
+		$tue = booking_cafe();
+		$room = booking::setup()['resources']['dining-room'];
+		$b = booking_guest(array('date' => $tue, 'time' => '19:00'));
+		same(array('resource_in_use'), booking_refused('bookingresource', array('slug' => 'main-room'), $room['id']));
+		same(array('resource_in_use'), booking_problems(function () use ($room) { cms_records::delete('bookingresource', $room['id']); }));
+		same(array(), booking_refused('bookingresource', array('name' => 'Main room'), $room['id']));
+		same('dining-room', cms_records::get('bookingresource', $room['id'])['slug']);
+		// a booking in the past doesn't hold it
+		cms_records::act('booking', $b['id'], 'cancel', array(), true);
+		same(true, cms_records::delete('bookingresource', $room['id']));
+		$tue = booking_salon();
+		$cut = booking::setup()['services']['cut'];
+		$b = booking_guest(array('date' => $tue, 'time' => '10:00', 'resource' => 'ana', 'service' => 'cut'));
+		same(array('service_in_use'), booking_refused('bookingservice', array('slug' => 'trim'), $cut['id']));
+		same(array('service_in_use'), booking_problems(function () use ($cut) { cms_records::delete('bookingservice', $cut['id']); }));
+		same(array(), booking_refused('bookingservice', array('name' => 'Trim'), $cut['id']));
+		cms_records::act('booking', $b['id'], 'cancel', array(), true);
+		same(array(), booking_refused('bookingservice', array('slug' => 'trim'), $cut['id']));
+		same(true, cms_records::delete('bookingservice', $cut['id']));
+	});
+});
+
+test('booking: forms shown again keep choices (#80)', function () {
+	$template = template::instance();
+	$select = '<form method="get"><select name="stylist"><option value="">Anyone</option><option>Ana</option><option> Mihai  Pop </option></select></form>';
+	$filled = $template->fill_form($select, array('stylist' => 'Ana'));
+	check(strpos($filled, '<option selected>Ana</option>') !== false && substr_count($filled, 'selected') === 1, $filled);
+	$filled = $template->fill_form($select, array('stylist' => 'Mihai Pop'));
+	check(strpos($filled, '<option selected> Mihai  Pop </option>') !== false && substr_count($filled, 'selected') === 1, $filled);
+	$filled = $template->fill_form($select, array('stylist' => ''));
+	check(strpos($filled, '<option value="" selected>Anyone</option>') !== false && substr_count($filled, 'selected') === 1, $filled);
+	$box = '<form method="post"><input name="email"><input type="checkbox" name="newsletter" value="yes" checked><input type="radio" name="seating" value="window" checked></form>';
+	// a post without the box: the visitor unticked it
+	$filled = $template->fill_form($box, array('email' => 'a@b.test'), false, true);
+	check(strpos($filled, 'checked') === false, $filled);
+	// the same values given by a model, or from the URL, leave it as designed
+	same(2, substr_count($template->fill_form($box, array('email' => 'a@b.test')), 'checked'));
+	// form_state() fills from the post
+	$_POST = array('email' => 'a@b.test', 'seating' => 'window');
+	$template->current_block = $box;
+	$filled = $template->form_state();
+	$_POST = array();
+	check(strpos($filled, 'name="newsletter" value="yes">') !== false && strpos($filled, 'value="window" checked') !== false, $filled);
+	// the booking form shown again after fully_booked keeps the chosen time
+	$times = '<form method="post"><input type="radio" name="time" value="19:00"><input type="radio" name="time" value="21:00" checked><input name="people"></form>';
+	$filled = $template->fill_form($times, array('time' => '19:00', 'people' => '4'), false, true);
+	check(strpos($filled, 'value="19:00" checked') !== false && substr_count($filled, 'checked') === 1, $filled);
+});
+
+test('booking: the booking form takes the day from the URL', function () {
+	booking_site(function () {
+		$tue = booking_salon();
+		$page = booking_render("/zzbook?date=$tue&resource=ana&service=cut&time=");
+		check(strpos($page, '[exit 0]') !== false, $page);
+		check(preg_match('#<input type="date" name="date" required value="'.$tue.'">#', $page) === 1, 'the date: '.$page);
+		check(strpos($page, '<input name="resource" value="ana">') !== false, 'the resource: '.$page);
+		check(strpos($page, '<input type="hidden" name="service" value="cut">') !== false, 'the service: '.$page);
+		check(strpos($page, '<input name="time" required>') !== false, 'an empty time stays empty: '.$page);
+	});
+	booking_site(function () {
+		// nothing to book yet
+		$page = booking_render('/zzbook');
+		check(strpos($page, '[exit 0]') !== false && strpos($page, '<form method="post"') !== false, $page);
+		same(array(), (new booking())->slots('date='.date('Y-m-d', strtotime('next tuesday'))));
 	});
 });
 

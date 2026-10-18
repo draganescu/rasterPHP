@@ -591,13 +591,14 @@ class template {
 	public function form_state($data = null)
 	{
 		$explicit = $data !== null;
-		$this->current_block = $this->fill_form($this->current_block, $explicit ? $data : $_POST, $explicit);
+		$this->current_block = $this->fill_form($this->current_block, $explicit ? $data : $_POST, $explicit, !$explicit);
 		return $this->current_block;
 	}
 
 	// the inputs, selects and textareas of $block with the values in $data;
-	// with $keep_rest, values no field took become hidden inputs
-	function fill_form($block, $data, $keep_rest = false)
+	// with $keep_rest, values no field took become hidden inputs. $posted
+	// says $data is what the form sent: a box it doesn't name was unticked.
+	function fill_form($block, $data, $keep_rest = false, $posted = false)
 	{
 		$data = (array)$data;
 		foreach (array('raster_form', 'raster_hp', 'csrf') as $internal) unset($data[$internal]);
@@ -616,14 +617,16 @@ class template {
 		};
 		$e = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
 
-		$block = preg_replace_callback('/<input\b[^>]*>/i', function ($m) use ($attr, $without, $lookup, $e) {
+		$block = preg_replace_callback('/<input\b[^>]*>/i', function ($m) use ($attr, $without, $lookup, $e, $posted) {
 			$tag = $m[0];
 			$name = $attr($tag, 'name');
 			if ($name === null || in_array($name, array('raster_form', 'raster_hp', 'csrf'))) return $tag;
 			$type = strtolower((string)$attr($tag, 'type') ?: 'text');
 			if (in_array($type, array('password', 'submit', 'button', 'reset', 'image', 'file'))) return $tag;
 			list($found, $value) = $lookup($name);
-			if (!$found) return $tag;
+			// a browser sends no unticked box: one ticked in the template that
+			// the post leaves out was unticked by the visitor
+			if (!$found) return $posted && ($type === 'checkbox' || $type === 'radio') ? $without($tag, 'checked') : $tag;
 			if ($type === 'checkbox' || $type === 'radio') {
 				$tag = $without($tag, 'checked');
 				$own = (string)$attr($tag, 'value');
@@ -645,9 +648,12 @@ class template {
 			list($found, $value) = $lookup($attr($m[1], 'name'));
 			if (!$found) return $m[0];
 			$values = array_map('strval', (array)$value);
-			$options = preg_replace_callback('/<option\b[^>]*>/i', function ($o) use ($attr, $without, $values) {
-				$tag = $without($o[0], 'selected');
-				return in_array((string)$attr($tag, 'value'), $values, true) ? preg_replace('/>$/', ' selected>', $tag) : $tag;
+			// an option without a value sends its text, as browsers do
+			$options = preg_replace_callback('/(<option\b[^>]*>)([^<]*)/i', function ($o) use ($attr, $without, $values) {
+				$tag = $without($o[1], 'selected');
+				$own = $attr($tag, 'value');
+				if ($own === null) $own = trim(preg_replace('/\s+/', ' ', html_entity_decode($o[2], ENT_QUOTES, 'UTF-8')));
+				return (in_array((string)$own, $values, true) ? preg_replace('/>$/', ' selected>', $tag) : $tag).$o[2];
 			}, $m[2]);
 			return $m[1].$options.$m[3];
 		}, $block);
