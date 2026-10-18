@@ -9,6 +9,9 @@
 // cms_store like MCP and the command line: every page save is a revision,
 // only fields the templates define can be written, and the same events fire.
 class cms_editor {
+	// the largest picture upload() takes; doctor checks PHP's limits against
+	// it, and the nginx config in private_paths.php allows a little more
+	const UPLOAD_MB = 12;
 
 	// ##Marking
 
@@ -320,7 +323,7 @@ class cms_editor {
 		cms::require_admin(true);
 		$types = array(IMAGETYPE_JPEG => 'jpg', IMAGETYPE_PNG => 'png', IMAGETYPE_GIF => 'gif', IMAGETYPE_WEBP => 'webp');
 		if (empty($_FILES['image']) || $_FILES['image']['error'] !== UPLOAD_ERR_OK) return self::fail('The upload did not arrive');
-		if ($_FILES['image']['size'] > 12 * 1024 * 1024) return self::fail('Pictures can be up to 12 MB');
+		if ($_FILES['image']['size'] > self::UPLOAD_MB * 1024 * 1024) return self::fail('Pictures can be up to 12 MB');
 		$info = @getimagesize($_FILES['image']['tmp_name']);
 		if (!$info || !isset($types[$info[2]])) return self::fail('Only JPEG, PNG, GIF and WebP pictures can be used');
 		$folder = trim(config::get('raster_media_folder', 'media'), '/');
