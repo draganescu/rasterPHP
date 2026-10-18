@@ -71,7 +71,7 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 		// not a paragraph inside the paragraph (#114)
 		const about = path.join(root, 'demo/views/cafe/about.html');
 		const aboutView = fs.readFileSync(about, 'utf8');
-		fs.writeFileSync(about, aboutView.replace('<h2>Opening hours</h2>', '<p class="lead"><!-- print.cms.lead -->We roast <em>our own</em> beans.<!-- /print.cms.lead --></p><h2>Opening hours</h2>'));
+		fs.writeFileSync(about, aboutView.replace('<h2>Opening hours</h2>', '<p class="lead"><!-- print.cms.lead -->We roast <em>our own</em> beans.<!-- /print.cms.lead --></p><ul class="features"><!-- print.cms.features --><li>Fast</li><li>Cheap</li><!-- /print.cms.features --></ul><h2>Opening hours</h2>'));
 		try {
 			await page.goto(base + '/about');
 			await page.waitForTimeout(500);
@@ -101,8 +101,68 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 			await page.waitForTimeout(900);
 			html = await (await fetch(base + '/about')).text();
 			check(/<p class="lead">We roast <em>our own<\/em> beans\.<br>Second line\.(<br>)?Pasted one\.<br>Pasted two\.<\/p>/.test(html), 'a pasted paragraph stays in the line: ' + (html.match(/<p class="lead">[\s\S]*?<h2>/) || [''])[0]);
+			// a rich field that is a list: Enter adds a bullet, as the browser does
+			const features = page.locator('ul.features');
+			await features.locator('li').last().click();
+			await page.keyboard.press('Control+End');
+			await page.keyboard.press('Enter');
+			await page.keyboard.type('Third');
+			await page.mouse.click(5, 5);
+			await page.waitForTimeout(900);
+			html = await (await fetch(base + '/about')).text();
+			check(html.includes('<ul class="features"><li>Fast</li><li>Cheap</li><li>Third</li></ul>'), 'Enter in a list field adds a bullet: ' + (html.match(/<ul class="features">[\s\S]*?<\/ul>/) || [''])[0]);
 		} finally {
 			fs.writeFileSync(about, aboutView);
+		}
+
+		// the same for an item's paragraph field, in a new item and in a copy (#114)
+		const menuFile = path.join(root, 'demo/views/cafe/menu.html');
+		const menuView = fs.readFileSync(menuFile, 'utf8');
+		fs.writeFileSync(menuFile, menuView.replace('<!-- print.description -->Double ristretto, steamed milk.', '<!-- print.description -->Double <em>ristretto</em>, steamed milk.'));
+		try {
+			await page.goto(base + '/menu');
+			await page.waitForTimeout(500);
+			const card = page.locator('.raster-ghost').first();
+			await card.click();
+			await page.keyboard.type('Macchiato');
+			await card.locator('[data-raster-name=description]').click();
+			await page.keyboard.press('End');
+			await page.keyboard.press('Enter');
+			await page.keyboard.type('Second');
+			await inShadow(page, h => [...h.shadowRoot.querySelectorAll('.handle button')].find(b => b.textContent === 'Add').click());
+			await page.waitForTimeout(1000);
+			html = await (await fetch(base + '/menu')).text();
+			check(html.includes('<p>Double <em>ristretto</em>, steamed milk.<br>Second</p>'), 'Enter in a new item\'s paragraph field saved a line break: ' + (html.match(/Macchiato[\s\S]*?<p class="price">/) || [''])[0]);
+			// a copy of an item: its fields know they are paragraphs too
+			await page.reload();
+			await page.waitForTimeout(500);
+			const macchiato = page.locator('[data-raster-item]', { hasText: 'Macchiato' }).first();
+			await macchiato.hover({ position: { x: 20, y: 20 }, force: true });
+			await page.waitForTimeout(300);
+			await inShadow(page, h => h.shadowRoot.querySelector('.handle button[aria-label=Duplicate]').click());
+			await page.waitForTimeout(1000);
+			const copy = page.locator('[data-raster-item]', { hasText: 'Macchiato' }).nth(1);
+			await copy.locator('p[data-raster-field]').first().click();
+			await page.keyboard.press('Control+End');
+			await page.keyboard.press('Enter');
+			await page.keyboard.type('Third');
+			await page.mouse.click(5, 5);
+			await page.waitForTimeout(900);
+			html = await (await fetch(base + '/menu')).text();
+			check(html.includes('<p>Double <em>ristretto</em>, steamed milk.<br>Second<br>Third</p>'), 'Enter in a copied item\'s paragraph field saved a line break: ' + (html.match(/<p>Double <em>ristretto<\/em>, steamed milk\.<br>Second[\s\S]*?<\/p>/g) || []).join(' | '));
+			// the two Macchiatos go, so the rest of the run sees the menu it expects
+			for (let i = 0; i < 2; i++) {
+				await page.goto(base + '/menu');
+				await page.waitForTimeout(500);
+				await page.mouse.move(2, 2);
+				await page.locator('[data-raster-item]', { hasText: 'Macchiato' }).first().hover({ position: { x: 20, y: 20 }, force: true });
+				await page.waitForTimeout(300);
+				await inShadow(page, h => h.shadowRoot.querySelector('.handle button[aria-label=Delete]').click());
+				await page.waitForTimeout(900);
+			}
+			check(!(await (await fetch(base + '/menu')).text()).includes('Macchiato'), 'the Macchiatos are gone');
+		} finally {
+			fs.writeFileSync(menuFile, menuView);
 		}
 
 		// a typed field shows what was stored, the way the page prints it

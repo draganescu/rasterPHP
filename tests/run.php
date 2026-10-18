@@ -2207,6 +2207,23 @@ test('the editor\'s clean() drops the same script links (#67)', function () use 
 	unlink($file);
 	same(array_values($cases), json_decode((string)$out, true), (string)$out);
 });
+test('the editor leaves Enter to the browser in a list or a table, and makes a line break in a paragraph (#114)', function () use ($root) {
+	$node = trim((string)shell_exec('command -v node 2>/dev/null'));
+	if ($node === '') return; // no node here: tests/editor-browser.js covers it in a browser
+	$js = file_get_contents("$root/system/models/cms/editor/editor.js");
+	check(preg_match('/\tfunction takesBlocks\(el\) \{.*?\n\t\}\n/s', $js, $m), 'editor.js has takesBlocks()');
+	$cases = array('DIV' => true, 'TD' => true, 'UL' => true, 'OL' => true, 'DL' => true, 'TABLE' => true, 'TBODY' => true,
+		'P' => false, 'H2' => false, 'LI' => false, 'SPAN' => false, 'A' => false);
+	$file = sys_get_temp_dir().'/raster-blocks-'.getmypid().'.js';
+	file_put_contents($file, $m[0]."\nvar cases = ".json_encode(array_keys($cases)).";\nprocess.stdout.write(JSON.stringify(cases.map(function (t) { return takesBlocks({ tagName: t }); })));\n");
+	$out = shell_exec(escapeshellarg($node).' '.escapeshellarg($file).' 2>&1');
+	unlink($file);
+	same(array_values($cases), json_decode((string)$out, true), (string)$out);
+	// every field the editor makes knows it: those found in the page, those
+	// of an item added or copied in the page, and those of the new-item card
+	check(substr_count($js, 'inline: !takesBlocks(node)') === 1 && strpos($js, 'field.inline = !takesBlocks(field.el)') !== false, 'adopt() and scan() set inline');
+	check(strpos($js, 'clean(node.innerHTML, !takesBlocks(node))') !== false, 'a new item is cleaned for where it sits');
+});
 test('arrays and bad bytes fail required; a field named tags[] takes a list (#70)', function () use ($base) {
 	$v = validation::get();
 	$r = new ReflectionMethod($v, 'check_field');

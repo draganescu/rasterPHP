@@ -1304,7 +1304,8 @@ of lists and filter pages come along; drafts and the editor don't.
   when you leave a field, every change can be undone). A rich field whose
   place can't hold paragraphs (it is a `<p>`, a heading, an `<li>`, or sits
   inside one) takes Enter as a line break, and pasted paragraphs become
-  lines, so what it stores fits where it prints. Items get a handle to
+  lines, so what it stores fits where it prints (in a field that is a list,
+  Enter still adds a bullet). Items get a handle to
   edit details, duplicate, hide, schedule or delete them; each list ends with
   a card for a new item, made from the template's mock-up. Photos (`print.@src`)
   are replaced by choosing or dropping a picture, framed in the browser.

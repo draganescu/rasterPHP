@@ -22,7 +22,7 @@ After logging in, every HTML page of the site shows an **Edit** button.
 |---|---|
 | start or stop editing | press **Edit** or the `E` key; `Esc` stops |
 | change text | click anything that glows, type, then click elsewhere. Changes save as soon as you leave the field. |
-| format rich text | select text in a rich field for bold, italic, link, list or plain text. In a field that is a paragraph or a heading, Enter starts a new line in it rather than a new paragraph |
+| format rich text | select text in a rich field for bold, italic, link, list or plain text. In a field that is a paragraph or a heading, Enter starts a new line in it rather than a new paragraph; in a field that is a list, Enter adds a bullet |
 | undo | ⌘Z / Ctrl+Z, or **Undo** in the message that confirms each change |
 | replace a picture | click it, choose or drop a new one, drag to choose what shows, then **Use photo** |
 | work on a list item | use the handle on the item: **Details** (every field, the slug, visibility, publish date), **Duplicate**, **Hide**/**Show**, **Schedule**, **Delete** |

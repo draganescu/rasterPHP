@@ -205,10 +205,14 @@
 		inside.forEach(function (n) { wrapper.appendChild(n); });
 		return wrapper;
 	}
-	// whether a region may hold paragraphs; a <p>, a heading, an <li> or a
-	// <span> can't, so a rich field there gets line breaks instead (#114)
+	// whether a region may hold paragraphs, or is a list or a table, where
+	// Enter is the browser's (a new bullet, a new row); a <p>, a heading, an
+	// <li> or a <span> can't, so a rich field there gets line breaks (#114)
 	function takesBlocks(el) {
-		return /^(DIV|BLOCKQUOTE|SECTION|ARTICLE|ASIDE|MAIN|HEADER|FOOTER|NAV|FIGURE|FIGCAPTION|TD|TH|DD|FORM|FIELDSET|DETAILS)$/.test(el.tagName);
+		return /^(DIV|BLOCKQUOTE|SECTION|ARTICLE|ASIDE|MAIN|HEADER|FOOTER|NAV|FIGURE|FIGCAPTION|TD|TH|DD|FORM|FIELDSET|DETAILS|UL|OL|MENU|DL|TABLE|THEAD|TBODY|TFOOT|TR)$/.test(el.tagName);
+	}
+	function lineBreak() {
+		if (!document.execCommand('insertLineBreak')) document.execCommand('insertHTML', false, '<br>');
 	}
 	// whether an item sits inside a list on the page
 	function holds(list, item) {
@@ -798,9 +802,12 @@
 				return;
 			}
 			if (e.key === 'Enter' && (e.metaKey || e.ctrlKey || field.kind === 'text')) { e.preventDefault(); field.el.blur(); return; }
-			if (e.key === 'Enter' && field.inline) { e.preventDefault(); if (!document.execCommand('insertLineBreak')) document.execCommand('insertHTML', false, '<br>'); return; }
+			if (e.key === 'Enter' && field.inline) { e.preventDefault(); lineBreak(); return; }
 			return;
 		}
+		// a rich field of a new item, in the card being filled in
+		var fresh = editing && e.key === 'Enter' && !e.metaKey && !e.ctrlKey && e.target.closest && e.target.closest('[data-raster-name][data-raster-edit=rich]');
+		if (fresh && fresh.closest('.raster-new') && !takesBlocks(fresh)) { e.preventDefault(); lineBreak(); return; }
 		if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable || (host && e.composedPath && e.composedPath().some(function (n) { return n.tagName === 'INPUT' || n.tagName === 'TEXTAREA'; }))) return;
 		if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
 			if (!undoStack.length) { if (editing) { e.preventDefault(); toast(t('nothing_to_undo')); } return; }
@@ -1092,7 +1099,7 @@
 			var finfo = { kind: old && old.kind === 'image' ? 'item_attr' : 'item_field', item: id, field: name, attr: old ? old.attr : node.getAttribute('data-raster-attr') };
 			marks[fid] = finfo;
 			var kind = old ? old.kind : (node.tagName === 'IMG' ? 'image' : (/<[a-z]/i.test(node.innerHTML) ? 'rich' : 'text'));
-			var field = { id: fid, info: finfo, el: node, kind: kind, attr: finfo.attr, item: item, key: 'item:' + id + ':' + name };
+			var field = { id: fid, info: finfo, el: node, kind: kind, attr: finfo.attr, item: item, key: 'item:' + id + ':' + name, inline: !takesBlocks(node) };
 			node.setAttribute('data-raster-field', fid);
 			if (kind === 'image' || kind === 'attr') node.removeAttribute('data-raster-edit'); else node.setAttribute('data-raster-edit', kind);
 			if (editing && kind !== 'image') node.setAttribute('contenteditable', kind === 'text' && plaintextOnly ? 'plaintext-only' : 'true');
@@ -1307,7 +1314,7 @@
 			var name = node.getAttribute('data-raster-name');
 			if (readonly(list.info).indexOf(name) >= 0 || (list.info.lists || []).indexOf(name) >= 0) return;
 			if (node.tagName === 'IMG') { fieldsOut[name] = node.getAttribute('data-raster-value') || (list.info.fields || {})[name] || ''; return; }
-			fieldsOut[name] = node.getAttribute('data-raster-edit') === 'text' ? node.innerText.replace(/\s+/g, ' ').trim() : clean(node.innerHTML).trim();
+			fieldsOut[name] = node.getAttribute('data-raster-edit') === 'text' ? node.innerText.replace(/\s+/g, ' ').trim() : clean(node.innerHTML, !takesBlocks(node)).trim();
 		});
 		working(1);
 		call('editor_save_item', { collection: list.info.collection, id: 0, fields: fieldsOut, examples: list.info.fields }).then(function (saved) {
