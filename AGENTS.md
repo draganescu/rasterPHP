@@ -1237,7 +1237,8 @@ use `'model.method'`: `method(true)` returns
   - Any content change throws the cache away and deletes the cached files
     (`util::content_changed()` in your own models; inside a transaction
     when it commits), and so does the moment a scheduled item is
-    published. A page whose render overlapped the
+    published, each one of several (`data/cache/next` keeps every time
+    still to come, one per line). A page whose render overlapped the
     change is not kept.
   - A filter page with no items (`/news/news_items/tag/nothing`), a page
     past the last one and a filter on a field the list doesn't have answer

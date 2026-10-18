@@ -266,21 +266,49 @@ class raster_cache {
 		return array('version' => self::version(), 'removed' => $removed);
 	}
 
-	// an item scheduled for later: the cache is thrown away at that time
+	// an item scheduled for later: the cache is thrown away at that time.
+	// data/cache/next keeps every time still to come, one per line.
 	static function schedule($timestamp) {
 		if ($timestamp <= time()) return;
-		$file = self::dir().'next';
-		$next = is_file($file) ? (int)file_get_contents($file) : 0;
-		if ($next === 0 || $next <= time() || $timestamp < $next) self::write($file, (string)$timestamp);
+		self::reschedule(function ($times) use ($timestamp) {
+			$times[] = (int)$timestamp;
+			return $times;
+		});
 	}
 
-	// a scheduled item's time has come: that's a content change too
+	// a scheduled item's time has come: that's a content change too. The
+	// cache is thrown away once however many came, and the later times stay.
 	static function publish_due() {
-		$next = self::dir().'next';
-		if (is_file($next) && (int)file_get_contents($next) <= time()) {
-			@unlink($next);
-			self::bump();
+		$file = self::dir().'next';
+		$times = is_file($file) ? array_map('intval', file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES)) : array();
+		if (!$times || min($times) > time()) return;
+		$due = false;
+		self::reschedule(function ($times) use (&$due) {
+			$later = array_filter($times, function ($time) { return $time > time(); });
+			$due = count($later) < count($times);
+			return $later;
+		});
+		if ($due && self::bump() === false) log::warning("page cache: can't write ".self::dir().'version, so a scheduled item waits for page_cache_ttl');
+	}
+
+	// changes the scheduled times under a lock, so a time scheduled while
+	// another request publishes the ones due is never lost
+	static function reschedule($change) {
+		if (!is_dir(self::dir())) @mkdir(self::dir(), 0775, true);
+		$handle = @fopen(self::dir().'next', 'c+');
+		if (!$handle) {
+			log::warning("page cache: can't write ".self::dir().'next, so scheduled items wait for page_cache_ttl');
+			return;
 		}
+		flock($handle, LOCK_EX);
+		$times = array_map('intval', array_filter(explode("\n", (string)stream_get_contents($handle))));
+		$times = array_unique($change($times));
+		sort($times);
+		ftruncate($handle, 0);
+		rewind($handle);
+		fwrite($handle, $times ? implode("\n", $times)."\n" : '');
+		flock($handle, LOCK_UN);
+		fclose($handle);
 	}
 
 	static function serve() {

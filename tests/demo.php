@@ -2876,6 +2876,14 @@ test(array('L9', 'L10'), 'page cache: made-up list URLs are not kept, a change d
 
 // ## Page cache and the clock (#158 group 8)
 
+// runs PHP with the demo booted, in the environment given
+function demo_php($code, $env) {
+	global $root;
+	$prefix = '';
+	foreach ($env as $name => $value) $prefix .= $name.'='.escapeshellarg($value).' ';
+	return shell_exec($prefix.escapeshellarg(PHP_BINARY).' -r '.escapeshellarg('require "'.$root.'/system/boot.php"; boot::$appname = "demo"; boot::cli(); '.$code).' 2>&1');
+}
+
 test('L13', 'raster render never reads or writes the page cache, and a protected page answers its redirect', function () use ($root, $tmp, $maildir) {
 	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => test_db("$tmp/prod.sqlite"), 'RASTER_URL' => 'https://cafe.example/', 'RASTER_MAIL' => "log://$maildir");
 	$prod = server(free_port(), $env);
@@ -2903,6 +2911,38 @@ test('L13', 'raster render never reads or writes the page cache, and a protected
 	same('', $answers[0]['html']);
 	// the account a page is rendered as still sees it
 	same(0, raster(array('render', '/staff', '--as=editor'))[0]);
+});
+
+test('L14', 'several scheduled items each clear the page cache when their time comes, in the site\'s time zone', function () use ($root, $tmp, $maildir) {
+	// far from UTC, so a time read in the wrong zone is hours off
+	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => test_db("$tmp/prod.sqlite"), 'RASTER_URL' => 'https://cafe.example/', 'RASTER_MAIL' => "log://$maildir", 'CAFE_TIMEZONE' => 'Pacific/Kiritimati');
+	$prod = server(free_port(), $env);
+	raster(array('cache', 'clear'), $env);
+	$now = time();
+	// dated before every other event, so both are on the first page
+	$out = demo_php('cms_store::connect(); R::freeze(false); foreach (array("First due" => 2, "Second due" => 4) as $title => $later) cms_store::save_item("eventsdata", 0, array("title" => $title, "date" => "2000-01-01", "published_at" => date("Y-m-d H:i:s", '.$now.' + $later)), array("title", "date")); echo date_default_timezone_get();', $env);
+	same('Pacific/Kiritimati', $out);
+	// other tests schedule items for 2099
+	$next = function () use ($root, $now) {
+		return array_values(array_filter(file("$root/demo/data/cache/next", FILE_IGNORE_NEW_LINES), function ($time) use ($now) { return $time < $now + 3600; }));
+	};
+	same(array((string)($now + 2), (string)($now + 4)), $next(), 'every time is kept');
+	http('GET', "$prod/events");
+	list(, $body, $headers) = http('GET', "$prod/events");
+	same('hit', header_value($headers, 'X-Raster-Cache'));
+	lacks($body, 'First due');
+	while (time() < $now + 3) usleep(100000);
+	$body = http('GET', "$prod/events")[1];
+	has($body, 'First due', 'the first is published on time');
+	lacks($body, 'Second due');
+	same(array((string)($now + 4)), $next(), 'the later time stays');
+	same('hit', header_value(http('GET', "$prod/events")[2], 'X-Raster-Cache'));
+	while (time() < $now + 5) usleep(100000);
+	list(, $body, $headers) = http('GET', "$prod/events");
+	same('miss', header_value($headers, 'X-Raster-Cache'));
+	has($body, 'Second due', 'the second is published on time');
+	same(array(), $next(), 'nothing left to wait for');
+	demo_php('cms_store::connect(); R::exec("DELETE FROM eventsdata WHERE title IN (\'First due\', \'Second due\')");', $env);
 });
 
 
