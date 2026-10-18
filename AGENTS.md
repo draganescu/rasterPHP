@@ -185,6 +185,13 @@ first use, so they can call each other directly (`mail::send_view(...)`,
 `validation::get()`). A helper class named `<model>_<name>` lives in
 `models/<model>/<name>.php` and loads the same way.
 
+One lookup finds a model, for pages, events, `/api`, `lint` and MCP alike
+(`controller::model($name)`): `models/<name>/` is the site's own and is used
+whole; else `models/the_<name>/` overrides the bundled
+`system/models/<name>/` (see **Extending**); else the bundled model. A site
+model with a bundled model's name hides the bundled one completely, and
+`lint` warns about it.
+
 A model that writes its own tables declares them, so production gets them
 from `raster schema --apply`:
 
@@ -268,6 +275,13 @@ class cafe {
   listener returning `false` makes
   `event::dispatch()` return `false`; the sender decides what that means.
 - Name your events `<model>.<what happened>`, in the past tense.
+- `listens()` returns a constant array: Raster keeps what it returns in
+  `data/cache/models.json` (with what each model declares), so a request
+  binds listeners without loading the models. The list is made again when a
+  model file changes or Raster is updated, so a new or edited model counts
+  on the next request. An override's `listens()` is the one that counts for
+  the model it overrides (call `parent::listens()` to keep the bundled
+  one's).
 - `lint` reports bindings to models or methods that don't exist, and events
   nothing sends. MCP `site_overview` lists who listens to what.
 
@@ -708,6 +722,10 @@ class reservation {
 
 ## Bundled models
 
+A bundled model's record types (`types()`) count only on a site whose views
+use the model (`render.<name>.…`, `print.<name>.…`, in any theme); the
+tables in its `schema()` always count.
+
 **authentication**: accounts, with every screen written in your templates.
 - Regions:
   - `render.authentication.login`: fields `login` (email or username) and
@@ -922,6 +940,9 @@ use `'model.method'`: `method(true)` returns
     tools, or the database changed directly, is not seen by visitors who
     aren't logged in until the cache is cleared or `page_cache_ttl` runs
     out: run `php bin/raster cache clear`, or MCP `clear_cache`.
+    That also deletes `data/cache/models.json`, where Raster keeps what the
+    models declare; it is made again when a model file changes anyway, and
+    a site whose `data/` can't be written to simply looks every time.
     `render` and `render_url` never read the cache, so a fresh render does
     not mean visitors see the change.
 
@@ -1055,9 +1076,21 @@ of lists and filter pages come along; drafts and the editor don't.
 
 - **Override a bundled model:** `models/the_<name>/the_<name>.php` with
   `class the_<name> extends <name>`. Templates keep calling `<name>`; your
-  class is used, and its `listens()` counts for `<name>`. Core files work the same way: `application/the_util.php`
-  is loaded after `system/util.php`. So are config files (`config/the_app.php`, `the_routes.php`,
-  `the_events.php` are loaded after the framework's own).
+  class is used, and its `listens()` counts for `<name>`. The override is
+  reached by template calls, events, `/api`, and the mail the bundled
+  models send: newsletter and authentication send through
+  `controller::model_class('mail')`, so a `the_mail` changes every email
+  Raster sends. Other static calls between models (`newsletter::subscribe`,
+  `i18n::detect`, `authentication::` helpers) go to the bundled class.
+  A helper file in the override's folder (`the_cms/store.php`) is found
+  before the bundled one.
+- **Core files:** `application/the_<name>.php` is loaded after
+  `system/<name>.php`. A `the_config`, `the_controller`, `the_event`,
+  `the_log`, `the_database` or `the_template` class there replaces that
+  singleton. `util` is all static, so a `the_util` class is never called in
+  its place: `the_util.php` is for functions of your own. Config files work
+  the same way (`config/the_app.php`, `the_routes.php`, `the_events.php` are
+  loaded after the framework's own).
 - **Values in scripts and styles:** `"/*- print.model.method /-*/"` is the
   same as `<!-- print.model.method /-->`, written so the file stays valid
   JavaScript or CSS. `lint`, `schema`, `describe` and MCP read it as the

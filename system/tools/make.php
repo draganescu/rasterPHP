@@ -24,8 +24,9 @@ class raster_make {
 		if (cms::reserved($name, 'collection')) throw new InvalidArgumentException("'$name' is a name the CMS keeps for itself");
 		// a PHP word, or a class Raster or the site already has, would break
 		// the site or quietly replace the bundled model
-		$paths = controller::build_model_paths($name);
-		if (in_array($name, self::$php_words, true) || file_exists($paths['system_path']) || (class_exists($name, false) && !file_exists($paths['app_path'])) || in_array($name, array('boot', 'config', 'controller', 'database', 'event', 'log', 'template', 'util', 'private_paths', 'raster_cache', 'records'), true)) {
+		$found = controller::model($name);
+		$own = $found && !$found['bundled'] && $found['class'] === $name;
+		if (in_array($name, self::$php_words, true) || ($found && ($found['bundled'] || $found['shadows'])) || (class_exists($name, false) && !$own) || in_array($name, array('boot', 'config', 'controller', 'database', 'event', 'log', 'template', 'util', 'private_paths', 'raster_cache', 'records'), true)) {
 			throw new InvalidArgumentException("'$name' is taken (by PHP or Raster); pick another name");
 		}
 		if ($method !== null && (!preg_match('/^[a-z][a-z0-9_]*$/', $method) || in_array($method, cms_records::$hooks, true) || in_array($method, self::$php_words, true))) {

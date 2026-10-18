@@ -324,20 +324,14 @@ class raster_inspector {
 	}
 
 	// ##Models
-	// Finds the file that would be loaded for a model, the same way
-	// controller::load_model does, and lists its public methods.
+	// Finds the file that would be loaded for a model (controller::model)
+	// and lists its public methods.
 	function model_info($model) {
 		static $cache = array();
 		if (isset($cache[$model])) return $cache[$model];
-		$models_path = config::get('models_path', 'models');
-		$candidates = array(
-			APPBASE.$models_path.'/'.$model.'/'.$model.'.php',
-			APPBASE.$models_path.'/the_'.$model.'/the_'.$model.'.php',
-			BASE.$models_path.'/'.$model.'/'.$model.'.php',
-		);
+		$found = controller::model($model);
 		$info = false;
-		foreach ($candidates as $file) {
-			if (!file_exists($file)) continue;
+		foreach ($found ? array($found['file']) : array() as $file) {
 			$info = array('file' => $file, 'methods' => array(), 'signatures' => array(), 'magic' => false, 'class' => false, 'loose' => strpos(file_get_contents($file), 'func_get_args') !== false);
 			$tokens = token_get_all(file_get_contents($file));
 			$count = count($tokens);
@@ -376,8 +370,8 @@ class raster_inspector {
 				}
 			}
 			// an override (the_feed extends feed) has its parent's methods too
-			if (strpos(basename(dirname($file)), 'the_') === 0) {
-				$parent = BASE.$models_path.'/'.$model.'/'.$model.'.php';
+			if ($found['parent']) {
+				$parent = $found['parent'];
 				if (file_exists($parent)) {
 					$base_info = $this->parent_info($parent);
 					$info['methods'] = array_values(array_unique(array_merge($info['methods'], $base_info['methods'])));
@@ -423,17 +417,9 @@ class raster_inspector {
 	// fresh every time instead of cached — a stale vocabulary is worse than no
 	// vocabulary.
 	function vocabulary() {
-		$models_path = config::get('models_path', 'models');
-		$found = array();
-		foreach (array(APPBASE.$models_path, BASE.$models_path) as $dir) {
-			foreach (glob($dir.'/*', GLOB_ONLYDIR) ?: array() as $folder) {
-				$name = basename($folder);
-				// the_<name> is an override of <name>, called by the original name
-				$found[strpos($name, 'the_') === 0 ? substr($name, 4) : $name] = true;
-			}
-		}
 		$models = array();
-		foreach (array_keys($found) as $name) {
+		// the_<name> is an override of <name>, called by the original name
+		foreach (controller::models() as $name => $found) {
 			$info = $this->model_info($name);
 			if ($info === false || !$info['class']) continue;
 			$methods = array();
@@ -454,8 +440,7 @@ class raster_inspector {
 			);
 			// what /api/<model>/<method> answers, and for whom. A bundled model,
 			// overridden or not, only when config api_system_models lets it through
-			$bundled = file_exists(BASE.$models_path.'/'.$name.'/'.$name.'.php');
-			if (!$bundled || in_array($name, (array)config::get('api_system_models', array('cms')))) $models[$name]['api'] = $this->model_api($name);
+			if (!($found['bundled'] || $found['shadows']) || in_array($name, (array)config::get('api_system_models', array('cms')))) $models[$name]['api'] = $this->model_api($name);
 		}
 		ksort($models);
 		$listeners = array();
@@ -478,12 +463,10 @@ class raster_inspector {
 
 	// What an application model offers over /api: array(method => role).
 	function model_api($model) {
-		$info = $this->model_info($model);
-		if (!$info) return array();
-		$class = strpos(basename(dirname($info['file'])), 'the_') === 0 ? 'the_'.$model : $model;
+		if (!controller::model($model)) return array();
 		try {
-			if (!class_exists($class, false)) require_once $info['file'];
-			if (!class_exists($class, false)) return array();
+			$class = controller::model_class($model);
+			if (!$class) return array();
 			// an override adds to what the model it overrides lists, as api.php does
 			$offered = array_merge(class_exists($model) ? api::offered($model) : array(), api::offered($class));
 		} catch (Throwable $e) {
@@ -993,7 +976,7 @@ class raster_inspector {
 
 	// ##Events
 	// Where the app listens: bindings in config/the_events.php and
-	// listens() in its models. array(event, model, method, file, line)
+	// listens() in the models (controller::models()). array(event, model, method, file, line)
 	function listeners() {
 		$found = array();
 		$file = APPBASE.'config/the_events.php';
@@ -1003,18 +986,18 @@ class raster_inspector {
 				foreach ($matches as $m) $found[] = array('event' => $m[2], 'model' => $m[4], 'method' => $m[6], 'file' => self::short($file), 'line' => $n + 1);
 			}
 		}
-		foreach (glob(APPBASE.config::get('models_path', 'models').'/*', GLOB_ONLYDIR) ?: array() as $dir) {
-			$folder = basename($dir);
-			$model_file = "$dir/$folder.php";
-			if (!is_file($model_file)) continue;
-			$source = file_get_contents($model_file);
-			$at = strpos($source, 'function listens(');
-			if ($at === false) continue;
-			if (!class_exists($folder)) require_once $model_file;
-			if (!method_exists($folder, 'listens')) continue;
-			$line = substr_count(substr($source, 0, $at), "\n") + 1;
-			$model = strpos($folder, 'the_') === 0 ? substr($folder, 4) : $folder;
-			foreach ((array)call_user_func(array($folder, 'listens')) as $event => $methods) {
+		foreach (controller::models() as $model => $declared) {
+			if (!$declared['listens']) continue;
+			// the line of listens() in the file that has it: the override's or the bundled one's
+			$line = 1;
+			foreach (array_filter(array($declared['file'], $declared['parent'])) as $model_file) {
+				$source = file_get_contents($model_file);
+				$at = strpos($source, 'function listens(');
+				if ($at === false) continue;
+				$line = substr_count(substr($source, 0, $at), "\n") + 1;
+				break;
+			}
+			foreach ($declared['listens'] as $event => $methods) {
 				foreach ((array)$methods as $method) $found[] = array('event' => $event, 'model' => $model, 'method' => $method, 'file' => self::short($model_file), 'line' => $line);
 			}
 		}
@@ -1124,21 +1107,33 @@ class raster_inspector {
 				$problems = array_merge($problems, $this->lint_file($view, $theme));
 			}
 		}
-		return array_merge($problems, $this->lint_routes(), $this->lint_events(), $this->lint_queries(), $this->lint_types(), $this->lint_api());
+		return array_merge($problems, $this->lint_routes(), $this->lint_events(), $this->lint_queries(), $this->lint_types(), $this->lint_api(), $this->lint_models());
+	}
+
+	// A site model with a bundled model's name replaces it whole: the
+	// bundled one's methods, listeners and tables are gone, and bundled code
+	// that calls it gets the site's class.
+	function lint_models() {
+		$problems = array();
+		foreach (controller::models() as $name => $found) {
+			if (!$found['shadows']) continue;
+			$problems[] = array('file' => self::short($found['file']), 'line' => 1, 'column' => 1, 'severity' => 'warning',
+				'message' => config::get('models_path', 'models')."/$name shadows the bundled $name, which is never loaded: to change the bundled one, name the folder the_$name (class the_$name extends $name); otherwise pick another name");
+		}
+		return $problems;
 	}
 
 	// What models offer over /api (static function api()): every method
 	// listed must be a public method that isn't static, with a known role.
 	function lint_api() {
 		$problems = array();
-		$models_path = config::get('models_path', 'models');
-		foreach (glob(APPBASE.$models_path.'/*', GLOB_ONLYDIR) ?: array() as $folder) {
-			$class = basename($folder);
-			$file = "$folder/$class.php";
-			if (!is_file($file) || strpos(file_get_contents($file), 'function api(') === false) continue;
+		// the site's own models and overrides; the bundled ones are Raster's
+		foreach (controller::models() as $name => $found) {
+			$class = $found['class'];
+			$file = $found['file'];
+			if (strpos($file, APPBASE) !== 0 || strpos(file_get_contents($file), 'function api(') === false) continue;
 			try {
-				if (!class_exists($class, false)) require_once $file;
-				if (!class_exists($class, false) || !method_exists($class, 'api')) continue;
+				if (!controller::model_class($name) || !method_exists($class, 'api')) continue;
 				$declaration = new ReflectionMethod($class, 'api');
 				$at = array('file' => self::short($file), 'line' => $declaration->getStartLine(), 'column' => 1);
 				if (!$declaration->isStatic()) {

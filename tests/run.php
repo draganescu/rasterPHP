@@ -234,6 +234,177 @@ test('a page request loads no command line tools and looks up no core overrides'
 	same(array(), array_values(array_intersect($out['looked_up'], array('the_config', 'the_log', 'the_template', 'the_controller', 'the_database'))), 'autoloader asked');
 });
 
+// ## One model lookup (#35 #42)
+
+// a model's files, written for one test and removed after it
+function temp_model($dir, $files) {
+	@mkdir($dir, 0775, true);
+	foreach ($files as $name => $source) file_put_contents("$dir/$name", $source);
+}
+function remove_dir($dir) {
+	if (!is_dir($dir)) return;
+	foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST) as $file) {
+		$file->isDir() ? rmdir($file->getPathname()) : unlink($file->getPathname());
+	}
+	rmdir($dir);
+}
+
+test('one lookup: app beats bundled, the_ overrides bundled', function () {
+	same('system', controller::model('feed')['bundled'] ? 'system' : 'app');
+	$app = APPBASE.config::get('models_path', 'models');
+	temp_model(BASE.'models/zz', array('zz.php' => "<?php\nclass zz\n{\n\tstatic function listens() {\n\t\treturn array('zz.happened' => 'noted');\n\t}\n\tfunction noted() {}\n}\n"));
+	temp_model("$app/the_zz", array('the_zz.php' => "<?php\nclass the_zz extends zz\n{\n}\n"));
+	temp_model("$app/feed", array('feed.php' => "<?php\nclass feed\n{\n}\n"));
+	try {
+		controller::forget_models();
+		$zz = controller::model('zz');
+		same('the_zz', $zz['class']);
+		same(BASE.'models/zz/zz.php', $zz['parent']);
+		same(array("$app/the_zz", BASE.'models/zz'), $zz['dirs']);
+		same('the_zz', controller::model_class('zz'));
+		check(class_exists('zz', false), 'the bundled zz is loaded as the parent');
+		// the site's own feed, in a fresh process: the bundled one is never read,
+		// and zz's listens() is bound once, for zz
+		$out = race_php('$m = controller::model("feed"); echo json_encode(array($m["bundled"], controller::model_class("feed"), get_included_files(), event::bindings()["zz.happened"]));', 1);
+		$out = json_decode($out[0], true);
+		check(is_array($out), 'the process said: '.json_encode($out));
+		same(false, $out[0]);
+		same('feed', $out[1]);
+		check(!in_array(BASE.'models/feed/feed.php', $out[2], true), 'the bundled feed.php was loaded');
+		same(array('zz.noted'), $out[3], 'zz.happened listeners:');
+	} finally {
+		remove_dir(BASE.'models/zz');
+		remove_dir("$app/the_zz");
+		remove_dir("$app/feed");
+		controller::forget_models();
+	}
+});
+
+test('the_mail reaches mail sent by newsletter', function () use ($maildir) {
+	$app = APPBASE.config::get('models_path', 'models');
+	temp_model("$app/the_mail", array('the_mail.php' => "<?php\nclass the_mail extends mail\n{\n\tstatic function send(\$to, \$subject, \$html, \$text = null, \$headers = array()) {\n\t\treturn parent::send(\$to, '[T] '.\$subject, \$html, \$text, \$headers);\n\t}\n}\n"));
+	$dir = "$maildir-the-mail";
+	try {
+		$out = race_php('newsletter::subscribe("a@b.test");', 1, array('RASTER_MAIL' => "log://$dir"));
+		same('', implode('', $out), 'the process said:');
+		$mails = glob("$dir/*.eml") ?: array();
+		same(1, count($mails), 'mails:');
+		check(preg_match('/^Subject: =\?UTF-8\?B\?([^?]+)\?=/m', file_get_contents($mails[0]), $m), 'no subject');
+		same('[T] ', substr(base64_decode($m[1]), 0, 4), 'the subject starts:');
+	} finally {
+		remove_dir("$app/the_mail");
+		remove_dir($dir);
+		controller::forget_models();
+	}
+});
+
+test('warm requests load no model that only listens', function () use ($root) {
+	$app = APPBASE.config::get('models_path', 'models');
+	$dir = sys_get_temp_dir().'/raster-warm-'.getmypid();
+	@mkdir($dir);
+	file_put_contents("$dir/prepend.php", '<?php register_shutdown_function(function () { file_put_contents('.var_export("$dir/out.json", true).', json_encode(get_included_files())); });');
+	$env = 'RASTER_ENV=production RASTER_DB='.escapeshellarg(test_db("$dir/db.sqlite"));
+	$render = function () use ($env, $dir, $root) {
+		@unlink("$dir/out.json");
+		$page = shell_exec("$env ".escapeshellarg(PHP_BINARY).' -d auto_prepend_file='.escapeshellarg("$dir/prepend.php").' '.escapeshellarg("$root/bin/raster").' render /about 2>&1');
+		$included = json_decode((string)@file_get_contents("$dir/out.json"), true);
+		check(is_array($included), 'no report from the render: '.$page);
+		return $included;
+	};
+	temp_model("$app/zzlisten", array('zzlisten.php' => "<?php\nclass zzlisten\n{\n\tstatic function listens() {\n\t\treturn array('zz.never' => 'heard');\n\t}\n\tfunction heard() {}\n}\n"));
+	try {
+		$render();
+		$included = $render();
+		$listening = array_values(array_filter($included, function ($f) {
+			return preg_match('#/models/([^/]+)/\1\.php$#', $f) && strpos(file_get_contents($f), 'function listens(') !== false;
+		}));
+		same(array(), $listening, 'models loaded only for their listens():');
+		$out = race_php('echo json_encode(array(event::bindings()["zz.never"], in_array('.var_export("$app/zzlisten/zzlisten.php", true).', get_included_files(), true)));', 1);
+		same(array(array('zzlisten.heard'), false), json_decode($out[0], true), 'bound from the cache, without the file:');
+		// a model added in development counts on the next request
+		temp_model("$app/zzlater", array('zzlater.php' => "<?php\nclass zzlater\n{\n\tstatic function listens() {\n\t\treturn array('zz.later' => 'heard');\n\t}\n\tfunction heard() {}\n}\n"));
+		$out = race_php('$b = event::bindings(); echo json_encode(isset($b["zz.later"]) ? $b["zz.later"] : null);', 1);
+		same(array('zzlater.heard'), json_decode($out[0], true), 'zz.later listeners:');
+	} finally {
+		remove_dir("$app/zzlisten");
+		remove_dir("$app/zzlater");
+		array_map('unlink', glob("$dir/*") ?: array());
+		@rmdir($dir);
+		controller::forget_models();
+	}
+});
+
+test('a broken, stale or unwritable models.json never stops a page', function () use ($root) {
+	$cache = raster_cache::dir().'models.json';
+	$dir = sys_get_temp_dir().'/raster-stale-'.getmypid();
+	@mkdir($dir);
+	$env = 'RASTER_ENV=production RASTER_DB='.escapeshellarg(test_db("$dir/db.sqlite"));
+	$render = function () use ($env, $root) {
+		return (string)shell_exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' render /about 2>&1');
+	};
+	$data = function () {
+		$all = array();
+		foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator(APPBASE.'data', FilesystemIterator::SKIP_DOTS)) as $file) {
+			if (strpos($file->getPathname(), APPBASE.'data/cache/') !== 0 && strpos($file->getFilename(), 'raster.sqlite') !== 0) $all[] = $file->getPathname();
+		}
+		sort($all);
+		return $all;
+	};
+	$before = $data();
+	try {
+		$fresh = $render();
+		check(strpos($fresh, '<html') !== false, 'the page: '.$fresh);
+		foreach (array('{"models": {"key"', '{"models":{"key":"2.2.6","value":{"feed":"x"}}}', '"just a string"') as $saved) {
+			file_put_contents($cache, $saved);
+			same($fresh, $render(), "the page with models.json $saved:");
+			$read = json_decode((string)file_get_contents($cache), true);
+			check(isset($read['models']['value']['feed']['declares']), 'models.json is written again: '.file_get_contents($cache));
+		}
+		// a data/ folder the server can't write to: a fresh scan every time
+		@unlink($cache);
+		chmod(raster_cache::dir(), 0555);
+		if (is_writable(raster_cache::dir())) throw new test_skipped('this user writes to read-only folders');
+		same($fresh, $render(), 'the page with a read-only cache:');
+		check(!is_file($cache), 'models.json was written');
+	} finally {
+		@chmod(raster_cache::dir(), 0775);
+		array_map('unlink', glob("$dir/*") ?: array());
+		@rmdir($dir);
+	}
+	same($before, $data(), 'files written outside data/cache:');
+});
+
+test('bundled types count only where views use them', function () {
+	$view = APPBASE.config::get('views_path', 'views').'/'.config::get('theme').'/zzbook-test.html';
+	temp_model(BASE.'models/zzbook', array('zzbook.php' => "<?php\nclass zzbook\n{\n\tstatic function types() {\n\t\treturn array('zzbook' => array('fields' => array('name' => '')));\n\t}\n}\n"));
+	try {
+		controller::forget_models();
+		cms_records::forget();
+		check(!isset(cms_records::types()['zzbook']), 'zzbook counts without a view');
+		file_put_contents($view, "<!-- render.zzbook.form -->\n<p>x</p>\n<!-- /render.zzbook.form -->\n");
+		controller::forget_models();
+		cms_records::forget();
+		check(isset(cms_records::types()['zzbook']), 'zzbook does not count with a view that renders it');
+	} finally {
+		@unlink($view);
+		remove_dir(BASE.'models/zzbook');
+		controller::forget_models();
+		cms_records::forget();
+	}
+});
+
+test('a site model named like a bundled one wins and lint says so', function () use ($root, $db) {
+	$app = APPBASE.config::get('models_path', 'models');
+	temp_model("$app/newsletter", array('newsletter.php' => "<?php\nclass newsletter\n{\n}\n"));
+	try {
+		$out = (string)shell_exec('RASTER_ENV=development RASTER_DB='.escapeshellarg($db).' '.escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' lint 2>&1');
+		check(strpos($out, 'models/newsletter shadows the bundled newsletter') !== false, 'lint said: '.$out);
+	} finally {
+		remove_dir("$app/newsletter");
+		controller::forget_models();
+	}
+});
+
 // ## Integration tests
 
 $port = free_port();
@@ -1137,6 +1308,10 @@ function cache_php($code) {
 	global $root;
 	return array(PHP_BINARY, '-r', 'require "'.$root.'/system/boot.php"; boot::$appname = "application"; boot::cli("/about"); config::set("page_cache")->to(true); raster_cache::$cacheable = true; http_response_code(200); '.$code);
 }
+// what the page cache keeps; models.json is the model lookup's, not a page
+function cached_pages() {
+	return array_values(array_filter(glob(APPBASE.'data/cache/*') ?: array(), function ($f) { return basename($f) !== 'models.json'; }));
+}
 function cache_run($code) {
 	$process = proc_open(cache_php($code), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes);
 	$out = stream_get_contents($pipes[1]).stream_get_contents($pipes[2]);
@@ -1242,7 +1417,7 @@ test('empty filter pages, pages past the last one and unknown filters are not ca
 			same('200 not cached', $get($path), $path);
 			same('200 not cached', $get($path), $path);
 		}
-		same(0, count(glob(APPBASE.'data/cache/*') ?: array()), 'cache files');
+		same(0, count(cached_pages()), 'cache files');
 		// lists with items are cached as before
 		foreach (array('/news/news_items/headline/Filler%201', '/news/news_page/2', '/news') as $path) {
 			same('200 X-Raster-Cache: miss', $get($path), $path);
@@ -1285,7 +1460,7 @@ test('other spellings of a list or item URL are not cached', function () use ($d
 			same('200 not cached', $get($path)[0], $path);
 			same('200 not cached', $get($path)[0], $path);
 		}
-		same(0, count(glob(APPBASE.'data/cache/*') ?: array()), 'cache files');
+		same(0, count(cached_pages()), 'cache files');
 		// the URLs the site's own links use are cached
 		foreach (array('/news/news_item/1', '/news/news_page/2', '/news/news_items/headline/Filler%201') as $path) {
 			same('200 X-Raster-Cache: miss', $get($path)[0], $path);
@@ -1303,7 +1478,7 @@ test('a typed filter spelled another way is not cached', function () use ($db) {
 			check(strpos($get($path)[1], 'Raster runs on PHP 8') !== false, "$path lists the item");
 			same('200 not cached', $get($path)[0], $path);
 		}
-		same(0, count(glob(APPBASE.'data/cache/*') ?: array()), 'cache files');
+		same(0, count(cached_pages()), 'cache files');
 		// the spelling the site prints is cached
 		foreach (array('/news/news_items/date/2026-09-25', '/news/news_items/id/1') as $path) {
 			same('200 X-Raster-Cache: miss', $get($path)[0], $path);
@@ -1336,7 +1511,7 @@ test('in production, made-up URLs of a list with no items are not cached', funct
 				same('200 not cached', $get($path)[0], $path);
 				same('200 not cached', $get($path)[0], $path);
 			}
-			same(0, count(glob(APPBASE.'data/cache/*') ?: array()), 'cache files');
+			same(0, count(cached_pages()), 'cache files');
 		});
 	} finally {
 		array_map('unlink', glob("$empty*") ?: array());
@@ -1356,7 +1531,7 @@ test('in production, made-up URLs of a list with no table yet are not cached', f
 				same('200 not cached', $get($path)[0], $path);
 				same('200 not cached', $get($path)[0], $path);
 			}
-			same(0, count(glob(APPBASE.'data/cache/*') ?: array()), 'cache files');
+			same(0, count(cached_pages()), 'cache files');
 		});
 	} finally {
 		array_map('unlink', glob("$bare*") ?: array());
@@ -1389,7 +1564,7 @@ test('a view name in other letter case is not cached', function () use ($db) {
 			check(in_array($status, array('200', '404')), "$path answers $status");
 			same($status.' not cached', $get($path)[0], $path);
 		}
-		same(0, count(glob(APPBASE.'data/cache/*') ?: array()), 'cache files');
+		same(0, count(cached_pages()), 'cache files');
 		// the spelling of the view's own file is cached
 		foreach (array('/about', '/news/news_page/2', '/news/news_items/headline/Filler%201', '/news.rss') as $path) {
 			same('200 X-Raster-Cache: miss', $get($path)[0], $path);

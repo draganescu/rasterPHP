@@ -438,8 +438,10 @@ class authentication
 			$user->reset_expires = date('Y-m-d H:i:s', time() + 3600);
 			R::store($user);
 			$reset = self::url(config::get('reset_page', 'reset')).'?token='.$token;
-			if (!mail::send_view('_email/password_reset', $user->email, array('reset_url' => $reset, 'name' => $user->name))) {
-				log::error('Password reset email failed: '.mail::$last_error);
+			// through the site's the_mail, when it has one
+			$mail = controller::model_class('mail');
+			if (!$mail::send_view('_email/password_reset', $user->email, array('reset_url' => $reset, 'name' => $user->name))) {
+				log::error('Password reset email failed: '.$mail::$last_error);
 			}
 		}
 		util::done('reset_sent');

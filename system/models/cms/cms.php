@@ -140,7 +140,7 @@ class cms
 
 	// custom cms routes for admin panels and collection URLs
 	public function route() {
-		include 'routes.php';
+		include __DIR__.'/routes.php';
 
 		// /news/news_item/3  -> news_item.html (or news.html)
 		// /news/news_page/2  -> news.html
