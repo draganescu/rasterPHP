@@ -97,11 +97,13 @@ class private_paths {
 			),
 			array(
 				'id' => 'sqlite-sidecars',
+				// tied to the database file, so a page whose slug ends in
+				// -journal (my-travel-journal) is still a page
 				'why' => "SQLite's journal, write-ahead log and shared memory files",
-				'php' => '-(journal|wal|shm)$',
-				'apache' => array('RewriteRule -(journal|wal|shm)$ - [F,L,NC]'),
-				'nginx' => '-(journal|wal|shm)$',
-				'caddy' => '-(journal|wal|shm)$',
+				'php' => '\.sqlite-(journal|wal|shm)$',
+				'apache' => array('RewriteRule \.sqlite-(journal|wal|shm)$ - [F,L,NC]'),
+				'nginx' => '\.sqlite-(journal|wal|shm)$',
+				'caddy' => '\.sqlite-(journal|wal|shm)$',
 			),
 		);
 	}

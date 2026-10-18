@@ -76,7 +76,10 @@ media/                        uploads from the CMS
 - Unknown URLs return 404, and so does any path with a segment starting
   with a dot (`/./about`, `/.env`); `a//b` is `a/b`. View files themselves (`.html`, `.rss`, `.xml`,
   `.json`, `.txt` under `application/views/`) are never served raw (403); other
-  theme assets are. Links like `href="news.rss"` are rewritten to `/news.rss`.
+  theme assets are. A second path segment named `config`, `models`, `data`
+  or `i18n` is refused (403) under any folder, since those are an app's
+  private folders: `docs/config.html` is a page nobody can open, and `lint`
+  warns about it (the rules are in `system/private_paths.php`). Links like `href="news.rss"` are rewritten to `/news.rss`.
 - In `.json` views, the rows of a render block are separated by commas, so a
   block inside `[ … ]` makes a JSON list.
 - Link to pages by file name, `href="about.html"`. Raster rewrites that to

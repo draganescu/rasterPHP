@@ -856,6 +856,11 @@ test('collections: slugs, drafts, scheduling, order', function () use ($base) {
 	list(, $body) = http('GET', "$base/news");
 	check(strpos($body, 'Secret draft') === false && strpos($body, 'From the future') === false, 'hidden items shown');
 	same(404, http('GET', "$base/news/news_item/secret-draft")[0]);
+	// a slug ending like one of SQLite's side files is a page (#98)
+	$journal = mcp_call('create_item', array('collection' => 'news', 'fields' => array('headline' => 'My travel journal')))['structuredContent'];
+	same('my-travel-journal', $journal['slug']);
+	same(200, http('GET', "$base/news/news_item/my-travel-journal")[0]);
+	mcp_call('delete_item', array('collection' => 'news', 'id' => $journal['id']));
 	check(strpos($body, 'Ünïcode') < strpos($body, 'Raster runs on PHP 8'), 'order=newest');
 });
 test('an item titled only with digits opens at its own slug (#90)', function () use ($base) {
@@ -1133,6 +1138,22 @@ test('private_paths: the rules, and the apps they name', function () use ($root)
 	check(private_paths::blocked('/.well-known/.env'), 'but not a dotfile inside it');
 	check(private_paths::blocked('/.well-known/x.php'), 'nor code');
 	check(private_paths::blocked('/.well-knownx/y'), 'nor a folder that only starts like it');
+	// SQLite's side files, not every URL that ends like one (#98)
+	foreach (array('/raster.sqlite-journal', '/x/raster.sqlite-wal', '/raster.SQLITE-SHM') as $path) check(private_paths::blocked($path), "$path must be private");
+	foreach (array('/news/news_item/my-travel-journal', '/reading-journal', '/data-wal') as $path) check(!private_paths::blocked($path), "$path must be served");
+});
+test('lint warns about a view whose address the server refuses (#98)', function () use ($root) {
+	$dir = "$root/application/views/default/docs";
+	@mkdir($dir);
+	file_put_contents("$dir/config.html", '<p>Settings</p>');
+	file_put_contents("$dir/setup.html", '<p>Setup</p>');
+	try {
+		$problems = (new raster_inspector())->lint();
+		check(has_problem($problems, '/docs/config is refused'), 'lint said: '.json_encode($problems));
+		check(!has_problem($problems, '/docs/setup is refused'), 'an ordinary page');
+	} finally {
+		remove_dir($dir);
+	}
 });
 test('private_paths: every server config carries every rule', function () use ($root) {
 	require_once BASE.'private_paths.php';

@@ -15,7 +15,7 @@ RewriteRule ^[^/]+/views/.*\.(html|rss|atom|xml|json|txt)$ - [F,L,NC]
 # code, databases, dumps and notes, wherever they are (index.php excepted)
 RewriteRule ^(?!index\.php$).*\.(php|phar|sqlite|sql|md|lock|ini|bak)$ - [F,L,NC]
 # SQLite's journal, write-ahead log and shared memory files
-RewriteRule -(journal|wal|shm)$ - [F,L,NC]
+RewriteRule \.sqlite-(journal|wal|shm)$ - [F,L,NC]
 
 # everything else is the site
 RewriteCond %{REQUEST_FILENAME} !-d
