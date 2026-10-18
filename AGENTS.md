@@ -441,7 +441,10 @@ class contact {
   form's own words for an empty field show; a field named `tags[]` takes a
   list. A `pattern` that can't run counts as not matched.
 - **What was typed comes back as typed** when the form is shown again:
-  `$100`, `\1` and `$0` included.
+  `$100`, `\1` and `$0` included. So do the choices: an `<option>` without
+  a `value` is chosen by its text, as browsers send it (`<option>Ana</option>`
+  for `stylist=Ana`), and a box ticked in the template that the visitor
+  unticked stays unticked (the post doesn't name it).
 - **`validation.field('name')`** shows its block when that field breaks a rule.
   Other regions: `matches('password', 'password_again')`, `cant_be('name',
   'admin')`, `accepted('terms')`. For your own rules, add
@@ -460,7 +463,8 @@ class contact {
   counts as another site unless `Sec-Fetch-Site` says it is this one), and
   bots that fill the honeypot. The bots get a fake success.
 - **Forms that ask with the URL** (`<form method="get">`, a filter or a
-  search) show what the URL asked: `/bookings?stylist=Ana` keeps Ana chosen.
+  search) show what the URL asked: `/bookings?stylist=Ana` keeps Ana chosen,
+  and `?stylist=` chooses only the option whose value is empty.
   Nothing else happens to them; see `field=?name` in the CMS options.
 
 ## The CMS: the markup is the schema
@@ -617,10 +621,19 @@ class reservation {
   alert the template words (`<!-- print.validation.alert('too_many') -->`).
   `cms_records::refuse('name')` stops a write from anywhere in the same way.
   Write problems as `$problems[] = 'name'` or `refuse('name')` so `lint`
-  knows the alerts are raised.
-- **Hooks are static** — `types()`, `check()`, actions — so
-  `/api/<model>/<method>` can never call them. `lint` reports a `check()` that
-  is not static and an action without its method. (Event listeners named in
+  knows the alerts are raised. `cms_records::writer()` says who makes the
+  write while `check()` runs: `'visitor'` (a form), `'editor'` (the in-page
+  editor, MCP) or `'model'` (the model's own code), so a rule can be for
+  guests only.
+- **`fill($type, $after, $before)` works out fields the model owns** before
+  `check()` runs, on every write: it returns `array(field => value)`, which
+  is stored as the fields' types (a booking's `ends` from its `time` and
+  service, a `changed_at`). It sees the record as `check()` does, and
+  `cms_records::writer()` too. Make such fields `readonly`, so only the
+  model sets them; keys that aren't fields are left out.
+- **Hooks are static** — `types()`, `check()`, `fill()`, actions — so
+  `/api/<model>/<method>` can never call them. `lint` reports a `check()` or
+  `fill()` that is not static and an action without its method. (Event listeners named in
   `listens()` are ordinary public methods; /api reaches them only if the
   model lists them in `api()`, which it shouldn't.)
 - **Privacy.** A type is private unless it says `'public' => true`: visitors
@@ -885,9 +898,9 @@ bundled model declares none of its types, and `lint` warns.
     does, so sites need no step for it.
 
 **booking**: bookings for a café's sittings or a salon's appointments
-(with or without "with Ana"). So far it has the setup and the slots the
-setup makes; the bookings themselves, their emails and the staff page
-follow.
+(with or without "with Ana"). So far it has the setup, the slots it makes,
+the bookings and what staff see of them; the guest's emails and manage
+link follow.
 - Setup, as records staff edit in the page (`render.cms.bookingresource`
   and so on; each is made by editors and private):
   - `bookingresource`: what is booked. `name`, `people` (most people at
@@ -927,19 +940,96 @@ follow.
   - `render.booking.resources('service=?service')` and
     `render.booking.services('resource=?resource')`: the active ones,
     editable in the page.
-  - Slots and days are never page-cached.
+  - `render.booking.form`: the booking form, posting fields `name email
+    phone date time people resource service notes` (a `the_booking`
+    override adds more). It stores a request and redirects with
+    `?done=booked`, or shows the form again with the alerts below. Shown
+    first, it is filled from the URL's `date`, `time`, `resource`, `service`
+    and `people` (a field the form doesn't have comes back as a hidden
+    input), and it raises `not_open` while no resource is active.
+  - Slots and days are never page-cached, and count the bookings made.
+- Bookings are the `booking` type: `name`, `email`, `phone`, `date`, `time`,
+  `people` (1 by default), `resource` (a slug), `service` (a slug or empty),
+  `notes`, and what the model works out (readonly): `ends`, `status`,
+  `changed_at`. `token_hashes` and `token_expires` are hidden. Guests make
+  them with the form, staff add them in the page (`staff_add`) or over MCP,
+  and with `owner` a guest who was logged in reads their own. Private.
+  - On every write the model fills (`fill()`) `ends` from the service, or
+    else the `every` of the hours row the time starts in; the `resource`
+    when there is only one; `people` 1 when no resource counts people; and
+    `changed_at` when the status, date or time changes.
+  - Status: a booking is `requested`, holding its place, until staff run
+    `confirm` or `decline` (the actions; `cancel` too). `declined` and
+    `cancelled` are final and free the place: changing the status from
+    them is refused with `already_declined` / `already_cancelled`, and a
+    confirmed booking can't be declined (`already_confirmed`). Each action
+    reads the booking again in its transaction, so one cancelled a moment
+    ago isn't confirmed from a page that still showed it.
+  - The slot's rules run when a booking is made, when its `date`, `time`,
+    `resource`, `service` or `people` change, and when it is confirmed, in
+    this order: `not_open` (no resources), `resource_invalid` (none chosen
+    among several, or an unknown one), `resource_inactive`, `name_invalid`
+    (empty), `email_invalid` (a guest's empty or anyone's invalid address),
+    `people_invalid` (below 1); `too_many` (a guest's over
+    `booking_max_people`); `not_a_slot` (not one of the day's starts, a
+    closed day, or ending after midnight); `service_unavailable` (none
+    chosen where the resource offers some, or one it doesn't offer or that
+    is off); `too_soon` / `too_far` (guests: within `booking_notice`, past
+    `booking_horizon`); `already_booked` (a guest's second booking of the
+    same start: a double click); `fully_booked`. Any other edit (a phone
+    number, a note) goes through, so a booking stranded by a change of the
+    setup never gets stuck.
+  - Capacity: at the busiest minute of the booking's span, the other active
+    bookings of its resource and day plus this one fit `people` and
+    `bookings` (whichever is above 0). The booking being changed doesn't
+    count against itself, so a move frees the old place as the new one is
+    checked. It is one query (`sql/peak.sql`) inside the write's lock, so
+    two guests at once can't both take the last place.
+  - Staff (the in-page editor, MCP, or model code) skip `too_soon`,
+    `too_far`, `too_many` and `already_booked`, and may book in the past (a
+    walk-in), but never over capacity and never off the slots.
+  - Needs attention: an active booking the setup no longer fits, with the
+    first reason of `closed`, `resource_inactive`, `service_unavailable`,
+    `not_a_slot` and `over_capacity` (some minute of it holds more than the
+    limit; each booking there is flagged). Staff may close a day, change
+    the hours or lower a limit under bookings: nothing is refused or
+    cancelled. `confirm` is refused with the reason; `cancel`, `decline`
+    and moving it are not.
+  - A resource's or service's slug stays while an active booking dated
+    today or later uses it: a change of slug or a delete is refused with
+    `resource_in_use` / `service_in_use`. Its name may change.
+- For staff (editors; anyone else gets nothing, wherever the page puts
+  them):
+  - `render.booking.agenda('from=today&days=7&resource=?resource')`: a row
+    per day, with `date`, `closed` (`'1'`/`'0'`), `slots` (as in
+    `render.booking.slots`, with the places left, for the resource asked
+    or the only one; no notice or horizon) and `bookings`: that day's
+    active bookings through `cms_records::listed`, editable in place, each
+    with `attention` (the reason, or empty), `resource_name` and
+    `service_name`.
+  - `render.booking.attention`: the active bookings to come that need
+    attention, with the same added fields.
+  - `print.booking.count('status=requested')`: how many bookings match
+    (options as `cms_records::find` takes them, values only), or
+    `count('attention')`: for the staff page's heading.
 - Times are the site's clock (`timezone`). A start the clock skips in spring
   isn't a slot, the hour repeated in autumn gives each time once, and a
   booking ends by midnight (a start whose span would end later isn't a slot;
   an end at midnight is `00:00`). `booking_notice` counts real minutes, so
   on the spring day 04:00 is 30 minutes after 02:30.
 - From code: `booking::day($date, $resource, $service, $people, $taken,
-  $now)` gives the slot rows, `booking::starts($date, $resource)` the
-  start times, `booking::peak($rows, $from, $to)` the most people and
-  bookings at once over minutes `[$from, $to)` (spans are half-open: one
-  ending at 10:00 and one starting then never meet).
+  $now)` gives the slot rows (`$now` false: as staff see the day),
+  `booking::starts($date, $resource)` the start times,
+  `booking::peak($rows, $from, $to)` the most people and bookings at once
+  over minutes `[$from, $to)` (spans are half-open: one ending at 10:00 and
+  one starting then never meet). `booking::move($id, $values, $who)` moves
+  a booking (`date`, `time`, `resource`, `service`, `people`) in one write;
+  a guest's move (`$who` `'guest'`) gets the guest rules and goes back to
+  `requested`, staff's keeps the status. `booking::reason($booking)` says
+  why it needs attention. Model code that writes bookings with
+  `cms_records::create/update` is trusted like staff.
 - Settings: `booking_notice` (60 minutes ahead), `booking_horizon` (60 days
-  ahead).
+  ahead), `booking_max_people` (12 in a guest's booking).
 
 **mail**: emails are views. `mail::send_view('_email/welcome', $to,
 array('name' => 'Ada'))` uses the view's `<title>` as the subject.
@@ -1281,6 +1371,7 @@ Set in `config/the_app.php` with `config::set('name')->to(value)`.
 | `timezone` | PHP's (`date.timezone`, UTC on most servers) | the site's time zone, `'Europe/Bucharest'`: `today`, scheduled items and every stamp follow it; an unknown name is logged and PHP's kept. `doctor` warns in production when neither this nor php.ini's `date.timezone` is set |
 | `booking_notice` | 60 | minutes ahead a guest may book |
 | `booking_horizon` | 60 | days ahead a guest may book |
+| `booking_max_people` | 12 | people in one booking, for guests; staff may book more |
 | `newsletter_double_opt_in` | true | false subscribes without a confirmation |
 | `newsletter_confirm_page`, `newsletter_unsubscribe_page` | `newsletter-confirm`, `newsletter-unsubscribe` | |
 | `mail`, `mail_from` | see `RASTER_MAIL` | transport and sender |

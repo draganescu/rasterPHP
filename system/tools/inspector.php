@@ -1214,8 +1214,10 @@ class raster_inspector {
 			if ($info['create'] !== 'editor' && !$this->listed($name)) {
 				$problems[] = $at + array('severity' => 'warning', 'message' => "Visitors make '$name' records with a form, but no view lists them with render.cms.$name, so staff can't see or edit them in the page. Add a staff page: <!-- render.cms.$name('order=newest') --> in a view protected for editors (config 'protected').");
 			}
-			if (method_exists($info['class'], 'check') && !(new ReflectionMethod($info['class'], 'check'))->isStatic()) {
-				$problems[] = $at + array('severity' => 'error', 'message' => "{$info['class']}::check() must be static: a hook is never an ordinary method");
+			foreach (array('check', 'fill') as $hook) {
+				if (method_exists($info['class'], $hook) && !(new ReflectionMethod($info['class'], $hook))->isStatic()) {
+					$problems[] = $at + array('severity' => 'error', 'message' => "{$info['class']}::$hook() must be static: a hook is never an ordinary method");
+				}
 			}
 			foreach ($info['actions'] as $action => $role) {
 				if (in_array($action, cms_records::$hooks, true)) {

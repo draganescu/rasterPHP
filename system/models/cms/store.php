@@ -424,7 +424,23 @@ class cms_store {
 		}
 		if ($info) {
 			$after = cms_records::decode($info, cms_types::read_row($type, $bean->export()));
-			cms_records::check($info, $after, $before ? cms_records::decode($info, $before) : null);
+			$before = $before ? cms_records::decode($info, $before) : null;
+			// the model sees who writes while it fills its fields and checks
+			$writer = cms_records::$writer;
+			cms_records::$writer = $who;
+			try {
+				// fields the model works out (a booking's end), stored as their type
+				$filled = cms_records::fill($info, $after, $before);
+				foreach ($filled as $field => $value) {
+					$bean->$field = in_array($field, $info['lists'], true)
+						? json_encode(array_values((array)$value), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+						: cms_types::clean(isset($types[$field]) ? $types[$field] : 'text', $value, $field);
+				}
+				if ($filled) $after = cms_records::decode($info, cms_types::read_row($type, $bean->export()));
+				cms_records::check($info, $after, $before);
+			} finally {
+				cms_records::$writer = $writer;
+			}
 		}
 		$bean->updated_at = R::isoDateTime();
 		R::store($bean);
