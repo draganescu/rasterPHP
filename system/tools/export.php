@@ -371,9 +371,13 @@ class raster_export {
 			'method' => 'GET', 'ignore_errors' => true, 'follow_location' => 0, 'timeout' => 30,
 			'header' => implode("\r\n", $headers),
 		)));
-		$body = @file_get_contents(rtrim($this->base, '/').str_replace('%2F', '/', rawurlencode($path)), false, $context);
+		// the headers come from the stream: PHP 8.5 deprecates $http_response_header
+		$stream = @fopen(rtrim($this->base, '/').str_replace('%2F', '/', rawurlencode($path)), 'r', false, $context);
+		$body = $stream ? stream_get_contents($stream) : '';
+		$meta = $stream ? stream_get_meta_data($stream) : array();
+		if ($stream) fclose($stream);
 		$status = 0; $type = '';
-		foreach (isset($http_response_header) ? $http_response_header : array() as $line) {
+		foreach (isset($meta['wrapper_data']) ? $meta['wrapper_data'] : array() as $line) {
 			if (preg_match('#^HTTP/\S+\s+(\d{3})#', $line, $m)) $status = (int)$m[1];
 			if (stripos($line, 'Content-Type:') === 0) $type = strtolower(trim(substr($line, 13)));
 		}

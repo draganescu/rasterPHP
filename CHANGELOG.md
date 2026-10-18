@@ -3,6 +3,26 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.15
+
+Nothing for sites to do.
+
+**A new day exports again.** `raster export` counts the date (in the site's `timezone`) as part of what the site is made of. A nightly export now drops events that `date>=today` no longer lists, where before it said "Nothing changed since the last export". Pages that come out the same are still not written again.
+
+**`raster update` stops when it can't replace a file.** A framework file it can't write or remove now stops the update with exit 1 and the file's name, and the files already replaced are put back. Before, it said "Updated" while some files were still old. `update <folder>` also refuses a folder that doesn't hold `system/boot.php`, even with `--force`.
+
+**The comment at the top of `bin/raster`** lists the same commands and options as `raster help`.
+
+## 2.2.14
+
+Behind nginx: regenerate the config with `php bin/raster deploy --config=nginx`, or add `client_max_body_size 13m;` to it. Make sure the php.ini PHP-FPM reads has `upload_max_filesize = 12M` and `post_max_size = 13M`.
+
+**The nginx config makes room for the editor's pictures.** nginx takes 1 MB request bodies unless told otherwise, so the editor's larger pictures were refused. `deploy --config=nginx` now allows 13 MB. It also gzips CSS, scripts, feeds and other text, and gives `/media/` a year's cache lifetime, since an upload never reuses a file name.
+
+**doctor checks PHP's upload limits.** In production it warns when PHP takes files under 12 MB or requests under 13 MB, the size of the editor's largest picture. Stock PHP takes 2 MB, so large PNGs never arrived and the editor could only say "The upload did not arrive".
+
+**Ready for PHP 8.5.** `update` and `export` no longer read `$http_response_header`, and the example shop no longer calls `curl_close()`. PHP 8.5 deprecates both. CI now tests PHP 8.1, 8.4 and 8.5, MySQL on 8.1 and 8.4, the in-page editor in Chromium, and updating a site from GitHub.
+
 ## 2.2.13
 
 To take bookings, add the six `_email/booking_*.html` views (`booking_requested`, `booking_new`, `booking_confirmed`, `booking_declined`, `booking_cancelled`, `booking_changed`) and a manage page (`booking.html`, or set `booking_manage_page`) with `render.booking.manage`. lint names any view that is missing.

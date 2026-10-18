@@ -137,10 +137,14 @@ class raster_project
 		return self::unpack($archive, $work);
 	}
 
+	// the headers come from the stream: PHP 8.5 deprecates $http_response_header
 	static function download($url) {
 		$context = stream_context_create(array('http' => array('header' => "User-Agent: raster-update\r\n", 'timeout' => 60, 'ignore_errors' => true)));
-		$body = @file_get_contents($url, false, $context);
-		$status = isset($http_response_header[0]) && preg_match('/\s(\d{3})\s/', $http_response_header[0], $m) ? (int)$m[1] : 0;
+		$stream = @fopen($url, 'r', false, $context);
+		$body = $stream ? stream_get_contents($stream) : false;
+		$meta = $stream ? stream_get_meta_data($stream) : array();
+		if ($stream) fclose($stream);
+		$status = isset($meta['wrapper_data'][0]) && preg_match('/\s(\d{3})\s/', $meta['wrapper_data'][0], $m) ? (int)$m[1] : 0;
 		if ($body === false || $status !== 200) throw new RuntimeException("Could not download $url".($status ? " (HTTP $status)" : ''));
 		return $body;
 	}
@@ -390,6 +394,13 @@ class raster_project
 
 	// ##Doctor
 
+	// a php.ini size (2M, 512K, 1G) in bytes
+	static function bytes($size) {
+		$units = array('k' => 1024, 'm' => 1048576, 'g' => 1073741824);
+		$unit = strtolower(substr(trim((string)$size), -1));
+		return (int)$size * (isset($units[$unit]) ? $units[$unit] : 1);
+	}
+
 	// checks a project and one app: array of array(status, title, detail)
 	// with status ok, warn or fail
 	static function doctor($root, $app, $environment) {
@@ -501,6 +512,14 @@ class raster_project
 			if (!in_array(strtolower((string)ini_get('display_errors')), array('', '0', 'off', 'false', 'no'), true)) {
 				$add('warn', 'display_errors is on in PHP\'s settings', "Raster turns it off for each request, but an error before that (a mistake in config/) still reaches visitors.\nSet display_errors = Off and log_errors = On in php.ini, as php.ini-production does");
 			}
+			// the editor sends pictures up to cms_editor::UPLOAD_MB, in a request
+			// with the rest of its form; stock PHP takes 2M files in 8M requests
+			$mb = cms_editor::UPLOAD_MB;
+			$upload = ini_get('upload_max_filesize');
+			$post = ini_get('post_max_size');
+			$where = "in the php.ini of the PHP that serves the site (this command may read another one)";
+			if (self::bytes($upload) < $mb * 1048576) $add('warn', "PHP takes uploads up to $upload; the editor sends pictures up to $mb MB", "Larger pictures don't arrive. Set upload_max_filesize = {$mb}M $where");
+			if (self::bytes($post) && self::bytes($post) < ($mb + 1) * 1048576) $add('warn', "PHP takes requests up to $post; the editor sends pictures up to $mb MB", "Larger pictures don't arrive. Set post_max_size = ".($mb + 1)."M $where");
 		}
 		return $checks;
 	}
