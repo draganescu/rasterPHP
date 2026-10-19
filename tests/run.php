@@ -280,6 +280,52 @@ test('one lookup: app beats bundled, the_ overrides bundled', function () {
 	}
 });
 
+test('listeners run in order: the framework\'s, the_events.php, the site\'s listens(), core (#27)', function () {
+	// this process: the framework's bindings, a site's, then core
+	event::bind('done')->to('site', 'zz_done');
+	event::bind('route_set')->to('site', 'zz_set');
+	try {
+		$bindings = event::bindings();
+		same(array('cms.setup', 'authentication.setup', 'site.zz_set'), $bindings['route_set'], 'route_set:');
+		same(array('site.zz_done', 'controller.output', 'log.output'), $bindings['done'], 'done:');
+	} finally {
+		event::unbind('done')->from('site', 'zz_done');
+		event::unbind('route_set')->from('site', 'zz_set');
+	}
+	// a bundled model's listens() goes with the framework's bindings, before
+	// the site's, so a site listener sees what the bundled one did
+	$app = APPBASE.config::get('models_path', 'models');
+	$events = APPBASE.'config/the_events.php';
+	$kept = file_get_contents($events);
+	// the starter site's is empty: a binding needs the <?php
+	$php = strpos($kept, '<?php') === 0 ? $kept : "<?php\n";
+	temp_model(BASE.'models/zzpay', array('zzpay.php' => "<?php\nclass zzpay\n{\n\tstatic function listens() {\n\t\treturn array('zz.paid' => 'mark');\n\t}\n\tfunction mark() { echo 'bundled '; }\n}\n"));
+	temp_model("$app/zzshop", array('zzshop.php' => "<?php\nclass zzshop\n{\n\tstatic function listens() {\n\t\treturn array('zz.paid' => 'see');\n\t}\n\tfunction see() { echo 'listens '; }\n\tfunction bound() { echo 'the_events '; }\n}\n"));
+	$paid = 'echo json_encode(event::bindings()["zz.paid"])."\n"; event::dispatch("zz.paid");';
+	try {
+		file_put_contents($events, $php."\nevent::bind('zz.paid')->to('zzshop', 'bound');\n");
+		$out = explode("\n", race_php($paid, 1)[0]);
+		same(array('zzpay.mark', 'zzshop.bound', 'zzshop.see'), json_decode($out[0], true), 'zz.paid listeners:');
+		same('bundled the_events listens ', $out[1], 'zz.paid ran:');
+		// an override's listens() counts for the bundled model, in its place
+		temp_model("$app/the_zzpay", array('the_zzpay.php' => "<?php\nclass the_zzpay extends zzpay\n{\n}\n"));
+		$out = explode("\n", race_php($paid, 1)[0]);
+		same('bundled the_events listens ', $out[1], 'zz.paid ran, with the_zzpay:');
+		remove_dir("$app/the_zzpay");
+		// and the site can unbind it in the_events.php
+		file_put_contents($events, $php."\nevent::unbind('zz.paid')->from('zzpay', 'mark');\n");
+		$out = explode("\n", race_php($paid, 1)[0]);
+		same(array('zzshop.see'), json_decode($out[0], true), 'zz.paid listeners, zzpay.mark unbound:');
+		same('listens ', $out[1], 'zz.paid ran, zzpay.mark unbound:');
+	} finally {
+		file_put_contents($events, $kept);
+		remove_dir(BASE.'models/zzpay');
+		remove_dir("$app/the_zzpay");
+		remove_dir("$app/zzshop");
+		controller::forget_models();
+	}
+});
+
 test('the_mail reaches mail sent by newsletter', function () use ($maildir) {
 	$app = APPBASE.config::get('models_path', 'models');
 	temp_model("$app/the_mail", array('the_mail.php' => "<?php\nclass the_mail extends mail\n{\n\tstatic function send(\$to, \$subject, \$html, \$text = null, \$headers = array()) {\n\t\treturn parent::send(\$to, '[T] '.\$subject, \$html, \$text, \$headers);\n\t}\n}\n"));
@@ -516,6 +562,24 @@ test('template defaults become content', function () use ($base) {
 	check(strpos($body, 'Placeholder') === false, 'remove block leaked');
 	check(strpos($body, 'href="'.$base.'/news/news_item/raster-runs-on-php-8"') !== false, 'detail link');
 	check(strpos($body, 'href="'.$base.'/news"') !== false, '.html links rewritten');
+});
+test('an extension on a routed or missing URL is never HTML labelled as another type (#120)', function () use ($base) {
+	$type = function ($headers) { return (string)current(preg_grep('/^Content-Type:/i', $headers)); };
+	// a missing page is the 404 page, as HTML
+	list($status, $body, $headers) = http('GET', "$base/nothing-here.json");
+	same(404, $status);
+	check(stripos($type($headers), 'text/html') !== false, $type($headers));
+	// a routed URL renders the routed view in that format: news.rss
+	list($status, $body, $headers) = http('GET', "$base/news/news_page/2.rss");
+	same(200, $status);
+	check(stripos($type($headers), 'application/rss+xml') !== false && strpos($body, '<rss') !== false, $type($headers));
+	// and is a 404 when the view has no file in it
+	list($status, , $headers) = http('GET', "$base/news/news_page/2.json");
+	same(404, $status);
+	check(stripos($type($headers), 'text/html') !== false, $type($headers));
+	// real format views are unchanged
+	same(200, http('GET', "$base/news.rss")[0]);
+	same(200, http('GET', "$base/sitemap.xml")[0]);
 });
 test('missing pages and items are 404', function () use ($base) {
 	same(404, http('GET', "$base/nothing-here")[0]);
@@ -881,6 +945,18 @@ function location($headers) {
 	return null;
 }
 
+test('one page has one address: a trailing slash and index.php/ redirect (#131)', function () use ($base) {
+	foreach (array('/about/' => '/about', '/index.php/about' => '/about', '/index.php/about/' => '/about', '/news/news_page/2/' => '/news/news_page/2',
+		'/about/?x=1&y=a%20b' => '/about?x=1&y=a%20b', '/news/news_items/headline/Filler%201/' => '/news/news_items/headline/Filler%201') as $asked => $address) {
+		list($status, , $headers) = http('GET', $base.$asked);
+		same(301, $status, $asked);
+		same($base.$address, location($headers), $asked);
+	}
+	same(200, http('GET', "$base/")[0]);
+	same(200, http('GET', "$base/about")[0]);
+	// a form sent to the slashed address is not lost in a redirect
+	same(200, http('POST', "$base/about/", 'x=1', array('Content-Type: application/x-www-form-urlencoded'))[0]);
+});
 test('lint: form conventions', function () {
 	check(has_problem(lint_html('<form method="post"><input name="a"></form>'), 'not inside a render block'));
 	check(has_problem(lint_html("<!-- render.site.nav --><form method=\"post\"><input name=\"a\" required><!-- render.validation.field('b') -->x<!-- /render.validation.field('b') --></form><!-- /render.site.nav -->"), "no input named b"));
@@ -959,7 +1035,26 @@ test('collections: slugs, drafts, scheduling, order', function () use ($base) {
 	list(, $body) = http('GET', "$base/news");
 	check(strpos($body, 'Secret draft') === false && strpos($body, 'From the future') === false, 'hidden items shown');
 	same(404, http('GET', "$base/news/news_item/secret-draft")[0]);
+	// a slug ending like one of SQLite's side files is a page (#98)
+	$journal = mcp_call('create_item', array('collection' => 'news', 'fields' => array('headline' => 'My travel journal')))['structuredContent'];
+	same('my-travel-journal', $journal['slug']);
+	same(200, http('GET', "$base/news/news_item/my-travel-journal")[0]);
+	mcp_call('delete_item', array('collection' => 'news', 'id' => $journal['id']));
 	check(strpos($body, 'Ünïcode') < strpos($body, 'Raster runs on PHP 8'), 'order=newest');
+});
+test('an item titled only with digits opens at its own slug (#90)', function () use ($base) {
+	http('GET', "$base/news");
+	$year = mcp_call('create_item', array('collection' => 'news', 'fields' => array('headline' => '1984')))['structuredContent'];
+	$one = mcp_call('create_item', array('collection' => 'news', 'fields' => array('headline' => '1')))['structuredContent'];
+	same('1984', $year['slug']);
+	same('1', $one['slug']);
+	check(strpos(http('GET', "$base/news/news_item/1984")[1], '<h1>1984</h1>') !== false, 'the item titled 1984');
+	// item 1 is the mock-up; the link /news/news_item/1 is the item titled 1
+	check(strpos(http('GET', "$base/news/news_item/1")[1], '<h1>1</h1>') !== false, 'the item titled 1, not item id 1');
+	// an id no slug shadows still opens its item
+	check(strpos(http('GET', "$base/news/news_item/{$year['id']}")[1], '<h1>1984</h1>') !== false, 'by id');
+	mcp_call('delete_item', array('collection' => 'news', 'id' => $year['id']));
+	mcp_call('delete_item', array('collection' => 'news', 'id' => $one['id']));
 });
 test('feeds are well-formed and escaped', function () use ($base) {
 	list($status, $body, $headers) = http('GET', "$base/news.rss");
@@ -1192,6 +1287,38 @@ test('frozen database: accounts and newsletter after schema --apply', function (
 		array_map('unlink', glob("$db*") ?: array());
 	}
 });
+test('the comment at the top of bin/raster lists what raster help lists (#49)', function () use ($root) {
+	// per command: the options and the <placeholders> it names
+	$names = function ($text) {
+		preg_match_all('/--([a-z\-]+)/', $text, $options);
+		preg_match_all('/<[^>]+>/', $text, $placeholders);
+		$names = array_values(array_unique(array_merge($options[1], $placeholders[0])));
+		sort($names);
+		return $names;
+	};
+	$header = array();
+	preg_match_all('#^//   php bin/raster (\S+)(.*)$#m', file_get_contents("$root/bin/raster"), $lines, PREG_SET_ORDER);
+	foreach ($lines as $line) $header[$line[1]] = $names($line[2]);
+	$help = array();
+	$command = null;
+	foreach (explode("\n", (string)shell_exec(escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' help')) as $line) {
+		// a command's lines are its own and the indented ones below it; the
+		// usage is what comes before the description's wide gap
+		if (preg_match('#^  php bin/raster (\S+)#', $line, $m)) $command = $m[1];
+		elseif (!preg_match('#^ {8}#', $line)) $command = null;
+		if ($command === null) continue;
+		$parts = preg_split('/\s{2,}/', trim($line));
+		$usage = preg_match('#^(php bin/raster|--)#', $parts[0]) ? $parts[0] : '';
+		// options named only in a description are taken too, as bin/raster does
+		preg_match_all('/--[a-z\-]+/', $line, $options);
+		$help[$command] = array_merge(isset($help[$command]) ? $help[$command] : array(), array($usage), $options[0]);
+	}
+	foreach ($help as $command => $texts) $help[$command] = $names(implode(' ', $texts));
+	ksort($header);
+	ksort($help);
+	same(array_keys($help), array_keys($header), 'the same commands');
+	foreach ($help as $command => $expected) same($expected, $header[$command], "$command:");
+});
 
 // ## What is never served: one list, three servers
 
@@ -1222,6 +1349,22 @@ test('private_paths: the rules, and the apps they name', function () use ($root)
 	check(private_paths::blocked('/.well-known/.env'), 'but not a dotfile inside it');
 	check(private_paths::blocked('/.well-known/x.php'), 'nor code');
 	check(private_paths::blocked('/.well-knownx/y'), 'nor a folder that only starts like it');
+	// SQLite's side files, not every URL that ends like one (#98)
+	foreach (array('/raster.sqlite-journal', '/x/raster.sqlite-wal', '/raster.SQLITE-SHM') as $path) check(private_paths::blocked($path), "$path must be private");
+	foreach (array('/news/news_item/my-travel-journal', '/reading-journal', '/data-wal') as $path) check(!private_paths::blocked($path), "$path must be served");
+});
+test('lint warns about a view whose address the server refuses (#98)', function () use ($root) {
+	$dir = "$root/application/views/default/docs";
+	@mkdir($dir);
+	file_put_contents("$dir/config.html", '<p>Settings</p>');
+	file_put_contents("$dir/setup.html", '<p>Setup</p>');
+	try {
+		$problems = (new raster_inspector())->lint();
+		check(has_problem($problems, '/docs/config is refused'), 'lint said: '.json_encode($problems));
+		check(!has_problem($problems, '/docs/setup is refused'), 'an ordinary page');
+	} finally {
+		remove_dir($dir);
+	}
 });
 test('private_paths: every server config carries every rule', function () use ($root) {
 	require_once BASE.'private_paths.php';
@@ -2310,6 +2453,50 @@ test('the editor\'s clean() drops the same script links (#67)', function () use 
 	unlink($file);
 	same(array_values($cases), json_decode((string)$out, true), (string)$out);
 });
+test('the editor leaves Enter to the browser in a list or a table, and makes a line break in a paragraph (#114)', function () use ($root) {
+	$node = trim((string)shell_exec('command -v node 2>/dev/null'));
+	if ($node === '') return; // no node here: tests/editor-browser.js covers it in a browser
+	$js = file_get_contents("$root/system/models/cms/editor/editor.js");
+	check(preg_match('/\tfunction takesBlocks\(el\) \{.*?\n\t\}\n/s', $js, $m), 'editor.js has takesBlocks()');
+	$cases = array('DIV' => true, 'TD' => true, 'UL' => true, 'OL' => true, 'DL' => true, 'TABLE' => true, 'TBODY' => true,
+		'P' => false, 'H2' => false, 'LI' => false, 'SPAN' => false, 'A' => false,
+		// the editor's own wrapper: a <div> is judged by its parent, a <span> never takes blocks
+		'DIV in ARTICLE' => true, 'DIV in TD' => true, 'DIV in LI' => false, 'SPAN in ARTICLE' => false, 'SPAN in P' => false);
+	$file = sys_get_temp_dir().'/raster-blocks-'.getmypid().'.js';
+	file_put_contents($file, $m[0]."\nvar cases = ".json_encode(array_keys($cases)).";\n"
+		."function el(t, wrap, parent) { return { tagName: t, nodeType: 1, parentNode: parent || null, hasAttribute: function (a) { return !!wrap && a === 'data-raster-wrap'; } }; }\n"
+		."process.stdout.write(JSON.stringify(cases.map(function (c) { var p = c.split(' in '); return takesBlocks(p[1] ? el(p[0], true, el(p[1])) : el(p[0])); })));\n");
+	$out = shell_exec(escapeshellarg($node).' '.escapeshellarg($file).' 2>&1');
+	unlink($file);
+	same(array_values($cases), json_decode((string)$out, true), (string)$out);
+	// every field the editor makes knows it: those found in the page, those
+	// of an item added or copied in the page, and those of the new-item card
+	check(substr_count($js, 'inline: !holdsBlocks(node)') === 1 && strpos($js, 'field.inline = !holdsBlocks(field.el)') !== false, 'adopt() and scan() set inline');
+	check(strpos($js, 'clean(node.innerHTML, !holdsBlocks(node))') !== false, 'a new item is cleaned for where it sits');
+});
+test('a rich field that already holds paragraphs keeps them, in an <li> or an <a> card too', function () use ($root) {
+	$node = trim((string)shell_exec('command -v node 2>/dev/null'));
+	if ($node === '') return;
+	$js = file_get_contents("$root/system/models/cms/editor/editor.js");
+	$code = '';
+	foreach (array('isBlock', 'takesBlocks', 'holdsBlocks') as $name) {
+		check(preg_match('/\tfunction '.$name.'\(\w+\) \{.*?\n\t\}\n/s', $js, $m), "editor.js has $name()");
+		$code .= $m[0];
+	}
+	// "A holding P": an <a> whose children are a <p>; "DIV in LI": the editor's wrapper
+	$cases = array('LI holding P P' => true, 'A holding P P' => true, 'DT holding UL' => true, 'DIV in LI holding P P' => true,
+		'LI' => false, 'LI holding EM' => false, 'A holding SPAN' => false, 'DIV in LI' => false, 'SPAN in LI holding EM' => false,
+		'P' => false, 'H2 holding EM' => false, 'ARTICLE' => true, 'DIV in TD' => true);
+	$file = sys_get_temp_dir().'/raster-holds-'.getmypid().'.js';
+	file_put_contents($file, $code."\nvar cases = ".json_encode(array_keys($cases)).";\n"
+		."function el(t, wrap, parent, kids) { return { tagName: t, nodeType: 1, parentNode: parent || null, childNodes: (kids || []).map(function (k) { return el(k); }), hasAttribute: function (a) { return !!wrap && a === 'data-raster-wrap'; } }; }\n"
+		."process.stdout.write(JSON.stringify(cases.map(function (c) { var h = c.split(' holding '), kids = h[1] ? h[1].split(' ') : [], p = h[0].split(' in '); return holdsBlocks(p[1] ? el(p[0], true, el(p[1]), kids) : el(p[0], false, null, kids)); })));\n");
+	$out = shell_exec(escapeshellarg($node).' '.escapeshellarg($file).' 2>&1');
+	unlink($file);
+	same(array_values($cases), json_decode((string)$out, true), (string)$out);
+	// Enter in the new-item card follows the same rule
+	check(strpos($js, "!holdsBlocks(fresh)") !== false, 'the new-item card asks holdsBlocks()');
+});
 test('arrays and bad bytes fail required; a field named tags[] takes a list (#70)', function () use ($base) {
 	$v = validation::get();
 	$r = new ReflectionMethod($v, 'check_field');
@@ -2836,17 +3023,20 @@ test('the site time zone sets today and published_at (#84)', function () use ($r
 	try {
 		cms_records::create('zztzday', array('title' => 'UTC today', 'day' => gmdate('Y-m-d')));
 		cms_records::create('zztzday', array('title' => 'Site today', 'day' => $there->format('Y-m-d')));
-		// a minute ago on the site's clock: hours away on UTC's
-		$minute_ago = (clone $there)->modify('-1 minute')->format('Y-m-d H:i:s');
-		cms_store::save_item('newsdata', 0, array('headline' => 'Zone news', 'published_at' => $minute_ago), array('headline', 'published_at'));
+		// a minute off on the site's clock is hours off on UTC's: ahead of
+		// UTC a minute ago is still to come by UTC; behind it a minute from
+		// now has long passed by UTC
+		$ahead = $there->getOffset() > 0;
+		$stamp_at = (clone $there)->modify($ahead ? '-1 minute' : '+1 minute')->format('Y-m-d H:i:s');
+		cms_store::save_item('newsdata', 0, array('headline' => 'Zone news', 'published_at' => $stamp_at), array('headline', 'published_at'));
 		$utc = $render();
 		check(strpos($utc, '<li>UTC today</li>') !== false && strpos($utc, 'Site today') === false, "without a time zone today is UTC's: $utc");
-		check(strpos($utc, 'Zone news') === false, 'and the news is still scheduled');
+		check((strpos($utc, 'Zone news') !== false) === !$ahead, $ahead ? 'and the news is still scheduled' : 'and the news is already live');
 		file_put_contents($config, $settings."\nconfig::set('timezone')->to('$zone');\n");
 		$zoned = $render();
 		check(strpos($zoned, '<li>Site today</li>') !== false, "today is the site's date: $zoned");
 		check(strpos($zoned, 'UTC today') === false, "an item dated today in UTC is not today on the site: $zoned");
-		check(strpos($zoned, '<li>Zone news</li>') !== false, 'published a minute ago on the site clock is live');
+		check((strpos($zoned, '<li>Zone news</li>') !== false) === $ahead, $ahead ? 'published a minute ago on the site clock is live' : 'published a minute from now on the site clock is scheduled');
 		// stamps follow it too
 		$stamp = with_timezone($zone, function () {
 			$item = cms_records::create('zztzday', array('title' => 'Stamped', 'day' => ''));
@@ -4492,6 +4682,42 @@ test('booking: requires(): emails, pages, settings and records', function () {
 			config::set('protected')->to($protected);
 		}
 	});
+});
+
+test('editor: marks settle in one pass over the page, however long (#53)', function () {
+	$template = template::instance();
+	$saved = $template->marks;
+	try {
+		$template->marks = array();
+		for ($i = 1; $i <= 12; $i++) $template->mark(array('kind' => 'field'));
+		$m = function ($id) { return '<!--raster:s '.$id.'-->x<!--raster:e '.$id.'-->'; };
+		$html = '<html><head><title>'.$m(1).'</title></head><BODY class="a">'.$m(2)
+			.'<a title="'.$m(3).'">'.$m(4).'</a><script>var a = "'.$m(5).'";</script>'.$m(6)
+			.'<TEXTAREA>'.$m(7).'</textarea><select><option>'.$m(8).'</option></select><p>'.$m(9)
+			.'<style>'.$m(10).'</STYLE><!--raster:a 11--><img src="a.jpg"><img alt="<!--raster:a 12-->"></p></body></html>';
+		$out = cms_editor::settle($html);
+		$hidden = array();
+		foreach ($template->marks as $id => $mark) if (!empty($mark['hidden'])) $hidden[] = $id;
+		same(array(1, 3, 5, 7, 8, 10, 12), $hidden);
+		foreach (array(2, 4, 6, 9) as $id) check(strpos($out, $m($id)) !== false, "mark $id kept: $out");
+		check(strpos($out, '<!--raster:a 11--><img') !== false && strpos($out, 'raster:s 1-->') === false, $out);
+		// a long list: one forward pass, not a copy of the page per mark
+		$template->marks = array();
+		$rows = '';
+		for ($i = 0; $i < 2000; $i++) {
+			$item = $template->mark(array('kind' => 'item'));
+			$title = $template->mark(array('kind' => 'item_field'));
+			$photo = $template->mark(array('kind' => 'item_attr'));
+			$rows .= '<!--raster:s '.$item.'--><li class="dish"><h3>'.$m($title).'</h3><!--raster:a '.$photo.'--><img src="d.jpg" alt="Dish"></li><!--raster:e '.$item.'-->';
+		}
+		$start = microtime(true);
+		$out = cms_editor::settle('<html><head><title>Menu</title></head><body><ul>'.$rows.'</ul></body></html>');
+		$took = microtime(true) - $start;
+		same(0, count(array_filter($template->marks, function ($mark) { return !empty($mark['hidden']); })));
+		check($took < 0.25, 'settle took '.round($took * 1000).' ms for 6,000 marks');
+	} finally {
+		$template->marks = $saved;
+	}
 });
 
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";

@@ -122,6 +122,12 @@ test('edited framework files stop an update', function () use ($site, $rel210) {
 
 test('update --force', function () use ($site, $rel210) {
 	append("$site/application/views/default/about.html", "\n<!-- my page -->\n");
+	// a page cached before the update
+	$cache = "$site/application/data/cache";
+	if (!is_dir($cache)) mkdir($cache, 0775, true);
+	file_put_contents("$cache/version", 'before');
+	$page = "$cache/".sha1('a page');
+	file_put_contents($page, "{}\n<p>old</p>");
 	list($code, $out) = raster($site, array('update', $rel210, '--force'));
 	same(0, $code, $out);
 	has($out, 'Updated to Raster 2.1.0');
@@ -135,6 +141,8 @@ test('update --force', function () use ($site, $rel210) {
 	has(file_get_contents("$site/application/views/default/about.html"), '<!-- my page -->', 'the app is left alone');
 	same("upgraded\n", file_get_contents("$site/application/config/marker.txt"));
 	same("2.1.0\n", file_get_contents("$site/application/config/raster-version"));
+	check(!is_file($page), 'the pages cached before the update are deleted');
+	check(file_get_contents("$cache/version") !== 'before', 'and the page cache has a new version');
 	// the old files are kept
 	preg_match('#The replaced files are in (\S+)/#', $out, $m);
 	check(isset($m[1]) && strpos($m[1], 'application/data/backups/raster-2.0.0-') === 0, $out);
@@ -404,6 +412,110 @@ test('new sites get no old .htaccess below the root (#76)', function () use ($re
 		check(!private_paths::blocked("/application/views/default/$file"), "theme file $file is served");
 	}
 	has(raster($site, array('doctor'))[1], '✓ .htaccess has every rule');
+});
+
+test('a file update can\'t write stops it, and the old files are put back (#102)', function () use ($tmp, $rel200, $rel210) {
+	$site = "$tmp/site-readonly";
+	same(0, raster($rel200, array('new', $site))[0]);
+	chmod("$site/system/util.php", 0444);
+	try {
+		list($code, $out) = raster($site, array('update', $rel210));
+		same(1, $code, $out);
+		has($out, 'system/util.php');
+		lacks($out, 'Updated to Raster');
+		lacks($out, 'Warning:', 'a refusal, not a PHP warning');
+		// as it was: what was changed before the failure is back, what was new is gone
+		same("2.0.0\n", file_get_contents("$site/system/VERSION"));
+		lacks(file_get_contents("$site/system/util.php"), '// changed in 2.1.0');
+		check(is_file("$site/system/obsolete.txt"), 'the removed file is back');
+		check(!file_exists("$site/system/tools/hello.php"), 'the new file is gone');
+		check(!file_exists("$site/system/upgrades/2.1.0.php"), 'the new upgrade step is gone');
+		check(!file_exists("$site/application/config/marker.txt"), 'no upgrade ran');
+		same("2.0.0\n", file_get_contents("$site/application/config/raster-version"));
+		list($code, $out) = raster($site, array('doctor'));
+		has($out, '✓ Raster 2.0.0');
+		has($out, '✓ Framework files as installed');
+	} finally {
+		chmod("$site/system/util.php", 0644);
+	}
+	// once the file can be written, the same update goes through
+	list($code, $out) = raster($site, array('update', $rel210));
+	same(0, $code, $out);
+	has(file_get_contents("$site/system/util.php"), '// changed in 2.1.0');
+});
+
+test('update takes only a folder that holds a Raster release, even with --force (#102)', function () use ($tmp, $rel200) {
+	$site = "$tmp/site-notarelease";
+	same(0, raster($rel200, array('new', $site))[0]);
+	$before = file_get_contents("$site/system/checksums.json");
+	mkdir("$tmp/empty-folder");
+	mkdir("$tmp/other-folder/system", 0775, true);
+	file_put_contents("$tmp/other-folder/system/VERSION", "9.9.9\n");
+	foreach (array("$tmp/empty-folder", "$tmp/other-folder") as $folder) {
+		foreach (array(array(), array('--force')) as $force) {
+			list($code, $out) = raster($site, array_merge(array('update', $folder), $force));
+			same(1, $code, $out);
+			has($out, "$folder does not hold a Raster release");
+			lacks($out, 'removed file(s)');
+		}
+	}
+	check(is_file("$site/bin/raster") && is_file("$site/system/boot.php"), 'the framework is still there');
+	list($code, $out) = raster($site, array('doctor'));
+	has($out, '✓ Framework files as installed');
+	same($before, file_get_contents("$site/system/checksums.json"));
+});
+
+// ## Uploads and downloads (#115, #113)
+
+test('doctor in production warns when PHP takes smaller uploads than the editor sends (#115)', function () use ($site) {
+	$doctor = function ($upload, $post) use ($site) {
+		$env = array_merge(getenv(), array('RASTER_APP' => 'application', 'RASTER_DB' => "$site/application/data/test.sqlite", 'NO_COLOR' => '1', 'RASTER_ENV' => 'production', 'RASTER_URL' => 'https://site.example/', 'RASTER_MAIL' => 'smtp://mail.example:587'));
+		unset($env['RASTER_MCP_TOKEN']);
+		$process = proc_open(array(PHP_BINARY, '-d', "upload_max_filesize=$upload", '-d', "post_max_size=$post", "$site/bin/raster", 'doctor'), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $site, $env);
+		$out = stream_get_contents($pipes[1]).stream_get_contents($pipes[2]);
+		return array(proc_close($process), $out);
+	};
+	// stock PHP: 2 MB files in an 8 MB request
+	list($code, $out) = $doctor('2M', '8M');
+	same(0, $code, 'a warning, not a failure: '.$out);
+	has($out, 'PHP takes uploads up to 2M');
+	has($out, 'upload_max_filesize = 12M');
+	list($code, $out) = $doctor('64M', '8M');
+	has($out, 'PHP takes requests up to 8M');
+	has($out, 'post_max_size = 13M');
+	list($code, $out) = $doctor('12M', '13M');
+	lacks($out, 'PHP takes');
+	// 0 is no limit for post_max_size
+	list($code, $out) = $doctor('1G', '0');
+	lacks($out, 'PHP takes');
+});
+
+test('update downloads a release over HTTP and reads its status (#113)', function () use ($repo, $tmp) {
+	$www = "$tmp/www";
+	@mkdir($www, 0775, true);
+	file_put_contents("$www/release.txt", "a release\n");
+	$socket = stream_socket_server('tcp://127.0.0.1:0');
+	$name = stream_socket_get_name($socket, false);
+	fclose($socket);
+	$base = 'http://'.$name;
+	$server = proc_open(array(PHP_BINARY, '-S', $name, '-t', $www), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $www);
+	try {
+		for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', (int)substr($name, strrpos($name, ':') + 1)); $i++) usleep(100000);
+		// every notice shows, so a deprecated way of reading the headers
+		// (PHP 8.5 deprecates $http_response_header) fails here
+		$download = function ($url) use ($repo) {
+			$code = 'require '.var_export("$repo/system/tools/project.php", true).'; try { echo raster_project::download($argv[1]); } catch (Exception $e) { echo "refused: ".$e->getMessage(); }';
+			$process = proc_open(array(PHP_BINARY, '-d', 'error_reporting=-1', '-d', 'display_errors=1', '-r', $code, $url), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes);
+			$out = stream_get_contents($pipes[1]).stream_get_contents($pipes[2]);
+			proc_close($process);
+			return $out;
+		};
+		same("a release\n", $download("$base/release.txt"));
+		same("refused: Could not download $base/missing.tar.gz (HTTP 404)", $download("$base/missing.tar.gz"));
+	} finally {
+		proc_terminate($server);
+		proc_close($server);
+	}
 });
 
 // ## 2.1.8 batch G: MCP themes

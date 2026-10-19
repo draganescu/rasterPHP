@@ -45,7 +45,7 @@ php bin/raster render /about
 php bin/raster render '/bookings?stylist=Ana' --as=editor
 ```
 
-Prints the HTML of a URL without a web server. Exits with 1 when the page answers with an error (404, 500), which makes it handy in tests. A query string fills `?…` as a browser's would.
+Prints the HTML of a URL without a web server, never from the page cache. Exits with 1 when the page answers with an error (404, 500) or a redirect, which makes it handy in tests. A protected page gets what a visitor gets: no page, `Location: …/login?next=…` and `HTTP 303` on stderr. A query string fills `?…` as a browser's would.
 
 `--as` renders the page as someone: an account's email or username, or a role (`editor`, `admin`, `member`) for a stand-in with that role. As staff, it also prints on stderr what the [in-page editor](The-In-Page-Editor) can do on the page: how many fields it can edit, the items, and each list with whether it gets a card for a new item. Use it after changing a page staff edit, to see that editing still works there. It refuses to run in production, where it would show any account's pages without a password: check on a development copy.
 
@@ -63,7 +63,7 @@ Compares the content model your templates declare with the database, and changes
 php bin/raster doctor [--json]
 ```
 
-A health check: PHP version and extensions, whether the app needs upgrade steps, whether framework files were edited, whether `.htaccess` has every protection rule, whether `data/` and `media/` are writable, template errors, database drift, deprecated features in use, and in production the site address, mail transport, MCP token and `RASTER_ENV`. Exit code 1 when something must be fixed. Run it on the server after every deploy.
+A health check: PHP version and extensions, whether the app needs upgrade steps, whether framework files were edited, whether `.htaccess` has every protection rule, whether `data/` and `media/` are writable, template errors, database drift, deprecated features in use, and in production the site address, mail transport, MCP token, `RASTER_ENV`, `display_errors` and whether PHP takes uploads as large as the editor's (12 MB: `upload_max_filesize` and `post_max_size`). Exit code 1 when something must be fixed. Run it on the server after every deploy.
 
 ## Accounts
 
@@ -110,7 +110,7 @@ Prints the web-server configuration that keeps private files private. See [Deplo
 | `php bin/raster vocabulary [--json]` | every model with its methods and their parameters, named SQL queries, events and listeners, reserved names |
 | `php bin/raster annotations [--json]` | the annotation grammar, as data |
 | `php bin/raster mcp` | runs the MCP server over standard input/output |
-| `php bin/raster cache clear` | throws the [page cache](Settings-and-Environments#the-page-cache) away, after editing views, models or the database by hand |
+| `php bin/raster cache clear` | throws the [page cache](Settings-and-Environments#the-page-cache) away, after editing views, models or the database by hand; exits 1 when it can't write the cache |
 
 These are also useful to humans: `vocabulary` is the quickest way to see what a template can call. See [Working with AI agents](Working-with-AI-Agents).
 

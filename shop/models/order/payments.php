@@ -183,7 +183,6 @@ class order_payments
 		curl_setopt_array($curl, $options);
 		$body = curl_exec($curl);
 		$status = (int)curl_getinfo($curl, CURLINFO_HTTP_CODE);
-		curl_close($curl);
 		$data = is_string($body) ? json_decode($body, true) : null;
 		if ($body === false || $status >= 400) {
 			$error = is_array($data) && isset($data['error']['code']) ? (string)$data['error']['code'] : 'unreachable';

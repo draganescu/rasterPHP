@@ -54,6 +54,7 @@ For each request, the first of these that gives one of your languages wins:
    config::set('domain_language')->to(array('example.ro' => 'ro'));
    ```
    Subdomains count too: `www.example.ro` is Romanian.
+   With the site's address set (`RASTER_URL`), the domains listed here are the site's own too: a page on `example.ro` keeps its language, its links stay on `example.ro`, and its forms are accepted. Only the domain exactly as listed counts for that, so list `www.example.ro` as well if visitors use it. Any other host gets the site's address.
 3. The cookie from an earlier `?lang=` choice. Its name is `lang`, or set your own with `config::set('language_cookie')->to('site_lang')`.
 4. The browser's preferred languages (`Accept-Language` header).
 5. The default language, the first in your list.

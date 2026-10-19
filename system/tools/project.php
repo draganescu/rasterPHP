@@ -118,7 +118,11 @@ class raster_project
 	// a folder holding a Raster release: a local path (a checkout or an
 	// unpacked archive), a .tar.gz file, or a version or branch on GitHub
 	static function fetch($source, $work) {
-		if (is_dir($source)) return realpath($source);
+		if (is_dir($source)) {
+			// the check an archive gets: --force overrides edited files, not this
+			if (!is_file("$source/system/boot.php")) throw new RuntimeException("$source does not hold a Raster release");
+			return realpath($source);
+		}
 		if (preg_match('/\.(tar\.gz|tgz)$/', $source) && is_file($source)) return self::unpack($source, $work);
 		$repo = getenv('RASTER_REPO') ?: self::REPO;
 		if ($source === 'latest') {
@@ -133,10 +137,14 @@ class raster_project
 		return self::unpack($archive, $work);
 	}
 
+	// the headers come from the stream: PHP 8.5 deprecates $http_response_header
 	static function download($url) {
 		$context = stream_context_create(array('http' => array('header' => "User-Agent: raster-update\r\n", 'timeout' => 60, 'ignore_errors' => true)));
-		$body = @file_get_contents($url, false, $context);
-		$status = isset($http_response_header[0]) && preg_match('/\s(\d{3})\s/', $http_response_header[0], $m) ? (int)$m[1] : 0;
+		$stream = @fopen($url, 'r', false, $context);
+		$body = $stream ? stream_get_contents($stream) : false;
+		$meta = $stream ? stream_get_meta_data($stream) : array();
+		if ($stream) fclose($stream);
+		$status = isset($meta['wrapper_data'][0]) && preg_match('/\s(\d{3})\s/', $meta['wrapper_data'][0], $m) ? (int)$m[1] : 0;
 		if ($body === false || $status !== 200) throw new RuntimeException("Could not download $url".($status ? " (HTTP $status)" : ''));
 		return $body;
 	}
@@ -171,7 +179,9 @@ class raster_project
 	}
 
 	// copies the framework files over, after keeping the old ones in
-	// <app>/data/backups/; returns the backup folder
+	// <app>/data/backups/; returns the backup folder. A file it can't write
+	// or remove stops it, and the old files are put back: the project is
+	// never left half updated and recorded as installed.
 	static function update($root, $release, $backup_app) {
 		$plan = self::plan($root, $release);
 		$backup = $root.'/'.$backup_app.'/data/backups/raster-'.self::version($root).'-'.date('Ymd-His');
@@ -179,24 +189,50 @@ class raster_project
 			self::copy_file($root.'/'.$path, $backup.'/'.$path);
 		}
 		if (is_file($root.'/system/checksums.json')) self::copy_file($root.'/system/checksums.json', $backup.'/system/checksums.json');
-		foreach ($plan['remove'] as $path) {
-			unlink($root.'/'.$path);
+		try {
+			foreach ($plan['remove'] as $path) {
+				if (!@unlink($root.'/'.$path)) throw new RuntimeException("Could not remove $path");
+			}
+			foreach (array_merge($plan['add'], $plan['change']) as $path) {
+				self::copy_file($release.'/'.$path, $root.'/'.$path, $path);
+			}
+		} catch (RuntimeException $e) {
+			$kept = substr($backup, strlen($root) + 1);
+			try { self::restore($root, $backup, $plan); }
+			catch (RuntimeException $failed) {
+				throw new RuntimeException($e->getMessage().'. Putting the old files back failed too ('.$failed->getMessage()."): they are in $kept/");
+			}
+			throw new RuntimeException($e->getMessage().'. Nothing was updated: the framework files are as they were (a copy is in '.$kept.'/)');
 		}
-		foreach (array_merge($plan['add'], $plan['change']) as $path) {
-			self::copy_file($release.'/'.$path, $root.'/'.$path);
-		}
-		// folders the release no longer has
-		foreach (array_reverse(self::folders($root.'/system')) as $dir) {
-			if (count(scandir($dir)) === 2) rmdir($dir);
-		}
+		self::remove_empty_folders($root);
 		if (is_file($root.'/bin/raster')) chmod($root.'/bin/raster', 0755);
 		self::record($root);
 		return is_dir($backup) ? $backup : null;
 	}
 
-	static function copy_file($from, $to) {
-		if (!is_dir(dirname($to))) mkdir(dirname($to), 0775, true);
-		copy($from, $to);
+	// undoes a stopped update: the backup's files back, the release's new ones gone
+	static function restore($root, $backup, $plan) {
+		foreach (array_merge($plan['change'], $plan['remove']) as $path) {
+			if (is_file($root.'/'.$path) && sha1_file($root.'/'.$path) === sha1_file($backup.'/'.$path)) continue;
+			self::copy_file($backup.'/'.$path, $root.'/'.$path, $path);
+		}
+		foreach ($plan['add'] as $path) {
+			if (file_exists($root.'/'.$path) && !@unlink($root.'/'.$path)) throw new RuntimeException("Could not remove $path");
+		}
+		self::remove_empty_folders($root);
+	}
+
+	// folders under system/ the files no longer need
+	static function remove_empty_folders($root) {
+		foreach (array_reverse(self::folders($root.'/system')) as $dir) {
+			if (count(scandir($dir)) === 2) rmdir($dir);
+		}
+	}
+
+	// $name is what an error calls the file (its path in the project)
+	static function copy_file($from, $to, $name = null) {
+		if (!is_dir(dirname($to))) @mkdir(dirname($to), 0775, true);
+		if (!@copy($from, $to)) throw new RuntimeException('Could not write '.($name === null ? $to : $name));
 	}
 
 	static function folders($dir) {
@@ -361,6 +397,13 @@ class raster_project
 
 	// ##Doctor
 
+	// a php.ini size (2M, 512K, 1G) in bytes
+	static function bytes($size) {
+		$units = array('k' => 1024, 'm' => 1048576, 'g' => 1073741824);
+		$unit = strtolower(substr(trim((string)$size), -1));
+		return (int)$size * (isset($units[$unit]) ? $units[$unit] : 1);
+	}
+
 	// checks a project and one app: array of array(status, title, detail)
 	// with status ok, warn or fail
 	static function doctor($root, $app, $environment) {
@@ -472,6 +515,14 @@ class raster_project
 			if (!in_array(strtolower((string)ini_get('display_errors')), array('', '0', 'off', 'false', 'no'), true)) {
 				$add('warn', 'display_errors is on in PHP\'s settings', "Raster turns it off for each request, but an error before that (a mistake in config/) still reaches visitors.\nSet display_errors = Off and log_errors = On in php.ini, as php.ini-production does");
 			}
+			// the editor sends pictures up to cms_editor::UPLOAD_MB, in a request
+			// with the rest of its form; stock PHP takes 2M files in 8M requests
+			$mb = cms_editor::UPLOAD_MB;
+			$upload = ini_get('upload_max_filesize');
+			$post = ini_get('post_max_size');
+			$where = "in the php.ini of the PHP that serves the site (this command may read another one)";
+			if (self::bytes($upload) < $mb * 1048576) $add('warn', "PHP takes uploads up to $upload; the editor sends pictures up to $mb MB", "Larger pictures don't arrive. Set upload_max_filesize = {$mb}M $where");
+			if (self::bytes($post) && self::bytes($post) < ($mb + 1) * 1048576) $add('warn', "PHP takes requests up to $post; the editor sends pictures up to $mb MB", "Larger pictures don't arrive. Set post_max_size = ".($mb + 1)."M $where");
 		}
 		return $checks;
 	}

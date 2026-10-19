@@ -26,6 +26,10 @@ if ($booking && $booking['bundled'] && controller::uses('booking')) {
 	foreach (array('requested', 'confirmed', 'declined', 'cancelled', 'rescheduled') as $step) event::bind("booking.$step")->to('booking', $step.'_mail');
 }
 unset($booking, $step);
+// What the bundled models declare in listens() (an override's, for a
+// the_ model), here so it runs before the site's listeners and
+// config/the_events.php can unbind it; the site's models are bound at boot
+event::discover(true);
 // The CMS editing toolbar for logged in editors
 event::bind('before_output')->to('cms','inject_toolbar');
 // Alerts (<!-- print.validation.alert('name') -->) show or hide at the end

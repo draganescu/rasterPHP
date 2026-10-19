@@ -692,6 +692,7 @@ class mcp
 
 	protected function tool_clear_cache($arguments) {
 		$cleared = raster_cache::clear();
+		if (isset($cleared['error'])) throw new RuntimeException(ucfirst($cleared['error']));
 		return array('ok' => true, 'page_cache' => raster_cache::enabled()) + $cleared;
 	}
 
