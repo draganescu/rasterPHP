@@ -2303,8 +2303,31 @@ test('the editor leaves Enter to the browser in a list or a table, and makes a l
 	same(array_values($cases), json_decode((string)$out, true), (string)$out);
 	// every field the editor makes knows it: those found in the page, those
 	// of an item added or copied in the page, and those of the new-item card
-	check(substr_count($js, 'inline: !takesBlocks(node)') === 1 && strpos($js, 'field.inline = !takesBlocks(field.el)') !== false, 'adopt() and scan() set inline');
-	check(strpos($js, 'clean(node.innerHTML, !takesBlocks(node))') !== false, 'a new item is cleaned for where it sits');
+	check(substr_count($js, 'inline: !holdsBlocks(node)') === 1 && strpos($js, 'field.inline = !holdsBlocks(field.el)') !== false, 'adopt() and scan() set inline');
+	check(strpos($js, 'clean(node.innerHTML, !holdsBlocks(node))') !== false, 'a new item is cleaned for where it sits');
+});
+test('a rich field that already holds paragraphs keeps them, in an <li> or an <a> card too', function () use ($root) {
+	$node = trim((string)shell_exec('command -v node 2>/dev/null'));
+	if ($node === '') return;
+	$js = file_get_contents("$root/system/models/cms/editor/editor.js");
+	$code = '';
+	foreach (array('isBlock', 'takesBlocks', 'holdsBlocks') as $name) {
+		check(preg_match('/\tfunction '.$name.'\(\w+\) \{.*?\n\t\}\n/s', $js, $m), "editor.js has $name()");
+		$code .= $m[0];
+	}
+	// "A holding P": an <a> whose children are a <p>; "DIV in LI": the editor's wrapper
+	$cases = array('LI holding P P' => true, 'A holding P P' => true, 'DT holding UL' => true, 'DIV in LI holding P P' => true,
+		'LI' => false, 'LI holding EM' => false, 'A holding SPAN' => false, 'DIV in LI' => false, 'SPAN in LI holding EM' => false,
+		'P' => false, 'H2 holding EM' => false, 'ARTICLE' => true, 'DIV in TD' => true);
+	$file = sys_get_temp_dir().'/raster-holds-'.getmypid().'.js';
+	file_put_contents($file, $code."\nvar cases = ".json_encode(array_keys($cases)).";\n"
+		."function el(t, wrap, parent, kids) { return { tagName: t, nodeType: 1, parentNode: parent || null, childNodes: (kids || []).map(function (k) { return el(k); }), hasAttribute: function (a) { return !!wrap && a === 'data-raster-wrap'; } }; }\n"
+		."process.stdout.write(JSON.stringify(cases.map(function (c) { var h = c.split(' holding '), kids = h[1] ? h[1].split(' ') : [], p = h[0].split(' in '); return holdsBlocks(p[1] ? el(p[0], true, el(p[1]), kids) : el(p[0], false, null, kids)); })));\n");
+	$out = shell_exec(escapeshellarg($node).' '.escapeshellarg($file).' 2>&1');
+	unlink($file);
+	same(array_values($cases), json_decode((string)$out, true), (string)$out);
+	// Enter in the new-item card follows the same rule
+	check(strpos($js, "!holdsBlocks(fresh)") !== false, 'the new-item card asks holdsBlocks()');
 });
 test('arrays and bad bytes fail required; a field named tags[] takes a list (#70)', function () use ($base) {
 	$v = validation::get();
