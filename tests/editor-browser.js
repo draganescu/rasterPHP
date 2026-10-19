@@ -12,12 +12,19 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const net = require('net');
+const crypto = require('crypto');
 
 const root = path.resolve(__dirname, '..');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'raster-editor-'));
 const screens = path.join(__dirname, 'screens');
 fs.mkdirSync(screens, { recursive: true });
-const env = Object.assign({}, process.env, { RASTER_APP: 'demo', RASTER_DB: path.join(tmp, 'cafe.sqlite'), RASTER_MAIL: 'log://' + path.join(tmp, 'mail') });
+const env = Object.assign({}, process.env, { RASTER_APP: 'demo', RASTER_DB: path.join(tmp, 'cafe.sqlite'), RASTER_MAIL: 'log://' + path.join(tmp, 'mail'), RASTER_SECRET: 'test-secret' });
+// a post form's signed time stamp, made a minute ago, as a browser that
+// fetched the form would send it (tests/db.php stamp_for_tests)
+function stamp() {
+	const time = Math.floor(Date.now() / 1000) - 60;
+	return time + '.' + crypto.createHmac('sha256', 'test-secret').update('raster_ts|' + time).digest('hex');
+}
 
 let failures = 0, passed = 0;
 function check(condition, message) { if (condition) passed++; else { failures++; console.log('  ✗ ' + message); } }
@@ -348,7 +355,7 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 		await page.keyboard.press('Escape');
 
 		// a record: the model's actions are buttons, its readonly fields are not editable
-		await fetch(base + '/visit?date=' + tuesday, { method: 'POST', body: new URLSearchParams({ raster_form: 'booking.form', resource: 'dining-room', name: 'Ilinca', email: 'ilinca@example.com', date: tuesday, time: '19:00', people: '2', terms: '1' }), redirect: 'manual' });
+		await fetch(base + '/visit?date=' + tuesday, { method: 'POST', body: new URLSearchParams({ raster_form: 'booking.form', raster_ts: stamp(), resource: 'dining-room', name: 'Ilinca', email: 'ilinca@example.com', date: tuesday, time: '19:00', people: '2', terms: '1' }), redirect: 'manual' });
 		await page.goto(base + '/staff');
 		await page.waitForTimeout(500);
 		const booking = page.locator('[data-raster-item]', { hasText: 'Ilinca' }).first();
