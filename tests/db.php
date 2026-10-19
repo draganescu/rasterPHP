@@ -89,3 +89,10 @@ register_shutdown_function(function () {
 	$server = test_pdo(test_server('mysql'));
 	foreach ($test_databases as $name) $server->exec("DROP DATABASE IF EXISTS `$name`");
 });
+
+// The stamp a browser would post: a form shown $ago seconds ago, signed with
+// the key the suites give their servers (RASTER_SECRET=test-secret).
+function stamp_for_tests($ago = 60) {
+	$time = time() - $ago;
+	return $time.'.'.hash_hmac('sha256', 'raster_ts|'.$time, 'test-secret');
+}

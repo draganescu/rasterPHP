@@ -489,7 +489,11 @@ class contact {
   checked boxes, selected options and textarea text. Passwords are never
   filled.
 - **Added automatically** to every post form: `raster_form` (its owner), a
-  honeypot field, and the session token for logged in users.
+  honeypot field, the session token for logged in users, and `raster_ts`, a
+  signed time stamp (the time the form was shown and an HMAC of it with the
+  site's key; see `RASTER_SECRET`). It is a hidden field like the others,
+  never a field of the form's own, and it is left out of emails, static
+  exports and forms with no render block around them. Nothing reads it yet.
 - **Refused automatically:** posts from other sites (an `Origin: null`
   counts as another site unless `Sec-Fetch-Site` says it is this one), and
   bots that fill the honeypot. The bots get a fake success.
@@ -1380,6 +1384,9 @@ use `'model.method'`: `method(true)` returns
     letter case (`/ABOUT` finds `about.html` on a disk that ignores case,
     as on macOS and Windows). A model that decides the same calls
     `raster_cache::skip()`.
+  - **Form stamps stay fresh.** A cached page keeps a marker where each
+    form's `raster_ts` goes, and a hit writes one new stamp into every form
+    on the page, so a cached form is no easier to replay than a live one.
   - Settings: `page_cache_ttl` (3600 seconds) and `page_cache_skip` (path
     patterns). Responses carry `X-Raster-Cache: hit|miss` (`miss` only when
     the page was stored). `describe` says
@@ -1640,6 +1647,13 @@ Environment variables: `RASTER_ENV`, `RASTER_URL`, `RASTER_DB`,
 `RASTER_APP` (the application folder, `application` by default),
 `RASTER_MAIL`, `RASTER_MAIL_FROM`, `RASTER_MCP_TOKEN`, `NO_COLOR` (plain
 command-line output). They win over the settings above.
+
+`RASTER_SECRET` is the site's key for signing form stamps (not a setting, so
+`describe` never shows it). Without it Raster makes `data/secret` (64 hex
+characters, mode 0600) the first time it needs one and keeps using that file.
+Set the variable instead when several servers share a site, so they all sign
+and check with one key. Changing the key makes the forms already shown fail
+their stamp check, so people with a page open send it again.
 
 ## Checklist for a change
 

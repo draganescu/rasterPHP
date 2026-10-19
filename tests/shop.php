@@ -19,6 +19,7 @@ putenv('RASTER_APP=shop');
 putenv("RASTER_DB=$db");
 putenv("RASTER_MAIL=log://$maildir");
 putenv('RASTER_ENV');
+putenv('RASTER_SECRET=test-secret');
 
 require_once $root.'/system/boot.php';
 boot::$appname = 'shop';
@@ -49,7 +50,7 @@ function free_port() {
 function server($env) {
 	global $root, $servers, $tmp;
 	$port = free_port();
-	$env = array_merge(array('PATH' => getenv('PATH'), 'RASTER_APP' => 'shop'), $env);
+	$env = array_merge(array('PATH' => getenv('PATH'), 'RASTER_APP' => 'shop', 'RASTER_SECRET' => 'test-secret'), $env);
 	$process = proc_open(array(PHP_BINARY, '-d', 'error_reporting=-1', '-d', 'log_errors=1', '-d', 'display_errors=0', '-d', "error_log=$tmp/php-errors.log", '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, $env);
 	for ($i = 0; $i < 100 && !@fsockopen('127.0.0.1', $port); $i++) usleep(50000);
 	$servers[] = $process;
@@ -62,6 +63,8 @@ register_shutdown_function(function () use ($tmp, $root) {
 });
 function http($method, $url, $body = null, $headers = array()) {
 	if (is_array($body)) {
+		// as a browser posts: the form's own stamp, shown a minute ago
+		if (isset($body['raster_form']) && !isset($body['raster_ts'])) $body['raster_ts'] = stamp_for_tests(60);
 		$body = http_build_query($body);
 		$headers[] = 'Content-Type: application/x-www-form-urlencoded';
 	}
