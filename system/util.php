@@ -4,6 +4,28 @@
 // providing a view wrappers for often uses situations
 class util {
 
+	// the site's key for signing things (the form stamp): RASTER_SECRET, else
+	// data/secret, made on the first use. '' when there is none to be had.
+	static $secret = null;
+	static function secret() {
+		if (self::$secret !== null) return self::$secret;
+		$env = getenv('RASTER_SECRET');
+		if ($env !== false && $env !== '') return self::$secret = $env;
+		$file = APPBASE.'data/secret';
+		if (!is_file($file)) {
+			if (!is_dir(dirname($file))) @mkdir(dirname($file), 0775, true);
+			// 'x' fails when the file exists, so two first requests can't
+			// write different keys: the loser reads the winner's
+			$handle = @fopen($file, 'x');
+			if ($handle) {
+				fwrite($handle, bin2hex(random_bytes(32)));
+				fclose($handle);
+				@chmod($file, 0600);
+			}
+		}
+		return self::$secret = trim((string)@file_get_contents($file));
+	}
+
 	// get the value from a key/value set passed in the url
 	static function param($name, $v = false)
 	{
@@ -347,6 +369,11 @@ class raster_cache {
 		// the browser's copy is as new as this one
 		$since = isset($_SERVER['HTTP_IF_MODIFIED_SINCE']) ? strtotime((string)$_SERVER['HTTP_IF_MODIFIED_SINCE']) : false;
 		if ($since !== false && $since >= $meta['t']) http_response_code(304);
+		elseif (!empty($meta['ts'])) {
+			// the forms on this page carry a marker where the stamp goes:
+			// one fresh stamp for all of them, so "too fast" works on a cached page
+			echo str_replace('{{raster:ts}}', validation_spam::stamp(), (string)stream_get_contents($handle));
+		}
 		else fpassthru($handle);
 		fclose($handle);
 		exit;
@@ -391,7 +418,11 @@ class raster_cache {
 		// but every spelling would be a copy of its own
 		if (!self::spelled_as_on_disk(controller::instance()->current_route)) return;
 		$time = time();
-		$meta = json_encode(array('v' => self::$version, 't' => $time, 'type' => $type, 'headers' => $headers));
+		$meta = array('v' => self::$version, 't' => $time, 'type' => $type, 'headers' => $headers);
+		// the form stamps are not kept: each is a marker serve() fills in
+		$output = preg_replace('/(name="raster_ts" value=")[^"]*"/', '$1{{raster:ts}}"', $output, -1, $stamps);
+		if ($stamps) $meta['ts'] = true;
+		$meta = json_encode($meta);
 		if (!self::write(self::dir().self::key(), $meta."\n".$output) || headers_sent()) return;
 		header('Last-Modified: '.self::http_date($time));
 		header('X-Raster-Cache: miss');

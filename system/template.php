@@ -63,6 +63,8 @@ class template {
   public $current_call = '';
   // emails get absolute links and no <base> or scripts
   public $is_email = false;
+  // the fields Raster adds to a post form itself: not the form's own
+  static $internal_fields = array('raster_form', 'raster_hp', 'csrf', 'raster_ts');
   // ##Editor marks
   // For logged in editors the CMS marks what it prints: page fields,
   // collections, their items and item fields. Each mark is a pair of
@@ -368,11 +370,13 @@ class template {
   }
     
   // ##Forms
-  // Every post form gets three hidden fields:
+  // Every post form gets these hidden fields:
   // - raster_form: the render block that owns the form (model.method), so
   //   models and validation know which form was sent
   // - raster_hp: a honeypot; bots fill it, people never see it
   // - csrf: the session token, when there is a session
+  // - raster_ts: the time the form was shown, signed; left out of emails,
+  //   exports and forms with no owner (nothing reads them)
   // Field constraints (required, type, minlength, maxlength, min, max,
   // pattern) are read from the inputs so validation can enforce them.
   function index_forms() {
@@ -438,6 +442,7 @@ class template {
 
   	// add the hidden fields, from the last form to the first
   	$token = util::csrf_token();
+  	$stamp = $this->is_email || getenv('RASTER_EXPORT') ? '' : validation_spam::stamp();
   	$this->form_owners = array();
   	foreach ($forms as $n => $form) $this->form_owners[$n] = $form['owner'];
   	foreach (array_reverse($forms, true) as $n => $form) {
@@ -450,6 +455,7 @@ class template {
   		$hidden = "\n<input type=\"hidden\" name=\"raster_form\" value=\"".htmlspecialchars($form['owner'], ENT_QUOTES)."\">"
   			."\n<input type=\"text\" name=\"raster_hp\" value=\"\" tabindex=\"-1\" autocomplete=\"off\" aria-hidden=\"true\" style=\"position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden\">";
   		if ($token !== '') $hidden .= "\n<input type=\"hidden\" name=\"csrf\" value=\"".$token."\">";
+  		if ($stamp !== '' && $form['owner'] !== '') $hidden .= "\n<input type=\"hidden\" name=\"raster_ts\" value=\"".$stamp."\">";
   		$at = $form['at'] + strlen($form['tag']);
   		$html = substr($html, 0, $at).$hidden.substr($html, $at);
   	}
@@ -472,7 +478,7 @@ class template {
   		}
   		if (empty($attributes['name'])) continue;
   		$name = preg_replace('/\[\]$/', '', $attributes['name']);
-  		if (in_array($name, array('raster_form', 'raster_hp', 'csrf'))) continue;
+  		if (in_array($name, self::$internal_fields)) continue;
   		// name="tags[]" asks for a list; any other field takes one value
   		$list = $name !== $attributes['name'];
   		$type = strtolower($input[1]) === 'input' ? strtolower(isset($attributes['type']) ? $attributes['type'] : 'text') : strtolower($input[1]);
@@ -601,7 +607,7 @@ class template {
 	function fill_form($block, $data, $keep_rest = false, $posted = false)
 	{
 		$data = (array)$data;
-		foreach (array('raster_form', 'raster_hp', 'csrf') as $internal) unset($data[$internal]);
+		foreach (self::$internal_fields as $internal) unset($data[$internal]);
 		$used = array();
 		$attr = function ($tag, $name) {
 			return preg_match('/\s'.$name.'\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))/i', $tag, $m) ? html_entity_decode($m[1] !== '' ? $m[1] : (isset($m[2]) && $m[2] !== '' ? $m[2] : (isset($m[3]) ? $m[3] : '')), ENT_QUOTES) : null;
@@ -620,7 +626,7 @@ class template {
 		$block = preg_replace_callback('/<input\b[^>]*>/i', function ($m) use ($attr, $without, $lookup, $e, $posted) {
 			$tag = $m[0];
 			$name = $attr($tag, 'name');
-			if ($name === null || in_array($name, array('raster_form', 'raster_hp', 'csrf'))) return $tag;
+			if ($name === null || in_array($name, self::$internal_fields)) return $tag;
 			$type = strtolower((string)$attr($tag, 'type') ?: 'text');
 			if (in_array($type, array('password', 'submit', 'button', 'reset', 'image', 'file'))) return $tag;
 			list($found, $value) = $lookup($name);

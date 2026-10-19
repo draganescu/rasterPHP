@@ -16,6 +16,7 @@ $maildir = sys_get_temp_dir().'/raster-mail-'.getmypid();
 putenv("RASTER_DB=$db");
 putenv("RASTER_MAIL=log://$maildir");
 putenv('RASTER_ENV=development');
+putenv('RASTER_SECRET=test-secret');
 
 require_once $root.'/system/boot.php';
 boot::$appname = 'application';
@@ -386,7 +387,8 @@ test('a broken, stale or unwritable models.json never stops a page', function ()
 	@mkdir($dir);
 	$env = 'RASTER_ENV=production RASTER_DB='.escapeshellarg(test_db("$dir/db.sqlite"));
 	$render = function () use ($env, $root) {
-		return (string)shell_exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' render /about 2>&1');
+		// the form stamps differ by the second they were made in
+		return preg_replace('/(name="raster_ts" value=")[^"]*/', '$1', (string)shell_exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' render /about 2>&1'));
 	};
 	$data = function () {
 		$all = array();
@@ -523,7 +525,7 @@ test('required emails come from the model', function () {
 
 $port = free_port();
 $base = "http://127.0.0.1:$port";
-$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_MCP_TOKEN' => 'test-token', 'RASTER_MAIL' => "log://$maildir", 'PATH' => getenv('PATH')));
+$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_MCP_TOKEN' => 'test-token', 'RASTER_MAIL' => "log://$maildir", 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
 register_shutdown_function(function () use ($server, $db, $maildir) {
 	proc_terminate($server);
 	array_map('unlink', glob("$db*") ?: array());
@@ -533,6 +535,8 @@ register_shutdown_function(function () use ($server, $db, $maildir) {
 for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
 
 function http($method, $url, $body = null, $headers = array()) {
+	// as a browser posts: the form's own stamp, shown a minute ago
+	if (is_string($body) && strpos($body, 'raster_form=') !== false && strpos($body, 'raster_ts=') === false) $body .= '&raster_ts='.stamp_for_tests(60);
 	$context = stream_context_create(array('http' => array(
 		'method' => $method, 'ignore_errors' => true, 'follow_location' => 0,
 		'header' => implode("\r\n", $headers), 'content' => $body,
@@ -812,7 +816,7 @@ test('sending on a frozen database widens the small newsletterissue columns 2.2.
 });
 test('mcp over stdio', function () use ($root, $db) {
 	$input = json_encode(array('jsonrpc' => '2.0', 'id' => 7, 'method' => 'tools/call', 'params' => array('name' => 'get_page', 'arguments' => array('page' => '/about'))))."\n";
-	$process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'PATH' => getenv('PATH')));
+	$process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
 	fwrite($pipes[0], $input);
 	fclose($pipes[0]);
 	$response = json_decode(stream_get_contents($pipes[1]), true);
@@ -831,7 +835,7 @@ test('a malformed MCP message is answered and the stdio server goes on (#134)', 
 		'{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"no_such_tool"}}',
 		'{"jsonrpc":"2.0","id":6,"method":"initialize","params":{}}',
 	);
-	$process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'PATH' => getenv('PATH')));
+	$process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
 	fwrite($pipes[0], implode("\n", $lines)."\n");
 	fclose($pipes[0]);
 	$out = array_values(array_filter(explode("\n", stream_get_contents($pipes[1]))));
@@ -1087,7 +1091,7 @@ test('page cache in production', function () use ($root, $db) {
 	$env = 'RASTER_ENV=production RASTER_DB='.escapeshellarg($db);
 	shell_exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' schema --apply');
 	$port = free_port();
-	$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_ENV' => 'production', 'PATH' => getenv('PATH')));
+	$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_ENV' => 'production', 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
 	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
 	try {
 		$cache = function () use ($port) { return current(preg_grep('/^X-Raster-Cache/i', http('GET', "http://127.0.0.1:$port/about")[2])); };
@@ -1127,7 +1131,7 @@ test('a production page reads the schema and each page row once, and counts noth
 });
 test('a site under a path: RASTER_URL with a folder', function () use ($root, $db) {
 	$port = free_port();
-	$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_URL' => "http://127.0.0.1:$port/preview/abc/", 'PATH' => getenv('PATH')));
+	$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_URL' => "http://127.0.0.1:$port/preview/abc/", 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
 	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
 	try {
 		$base = "http://127.0.0.1:$port/preview/abc";
@@ -1753,7 +1757,7 @@ test('tracking parameters alone still use the cache', function () {
 test('empty filter pages, pages past the last one and unknown filters are not cached', function () use ($root, $db) {
 	cache_empty();
 	$port = free_port();
-	$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_ENV' => 'production', 'PATH' => getenv('PATH')));
+	$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_ENV' => 'production', 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
 	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
 	try {
 		$get = function ($path) use ($port) {
@@ -1783,7 +1787,7 @@ test('empty filter pages, pages past the last one and unknown filters are not ca
 function cache_server($db, $test) {
 	global $root;
 	$port = free_port();
-	$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_ENV' => 'production', 'PATH' => getenv('PATH')));
+	$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_ENV' => 'production', 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
 	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
 	$get = function ($path) use ($port) {
 		list($status, $body, $headers) = http('GET', "http://127.0.0.1:$port$path");
@@ -1929,7 +1933,7 @@ function b_server($env) {
 	$port = free_port();
 	$log = sys_get_temp_dir().'/raster-b-'.getmypid().'-'.$port.'.log';
 	$process = proc_open(array(PHP_BINARY, '-d', 'display_errors=1', '-d', 'log_errors=0', '-d', 'output_buffering=0', '-d', 'html_errors=0', '-d', "error_log=$log", '-S', "127.0.0.1:$port", "$root/index.php"),
-		array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array_merge(array('PATH' => getenv('PATH')), $env));
+		array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array_merge(array('PATH' => getenv('PATH'), 'RASTER_SECRET' => 'test-secret'), $env));
 	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
 	register_shutdown_function(function () use ($process, $log) { proc_terminate($process); @unlink($log); });
 	return array("http://127.0.0.1:$port", $log);
@@ -2531,7 +2535,7 @@ test('arrays and bad bytes fail required; a field named tags[] takes a list (#70
 // MCP view tools take a theme only as a folder directly under views/ (#72)
 function mcp_stdio_calls($calls) {
 	global $root, $db;
-	$process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'PATH' => getenv('PATH')));
+	$process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
 	foreach ($calls as $i => $call) {
 		fwrite($pipes[0], json_encode(array('jsonrpc' => '2.0', 'id' => 100 + $i, 'method' => 'tools/call', 'params' => array('name' => $call[0], 'arguments' => $call[1])))."\n");
 	}
@@ -4201,7 +4205,7 @@ function booking_server($env = array()) {
 	global $root, $db, $maildir;
 	$port = free_port();
 	$log = sys_get_temp_dir().'/raster-booking-'.getmypid().'-'.$port.'.log';
-	$env = array_merge(array('PATH' => getenv('PATH'), 'RASTER_DB' => $db, 'RASTER_ENV' => 'development', 'RASTER_MAIL' => "log://$maildir-booking",
+	$env = array_merge(array('PATH' => getenv('PATH'), 'RASTER_SECRET' => 'test-secret', 'RASTER_DB' => $db, 'RASTER_ENV' => 'development', 'RASTER_MAIL' => "log://$maildir-booking",
 		'RASTER_MAIL_FROM' => 'staff@zz.test', 'RASTER_URL' => "http://127.0.0.1:$port/"), $env);
 	$process = proc_open(array(PHP_BINARY, '-d', 'log_errors=1', '-d', "error_log=$log", '-S', "127.0.0.1:$port", "$root/index.php"),
 		array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, $env);
@@ -4798,6 +4802,123 @@ test('editor: marks settle in one pass over the page, however long (#53)', funct
 		check($took < 0.25, 'settle took '.round($took * 1000).' ms for 6,000 marks');
 	} finally {
 		$template->marks = $saved;
+	}
+});
+
+// ## Spam checks: the stamp
+
+class test_stampform {
+	function form() { return false; }
+}
+// the forms of $html as a page shows them (not as an email): with their hidden fields
+function stamped($html) {
+	$previous = template::swap(null);
+	try {
+		$template = template::instance();
+		$template->output = $html;
+		$template->index_forms();
+		return $template->output;
+	} finally {
+		template::swap($previous);
+	}
+}
+test('every post form gets a signed stamp', function () {
+	$out = stamped('<!-- render.test_stampform.form --><form method="post"><input name="a"></form><!-- /render.test_stampform.form -->'
+		.'<!-- render.test_stampform.form --><form method="get"><input name="q"></form><!-- /render.test_stampform.form -->');
+	same(1, substr_count($out, 'name="raster_ts"'), $out);
+	check(preg_match('/name="raster_ts" value="(\d{10}\.[0-9a-f]{64})"/', $out, $m) === 1, $out);
+	same(0, validation_spam::stamp_age($m[1]) <= 2 ? 0 : 1);
+	// the get form is the second one, and has none
+	check(strpos(substr($out, strpos($out, 'method="get"')), 'raster_ts') === false, $out);
+});
+test('a stamp is checked by its signature', function () {
+	same(false, validation_spam::stamp_age('123.abc'));
+	same(false, validation_spam::stamp_age(time().'.'.str_repeat('0', 64)));
+	same(false, validation_spam::stamp_age(array('x')));
+	same(null, validation_spam::stamp_age(''));
+	same(null, validation_spam::stamp_age(null));
+	same(30, validation_spam::stamp_age(validation_spam::stamp(time() - 30)));
+});
+test('the key: RASTER_SECRET, else data/secret made once', function () {
+	$file = APPBASE.'data/secret';
+	$kept = is_file($file) ? file_get_contents($file) : null;
+	@unlink($file);
+	$was = getenv('RASTER_SECRET');
+	try {
+		putenv('RASTER_SECRET');
+		util::$secret = null;
+		$made = util::secret();
+		check((bool)preg_match('/^[0-9a-f]{64}$/', $made), "key: $made");
+		same($made, file_get_contents($file));
+		if (DIRECTORY_SEPARATOR === '/') same('0600', substr(sprintf('%o', fileperms($file)), -4));
+		util::$secret = null;
+		same($made, util::secret(), 'a second request reads the same key');
+		putenv('RASTER_SECRET=from-the-environment');
+		util::$secret = null;
+		same('from-the-environment', util::secret());
+	} finally {
+		putenv($was === false ? 'RASTER_SECRET' : "RASTER_SECRET=$was");
+		util::$secret = null;
+		if ($kept === null) @unlink($file); else file_put_contents($file, $kept);
+	}
+});
+test('the stamp is not a field', function () {
+	same(array(), template::instance()->constraints('<input name="raster_ts">'));
+	$filled = template::instance()->fill_form('<input type="hidden" name="raster_ts" value="">', array('raster_ts' => 'x'));
+	check(strpos($filled, 'value="x"') === false, $filled);
+});
+test('emails and exports carry no stamp', function () {
+	$file = sys_get_temp_dir().'/raster-stamp-'.getmypid().'.html';
+	file_put_contents($file, '<!-- render.test_stampform.form --><form method="post"><input name="a"></form><!-- /render.test_stampform.form -->');
+	controller::instance()->objects['test_stampform'] = new test_stampform();
+	$html = '<!-- render.test_stampform.form --><form method="post"><input name="a"></form><!-- /render.test_stampform.form -->';
+	try {
+		$email = controller::render_view($file);
+		check(strpos($email, 'raster_form') !== false && strpos($email, 'raster_ts') === false, $email);
+		putenv('RASTER_EXPORT=1');
+		check(strpos(stamped($html), 'raster_ts') === false, 'export');
+		putenv('RASTER_EXPORT');
+		check(strpos(stamped($html), 'raster_ts') !== false, 'page');
+		// a form nothing owns is read by nobody
+		check(strpos(stamped('<form method="post"><input name="a"></form>'), 'raster_ts') === false, 'no owner');
+	} finally {
+		putenv('RASTER_EXPORT');
+		unset(controller::instance()->objects['test_stampform']);
+		unlink($file);
+	}
+});
+test('a cached page with two forms serves fresh stamps to both', function () use ($root, $db) {
+	$view = APPBASE.config::get('views_path', 'views').'/'.config::get('theme', 'default').'/zzstamps.html';
+	file_put_contents($view, '<html><head><title>Two forms</title></head><body>'
+		.'<!-- render.newsletter.signup --><form method="post"><input type="email" name="email"><button>Join</button></form><!-- /render.newsletter.signup -->'
+		.'<!-- render.authentication.register --><form method="post"><input name="name"><input type="email" name="email"><input type="password" name="password"><button>Sign up</button></form><!-- /render.authentication.register -->'
+		.'</body></html>');
+	$env = 'RASTER_ENV=production RASTER_SECRET=test-secret RASTER_DB='.escapeshellarg($db);
+	shell_exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' schema --apply');
+	foreach (glob(APPBASE.'data/cache/*') ?: array() as $f) unlink($f);
+	$port = free_port();
+	$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_ENV' => 'production', 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
+	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
+	try {
+		$stamps = function ($body) { preg_match_all('/name="raster_ts" value="([^"]*)"/', $body, $m); return $m[1]; };
+		list(, $first) = http('GET', "http://127.0.0.1:$port/zzstamps");
+		sleep(1);
+		list(, $second, $headers) = http('GET', "http://127.0.0.1:$port/zzstamps");
+		check((bool)preg_grep('/^X-Raster-Cache: hit/i', $headers), 'the second answer is the cache: '.implode(' | ', $headers));
+		$made = $stamps($second);
+		same(2, count($made), 'two forms');
+		same($made[0], $made[1], 'one stamp for the whole page');
+		check(validation_spam::stamp_age($made[0]) <= 1, 'made at the second request');
+		check($made[0] !== $stamps($first)[0], 'not the first answer\'s stamp');
+		$files = array_filter(glob(APPBASE.'data/cache/*') ?: array(), function ($f) { return basename($f) !== 'next' && is_file($f) && strpos(file_get_contents($f), 'Two forms') !== false; });
+		same(1, count($files), 'the cached copy');
+		$copy = file_get_contents(current($files));
+		same(2, substr_count($copy, '{{raster:ts}}'));
+		check(!preg_match('/raster_ts" value="\d/', $copy), 'no stamp kept on disk');
+	} finally {
+		proc_terminate($server);
+		unlink($view);
+		foreach (glob(APPBASE.'data/cache/*') ?: array() as $f) unlink($f);
 	}
 });
 
