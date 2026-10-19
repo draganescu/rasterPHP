@@ -253,7 +253,9 @@ class mail
 			$chunk .= $char;
 		}
 		if ($chunk !== '') $words[] = '=?UTF-8?B?'.base64_encode($chunk).'?=';
-		return implode(' ', $words);
+		// a folding break between the words (RFC 5322), so a long name can't
+		// make a header line over 998 characters
+		return implode("\r\n ", $words);
 	}
 
 	// whether a link mailed at $stamp (a date and time) went out within

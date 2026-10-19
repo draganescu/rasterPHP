@@ -931,9 +931,11 @@ class raster_inspector {
 			}
 		}
 		// forms that can turn a post away need alerts to say so
+		// (a fragment the view includes, such as a layout's header, counts)
+		$whole = $this->expand($html, $theme);
 		foreach (validation_spam::$checked_regions as $region) {
 			if (!preg_match('/<!-- '.preg_quote($region, '/').'[ (]/', $html, $m, PREG_OFFSET_CAPTURE)) continue;
-			if (strpos($html, "print.validation.alert('try_again')") === false || strpos($html, "print.validation.alert('slow_down')") === false) {
+			if (strpos($whole, "print.validation.alert('try_again')") === false || strpos($whole, "print.validation.alert('slow_down')") === false) {
 				$problems[] = self::problem_at('warning', $html, $m[0][1], "$this->linting: $region can turn a post away as spam; add print.validation.alert('try_again') and print.validation.alert('slow_down') so the person knows to send it again");
 				break;
 			}

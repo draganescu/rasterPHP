@@ -434,32 +434,46 @@ pasted into the SQL.
 ## Forms
 
 A form posts to its own page. The render block around it is the model that
-handles it:
+handles it. A feedback form, a rating and a comment kept for staff and
+mailed to nobody:
 
 ```html
-<!-- print.validation.alert('sent') --><p>Thanks, we got your message.</p><!-- /print.validation.alert('sent') -->
-<!-- render.contact.send -->
+<!-- print.validation.alert('sent') --><p>Thanks, we read every one.</p><!-- /print.validation.alert('sent') -->
+<!-- print.validation.alert('try_again') --><p>That went by a bit quickly. Send it once more.</p><!-- /print.validation.alert('try_again') -->
+<!-- print.validation.alert('slow_down') --><p>That's a lot from one place. Try again in an hour.</p><!-- /print.validation.alert('slow_down') -->
+<!-- render.feedback.send -->
 <form method="post">
-  <input type="email" name="email" required>
-  <!-- render.validation.field('email') --><p class="error">Enter your email.</p><!-- /render.validation.field('email') -->
-  <textarea name="message" required maxlength="2000"></textarea>
-  <!-- render.validation.field('message') --><p class="error">Write a message (up to 2000 characters).</p><!-- /render.validation.field('message') -->
+  <input type="number" name="rating" min="1" max="5" required>
+  <!-- render.validation.field('rating') --><p class="error">Give us 1 to 5.</p><!-- /render.validation.field('rating') -->
+  <textarea name="comment" maxlength="1000"></textarea>
   <button>Send</button>
 </form>
-<!-- /render.contact.send -->
+<!-- /render.feedback.send -->
 ```
 
 ```php
-class contact {
+class feedback {                                                  // application/models/feedback/feedback.php
+    static function types() {
+        // 'spam' => false: send() runs the spam checks itself
+        return array('feedback' => array('fields' => array('rating' => 0, 'comment' => ''), 'create' => 'visitor', 'spam' => false));
+    }
     function send() {
         $v = validation::get();
-        if (!$v->submitted()) return false;                       // show the form as designed
+        if (!$v->submitted()) return false;                          // show the form as designed
         if (!$v->valid()) return template::instance()->form_state(); // again, with the values
-        mail::send_view('_email/contact', 'me@example.com', array('message' => util::post('message')));
-        util::done('sent');                                       // redirect; the alert shows
+        if ($reasons = $v->suspect()) return $v->hold($reasons);     // looks like spam: again, with try_again or slow_down
+        cms_records::create('feedback', array('rating' => (int)util::post('rating'), 'comment' => (string)util::post('comment')));
+        util::done('sent');                                          // redirect; the alert shows
     }
 }
 ```
+
+A form that only stores what it is sent needs less: `function send() { return
+cms_records::submit('feedback', 'sent'); }` does these steps, spam checks
+included (leave out `'spam' => false`). For a contact form that emails staff,
+use the bundled `contact` model (see **Bundled models**) rather than a model
+of your own. Staff read the feedback on a page that renders
+`render.cms.feedback` (see **Records**).
 
 - **Rules live in the HTML.** `required`, `type` (email, url, number, date),
   `minlength`, `maxlength`, `min`, `max` and `pattern` are enforced on the
@@ -566,7 +580,9 @@ class contact {
     `render.newsletter.signup`, `render.authentication.register` or
     `render.booking.form` that lacks `print.validation.alert('try_again')`
     or `('slow_down')`: word them where the person will see them, as for
-    any alert. A site's own form on `cms_records::submit` is covered too,
+    any alert. Put the pair once at the top of the layout's `res.header`
+    (`lint` counts alerts in the fragments a view includes), so a held post
+    shows its message once, and not again beside the form. A site's own form on `cms_records::submit` is covered too,
     but `lint` can't see which views post to it, so add the alerts there
     yourself. A script that posts without ever fetching the form gets
     `try_again`.

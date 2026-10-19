@@ -4700,6 +4700,23 @@ test('lint warns when a checked form has no try_again alert', function () {
 	check(!has_problem(lint_html("<p>No form here.</p>"), 'can turn a post away as spam'), 'quiet without the region');
 });
 
+test('lint counts try_again and slow_down alerts in the fragments a view includes', function () {
+	$views = sys_get_temp_dir().'/raster-lint-theme-'.getmypid();
+	mkdir($views.'/zz', 0777, true);
+	$alerts = "<!-- print.validation.alert('try_again') --><p>Again.</p><!-- /print.validation.alert('try_again') -->\n<!-- print.validation.alert('slow_down') --><p>Slow.</p><!-- /print.validation.alert('slow_down') -->\n";
+	file_put_contents("$views/zz/_layout.html", "<!-- res.header -->\n$alerts<!-- /res.header -->\n<!-- res.bare -->\n<p>Nothing.</p>\n<!-- /res.bare -->\n");
+	try {
+		$form = "<!-- render.newsletter.signup -->\n<form method=\"post\"><input type=\"email\" name=\"email\" required></form>\n<!-- /render.newsletter.signup -->\n";
+		$inspector = new raster_inspector($views, 'zz');
+		check(!has_problem($inspector->lint_source("<!-- dry._layout.header /-->\n$form"), 'can turn a post away as spam'), 'quiet when the header fragment has both alerts');
+		check(has_problem($inspector->lint_source("<!-- dry._layout.bare /-->\n$form"), 'can turn a post away as spam'), 'still warns when the fragment has neither');
+	} finally {
+		unlink("$views/zz/_layout.html");
+		rmdir("$views/zz");
+		rmdir($views);
+	}
+});
+
 test('lint warns about raw find() rows on any page (#125)', function () {
 	$app = APPBASE.config::get('models_path', 'models');
 	temp_model("$app/zzraw", array('zzraw.php' => "<?php\nclass zzraw\n{\n\tstatic function types() {\n\t\treturn array('zzraw' => array('fields' => array('name' => '', 'newsletter' => false)));\n\t}\n\tfunction rows() {\n\t\treturn cms_records::find('zzraw');\n\t}\n\tfunction text() {\n\t\treturn array_map(function (\$r) { return cms_records::for_template(cms_records::info('zzraw'), \$r); }, cms_records::find('zzraw'));\n\t}\n\tfunction escaped() {\n\t\t\$rows = array();\n\t\tforeach (cms_records::find('zzraw') as \$r) \$rows[] = array('name' => util::e(\$r['name']), 'newsletter' => \$r['newsletter'] ? '1' : '0');\n\t\treturn \$rows;\n\t}\n\tfunction listed() {\n\t\treturn cms_records::listed('zzraw', cms_records::find('zzraw'));\n\t}\n}\n"));
@@ -5660,8 +5677,19 @@ test('mail: a name that isn\'t plain ASCII is encoded whole, an ASCII one as wri
 		$words->setAccessible(true);
 		$long = str_repeat('Café ', 20);
 		$encoded = $words->invoke(null, $long);
-		foreach (explode(' ', $encoded) as $word) check(strlen($word) <= 75 && preg_match('/^=\?UTF-8\?B\?[A-Za-z0-9+\/=]+\?=$/', $word), $word);
-		same($long, mb_decode_mimeheader($encoded));
+		// joined by a folding break, so no header line grows past the limit
+		foreach (explode("\r\n ", $encoded) as $word) check(strlen($word) <= 75 && preg_match('/^=\?UTF-8\?B\?[A-Za-z0-9+\/=]+\?=$/', $word), $word);
+		same($long, mb_decode_mimeheader(str_replace("\r\n ", ' ', $encoded)));
+		same(1, count(explode("\r\n ", $words->invoke(null, 'Ana Café'))), 'a short name is one word, unchanged');
+		// 200 emoji make a header far past 998 characters unless it is folded
+		putenv('RASTER_MAIL_FROM=Raster Cafe <hello@cafe.test>');
+		check(mail::send(str_repeat("\u{1F600}", 200).' <ana@example.com>', 'Hi', '<p>Hi</p>'), (string)mail::$last_error);
+		$files = glob("$dir/*.eml");
+		sort($files);
+		$folded = file_get_contents(end($files));
+		$head = substr($folded, 0, strpos($folded, "\r\n\r\n"));
+		foreach (explode("\r\n", $head) as $line) check(strlen($line) <= 998, 'header line of '.strlen($line).' characters');
+		check(strpos($head, "\r\n =?UTF-8?B?") !== false, 'the long name is folded');
 	} finally {
 		putenv($was[0] === false ? 'RASTER_MAIL' : "RASTER_MAIL={$was[0]}");
 		putenv($was[1] === false ? 'RASTER_MAIL_FROM' : "RASTER_MAIL_FROM={$was[1]}");

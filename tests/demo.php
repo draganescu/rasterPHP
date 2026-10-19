@@ -506,23 +506,23 @@ test('C25', 'broken templates stop with a list of errors in development', functi
 
 test(array('D1', 'D18', 'D19'), 'hidden fields on every post form', function () use ($base) {
 	$body = http('GET', "$base/visit")[1];
-	foreach (array('booking.form', 'cafe.contact', 'newsletter.signup') as $owner) has($body, 'name="raster_form" value="'.$owner.'"');
+	foreach (array('booking.form', 'contact.form', 'newsletter.signup') as $owner) has($body, 'name="raster_form" value="'.$owner.'"');
 	same(3, substr_count($body, 'name="raster_hp"'));
 	lacks($body, 'name="csrf"', 'no session, no token');
 	lacks($body, 'class="error"');
 	lacks($body, 'Thank you, we have your request');
 });
 test('D3', 'posts from other sites are refused', function () use ($base) {
-	same(403, http('POST', "$base/visit", array('raster_form' => 'cafe.contact'), array('Origin: https://evil.example'))[0]);
-	same(403, http('POST', "$base/visit", array('raster_form' => 'cafe.contact'), array('Sec-Fetch-Site: cross-site'))[0]);
-	same(403, http('POST', "$base/visit", array('raster_form' => 'cafe.contact'), array('Referer: https://evil.example/page'))[0]);
+	same(403, http('POST', "$base/visit", array('raster_form' => 'contact.form'), array('Origin: https://evil.example'))[0]);
+	same(403, http('POST', "$base/visit", array('raster_form' => 'contact.form'), array('Sec-Fetch-Site: cross-site'))[0]);
+	same(403, http('POST', "$base/visit", array('raster_form' => 'contact.form'), array('Referer: https://evil.example/page'))[0]);
 	same(403, http('POST', "$base/api/cafe/hours", array('x' => 1), array('Origin: https://evil.example'))[0]);
 	$host = parse_url($base, PHP_URL_HOST).':'.parse_url($base, PHP_URL_PORT);
-	same(200, http('POST', "$base/visit", array('raster_form' => 'cafe.contact', 'email' => ''), array("Origin: http://$host", 'Sec-Fetch-Site: same-origin'))[0], 'browsers posting from the site are welcome');
+	same(200, http('POST', "$base/visit", array('raster_form' => 'contact.form', 'email' => ''), array("Origin: http://$host", 'Sec-Fetch-Site: same-origin'))[0], 'browsers posting from the site are welcome');
 });
 test('D4', 'bots that fill the honeypot get a fake success', function () use ($base) {
 	$before = count(mails());
-	list($status, , $headers) = http('POST', "$base/visit", array('raster_form' => 'cafe.contact', 'raster_hp' => 'buy now', 'email' => 'bot@spam.test', 'message' => 'spam'));
+	list($status, , $headers) = http('POST', "$base/visit", array('raster_form' => 'contact.form', 'raster_hp' => 'buy now', 'email' => 'bot@spam.test', 'message' => 'spam'));
 	same(303, $status);
 	same($before, count(mails()), 'nothing sent');
 });
@@ -552,19 +552,19 @@ test(array('D5', 'D6', 'D7', 'D8', 'D9', 'D10', 'D11', 'D12', 'D24'), 'rules fro
 });
 test(array('D13', 'C19', 'D25'), 'an application rule (its region runs before the form model); validation::errors()', function () use ($base) {
 	$before = count(mails());
-	list(, $body) = http('POST', "$base/visit", array('raster_form' => 'cafe.contact', 'email' => 'ana@example.com', 'message' => 'Cheap pills at https://spam.example/now'));
+	list(, $body) = http('POST', "$base/visit", array('raster_form' => 'contact.form', 'email' => 'ana@example.com', 'message' => 'Cheap pills at https://spam.example/now'));
 	has($body, 'Please leave out web links: write the address in words.');
 	same($before, count(mails()), 'nothing sent');
-	list(, $body) = http('POST', "$base/visit", array('raster_form' => 'cafe.contact', 'email' => 'bad', 'website' => 'not a url', 'message' => 'See www.spam.example'));
+	list(, $body) = http('POST', "$base/visit", array('raster_form' => 'contact.form', 'email' => 'bad', 'website' => 'not a url', 'message' => 'See www.spam.example'));
 	has($body, '<p class="error-count">3 problems</p>', 'validation::errors(): the email, the website and the link');
 });
 test(array('D14', 'D19', 'D23'), 'rule names from older Raster, two forms on one page', function () use ($base) {
-	list(, $body) = http('POST', "$base/visit", array('raster_form' => 'cafe.contact', 'email' => '', 'message' => 'Hi'));
+	list(, $body) = http('POST', "$base/visit", array('raster_form' => 'contact.form', 'email' => '', 'message' => 'Hi'));
 	has($body, 'Your email, please.');
 	lacks($body, 'That email does not look right.', 'email_format passes on empty');
 	lacks($body, 'We need a valid email to confirm.', 'the other form stays quiet');
 	lacks($body, 'Please enter a valid email address.', 'the footer form stays quiet');
-	list(, $body) = http('POST', "$base/visit", array('raster_form' => 'cafe.contact', 'email' => 'bad', 'message' => 'Hi', 'website' => 'not a url'));
+	list(, $body) = http('POST', "$base/visit", array('raster_form' => 'contact.form', 'email' => 'bad', 'message' => 'Hi', 'website' => 'not a url'));
 	has($body, 'That email does not look right.');
 	has($body, 'A web address starts with https://', 'type="url"');
 });
@@ -579,11 +579,10 @@ test('D16', 'the form is filled again, never with passwords', function () use ($
 	list(, $body) = book($base, array('email' => 'nope', 'date' => next_open('tue', 2), 'time' => '21:00'));
 	has($body, 'name="time" value="21:00" checked');
 	check(!preg_match('/value="19:00"[^>]*checked/', $body), 'only the time chosen');
-	// a select, and a radio ticked in the template that the post changed
-	list(, $body) = http('POST', "$base/visit", array('raster_form' => 'cafe.contact', 'email' => 'bad', 'topic' => 'event', 'reply' => 'phone', 'message' => 'Hi'));
-	has($body, '<option value="event" selected>');
-	has($body, 'value="phone" checked');
-	check(!preg_match('/value="email"[^>]*checked/', $body), 'old radio still checked');
+	// a select
+	list(, $body) = http('POST', "$base/visit", array('raster_form' => 'contact.form', 'email' => 'bad', 'subject' => 'An event', 'message' => 'Hi'));
+	has($body, '<option value="An event" selected>');
+	check(!preg_match('/value="A table"[^>]*selected/', $body), 'only the option chosen');
 });
 test(array('D17', 'I1', 'I2', 'C23'), 'a valid booking: stored, emailed, redirected, alert shown', function () use ($base) {
 	$day = next_open('tue');
@@ -615,7 +614,7 @@ test('D20', 'forms filled with data and spa_ classes', function () use ($base) {
 });
 test('D21', '/api never runs form models', function () use ($base) {
 	$before = count(mails());
-	list($status, $body) = http('POST', "$base/api/cafe/contact", array('email' => 'x@example.com', 'message' => 'via api'));
+	list($status, $body) = http('POST', "$base/api/contact/form", array('email' => 'x@example.com', 'message' => 'via api'));
 	same(404, $status, 'a form handler the model does not list');
 	same(404, http('POST', "$base/api/booking/form", array('name' => 'x'))[0], 'nor a bundled one');
 	// and one a model does list is not a form submission there
@@ -770,8 +769,8 @@ test(array('G4', 'G5', 'G8', 'C10', 'D2', 'D22'), 'log in, next, flags, session 
 	lacks($members, 'Log in</a>');
 	$token = token_in($members);
 	check($token !== null, 'logged in forms carry the token');
-	same(403, http('POST', "$base/visit", array('raster_form' => 'cafe.contact', 'email' => 'a@b.co', 'message' => 'x'), array("Cookie: $cookie"))[0], 'no token, no post');
-	same(303, http('POST', "$base/visit", array('raster_form' => 'cafe.contact', 'email' => 'a@b.co', 'message' => 'x', 'csrf' => $token), array("Cookie: $cookie"))[0]);
+	same(403, http('POST', "$base/visit", array('raster_form' => 'contact.form', 'email' => 'a@b.co', 'message' => 'x'), array("Cookie: $cookie"))[0], 'no token, no post');
+	same(303, http('POST', "$base/visit", array('raster_form' => 'contact.form', 'email' => 'a@b.co', 'message' => 'x', 'csrf' => $token), array("Cookie: $cookie"))[0]);
 });
 test(array('G7', 'G16'), 'roles: members, editors, the command line', function () use ($base) {
 	list($code, $out) = raster(array('user', 'staff@cafe.test', '--role=editor', '--password=staff password', '--name=Sam'));
@@ -1135,7 +1134,7 @@ test(array('I3', 'I4', 'I8', 'I9'), 'SMTP: plain on localhost, STARTTLS and smtp
 	};
 	$send = function ($dsn, $from = true) use ($root, $cert) {
 		$code = 'require "'.$root.'/system/boot.php"; boot::$appname = "demo"; boot::cli();'
-			.' echo mail::send_view("_email/contact", "owner@cafe.test", array("email" => "a@b.co", "message" => "Hi")) ? "sent" : "failed: ".mail::$last_error;';
+			.' echo mail::send_view("_email/contact_received", "owner@cafe.test", array("email" => "a@b.co", "message" => "Hi")) ? "sent" : "failed: ".mail::$last_error;';
 		$env = 'RASTER_MAIL='.escapeshellarg($dsn).($from ? ' RASTER_MAIL_FROM='.escapeshellarg('Café <hello@cafe.test>') : ' RASTER_MAIL_FROM=');
 		return shell_exec($env.' '.escapeshellarg(PHP_BINARY).' -d openssl.cafile='.escapeshellarg("$cert.crt").' -r '.escapeshellarg($code).' 2>&1');
 	};
@@ -1222,7 +1221,7 @@ test('M4', 'every MCP tool', function () use ($base) {
 	$urls = array_map(function ($p) { return $p['url']; }, $overview['pages']);
 	foreach (array('site', '/', '/about', '/menu', '/docs/setup') as $url) check(in_array($url, $urls), "overview lacks $url");
 	$collections = array_map(function ($c) { return $c['name']; }, $overview['collections']);
-	same(array('booking', 'bookingclosed', 'bookinghours', 'bookingresource', 'bookingservice', 'events', 'faq', 'journal', 'menu'), $collections);
+	same(array('booking', 'bookingclosed', 'bookinghours', 'bookingresource', 'bookingservice', 'contactmessage', 'events', 'faq', 'journal', 'menu'), $collections);
 	same('About us', mcp($base, 'get_page', array('page' => '/about'))['fields']['heading']);
 	$item = mcp($base, 'create_item', array('collection' => 'journal', 'fields' => array('title' => 'MCP post', 'author' => 'Agent')));
 	same('Agent', mcp($base, 'get_item', array('collection' => 'journal', 'id' => $item['id']))['author']);
@@ -1259,7 +1258,7 @@ test('M10', 'describe: the site in one call', function () use ($base) {
 	same('cafe', $all['site']['theme']);
 	check(in_array('/menu', array_map(function ($p) { return $p['url']; }, $all['pages'])), 'the pages are there');
 	$names = array_map(function ($c) { return $c['name']; }, $all['collections']);
-	same(array('booking', 'bookingclosed', 'bookinghours', 'bookingresource', 'bookingservice', 'events', 'faq', 'journal', 'menu'), $names);
+	same(array('booking', 'bookingclosed', 'bookinghours', 'bookingresource', 'bookingservice', 'contactmessage', 'events', 'faq', 'journal', 'menu'), $names);
 	same(4, $all['collections'][array_search('menu', $names)]['page_size'], 'menu_page_size');
 	same(50, $all['collections'][array_search('booking', $names)]['page_size'], 'booking_page_size');
 	same(0, $all['lint']['errors']);
@@ -1637,10 +1636,10 @@ test('N10', 'print.if.live and print.if.static: forms stay out of a static expor
 	has($live, 'name="raster_form" value="booking.form"');
 	lacks($live, 'Call us on', 'print.if.static is hidden on the live site');
 	// a form the template doesn't wrap stops the export, and nothing is written
-	with_file("$views/export-probe.html", '<!doctype html><html><body><!-- render.cafe.contact --><form method="post"><input name="email"><button>Send</button></form><!-- /render.cafe.contact --></body></html>', function () use ($tmp) {
+	with_file("$views/export-probe.html", '<!doctype html><html><body><!-- render.contact.form --><form method="post"><input name="email"><button>Send</button></form><!-- /render.contact.form --></body></html>', function () use ($tmp) {
 		list($code, $output) = raster(array('export', "$tmp/probe"));
 		same(1, $code, $output);
-		has($output, 'The cafe.contact form (/export-probe) needs PHP. Wrap it in <!-- print.if.live -->');
+		has($output, 'The contact.form form (/export-probe) needs PHP. Wrap it in <!-- print.if.live -->');
 		has($output, 'Nothing was written');
 		check(!file_exists("$tmp/probe/index.html"));
 	});
@@ -1927,7 +1926,7 @@ test(array('G19', 'G20', 'G21'), 'login_page, usernames, raster user defaults', 
 test(array('I6', 'I7'), 'mail: the default log folder and PHP mail()', function () use ($root, $tmp) {
 	$send = function ($env, $ini = '') use ($root) {
 		$code = 'require "'.$root.'/system/boot.php"; boot::$appname = "demo"; boot::cli();'
-			.' echo mail::send_view("_email/contact", "owner@cafe.test", array("email" => "a@b.co", "message" => "Hello there")) ? "sent" : "failed: ".mail::$last_error;';
+			.' echo mail::send_view("_email/contact_received", "owner@cafe.test", array("email" => "a@b.co", "message" => "Hello there")) ? "sent" : "failed: ".mail::$last_error;';
 		return shell_exec($env.' '.escapeshellarg(PHP_BINARY).' '.$ini.' -r '.escapeshellarg($code).' 2>&1');
 	};
 	$before = count(glob("$root/demo/data/mail/*.eml") ?: array());
@@ -1957,7 +1956,7 @@ test('J7', 'a language per domain with the site address set (#96)', function () 
 	$body = http('GET', "$k/lab", null, array("Host: ro.localhost:$port"))[1];
 	has($body, '>Meniu</a>');
 	has($body, "href=\"http://ro.localhost:$port/menu\"");
-	same(200, http('POST', "$k/visit", array('raster_form' => 'cafe.contact', 'email' => ''), array("Host: ro.localhost:$port", "Origin: http://ro.localhost:$port"))[0], 'a form sent from that domain');
+	same(200, http('POST', "$k/visit", array('raster_form' => 'contact.form', 'email' => ''), array("Host: ro.localhost:$port", "Origin: http://ro.localhost:$port"))[0], 'a form sent from that domain');
 	// any other host gets the site's address
 	$body = http('GET', "$k/lab", null, array('Host: evil.example'))[1];
 	has($body, "href=\"http://localhost:$port/menu\"");
@@ -2817,7 +2816,7 @@ test(array('R12', 'R13'), 'schema --apply creates record tables in production; m
 	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => test_db("$tmp/records-prod.sqlite"));
 	list($code, $out) = raster(array('schema', '--apply'), $env);
 	same(0, $code, $out);
-	foreach (array('booking', 'bookingresource', 'bookinghours', 'bookingclosed', 'bookingservice') as $type) has($out, "created table {$type}data");
+	foreach (array('booking', 'bookingresource', 'bookinghours', 'bookingclosed', 'bookingservice', 'contactmessage') as $type) has($out, "created table {$type}data");
 	$pdo = test_pdo($env['RASTER_DB']);
 	same(0, (int)$pdo->query('SELECT COUNT(*) FROM bookingdata')->fetchColumn(), 'no row left behind');
 	same(0, (int)$pdo->query('SELECT COUNT(*) FROM bookingresourcedata')->fetchColumn(), 'nothing to book until demo/seed.php');
@@ -2832,10 +2831,13 @@ test(array('R12', 'R13'), 'schema --apply creates record tables in production; m
 	same(3, (int)$pdo->query('SELECT COUNT(*) FROM bookingresourcedata')->fetchColumn());
 	same(array(0, ''), raster_php_env("$root/demo/seed.php", $env));
 	// a catering request form, as a type
-	list($code, $out) = raster(array('make', 'model', 'cafe', '--from=visit.html'));
-	same(1, $code);
-	has($out, 'exists; --force replaces it');
 	$views = "$root/demo/views/cafe";
+	// a model that exists is not written over
+	with_file("$views/zz-exists.html", '<html><body><!-- render.cafe.ask --><form method="post"><input name="email"><button>Ask</button></form><!-- /render.cafe.ask --></body></html>', function () {
+		list($code, $out) = raster(array('make', 'model', 'cafe', '--from=zz-exists'));
+		same(1, $code);
+		has($out, 'exists; --force replaces it');
+	});
 	$code_out = with_file("$views/zz-inquiry.html", '<html><body><form method="get"><input name="q"></form><!-- render.inquiry.contact --><form method="post"><input type="email" name="email" required><textarea name="message" required></textarea><button>Ask</button></form><!-- /render.inquiry.contact --></body></html>', function () {
 		list($code, $code_out) = raster(array('make', 'model', 'inquiry', '--from=zz-inquiry', '--form=contact', '--dry-run'));
 		same(0, $code, $code_out);
@@ -2859,7 +2861,7 @@ test('C48', '/api answers only what a model lists, for the roles it names', func
 	// public methods a model doesn't list are not there, whatever they return
 	same(404, http('GET', "$base/api/cafe/stamp")[0], 'an event handler');
 	same(404, http('GET', "$base/api/cafe/subscribe_guest")[0], 'a listener');
-	same(404, http('GET', "$base/api/cafe/contact")[0], 'a form handler');
+	same(404, http('GET', "$base/api/contact/form")[0], 'a form handler');
 	same(404, http('GET', "$base/api/booking/agenda")[0], 'a bundled model\'s staff region');
 	// an override is only reached by the name it overrides, and that name
 	// only when api_system_models lists it
@@ -3550,12 +3552,12 @@ test('D28', 'a field sent as name[] or with a bad byte fails required; a field n
 	list($status, $body) = http('POST', "$base/visit", http_build_query($good).'&notes=caf%C3', array('Content-Type: application/x-www-form-urlencoded'));
 	has($body, 'Keep notes under 300 characters.', 'on a field with no pattern too');
 	same($count, (int)R::count('bookingdata'), 'nothing was stored');
-	$form = '<html><body><!-- render.cafe.contact --><form method="post"><input type="email" name="email" required><label><input type="checkbox" name="tags[]" value="cakes" required> Cakes</label><label><input type="checkbox" name="tags[]" value="coffee"> Coffee</label><!-- render.validation.field(\'tags\') --><p class="error">Pick a topic.</p><!-- /render.validation.field(\'tags\') --><textarea name="message" required></textarea><!-- render.validation.field(\'message\') --><p class="error">Write a message.</p><!-- /render.validation.field(\'message\') --><button>Send</button></form><!-- /render.cafe.contact --></body></html>';
+	$form = '<html><body><!-- render.contact.form --><form method="post"><input type="email" name="email" required><label><input type="checkbox" name="tags[]" value="cakes" required> Cakes</label><label><input type="checkbox" name="tags[]" value="coffee"> Coffee</label><!-- render.validation.field(\'tags\') --><p class="error">Pick a topic.</p><!-- /render.validation.field(\'tags\') --><textarea name="message" required></textarea><!-- render.validation.field(\'message\') --><p class="error">Write a message.</p><!-- /render.validation.field(\'message\') --><button>Send</button></form><!-- /render.contact.form --></body></html>';
 	with_file("$views/zz-topics.html", $form, function () use ($base) {
-		$send = function ($extra) use ($base) { return http('POST', "$base/zz-topics", 'raster_form=cafe.contact&email=zz%40example.com'.$extra, array('Content-Type: application/x-www-form-urlencoded')); };
+		$send = function ($extra) use ($base) { return http('POST', "$base/zz-topics", 'raster_form=contact.form&email=zz%40example.com'.$extra, array('Content-Type: application/x-www-form-urlencoded')); };
 		list($status, , $headers) = $send('&tags%5B%5D=cakes&tags%5B%5D=coffee&message=Hi');
 		same(303, $status, 'tags[] is a list the form asked for');
-		has(header_value($headers, 'Location'), 'done=contacted');
+		has(header_value($headers, 'Location'), 'done=sent');
 		list($status, $body) = $send('&message=Hi');
 		same(200, $status);
 		has($body, 'Pick a topic.', 'and still required');
@@ -4027,7 +4029,7 @@ test('I10', 'a form that sends mail answers at once, even when the mail server n
 	$cookie = login($site, 'waiting@cafe.test', 'waiting password');
 	$token = token_in(http('GET', "$site/visit", null, array("Cookie: $cookie"))[1]);
 	check($token !== null, 'the form carries the token');
-	$body = http_build_query(array('raster_form' => 'cafe.contact', 'email' => 'a@b.co', 'message' => 'Is the terrace open?', 'csrf' => $token));
+	$body = http_build_query(array('raster_form' => 'contact.form', 'email' => 'a@b.co', 'message' => 'Is the terrace open?', 'csrf' => $token, 'raster_ts' => stamp_for_tests(60)));
 	$url = parse_url($site);
 	$started = microtime(true);
 	$socket = fsockopen($url['host'], $url['port'], $errno, $errstr, 2);
@@ -4328,7 +4330,7 @@ test('P8', 'a logged in guest manages their own bookings from /account, without 
 	has(http('GET', "$base/account", null, $h)[1], 'people: cancelled');
 });
 
-// ## Q. Spam checks on the bundled forms
+// ## Q. Spam checks on the bundled forms, and the contact form
 
 // forgets the counts, so a test starts with an hour of room
 function spam_forget() {
@@ -4417,39 +4419,101 @@ test('Q1', 'a record form is covered without code, and a type can turn it off', 
 	};
 	$view = "<html><body>\n<!-- print.validation.alert('try_again') --><p>Again, please.</p><!-- /print.validation.alert('try_again') -->\n<!-- print.validation.alert('slow_down') --><p>Slow down.</p><!-- /print.validation.alert('slow_down') -->\n<!-- render.zzspam.form -->\n<form method=\"post\"><input name=\"title\" required maxlength=\"50\"><input name=\"note\"><button>Send</button></form>\n<!-- /render.zzspam.form -->\n</body></html>\n";
 	@mkdir("$root/demo/models/zzspam");
-	with_file("$views/zz-spam.html", $view, function () use ($spam_base, $root, $model) {
-		foreach (array(true => 'held', false => 'stored') as $spam => $outcome) {
-			with_file("$root/demo/models/zzspam/zzspam.php", $model($spam), function () use ($spam_base, $spam, $outcome) {
-				$title = "T-$outcome";
-				list($status, $body) = http('POST', "$spam_base/zz-spam", array('raster_form' => 'zzspam.form', 'title' => $title, 'raster_ts' => ''));
-				database::instance('cms');
-				if ($spam) {
-					same(200, $status);
-					has($body, 'Again, please.');
-					has($body, 'value="'.$title.'"');
-					same(0, (int)R::count('zzspamdata'), 'a post without a stamp is held');
-				} else {
-					same(303, $status);
-					same(1, (int)R::count('zzspamdata'), 'stored when the type says spam is false');
-				}
-			});
-		}
-	});
-	@rmdir("$root/demo/models/zzspam");
-	R::exec('DROP TABLE IF EXISTS zzspamdata');
+	try {
+		with_file("$views/zz-spam.html", $view, function () use ($spam_base, $root, $model) {
+			foreach (array(true => 'held', false => 'stored') as $spam => $outcome) {
+				with_file("$root/demo/models/zzspam/zzspam.php", $model($spam), function () use ($spam_base, $spam, $outcome) {
+					$title = "T-$outcome";
+					list($status, $body) = http('POST', "$spam_base/zz-spam", array('raster_form' => 'zzspam.form', 'title' => $title, 'raster_ts' => ''));
+					database::instance('cms');
+					if ($spam) {
+						same(200, $status);
+						has($body, 'Again, please.');
+						has($body, 'value="'.$title.'"');
+						same(0, (int)R::count('zzspamdata'), 'a post without a stamp is held');
+					} else {
+						same(303, $status);
+						same(1, (int)R::count('zzspamdata'), 'stored when the type says spam is false');
+					}
+				});
+			}
+		});
+	} finally {
+		@rmdir("$root/demo/models/zzspam");
+		R::exec('DROP TABLE IF EXISTS zzspamdata');
+	}
 });
 
 test('Q1', 'editors are never held', function () use ($spam_base) {
 	spam_forget();
 	raster(array('user', 'spam-editor@cafe.test', '--role=editor', '--password=editor password'));
 	$cookie = login($spam_base, 'spam-editor@cafe.test', 'editor password');
-	$hits = (int)(database::instance('cms') ? R::getCell('SELECT COUNT(*) FROM formhit') : 0);
+	database::instance('cms');
+	$hits = (int)R::getCell('SELECT COUNT(*) FROM formhit');
 	$csrf = token_in(http('GET', "$spam_base/visit", null, array("Cookie: $cookie"))[1]);
 	check($csrf, 'the editor has a session token');
 	list($status) = book($spam_base, array('date' => next_open('wed'), 'name' => 'By Phone', 'email' => 'by-phone@example.com', 'raster_ts' => '', 'csrf' => $csrf), array("Cookie: $cookie"));
 	same(303, $status);
 	same(1, (int)R::count('bookingdata', ' email = ? ', array('by-phone@example.com')), 'stored');
 	same($hits, (int)R::getCell('SELECT COUNT(*) FROM formhit'), 'and not counted');
+});
+
+test('Q3', 'the café\'s contact form stores and mails the message', function () use ($base) {
+	database::instance('cms');
+	$before = count(mails());
+	list($status, , $headers) = http('POST', "$base/visit", array('raster_form' => 'contact.form', 'name' => 'Ana Pop', 'email' => 'terrace@example.com', 'phone' => '+40 721 000 000', 'subject' => 'A table', 'message' => 'Is the terrace open on Sunday?'));
+	same(303, $status);
+	same("$base/visit?done=sent", header_value($headers, 'Location'));
+	has(http('GET', "$base/visit?done=sent")[1], 'Thanks, we will write back soon.');
+	$sent = array_slice(mails(), $before);
+	same(array('staff@cafe.test'), array_column($sent, 'to'), 'staff get one email, the guest none');
+	same('A message from the website', $sent[0]['subject']);
+	has($sent[0]['raw'], "\r\nReply-To: \"Ana Pop\" <terrace@example.com>\r\n", 'Reply-To is the guest');
+	has($sent[0]['html'], 'Is the terrace open on Sunday?');
+	has($sent[0]['html'], 'href="'.$base.'/visit"', 'where it was sent from');
+	has($sent[0]['html'], 'href="'.$base.'/staff"', 'and the staff page');
+	same('new', R::getCell('SELECT status FROM contactmessagedata WHERE email = ?', array('terrace@example.com')));
+	raster(array('user', 'staff@cafe.test', '--role=editor', '--password=staff password', '--name=Sam'));
+	$staff = login($base, 'staff@cafe.test', 'staff password');
+	$page = http('GET', "$base/staff", null, array("Cookie: $staff"))[1];
+	has(staff_section($page, 'New'), 'Is the terrace open on Sunday?', 'listed on /staff for the editor');
+	lacks(http('GET', "$base/staff")[1], 'Is the terrace open', 'and not for anyone else');
+	// the message's own page is for staff too
+	same(303, http('GET', "$base/contactmessage/contactmessage_item/".R::getCell('SELECT id FROM contactmessagedata WHERE email = ?', array('terrace@example.com')))[0]);
+});
+test('Q4', 'a link-stuffed message is kept aside as spam, and staff can say it was not', function () use ($base) {
+	database::instance('cms');
+	$before = count(mails());
+	// bbcode links: the café\'s own rule (D13) turns plain web addresses back, this is what it lets through
+	$links = '[url=a.example]a[/url] [url=b.example]b[/url] [url=c.example]c[/url] cheap watches';
+	list($status, , $headers) = http('POST', "$base/visit", array('raster_form' => 'contact.form', 'name' => 'Linker', 'email' => 'linker@example.com', 'message' => $links));
+	same(303, $status);
+	same("$base/visit?done=sent", header_value($headers, 'Location'), 'the visitor is thanked all the same');
+	same($before, count(mails()), 'nobody is emailed');
+	$id = (int)R::getCell('SELECT id FROM contactmessagedata WHERE email = ?', array('linker@example.com'));
+	same('spam', R::getCell('SELECT status FROM contactmessagedata WHERE id = ?', array($id)));
+	has((string)R::getCell('SELECT spam FROM contactmessagedata WHERE id = ?', array($id)), 'too_many_links');
+	raster(array('user', 'staff@cafe.test', '--role=editor', '--password=staff password', '--name=Sam'));
+	$staff = login($base, 'staff@cafe.test', 'staff password');
+	$h = array("Cookie: $staff");
+	$page = http('GET', "$base/staff", null, $h)[1];
+	has(staff_section($page, 'Spam'), 'cheap watches', 'in the Spam list');
+	lacks(staff_section($page, 'New'), 'cheap watches');
+	list($status, $body) = http('POST', "$base/api/cms/editor_action", array('collection' => 'contactmessage', 'id' => $id, 'action' => 'not_spam', 'csrf' => token_in($page)), $h);
+	same(200, $status, $body);
+	same('new', json_decode($body, true)['status']);
+	same($before, count(mails()), 'marking it not spam mails nobody');
+	$page = http('GET', "$base/staff", null, $h)[1];
+	has(staff_section($page, 'New'), 'cheap watches', 'now in the new list');
+	lacks(staff_section($page, 'Spam'), 'cheap watches');
+});
+test('Q5', 'the staff page lists messages with the in-page editor', function () use ($base) {
+	same(303, http('POST', "$base/visit", array('raster_form' => 'contact.form', 'email' => 'editable@example.com', 'message' => 'Do you have high chairs?'))[0]);
+	list($code, $out) = raster(array('render', '/staff', '--as=editor'));
+	same(0, $code, $out);
+	// a message is a record the editor marks, with their buttons
+	has($out, '"collection":"contactmessage"', 'the messages are editable in the page');
+	has($out, '"actions":["done","spam","not_spam"]', 'with their actions');
 });
 
 // ## No PHP warnings, notices or deprecations on any request
@@ -4463,11 +4527,13 @@ if (preg_match_all('/PHP (Warning|Notice|Deprecated|Fatal error|Parse error):.*$
 
 $readme = file_get_contents("$root/demo/README.md");
 preg_match_all('/^\| ([A-Z]\d+) \|/m', $readme, $ids);
+// a filtered run covers only some features, so the gate is for full runs
+$only = getenv('RASTER_TEST_ONLY');
 $missing = array_diff($ids[1], array_keys($covered));
 $unknown = array_diff(array_keys($covered), $ids[1]);
 if ($unknown) $failed[] = 'tests name features that demo/README.md does not list: '.implode(', ', $unknown);
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."; ".(count($ids[1]) - count($missing))."/".count($ids[1])." features covered\n";
 foreach ($skipped as $skip) echo "  - $skip\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";
-if ($missing) echo "  Not covered: ".implode(', ', $missing)."\n";
-exit($failed || $missing ? 1 : 0);
+if ($missing && !$only) echo "  Not covered: ".implode(', ', $missing)."\n";
+exit($failed || ($missing && !$only) ? 1 : 0);

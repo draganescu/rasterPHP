@@ -46,6 +46,27 @@
       <tr class="booking"><td><!-- print.name -->Ana<!-- /print.name --></td><td><!-- print.date -->2026-10-20<!-- /print.date --> <!-- print.time -->19:00<!-- /print.time --></td><td><!-- print.resource -->dining-room<!-- /print.resource --></td><td><!-- print.people -->2<!-- /print.people --> people</td><td><!-- print.notes -->Window seat<!-- /print.notes --></td><td class="status"><!-- print.status -->confirmed<!-- /print.status --></td></tr>
       <!-- /render.cms.booking('date<today&status!=cancelled&resource=?resource&date=?day&order=-date,-time&limit=20') -->
     </tbody></table>
+    <h2>Messages</h2>
+    <p><!-- print.contact.count('status=new') -->2<!-- /print.contact.count('status=new') --> messages to answer, <!-- print.contact.count('status=spam') -->0<!-- /print.contact.count('status=spam') --> kept aside as spam.</p>
+    <p>Messages come from the bundled contact model: guests write on <a href="visit.html">/visit</a>, and each message is kept here with its buttons, mark it done once you have answered it. One that looks like spam is kept aside, and the sender is thanked all the same; if it was a real person, mark it not spam and it moves up to the new ones.</p>
+    <h3>New</h3>
+    <!-- render.contact.messages('status=new&order=-created_at') -->
+      <article class="message"><!-- print.@href.raster_detail_link --><a href="contactmessage/contactmessage_item/1"><!-- print.title -->2026-10-18 14:32<!-- /print.title --></a><!-- /print.@href.raster_detail_link -->
+        <!-- print.name -->Ana<!-- /print.name -->, <!-- print.email -->ana@example.com<!-- /print.email -->, about <!-- print.subject -->A table<!-- /print.subject --> (from <!-- print.page -->/visit<!-- /print.page -->)
+        <p><!-- print.message -->Is the terrace open?<!-- /print.message --></p></article>
+    <!-- /render.contact.messages('status=new&order=-created_at') -->
+    <h3>Spam</h3>
+    <!-- render.contact.messages('status=spam&order=-created_at') -->
+      <article class="message"><!-- print.@href.raster_detail_link --><a href="contactmessage/contactmessage_item/1"><!-- print.title -->2026-10-18 14:32<!-- /print.title --></a><!-- /print.@href.raster_detail_link -->
+        <!-- print.name -->Ana<!-- /print.name -->, <!-- print.email -->ana@example.com<!-- /print.email -->, about <!-- print.subject -->A table<!-- /print.subject --> (from <!-- print.page -->/visit<!-- /print.page -->)
+        <p><!-- print.message -->Is the terrace open?<!-- /print.message --></p><p class="attention">Kept aside because: <!-- print.spam -->no_stamp<!-- /print.spam --></p></article>
+    <!-- /render.contact.messages('status=spam&order=-created_at') -->
+    <h3>Done</h3>
+    <!-- render.contact.messages('status=done&order=-created_at&limit=20') -->
+      <article class="message"><!-- print.@href.raster_detail_link --><a href="contactmessage/contactmessage_item/1"><!-- print.title -->2026-10-18 14:32<!-- /print.title --></a><!-- /print.@href.raster_detail_link -->
+        <!-- print.name -->Ana<!-- /print.name -->, <!-- print.email -->ana@example.com<!-- /print.email -->, about <!-- print.subject -->A table<!-- /print.subject --> (from <!-- print.page -->/visit<!-- /print.page -->)
+        <p><!-- print.message -->Is the terrace open?<!-- /print.message --></p></article>
+    <!-- /render.contact.messages('status=done&order=-created_at&limit=20') -->
   </main>
   <!-- dry._layout.footer /-->
 </body>

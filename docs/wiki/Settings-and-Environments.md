@@ -13,7 +13,7 @@ config::set('protected')->to(array('account' => 'member'));
 config::set('after_login')->to('account');
 ```
 
-This file is loaded after the framework's defaults (`system/config/app.php`), so what you set wins. Read a setting anywhere with `config::get('name')`, or `config::get('name', $default)`. You can add settings of your own the same way; the demo café keeps its staff email address in `config::set('cafe_staff_email')`.
+This file is loaded after the framework's defaults (`system/config/app.php`), so what you set wins. Read a setting anywhere with `config::get('name')`, or `config::get('name', $default)`. You can add settings of your own the same way; the demo café sets `config::set('contact_staff_email')` for its contact form.
 
 Other files in `application/config/`:
 
@@ -126,6 +126,17 @@ Set with `config::set('name')->to(value)` in `config/the_app.php`.
 | `reset_page` | `reset` | the page password-reset emails link to |
 | `password_min_length` | `8` | |
 | `timezone` | PHP's (`date.timezone` in php.ini, UTC on most servers) | the site's time zone, such as `'Europe/Bucharest'`: `today` in lists, scheduled items and every date Raster stores follow it. An unknown name is logged and PHP's zone is kept. `doctor` warns in production when neither this nor `date.timezone` is set |
+| `contact_staff_email` | the sender (`RASTER_MAIL_FROM`, `mail_from`) | where the bundled contact form's staff emails go |
+| `contact_staff_page` | `staff` | the page with the messages, for the link in that email |
+| `contact_max_length` | `5000` | characters in a contact message |
+| `contact_spam_days` | `30` | days a message kept aside as spam stays; `false` keeps it |
+| `spam_min_seconds` | `3` | a post sooner than this after its form was shown is `too_fast`; `false` turns the stamp checks off |
+| `spam_max_age` | `86400` | a stamp older than this many seconds is `stamp_old`; `false` allows any age |
+| `spam_per_ip`, `spam_per_email` | `5`, `3` | posts of one form in an hour from one IP, with one address; `false` turns that limit off |
+| `spam_max_links` | `2` | links allowed in the fields a form checks; `0` allows none, `false` any number |
+| `spam_blocklist` | none | words and domains (`casino`, `pills.example`) that make a post `blocked` |
+| `trusted_proxies` | none | proxies in front of the site, such as `array('10.0.0.0/8')`: only a post from one of them has its visitor's address read from a header |
+| `client_ip_header` | `X-Forwarded-For` | the header those proxies send the visitor's address in (`Fly-Client-IP` is one address) |
 | `newsletter_double_opt_in` | `true` | `false` subscribes without a confirmation email |
 | `newsletter_confirm_page` | `newsletter-confirm` | |
 | `newsletter_unsubscribe_page` | `newsletter-unsubscribe` | |
@@ -157,5 +168,6 @@ Environment variables win over the settings above. Set them in your server's con
 | `RASTER_MAIL` | the mail transport: `log://`, `mail://`, `smtp://…`, `smtps://…` |
 | `RASTER_MAIL_FROM` | the sender, e.g. `My Site <hello@example.com>` |
 | `RASTER_MCP_TOKEN` | turns on MCP over HTTP; clients must send this token |
+| `RASTER_SECRET` | the site's key for signing form stamps. Without it Raster makes `application/data/secret` (mode 0600) the first time it needs one. Set it when several servers share a site, so all of them sign and check with one key. Changing it makes forms already open send their stamp again |
 | `NO_COLOR` | plain command-line output, without colours |
 | `RASTER_REPO` | the GitHub repository `raster update` downloads from (default `draganescu/rasterPHP`), for forks |

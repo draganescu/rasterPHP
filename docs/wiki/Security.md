@@ -10,6 +10,13 @@ This page lists the protections Raster applies for you, and the few things that 
 
 **Spam bots are fooled.** Every post form has a hidden honeypot field. Posts that fill it get a fake success and nothing is done.
 
+**Spam is checked, without keeping anyone's address.** Every post form also carries a hidden time stamp, signed with the site's key. A form model can ask `validation::get()->suspect()` whether a post looks like spam; the newsletter, sign-up, forgot-password and booking forms, and every record form visitors can fill, do. It looks at the stamp (missing, forged, sent too fast, or too old), how many posts one IP and one email address made in the last hour, links, and a blocklist you set. A held post gets its form back with what was typed, and an alert in your words. The contact form keeps a suspected message aside for staff and thanks the sender all the same. Editors are never held. See [Forms and validation](Forms-and-Validation#spam-checks).
+
+- **No raw IP is stored**, in a table, a log line or an event. Counts hold a hash of the IP (an IPv6 address by its first 64 bits) and of the email address, made with a salt that changes each day. At midnight the salt is deleted with every count made with it, so limits start again and nothing can be traced back.
+- **The key** is `RASTER_SECRET`, or else a file Raster makes at `application/data/secret`. A check that can't run (no key, no table yet) lets the post through and logs a warning: a broken check never locks visitors out.
+- **Behind a proxy** (Fly, a load balancer, Cloudflare) every post comes from the proxy's address, so every visitor would share one count. Set `trusted_proxies` to its addresses, and the visitor's address is read from `client_ip_header` (`X-Forwarded-For`). `raster doctor` warns in production when posts come from a private address and `trusted_proxies` is empty.
+- **Tune it** with `spam_min_seconds`, `spam_max_age`, `spam_per_ip`, `spam_per_email`, `spam_max_links` and `spam_blocklist` (see [Settings and environments](Settings-and-Environments)).
+
 **Validation runs on the server.** The rules in your HTML (`required`, `type`, `maxlength`, `pattern`…) are enforced on the server as well as in the browser. A field sent as a list the form didn't ask for (`name[]=x`), or with bytes that aren't UTF-8, fails `required` instead of slipping past the rules.
 
 **Links visitors type can't run script.** A record field a visitor wrote and a view prints as a link (`print.@href.website`) is dropped when it is a `javascript:`, `data:` or `vbscript:` URL, also when an HTML entity, a tab, a newline or a control byte hides the scheme. The in-page editor applies the same rule to links editors type.

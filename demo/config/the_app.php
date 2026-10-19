@@ -11,7 +11,7 @@ config::set('language_cookie')->to('cafe_lang');
 // under it (/staff/setup, /staff/bookings) and a booking's own page. Never
 // 'booking': that prefix would also lock the guest's /booking page (lint
 // warns about it).
-config::set('protected')->to(array('members' => 'member', 'staff' => 'editor', 'account' => 'member', 'booking_item' => 'editor'));
+config::set('protected')->to(array('members' => 'member', 'staff' => 'editor', 'account' => 'member', 'booking_item' => 'editor', 'contactmessage_item' => 'editor'));
 config::set('after_login')->to('members');
 config::set('password_min_length')->to(10);
 config::set('reset_page')->to('password/new');
@@ -43,7 +43,7 @@ config::set('page_cache_skip')->to(array('lab'));
 
 // mail: who it comes from, and where staff messages go
 config::set('mail_from')->to('Raster Café <hello@cafe.test>');
-config::set('cafe_staff_email')->to('staff@cafe.test');
+config::set('contact_staff_email')->to('staff@cafe.test');
 
 // bookings (the bundled booking model; what can be booked comes from
 // php demo/seed.php): the form is on /visit, staff get the requests, and a
@@ -52,7 +52,7 @@ config::set('booking_page')->to('visit');
 config::set('booking_staff_email')->to('staff@cafe.test');
 config::set('booking_max_people')->to(8);
 
-// the contact and reset forms keep the older validation regions on purpose, so
+// the contact form on /visit and the reset form keep the older validation regions on purpose, so
 // the suite still covers them (D14). doctor counts them apart instead of warning.
 config::set('allow_deprecated')->to(array(
 	'legacy-validation-regions' => '#^views/cafe/(visit|password/new)\.html$#',
