@@ -82,7 +82,7 @@ class newsletter
 		$v = validation::get();
 		if (!$v->submitted()) return false;
 		if (!$v->valid()) return template::instance()->form_state();
-		if ($reasons = $v->suspect(array())) return $v->hold($reasons);
+		if ($reasons = validation_spam::holds($v->suspect(array()))) return $v->hold($reasons);
 		$status = self::subscribe(util::post('email'), util::post('name'), '/'.ltrim(strtok((string)config::get('uri_string'), '?'), '/'));
 		if ($status === false) {
 			$v->raise('email_invalid');

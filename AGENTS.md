@@ -471,7 +471,7 @@ class feedback {                                                  // application
         $v = validation::get();
         if (!$v->submitted()) return false;                          // show the form as designed
         if (!$v->valid()) return template::instance()->form_state(); // again, with the values
-        if ($reasons = $v->suspect()) return $v->hold($reasons);     // looks like spam: again, with try_again or slow_down
+        if ($reasons = validation_spam::holds($v->suspect())) return $v->hold($reasons); // looks like spam: again, with try_again or slow_down
         cms_records::create('feedback', array('rating' => (int)util::post('rating'), 'comment' => (string)util::post('comment')));
         util::done('sent');                                          // redirect; the alert shows
     }
@@ -521,7 +521,7 @@ of your own. Staff read the feedback on a page that renders
 - **Spam checks.** A form model asks after `valid()`, once per post:
 
   ```php
-  if ($reasons = $v->suspect()) return $v->hold($reasons);   // the form again, as typed
+  if ($reasons = validation_spam::holds($v->suspect())) return $v->hold($reasons);   // the form again, as typed
   ```
 
   - `validation::get()->suspect($fields = null)` returns the reasons the
@@ -539,12 +539,18 @@ of your own. Staff read the feedback on a page that renders
     | `stamp_invalid` | its signature doesn't match (forged, or the key changed) |
     | `too_fast` | sooner than `spam_min_seconds` after the form was shown |
     | `stamp_old` | later than `spam_max_age` seconds after it: a replayed stamp |
-    | `too_many_from_ip` | more than `spam_per_ip` posts of this form from this IP in the last hour |
+    | `too_many_from_ip` | more than `spam_per_ip` posts of this form from this IP in the last hour; it flags the post and doesn't hold it (see `holds()`) |
     | `too_many_from_email` | more than `spam_per_email` posts of this form with this `email` in the last hour |
     | `too_many_links` | more than `spam_max_links` links (`http://`, `https://`, `www.`, `[url=`) in the checked fields |
     | `blocked` | a word of `spam_blocklist` in the checked fields, or a domain of it (an entry with a dot, and its subdomains) in their links or the email's domain; not checked at all with `$fields` `array()` |
 
     At most one stamp reason; every other check runs, in this order.
+  - `validation_spam::holds($reasons)` keeps the reasons that turn a post
+    away: all but `too_many_from_ip`. Many people can share one address (an
+    office, a phone carrier, a proxy Raster can't see through), so over
+    `spam_per_ip` a post is only flagged: the contact form keeps it as
+    spam, the other forms take it. `spam_ip_blocks` true holds it back too.
+    Pass `suspect()`'s answer through it before `hold()`.
   - `$v->hold($reasons)` raises `slow_down` when a reason is a limit
     (`too_many_from_…`), else `try_again`, and returns the form again with
     what was typed and a fresh stamp. Word both alerts in the view.
@@ -566,16 +572,28 @@ of your own. Staff read the feedback on a page that renders
     count made with it, so limits start again at midnight. Counts older
     than an hour are deleted as new ones are written. Both tables are the
     validation model's `schema()`: `schema --apply` makes them.
-  - **Behind a proxy** every post comes from the proxy's address, and every
-    visitor shares one count. Name it in `trusted_proxies` (addresses or
-    CIDR ranges, IPv4 and IPv6): a post from one of them is counted by
-    `client_ip_header` (`X-Forwarded-For`, the last entry that isn't a
-    trusted proxy; or one address, `Fly-Client-IP`). An entry's port and
-    brackets are left out (`1.2.3.4:5678`, `[2001:db8::1]:443`). A header
-    that is missing or not an address keeps the proxy's. An IPv4 address written as
-    IPv6 (`::ffff:203.0.113.7`) counts as the IPv4 address. In production
-    `doctor` warns when today's posts came from a private address and
-    `trusted_proxies` is empty.
+  - **Behind a proxy** every post comes from the proxy's address. A post
+    from a trusted proxy is counted by `client_ip_header`
+    (`X-Forwarded-For`, the last entry that isn't a trusted proxy; or one
+    address, `Fly-Client-IP`). With `trusted_proxies` not set, every
+    private, loopback or link-local address is trusted (`10/8`,
+    `172.16/12`, `192.168/16`, `127/8`, `169.254/16`, `::1`, `fc00::/7`,
+    `fe80::/10`): nobody on the open internet can post from one, so the
+    post came through a proxy on the same network. That covers Fly,
+    raster-builder sites and most hosts with nginx or LiteSpeed in front,
+    with no settings. Set `trusted_proxies` (addresses or CIDR ranges, IPv4
+    and IPv6) and only those are trusted; `array()` trusts nobody. An
+    entry's port and brackets are left out (`1.2.3.4:5678`,
+    `[2001:db8::1]:443`). A header that is missing or not an address keeps
+    the proxy's. An IPv4 address written as IPv6 (`::ffff:203.0.113.7`)
+    counts as the IPv4 address. Cloudflare's addresses are public: name
+    them in `trusted_proxies` with `client_ip_header` `CF-Connecting-IP`.
+  - **Many people on one address.** When one IP sends one form more than 5
+    different emails in an hour, today's `formsalt` row notes it (a `pair`
+    row in `formhit`, both hashes, goes with the counts), and in
+    production `doctor` warns: "Many people seem to share one address. If
+    the site is behind Cloudflare or another proxy, set `trusted_proxies`
+    and `client_ip_header`." One person posting again and again doesn't.
   - **What each bundled public form does with a suspect post.** They ask
     `suspect(array())` (stamp and limits, no text checks and no
     blocklist, the email's domain included) right after `valid()`, so a
@@ -583,12 +601,12 @@ of your own. Staff read the feedback on a page that renders
 
     | Form | A suspect post |
     |---|---|
-    | `render.newsletter.signup` | nothing stored or mailed; the form again with what was typed, and `try_again` (stamp) or `slow_down` (a limit) |
+    | `render.newsletter.signup` | nothing stored or mailed; the form again with what was typed, and `try_again` (stamp) or `slow_down` (a limit); `too_many_from_ip` alone is taken, unless `spam_ip_blocks` |
     | `render.authentication.register` | the same |
     | `render.booking.form` | the same |
-    | `render.authentication.forgot` | only the limits count: a post over one answers `reset_sent` as for an unknown address and mails nothing; the stamp is not checked |
-    | `cms_records::submit` (a record form whose type has `create` `visitor` or `member`) | the form again with `try_again` / `slow_down`; checked before `create` is, so a bot learns nothing about which types need a login |
-    | `render.contact.form` | stored as `spam` with its reasons, nobody emailed, and `sent` as for anyone (see **Bundled models**, contact); it also checks `name`, `subject` and `message` for links and blocked words, and the email's domain against the blocklist |
+    | `render.authentication.forgot` | only the limits count: a post over `spam_per_email` (or over `spam_per_ip` with `spam_ip_blocks`) answers `reset_sent` as for an unknown address and mails nothing; the stamp is not checked |
+    | `cms_records::submit` (a record form whose type has `create` `visitor` or `member`) | the form again with `try_again` / `slow_down` (as the newsletter: not for `too_many_from_ip` alone); checked before `create` is, so a bot learns nothing about which types need a login |
+    | `render.contact.form` | stored as `spam` with its reasons (`too_many_from_ip` included), nobody emailed, and `sent` as for anyone (see **Bundled models**, contact); it also checks `name`, `subject` and `message` for links and blocked words, and the email's domain against the blocklist |
 
     Login, reset, account, logout, the booking manage page and the
     newsletter's unsubscribe aren't checked. `lint` warns on a view with
@@ -818,7 +836,7 @@ own: the bundled booking model has the type, its rules and its emails (see
   on to pay. A visitor who may not create gets `login_required` (member
   types) or `not_allowed`. For a type that visitors or members create,
   `submit()` first asks `suspect(array())` (see **Forms**): a post that
-  looks like spam gets the form again with `try_again` or `slow_down`, so
+  looks like spam (`holds()`) gets the form again with `try_again` or `slow_down`, so
   word both. A type that runs its own checks says `'spam' => false`.
 - **Editors and agents** change records like items, except that readonly
   fields are shown and not editable, hidden fields never reach them, and the
@@ -1874,9 +1892,10 @@ Set in `config/the_app.php` with `config::set('name')->to(value)`.
 | `spam_min_seconds` | 3 | a post sooner than this after its form was shown is `too_fast`; false turns the stamp checks off |
 | `spam_max_age` | 86400 | a stamp older than this many seconds is `stamp_old`; false allows any age |
 | `spam_per_ip`, `spam_per_email` | 5, 3 | posts of one form in an hour from one IP, with one address; false turns that limit off |
+| `spam_ip_blocks` | false | true holds back a post over `spam_per_ip` too; by default it is only flagged (the contact form keeps it as spam) |
 | `spam_max_links` | 2 | links allowed in the checked fields; 0 allows none, false any number |
 | `spam_blocklist` | none | words and domains (`casino`, `pills.example`) that make a post `blocked` |
-| `trusted_proxies`, `client_ip_header` | none, `X-Forwarded-For` | proxies in front of the site (`array('10.0.0.0/8')`), and the header they send the visitor's address in |
+| `trusted_proxies`, `client_ip_header` | private addresses, `X-Forwarded-For` | proxies in front of the site (`array('10.0.0.0/8')`; not set, any private, loopback or link-local address; `array()` none), and the header they send the visitor's address in |
 | `allow_deprecated` | none | `array('<id>' => true or path pattern(s))`: uses of deprecated features this site keeps on purpose, so `doctor` counts them apart instead of warning |
 
 Environment variables: `RASTER_ENV`, `RASTER_URL`, `RASTER_DB`,
@@ -1947,8 +1966,8 @@ stamp check, so people with a page open send it again.
   (`system/tools/deprecations.php`, minus the ones config `allow_deprecated`
   says are on purpose), a `data/secret` the user running it can't read or
   that isn't a key,
-  and, in production, posts arriving through a proxy `trusted_proxies`
-  doesn't name, the site address, mail, tokens,
+  and, in production, one address that sent one form many different
+  emails today (many people share it), the site address, mail, tokens,
   whether PHP shows errors (`display_errors`) and whether PHP takes the
   editor's pictures: it warns when `upload_max_filesize` is below 12M or
   `post_max_size` below 13M (`cms_editor::UPLOAD_MB` and the rest of the

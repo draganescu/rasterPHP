@@ -4417,22 +4417,70 @@ test('Q1', 'forgot: too many asks answer as for an unknown address', function ()
 	same($counts[3], $counts[4], 'the 4th ask sent nothing');
 });
 
-test('Q2', 'too many posts from one place: slow_down, and nothing stored', function () use ($spam_base) {
+test('Q2', 'too many posts from one place: slow_down, and nothing stored', function () use ($spam_base, $db, $maildir, $views, $root) {
 	spam_forget();
-	for ($i = 1; $i <= 5; $i++) {
-		same(303, post_to($spam_base, '/journal', array('raster_form' => 'newsletter.signup', 'email' => "crowd$i@example.com"))[0], "post $i");
+	// one email four times: the 4th is over the limit of 3 for it
+	for ($i = 1; $i <= 3; $i++) {
+		same(303, post_to($spam_base, '/journal', array('raster_form' => 'newsletter.signup', 'email' => 'again@example.com'))[0], "post $i");
 	}
-	list($status, $body) = post_to($spam_base, '/journal', array('raster_form' => 'newsletter.signup', 'email' => 'crowd6@example.com'));
+	list($status, $body) = post_to($spam_base, '/journal', array('raster_form' => 'newsletter.signup', 'email' => 'again@example.com'));
 	same(200, $status);
 	has($body, "That's a lot from one place");
 	lacks($body, 'That went by a bit quickly');
-	has($body, 'value="crowd6@example.com"');
+	has($body, 'value="again@example.com"');
+	// six people behind one address (an office, a phone carrier) are all taken:
+	// the per-IP count only flags them
+	$office = array('X-Forwarded-For: 203.0.113.70');
+	for ($i = 1; $i <= 6; $i++) {
+		same(303, post_to($spam_base, '/journal', array('raster_form' => 'newsletter.signup', 'email' => "crowd$i@example.com"), 60, $office)[0], "crowd $i");
+	}
 	database::instance('cms');
-	same(0, (int)R::getCell('SELECT COUNT(*) FROM subscriber WHERE email = ?', array('crowd6@example.com')), 'no subscriber');
-	same(5, (int)R::getCell("SELECT COUNT(*) FROM subscriber WHERE email LIKE 'crowd%'"), 'the five before');
+	same(6, (int)R::getCell("SELECT COUNT(*) FROM subscriber WHERE email LIKE 'crowd%'"), 'six subscribers');
+	// a record form too (cms_records::submit, as bookings are)
+	$model = "<?php\nclass zzshared\n{\n\tstatic function types() {\n\t\treturn array('zzshared' => array('fields' => array('title' => ''), 'create' => 'visitor'));\n\t}\n\tfunction form() { return cms_records::submit('zzshared', 'sent'); }\n}\n";
+	$view = "<html><body>\n<!-- print.validation.alert('try_again') --><p>Again, please.</p><!-- /print.validation.alert('try_again') -->\n<!-- print.validation.alert('slow_down') --><p>Slow down.</p><!-- /print.validation.alert('slow_down') -->\n<!-- render.zzshared.form -->\n<form method=\"post\"><input name=\"title\" required maxlength=\"50\"><button>Send</button></form>\n<!-- /render.zzshared.form -->\n</body></html>\n";
+	// spam_ip_blocks on holds them back again
+	$strict = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'CAFE_SPAM_LIMITS' => 'on', 'CAFE_SPAM_IP_BLOCKS' => 'on'));
+	@mkdir("$root/demo/models/zzshared");
+	try {
+		with_file("$views/zz-shared.html", $view, function () use ($spam_base, $strict, $root, $model, $office) {
+			with_file("$root/demo/models/zzshared/zzshared.php", $model, function () use ($spam_base, $strict, $office) {
+				for ($i = 1; $i <= 6; $i++) {
+					same(303, post_to($spam_base, '/zz-shared', array('raster_form' => 'zzshared.form', 'title' => "Shared $i"), 60, $office)[0], "record $i");
+				}
+				database::instance('cms');
+				same(6, (int)R::count('zzshareddata'), 'six records');
+				spam_forget();
+				for ($i = 1; $i <= 5; $i++) {
+					same(303, post_to($strict, '/zz-shared', array('raster_form' => 'zzshared.form', 'title' => "Strict $i"), 60, $office)[0], "spam_ip_blocks, record $i");
+				}
+				list($status, $body) = post_to($strict, '/zz-shared', array('raster_form' => 'zzshared.form', 'title' => 'Strict 6'), 60, $office);
+				same(200, $status, 'spam_ip_blocks: the 6th');
+				has($body, 'Slow down.');
+				has($body, 'value="Strict 6"');
+				database::instance('cms');
+				same(0, (int)R::count('zzshareddata', ' title = ? ', array('Strict 6')), 'not stored');
+			});
+		});
+	} finally {
+		@rmdir("$root/demo/models/zzshared");
+		database::instance('cms');
+		R::exec('DROP TABLE IF EXISTS zzshareddata');
+	}
+	spam_forget();
+	for ($i = 1; $i <= 5; $i++) {
+		same(303, post_to($strict, '/journal', array('raster_form' => 'newsletter.signup', 'email' => "strict$i@example.com"), 60, $office)[0], "spam_ip_blocks, post $i");
+	}
+	list($status, $body) = post_to($strict, '/journal', array('raster_form' => 'newsletter.signup', 'email' => 'strict6@example.com'), 60, $office);
+	same(200, $status);
+	has($body, "That's a lot from one place");
+	has($body, 'value="strict6@example.com"');
+	database::instance('cms');
+	same(0, (int)R::getCell('SELECT COUNT(*) FROM subscriber WHERE email = ?', array('strict6@example.com')), 'no subscriber');
+	same(5, (int)R::getCell("SELECT COUNT(*) FROM subscriber WHERE email LIKE 'strict%'"), 'the five before');
 	// the main server has the limits off: the same post is taken there
 	global $base;
-	same(303, post_to($base, '/journal', array('raster_form' => 'newsletter.signup', 'email' => 'crowd7@example.com'))[0]);
+	same(303, post_to($base, '/journal', array('raster_form' => 'newsletter.signup', 'email' => 'again@example.com'))[0]);
 });
 
 test('Q1', 'a record form is covered without code, and a type can turn it off', function () use ($spam_base, $root, $views) {

@@ -35,7 +35,7 @@ class feedback {
         $v = validation::get();
         if (!$v->submitted()) return false;                            // 1. not sent: show the form as written
         if (!$v->valid()) return template::instance()->form_state();   // 2. invalid: show it again with the values typed
-        if ($reasons = $v->suspect()) return $v->hold($reasons);       // 3. looks like spam: show it again, with try_again or slow_down
+        if ($reasons = validation_spam::holds($v->suspect())) return $v->hold($reasons); // 3. looks like spam: show it again, with try_again or slow_down
         cms_records::create('feedback', array(                         // 4. fine: do the work
             'rating' => (int)util::post('rating'),
             'comment' => (string)util::post('comment'),
@@ -177,6 +177,7 @@ $v->submitted();          // this form was posted
 $v->valid();              // every rule passes
 $v->errors();             // array('email' => array('required'), …) for this form
 $v->suspect();            // the reasons the post looks like spam, empty when it looks human
+validation_spam::holds($reasons); // the reasons that hold a post back: all but too_many_from_ip
 $v->hold($reasons);       // show the form again, as typed, with try_again or slow_down
 $v->raise('name_taken');  // show alert('name_taken')
 util::post('email');      // a posted value, or false
@@ -218,9 +219,11 @@ You don't need to add anything to your forms for this.
 
 `suspect()` checks the stamp and the limits. Pass the fields to look through for links and blocked words, `suspect(array('subject', 'message'))`; with none, `suspect()` looks through every field the form posted, and `suspect(array())` through none: then no text is checked at all, not even the email's domain against the blocklist, since a form that answers `try_again` would turn a blocked address away on every try. Editors are never held, so you can test your own form. A check that can't run (no table yet, no key) passes, and logs a warning.
 
+Many people can share one IP: an office, a phone carrier, a proxy Raster can't see through. So `too_many_from_ip` only flags a post. `validation_spam::holds($reasons)` keeps the reasons that should turn it away, all but that one, unless `spam_ip_blocks` is true. Pass `suspect()`'s answer through it, as the feedback form above does.
+
 `hold($reasons)` shows the form again as it was typed, with a fresh stamp, and the alert `try_again` (the stamp) or `slow_down` (a limit). Word both in the template, once, at the top of the layout, so a held post shows its message once; `raster lint` asks for them on a page with a bundled form that can hold a post, and counts alerts in the fragments the page includes (`<!-- dry._layout.header /-->`).
 
-The newsletter, sign-up, forgot-password and booking forms, and every record form with `create` `visitor` or `member`, do this for you. Contact does it differently: it keeps a suspected message aside and thanks the sender all the same. See [Security](Security) for how counts are kept (no raw IP) and what to set behind a proxy.
+The newsletter, sign-up, forgot-password and booking forms, and every record form with `create` `visitor` or `member`, do this for you. Contact does it differently: it keeps a suspected message aside (one over `spam_per_ip` too) and thanks the sender all the same. See [Security](Security) for how counts are kept (no raw IP) and what to set behind a proxy.
 
 ## Good to know
 

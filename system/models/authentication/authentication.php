@@ -412,7 +412,7 @@ class authentication
 		$v = validation::get();
 		if (!$v->submitted()) return false;
 		if (!$v->valid()) return $this->form_again();
-		if ($reasons = $v->suspect(array())) return $v->hold($reasons);
+		if ($reasons = validation_spam::holds($v->suspect(array()))) return $v->hold($reasons);
 		self::connect();
 		$email = strtolower(trim((string)util::post('email')));
 		if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
@@ -447,8 +447,9 @@ class authentication
 		if (!$v->submitted()) return false;
 		if (!$v->valid()) return $this->form_again();
 		// a bot that asks too often gets the answer for an unknown address, so
-		// it learns nothing and no mail goes out; other reasons don't matter here
-		if (array_intersect($v->suspect(array()), array('too_many_from_ip', 'too_many_from_email'))) {
+		// it learns nothing and no mail goes out; other reasons don't matter
+		// here, and too many from one IP only when spam_ip_blocks says so
+		if (array_intersect(validation_spam::holds($v->suspect(array())), array('too_many_from_ip', 'too_many_from_email'))) {
 			util::done('reset_sent');
 			return false;
 		}

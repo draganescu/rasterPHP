@@ -66,6 +66,7 @@ $knob = function ($name) { $value = getenv($name); return $value === false ? nul
 // the suite posts many forms from one address; the spam tests leave the limits on
 if ($knob('CAFE_SPAM_LIMITS') === 'off') config::set('spam_per_ip')->to(false);
 if ($knob('CAFE_SPAM_LIMITS') === 'off') config::set('spam_per_email')->to(false);
+if ($knob('CAFE_SPAM_IP_BLOCKS') === 'on') config::set('spam_ip_blocks')->to(true);
 if ($knob('CAFE_REGISTRATION') === 'off') config::set('registration')->to(false);
 if ($knob('CAFE_DOUBLE_OPT_IN') === 'off') config::set('newsletter_double_opt_in')->to(false);
 if ($knob('CAFE_LOGIN_PAGE')) config::set('login_page')->to($knob('CAFE_LOGIN_PAGE'));

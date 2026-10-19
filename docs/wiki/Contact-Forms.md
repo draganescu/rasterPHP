@@ -38,7 +38,7 @@ To add a field (a topic, an order number), override the model's types, as for [B
 
 ## Spam is kept aside
 
-Every message is stored. One that looks like spam (`validation::get()->suspect()`, see [Forms and validation](Forms-and-Validation#spam-checks)) is stored with status `spam` and the reasons it was flagged, for example `no_stamp` or `too_many_links`. Nobody is emailed about it, and the sender is thanked all the same, so a bot learns nothing. Besides the stamp and the limits, the model looks through `name`, `subject` and `message` for links and blocked words.
+Every message is stored. One that looks like spam (`validation::get()->suspect()`, see [Forms and validation](Forms-and-Validation#spam-checks)) is stored with status `spam` and the reasons it was flagged, for example `no_stamp`, `too_many_links` or `too_many_from_ip` (more than `spam_per_ip` messages from one address in an hour: the other forms take such a post, contact keeps it aside). Nobody is emailed about it, and the sender is thanked all the same, so a bot learns nothing. Besides the stamp and the limits, the model looks through `name`, `subject` and `message` for links and blocked words.
 
 That is why a contact form needs only the `sent` alert and not `try_again` or `slow_down`. If a real person was caught, staff mark the message not spam and it moves up to the new ones. Spam older than `contact_spam_days` (30) is deleted as new messages arrive; real messages stay until staff delete them.
 

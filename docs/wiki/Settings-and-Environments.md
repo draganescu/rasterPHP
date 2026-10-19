@@ -133,9 +133,10 @@ Set with `config::set('name')->to(value)` in `config/the_app.php`.
 | `spam_min_seconds` | `3` | a post sooner than this after its form was shown is `too_fast`; `false` turns the stamp checks off |
 | `spam_max_age` | `86400` | a stamp older than this many seconds is `stamp_old`; `false` allows any age |
 | `spam_per_ip`, `spam_per_email` | `5`, `3` | posts of one form in an hour from one IP, with one address; `false` turns that limit off |
+| `spam_ip_blocks` | `false` | `true` holds back a post over `spam_per_ip` too; by default it is only flagged, since many people can share one IP (the contact form keeps it as spam) |
 | `spam_max_links` | `2` | links allowed in the fields a form checks; `0` allows none, `false` any number |
 | `spam_blocklist` | none | words and domains (`casino`, `pills.example`) that make a post `blocked` |
-| `trusted_proxies` | none | proxies in front of the site, such as `array('10.0.0.0/8')`: only a post from one of them has its visitor's address read from a header |
+| `trusted_proxies` | private addresses | proxies in front of the site, such as `array('10.0.0.0/8')`: only a post from one of them has its visitor's address read from a header. Not set, any private, loopback or link-local address counts as one; `array()` trusts nobody |
 | `client_ip_header` | `X-Forwarded-For` | the header those proxies send the visitor's address in (`Fly-Client-IP` is one address) |
 | `newsletter_double_opt_in` | `true` | `false` subscribes without a confirmation email |
 | `newsletter_confirm_page` | `newsletter-confirm` | |

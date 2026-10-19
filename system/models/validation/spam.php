@@ -9,7 +9,9 @@
 *
 * reasons() is what validation::get()->suspect() asks. It checks the stamp,
 * counts the post by its IP and its address (hashed with the day's salt, in
-* the formhit table), and looks for links and blocked words. A check that
+* the formhit table), and looks for links and blocked words. holds() says
+* which of the reasons turn a post away: too_many_from_ip only flags one,
+* unless spam_ip_blocks. A check that
 * can't run (no key, no table, a database error) passes and logs a warning,
 * so a form never stops working because of its spam checks. No raw IP is
 * stored or logged: only hashes, and the salt goes with its counts at
@@ -24,6 +26,14 @@ class validation_spam
 	static $warned = array();
 	// the tables were made (or found) in this request
 	static $ready = false;
+	// what counts as a proxy while trusted_proxies isn't set: addresses no
+	// request from the open internet can come from (private, loopback,
+	// link-local; fc00::/7 has Fly's fdaa::), so a post from one came
+	// through a proxy on the same network, as Caddy's private_ranges says
+	static $private_ranges = array('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '127.0.0.0/8', '169.254.0.0/16', '::1', 'fc00::/7', 'fe80::/10');
+	// distinct emails one IP sends one form in an hour, more than a person
+	// has: over it, today's formsalt row says many people share addresses
+	const SHARED_EMAILS = 5;
 
 	// "<unix time>.<64 hex>", or '' when there is no key to sign with
 	static function stamp($time = null) {
@@ -66,7 +76,9 @@ class validation_spam
 		}
 
 		// the limits: the post is counted, then compared, so the 6th post
-		// of the hour is the first one over a limit of 5
+		// of the hour is the first one over a limit of 5. Over spam_per_ip
+		// is a reason like the others, but holds() only holds a post for it
+		// when spam_ip_blocks says so: many people can share an address
 		$per_ip = config::get('spam_per_ip', 5);
 		$per_email = config::get('spam_per_email', 3);
 		$email = self::email();
@@ -74,10 +86,12 @@ class validation_spam
 		if ($per_ip !== false || $per_email !== false) {
 			$salt = self::salt();
 			if ($salt !== null) {
-				self::note_proxy();
 				try {
-					if ($per_ip !== false && self::count_hit($owner, 'ip', self::hash(self::network(self::client_ip()), $salt)) > (int)$per_ip) $reasons[] = 'too_many_from_ip';
-					if ($per_email !== false && self::count_hit($owner, 'email', self::hash($email, $salt)) > (int)$per_email) $reasons[] = 'too_many_from_email';
+					$ip = self::hash(self::network(self::client_ip()), $salt);
+					$address = $email === null ? null : self::hash($email, $salt);
+					if ($per_ip !== false && self::count_hit($owner, 'ip', $ip) > (int)$per_ip) $reasons[] = 'too_many_from_ip';
+					if ($per_email !== false && self::count_hit($owner, 'email', $address) > (int)$per_email) $reasons[] = 'too_many_from_email';
+					if ($per_ip !== false && $address !== null) self::note_shared($owner, $ip, $address);
 				} catch (Exception $e) {
 					self::warn($e->getMessage());
 				}
@@ -109,13 +123,24 @@ class validation_spam
 		return filter_var($email, FILTER_VALIDATE_EMAIL) ? $email : null;
 	}
 
+	// The reasons that hold a post back (the form again, slow_down or
+	// try_again): all of them but too_many_from_ip, which only flags the
+	// post unless spam_ip_blocks is true. An office, a phone carrier or a
+	// proxy Raster can't see through puts many people on one address.
+	static function holds($reasons) {
+		if (config::get('spam_ip_blocks', false)) return array_values((array)$reasons);
+		return array_values(array_diff((array)$reasons, array('too_many_from_ip')));
+	}
+
 	// The visitor's address: REMOTE_ADDR, unless that is a trusted proxy,
 	// then the client_ip_header it sends (for a list, the last entry that
 	// isn't itself trusted; an entry's port and brackets left out). A
-	// missing or bad header keeps REMOTE_ADDR.
+	// missing or bad header keeps REMOTE_ADDR. Trusted are the addresses
+	// in trusted_proxies, or while it isn't set, the private ones
+	// ($private_ranges); array() trusts nobody.
 	static function client_ip() {
 		$remote = self::unmapped(isset($_SERVER['REMOTE_ADDR']) ? (string)$_SERVER['REMOTE_ADDR'] : '');
-		$proxies = (array)config::get('trusted_proxies', array());
+		$proxies = self::proxies();
 		if (!$proxies || !self::trusted($remote, $proxies)) return $remote;
 		$header = 'HTTP_'.strtoupper(str_replace('-', '_', (string)config::get('client_ip_header', 'X-Forwarded-For')));
 		if (empty($_SERVER[$header]) || !is_string($_SERVER[$header])) return $remote;
@@ -146,6 +171,13 @@ class validation_spam
 		$packed = inet_pton($ip);
 		if (substr($packed, 0, 12) !== str_repeat("\0", 10)."\xff\xff") return $ip;
 		return inet_ntop(substr($packed, 12));
+	}
+
+	// config::get() gives null for a setting that isn't there, so null set
+	// on purpose is the default too
+	protected static function proxies() {
+		$proxies = config::get('trusted_proxies', null);
+		return $proxies === null ? self::$private_ranges : (array)$proxies;
 	}
 
 	protected static function trusted($ip, $proxies) {
@@ -216,18 +248,16 @@ class validation_spam
 		}
 	}
 
-	// Posts from a private address with no trusted_proxies: a proxy is
-	// probably in front and every visitor shares one count. doctor runs
-	// on the command line and learns it from today's formsalt row.
-	protected static function note_proxy() {
-		$remote = self::unmapped(isset($_SERVER['REMOTE_ADDR']) ? (string)$_SERVER['REMOTE_ADDR'] : '');
-		if (!filter_var($remote, FILTER_VALIDATE_IP) || filter_var($remote, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) return;
-		if (config::get('trusted_proxies')) return;
-		try {
-			database::instance('validation')->mark_proxied(date('Y-m-d'));
-		} catch (Exception $e) {
-			self::warn($e->getMessage());
-		}
+	// One IP sending one form more distinct emails in an hour than a person
+	// has: a proxy Raster can't see through (Cloudflare), or many people
+	// behind one address. A pair row (the IP's hash and the email's) is
+	// kept with the counts and goes with them; doctor runs on the command
+	// line and learns it from today's formsalt row.
+	protected static function note_shared($form, $ip, $email) {
+		$db = database::instance('validation');
+		$db->add_hit($form, 'pair', $ip.'.'.$email, time());
+		$rows = $db->shared($form, $ip.'.%', time() - 3600);
+		if ($rows && (int)$rows[0]['emails'] > self::SHARED_EMAILS) $db->mark_proxied(date('Y-m-d'));
 	}
 
 	// Counts one post of $form by $kind (ip or email) and $hash; returns
