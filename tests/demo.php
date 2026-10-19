@@ -2949,6 +2949,129 @@ test(array('L9', 'L10'), 'page cache: made-up list URLs are not kept, a change d
 	same('200 miss', $cache('/journal/journal_items/author/Mara'));
 });
 
+// ## Page cache and the clock (#158 group 8)
+
+// runs PHP with the demo booted, in the environment given
+function demo_php($code, $env) {
+	global $root;
+	$prefix = '';
+	foreach ($env as $name => $value) $prefix .= $name.'='.escapeshellarg($value).' ';
+	return shell_exec($prefix.escapeshellarg(PHP_BINARY).' -r '.escapeshellarg('require "'.$root.'/system/boot.php"; boot::$appname = "demo"; boot::cli(); '.$code).' 2>&1');
+}
+
+test('L13', 'raster render never reads or writes the page cache, and a protected page answers its redirect', function () use ($root, $tmp, $maildir) {
+	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => test_db("$tmp/prod.sqlite"), 'RASTER_URL' => 'https://cafe.example/', 'RASTER_MAIL' => "log://$maildir");
+	$prod = server(free_port(), $env);
+	raster(array('cache', 'clear'), $env);
+	http('GET', "$prod/faq");
+	same('hit', header_value(http('GET', "$prod/faq")[2], 'X-Raster-Cache'));
+	$faq = "$root/demo/views/cafe/faq.html";
+	with_file($faq, str_replace('</body>', '<p>Edited by hand</p></body>', file_get_contents($faq)), function () use ($env) {
+		list($code, $out) = raster(array('render', '/faq'), $env);
+		same(0, $code, $out);
+		has($out, 'Edited by hand', 'render printed the cached page');
+	});
+	raster(array('render', '/about'), $env);
+	same('miss', header_value(http('GET', "$prod/about")[2], 'X-Raster-Cache'), 'render stored the page');
+	// a protected page: the redirect the web gets, and exit 1
+	list($code, $out) = raster(array('render', '/staff'), $env);
+	same(1, $code, $out);
+	has($out, 'HTTP 303');
+	has($out, 'Location: https://cafe.example/login?next=%2Fstaff');
+	lacks($out, '<html', 'the protected page itself');
+	$answers = mcp_stdio(array(array('render_url', array('url' => '/staff'))));
+	same(303, $answers[0]['status']);
+	same(false, $answers[0]['ok']);
+	has($answers[0]['errors'], '/login?next=%2Fstaff');
+	same('', $answers[0]['html']);
+	// the account a page is rendered as still sees it
+	same(0, raster(array('render', '/staff', '--as=editor'))[0]);
+});
+
+test('L14', 'several scheduled items each clear the page cache when their time comes, in the site\'s time zone', function () use ($root, $tmp, $maildir) {
+	// far from UTC, so a time read in the wrong zone is hours off
+	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => test_db("$tmp/prod.sqlite"), 'RASTER_URL' => 'https://cafe.example/', 'RASTER_MAIL' => "log://$maildir", 'CAFE_TIMEZONE' => 'Pacific/Kiritimati');
+	$prod = server(free_port(), $env);
+	raster(array('cache', 'clear'), $env);
+	$now = time();
+	// dated before every other event, so both are on the first page
+	$out = demo_php('cms_store::connect(); R::freeze(false); foreach (array("First due" => 2, "Second due" => 4) as $title => $later) cms_store::save_item("eventsdata", 0, array("title" => $title, "date" => "2000-01-01", "published_at" => date("Y-m-d H:i:s", '.$now.' + $later)), array("title", "date")); echo date_default_timezone_get();', $env);
+	same('Pacific/Kiritimati', $out);
+	// other tests schedule items for 2099
+	$next = function () use ($root, $now) {
+		return array_values(array_filter(file("$root/demo/data/cache/next", FILE_IGNORE_NEW_LINES), function ($time) use ($now) { return $time < $now + 3600; }));
+	};
+	same(array((string)($now + 2), (string)($now + 4)), $next(), 'every time is kept');
+	http('GET', "$prod/events");
+	list(, $body, $headers) = http('GET', "$prod/events");
+	same('hit', header_value($headers, 'X-Raster-Cache'));
+	lacks($body, 'First due');
+	while (time() < $now + 3) usleep(100000);
+	$body = http('GET', "$prod/events")[1];
+	has($body, 'First due', 'the first is published on time');
+	lacks($body, 'Second due');
+	same(array((string)($now + 4)), $next(), 'the later time stays');
+	same('hit', header_value(http('GET', "$prod/events")[2], 'X-Raster-Cache'));
+	while (time() < $now + 5) usleep(100000);
+	list(, $body, $headers) = http('GET', "$prod/events");
+	same('miss', header_value($headers, 'X-Raster-Cache'));
+	has($body, 'Second due', 'the second is published on time');
+	same(array(), $next(), 'nothing left to wait for');
+	demo_php('cms_store::connect(); R::exec("DELETE FROM eventsdata WHERE title IN (\'First due\', \'Second due\')");', $env);
+});
+
+test('L15', 'cache clear says so when it can\'t write the cache, and upgrade clears it', function () use ($root, $tmp, $maildir) {
+	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => test_db("$tmp/prod.sqlite"), 'RASTER_URL' => 'https://cafe.example/', 'RASTER_MAIL' => "log://$maildir");
+	$prod = server(free_port(), $env);
+	$dir = "$root/demo/data/cache";
+	raster(array('cache', 'clear'), $env);
+	http('GET', "$prod/faq");
+	// the cache belongs to the web server's user, and this is someone else
+	foreach (glob("$dir/*") as $file) chmod($file, 0444);
+	chmod($dir, 0555);
+	try {
+		list($code, $out) = raster(array('cache', 'clear'), $env);
+		same(1, $code, $out);
+		has($out, "error: can't write $dir/version");
+		lacks($out, 'Page cache cleared');
+		$answers = mcp_stdio(array(array('clear_cache')));
+		has(isset($answers[0]['error']) ? $answers[0]['error'] : '', "Can't write $dir/version");
+	} finally {
+		chmod($dir, 0775);
+		foreach (glob("$dir/*") as $file) chmod($file, 0664);
+	}
+	same('hit', header_value(http('GET', "$prod/faq")[2], 'X-Raster-Cache'));
+	list($code, $out) = raster(array('upgrade'), $env);
+	same(0, $code, $out);
+	same('miss', header_value(http('GET', "$prod/faq")[2], 'X-Raster-Cache'), 'the first request after an upgrade');
+});
+
+test('L16', 'a cached page keeps the headers it was made with, has Last-Modified and answers 304', function () use ($root, $tmp, $maildir) {
+	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => test_db("$tmp/prod.sqlite"), 'RASTER_URL' => 'https://cafe.example/', 'RASTER_MAIL' => "log://$maildir", 'CAFE_TIMEZONE' => 'Pacific/Kiritimati');
+	$prod = server(free_port(), $env);
+	raster(array('cache', 'clear'), $env);
+	list(, $first, $miss) = http('GET', "$prod/faq");
+	same('miss', header_value($miss, 'X-Raster-Cache'));
+	list($status, $body, $hit) = http('GET', "$prod/faq");
+	same(200, $status);
+	same('hit', header_value($hit, 'X-Raster-Cache'));
+	same($first, $body);
+	foreach (array('X-Cafe', 'X-Cafe-Done', 'Content-Type') as $name) same(header_value($miss, $name), header_value($hit, $name), $name);
+	same(1, count(preg_grep('/^X-Cafe:/i', $hit)), 'a header is sent once');
+	$modified = header_value($hit, 'Last-Modified');
+	same($modified, header_value($miss, 'Last-Modified'));
+	check(preg_match('/^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/', (string)$modified), 'an HTTP date: '.$modified);
+	check(abs(strtotime($modified) - time()) < 30, 'in GMT, whatever the site\'s time zone: '.$modified);
+	list($status, $body, $headers) = http('GET', "$prod/faq", null, array("If-Modified-Since: $modified"));
+	same(304, $status);
+	same('', $body);
+	same('hit', header_value($headers, 'X-Raster-Cache'));
+	same(200, http('GET', "$prod/faq", null, array('If-Modified-Since: '.gmdate('D, d M Y H:i:s', strtotime($modified) - 60).' GMT'))[0], 'an older copy gets the page');
+	same(200, http('GET', "$prod/faq", null, array('If-Modified-Since: yesterday-ish'))[0], 'a date that is not one');
+	// a session cookie is never kept, nor sent again
+	foreach ($hit as $header) check(stripos($header, 'Set-Cookie:') !== 0, $header);
+});
+
 // ## 2.1.8 batch B: errors and /api
 
 test('C51', 'cms offers over /api only what its api() lists: the editor endpoints, style and logout; an override adds nothing unlisted', function () use ($base, $root) {

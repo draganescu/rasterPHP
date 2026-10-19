@@ -3,6 +3,18 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.19
+
+Nothing for sites to do.
+
+**`raster render` shows what visitors get.** It never reads or writes the page cache, also in production, so a view edited by hand shows at once. A protected page answers with its 303 to the login page: `Location: …` and `HTTP 303` go to stderr, no page is printed, and the exit code is 1. MCP `render_url` gives status 303. `--as` still renders the page as that person.
+
+**Every scheduled item clears the page cache.** Before, only the earliest did, and later ones were missing from cached pages until `page_cache_ttl` ran out. `data/cache/next` now keeps every time still to come.
+
+**`cache clear` says when it couldn't.** When the cache belongs to another user (the web server's) and nothing could be written, `raster cache clear` says so and exits 1, and MCP `clear_cache` answers an error. Run it as the web server's user. `raster update` and `raster upgrade` now clear the page cache when they finish.
+
+**Cached pages keep their headers and answer 304.** Headers a model or listener sets (`X-Robots-Tag`, CORS, `Link`) are sent on cache hits too. Cached pages carry `Last-Modified`, and a request with a current `If-Modified-Since` gets a 304 with no body.
+
 ## 2.2.18
 
 Nothing for sites to do. On nginx or Caddy, print the server config again with `raster deploy` so pages whose slug ends in `-journal`, `-wal` or `-shm` can be opened.

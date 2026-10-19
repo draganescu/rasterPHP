@@ -245,6 +245,10 @@ php tests/demo.php                        # the whole matrix
 | L10 | page cache: links with only tracking parameters (`utm_*`, `fbclid`, `gclid`, `msclkid`) are cache hits, and their values never reach the cached page |
 | L11 | a database that can't be reached answers 503 outside development (`error_document_503`, views/cafe/503.html; `/api` as JSON, before the method runs), logged, never cached |
 | L12 | the page cache is thrown away and `content_changed` sent once a transaction commits, and not at all when it is rolled back |
+| L13 | `raster render` and MCP `render_url` never read or write the page cache; a protected page answers its 303 to the login page, with exit 1 |
+| L14 | several scheduled items each clear the page cache when their time comes, in the site's `timezone` |
+| L15 | `raster cache clear` and MCP `clear_cache` fail when they can't write the cache; `upgrade` (and so `update`) clears it |
+| L16 | a cached page keeps the headers it was made with, carries `Last-Modified` and answers `If-Modified-Since` with 304 |
 | M1 | MCP needs its token; GET is refused |
 | M2 | initialize, ping, tools/list, batches, errors |
 | M3 | notifications get 202 |

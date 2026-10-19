@@ -122,6 +122,12 @@ test('edited framework files stop an update', function () use ($site, $rel210) {
 
 test('update --force', function () use ($site, $rel210) {
 	append("$site/application/views/default/about.html", "\n<!-- my page -->\n");
+	// a page cached before the update
+	$cache = "$site/application/data/cache";
+	if (!is_dir($cache)) mkdir($cache, 0775, true);
+	file_put_contents("$cache/version", 'before');
+	$page = "$cache/".sha1('a page');
+	file_put_contents($page, "{}\n<p>old</p>");
 	list($code, $out) = raster($site, array('update', $rel210, '--force'));
 	same(0, $code, $out);
 	has($out, 'Updated to Raster 2.1.0');
@@ -135,6 +141,8 @@ test('update --force', function () use ($site, $rel210) {
 	has(file_get_contents("$site/application/views/default/about.html"), '<!-- my page -->', 'the app is left alone');
 	same("upgraded\n", file_get_contents("$site/application/config/marker.txt"));
 	same("2.1.0\n", file_get_contents("$site/application/config/raster-version"));
+	check(!is_file($page), 'the pages cached before the update are deleted');
+	check(file_get_contents("$cache/version") !== 'before', 'and the page cache has a new version');
 	// the old files are kept
 	preg_match('#The replaced files are in (\S+)/#', $out, $m);
 	check(isset($m[1]) && strpos($m[1], 'application/data/backups/raster-2.0.0-') === 0, $out);

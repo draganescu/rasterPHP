@@ -20,7 +20,7 @@ php bin/raster serve              # http://localhost:8000, no setup, SQLite
 php bin/raster lint               # after every template edit; exit 1 on errors
 php bin/raster lint --fix         # repair what is mechanical, report the rest
 php bin/raster schema             # what the CMS will store, compared with the database
-php bin/raster render /about      # print a page without a server (exit 1 on 4xx/5xx)
+php bin/raster render /about      # print a page without a server (exit 1 on 3xx/4xx/5xx)
 php bin/raster render /staff --as=editor   # as staff see it, says what the editor can edit (not in production)
 php bin/raster cache clear        # after editing files or the database by hand, in production
 php bin/raster doctor             # is this site healthy, up to date, ready for production?
@@ -850,6 +850,10 @@ bundled model declares none of its types, and `lint` warns.
   see **Editors and agents**),
   `registration` (false turns sign-up off), `login_page`, `after_login`,
   `password_min_length` (8).
+- A protected page answers a visitor with a 303 to the login page, and
+  `raster render` (MCP `render_url`) does the same: it prints `Location:
+  …` and `HTTP 303` on stderr, no page, and exits 1. `--as` renders it
+  as that person sees it.
 - Five wrong passwords lock an account for 15 minutes. Once 15 minutes have
   passed since the last wrong one, counting starts again from zero.
 - One email, one account: two sign-ups at once with one email (a double
@@ -1255,8 +1259,14 @@ use `'model.method'`: `method(true)` returns
   - Any content change throws the cache away and deletes the cached files
     (`util::content_changed()` in your own models; inside a transaction
     when it commits), and so does the moment a scheduled item is
-    published. A page whose render overlapped the
+    published, each one of several (`data/cache/next` keeps every time
+    still to come, one per line). A page whose render overlapped the
     change is not kept.
+  - A cached page goes out with the headers it was made with (what models
+    and listeners set: `X-Robots-Tag`, a CORS header, `Link`), never
+    `Set-Cookie`: a page that sets a cookie is not kept. It carries
+    `Last-Modified` (the time it was stored, in GMT), and a request whose
+    `If-Modified-Since` is not older gets a 304 without the page.
   - A filter page with no items (`/news/news_items/tag/nothing`), a page
     past the last one and a filter on a field the list doesn't have answer
     200 but are never cached, so made-up URLs don't fill the disk. Neither
@@ -1269,19 +1279,24 @@ use `'model.method'`: `method(true)` returns
     as on macOS and Windows). A model that decides the same calls
     `raster_cache::skip()`.
   - Settings: `page_cache_ttl` (3600 seconds) and `page_cache_skip` (path
-    patterns). Responses carry `X-Raster-Cache: hit|miss`. `describe` says
+    patterns). Responses carry `X-Raster-Cache: hit|miss` (`miss` only when
+    the page was stored). `describe` says
     whether the cache is on (`site.page_cache`).
   - **Changes Raster doesn't make itself don't clear it.** Raster's own
     writes do (`write_view`, `update_page`, the item tools, the editor,
     forms). A view, theme file, model or config edited with ordinary file
     tools, or the database changed directly, is not seen by visitors who
     aren't logged in until the cache is cleared or `page_cache_ttl` runs
-    out: run `php bin/raster cache clear`, or MCP `clear_cache`.
-    That also deletes `data/cache/models.json`, where Raster keeps what the
+    out: run `php bin/raster cache clear`, or MCP `clear_cache`. When it
+    can't write the cache (its files belong to the web server's user and
+    the command runs as another) it says so and exits 1 (MCP: an error),
+    and visitors keep the old pages: run it as that user. A content change
+    that can't write it logs a warning. `raster upgrade`, and so `update`,
+    clears the cache at the end. That also deletes `data/cache/models.json`, where Raster keeps what the
     models declare; it is made again when a model file changes anyway, and
     a site whose `data/` can't be written to simply looks every time.
-    `render` and `render_url` never read the cache, so a fresh render does
-    not mean visitors see the change.
+    `render` and `render_url` never read or write the cache, so a fresh
+    render does not mean visitors see the change.
 
 ## Static export
 
@@ -1540,7 +1555,9 @@ command-line output). They win over the settings above.
   that names no app folder (missing, without `config/`, or a framework
   folder such as `system/`) is refused with an error and exit 1, and
   nothing is written. When the version file can't be written, upgrade
-  says so, names the steps that ran, and exits 1.
+  says so, names the steps that ran, and exits 1. Upgrade ends by
+  clearing the page cache, since new framework files and rewritten views
+  make different pages (a cache it can't write is a warning).
   Database changes stay with `raster schema --apply`.
 - `php bin/raster doctor` checks PHP, versions, edited framework files,
   templates, the database, whether `.htaccess` still carries every rule in

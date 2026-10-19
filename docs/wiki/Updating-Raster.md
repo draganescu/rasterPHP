@@ -47,7 +47,7 @@ php bin/raster upgrade --dry-run   # list the steps
 php bin/raster upgrade             # apply them
 ```
 
-`update` already does this for you. Each step checks first whether it's needed, so running it twice is harmless. The version an app has been upgraded to is in `config/raster-version`.
+`update` already does this for you. Each step checks first whether it's needed, so running it twice is harmless. Upgrade ends by clearing the [page cache](Settings-and-Environments#the-page-cache), so visitors get pages made by the new version. The version an app has been upgraded to is in `config/raster-version`.
 
 An app without that file, such as a second app you made by copying the first, is taken as current: `raster upgrade` writes today's version into it, runs no old steps and says so in one line. From then on it updates like any other app.
 
