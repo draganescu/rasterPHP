@@ -2285,6 +2285,50 @@ test('the editor\'s clean() drops the same script links (#67)', function () use 
 	unlink($file);
 	same(array_values($cases), json_decode((string)$out, true), (string)$out);
 });
+test('the editor leaves Enter to the browser in a list or a table, and makes a line break in a paragraph (#114)', function () use ($root) {
+	$node = trim((string)shell_exec('command -v node 2>/dev/null'));
+	if ($node === '') return; // no node here: tests/editor-browser.js covers it in a browser
+	$js = file_get_contents("$root/system/models/cms/editor/editor.js");
+	check(preg_match('/\tfunction takesBlocks\(el\) \{.*?\n\t\}\n/s', $js, $m), 'editor.js has takesBlocks()');
+	$cases = array('DIV' => true, 'TD' => true, 'UL' => true, 'OL' => true, 'DL' => true, 'TABLE' => true, 'TBODY' => true,
+		'P' => false, 'H2' => false, 'LI' => false, 'SPAN' => false, 'A' => false,
+		// the editor's own wrapper: a <div> is judged by its parent, a <span> never takes blocks
+		'DIV in ARTICLE' => true, 'DIV in TD' => true, 'DIV in LI' => false, 'SPAN in ARTICLE' => false, 'SPAN in P' => false);
+	$file = sys_get_temp_dir().'/raster-blocks-'.getmypid().'.js';
+	file_put_contents($file, $m[0]."\nvar cases = ".json_encode(array_keys($cases)).";\n"
+		."function el(t, wrap, parent) { return { tagName: t, nodeType: 1, parentNode: parent || null, hasAttribute: function (a) { return !!wrap && a === 'data-raster-wrap'; } }; }\n"
+		."process.stdout.write(JSON.stringify(cases.map(function (c) { var p = c.split(' in '); return takesBlocks(p[1] ? el(p[0], true, el(p[1])) : el(p[0])); })));\n");
+	$out = shell_exec(escapeshellarg($node).' '.escapeshellarg($file).' 2>&1');
+	unlink($file);
+	same(array_values($cases), json_decode((string)$out, true), (string)$out);
+	// every field the editor makes knows it: those found in the page, those
+	// of an item added or copied in the page, and those of the new-item card
+	check(substr_count($js, 'inline: !holdsBlocks(node)') === 1 && strpos($js, 'field.inline = !holdsBlocks(field.el)') !== false, 'adopt() and scan() set inline');
+	check(strpos($js, 'clean(node.innerHTML, !holdsBlocks(node))') !== false, 'a new item is cleaned for where it sits');
+});
+test('a rich field that already holds paragraphs keeps them, in an <li> or an <a> card too', function () use ($root) {
+	$node = trim((string)shell_exec('command -v node 2>/dev/null'));
+	if ($node === '') return;
+	$js = file_get_contents("$root/system/models/cms/editor/editor.js");
+	$code = '';
+	foreach (array('isBlock', 'takesBlocks', 'holdsBlocks') as $name) {
+		check(preg_match('/\tfunction '.$name.'\(\w+\) \{.*?\n\t\}\n/s', $js, $m), "editor.js has $name()");
+		$code .= $m[0];
+	}
+	// "A holding P": an <a> whose children are a <p>; "DIV in LI": the editor's wrapper
+	$cases = array('LI holding P P' => true, 'A holding P P' => true, 'DT holding UL' => true, 'DIV in LI holding P P' => true,
+		'LI' => false, 'LI holding EM' => false, 'A holding SPAN' => false, 'DIV in LI' => false, 'SPAN in LI holding EM' => false,
+		'P' => false, 'H2 holding EM' => false, 'ARTICLE' => true, 'DIV in TD' => true);
+	$file = sys_get_temp_dir().'/raster-holds-'.getmypid().'.js';
+	file_put_contents($file, $code."\nvar cases = ".json_encode(array_keys($cases)).";\n"
+		."function el(t, wrap, parent, kids) { return { tagName: t, nodeType: 1, parentNode: parent || null, childNodes: (kids || []).map(function (k) { return el(k); }), hasAttribute: function (a) { return !!wrap && a === 'data-raster-wrap'; } }; }\n"
+		."process.stdout.write(JSON.stringify(cases.map(function (c) { var h = c.split(' holding '), kids = h[1] ? h[1].split(' ') : [], p = h[0].split(' in '); return holdsBlocks(p[1] ? el(p[0], true, el(p[1]), kids) : el(p[0], false, null, kids)); })));\n");
+	$out = shell_exec(escapeshellarg($node).' '.escapeshellarg($file).' 2>&1');
+	unlink($file);
+	same(array_values($cases), json_decode((string)$out, true), (string)$out);
+	// Enter in the new-item card follows the same rule
+	check(strpos($js, "!holdsBlocks(fresh)") !== false, 'the new-item card asks holdsBlocks()');
+});
 test('arrays and bad bytes fail required; a field named tags[] takes a list (#70)', function () use ($base) {
 	$v = validation::get();
 	$r = new ReflectionMethod($v, 'check_field');
@@ -2811,17 +2855,20 @@ test('the site time zone sets today and published_at (#84)', function () use ($r
 	try {
 		cms_records::create('zztzday', array('title' => 'UTC today', 'day' => gmdate('Y-m-d')));
 		cms_records::create('zztzday', array('title' => 'Site today', 'day' => $there->format('Y-m-d')));
-		// a minute ago on the site's clock: hours away on UTC's
-		$minute_ago = (clone $there)->modify('-1 minute')->format('Y-m-d H:i:s');
-		cms_store::save_item('newsdata', 0, array('headline' => 'Zone news', 'published_at' => $minute_ago), array('headline', 'published_at'));
+		// a minute off on the site's clock is hours off on UTC's: ahead of
+		// UTC a minute ago is still to come by UTC; behind it a minute from
+		// now has long passed by UTC
+		$ahead = $there->getOffset() > 0;
+		$stamp_at = (clone $there)->modify($ahead ? '-1 minute' : '+1 minute')->format('Y-m-d H:i:s');
+		cms_store::save_item('newsdata', 0, array('headline' => 'Zone news', 'published_at' => $stamp_at), array('headline', 'published_at'));
 		$utc = $render();
 		check(strpos($utc, '<li>UTC today</li>') !== false && strpos($utc, 'Site today') === false, "without a time zone today is UTC's: $utc");
-		check(strpos($utc, 'Zone news') === false, 'and the news is still scheduled');
+		check((strpos($utc, 'Zone news') !== false) === !$ahead, $ahead ? 'and the news is still scheduled' : 'and the news is already live');
 		file_put_contents($config, $settings."\nconfig::set('timezone')->to('$zone');\n");
 		$zoned = $render();
 		check(strpos($zoned, '<li>Site today</li>') !== false, "today is the site's date: $zoned");
 		check(strpos($zoned, 'UTC today') === false, "an item dated today in UTC is not today on the site: $zoned");
-		check(strpos($zoned, '<li>Zone news</li>') !== false, 'published a minute ago on the site clock is live');
+		check((strpos($zoned, '<li>Zone news</li>') !== false) === $ahead, $ahead ? 'published a minute ago on the site clock is live' : 'published a minute from now on the site clock is scheduled');
 		// stamps follow it too
 		$stamp = with_timezone($zone, function () {
 			$item = cms_records::create('zztzday', array('title' => 'Stamped', 'day' => ''));
@@ -4467,6 +4514,42 @@ test('booking: requires(): emails, pages, settings and records', function () {
 			config::set('protected')->to($protected);
 		}
 	});
+});
+
+test('editor: marks settle in one pass over the page, however long (#53)', function () {
+	$template = template::instance();
+	$saved = $template->marks;
+	try {
+		$template->marks = array();
+		for ($i = 1; $i <= 12; $i++) $template->mark(array('kind' => 'field'));
+		$m = function ($id) { return '<!--raster:s '.$id.'-->x<!--raster:e '.$id.'-->'; };
+		$html = '<html><head><title>'.$m(1).'</title></head><BODY class="a">'.$m(2)
+			.'<a title="'.$m(3).'">'.$m(4).'</a><script>var a = "'.$m(5).'";</script>'.$m(6)
+			.'<TEXTAREA>'.$m(7).'</textarea><select><option>'.$m(8).'</option></select><p>'.$m(9)
+			.'<style>'.$m(10).'</STYLE><!--raster:a 11--><img src="a.jpg"><img alt="<!--raster:a 12-->"></p></body></html>';
+		$out = cms_editor::settle($html);
+		$hidden = array();
+		foreach ($template->marks as $id => $mark) if (!empty($mark['hidden'])) $hidden[] = $id;
+		same(array(1, 3, 5, 7, 8, 10, 12), $hidden);
+		foreach (array(2, 4, 6, 9) as $id) check(strpos($out, $m($id)) !== false, "mark $id kept: $out");
+		check(strpos($out, '<!--raster:a 11--><img') !== false && strpos($out, 'raster:s 1-->') === false, $out);
+		// a long list: one forward pass, not a copy of the page per mark
+		$template->marks = array();
+		$rows = '';
+		for ($i = 0; $i < 2000; $i++) {
+			$item = $template->mark(array('kind' => 'item'));
+			$title = $template->mark(array('kind' => 'item_field'));
+			$photo = $template->mark(array('kind' => 'item_attr'));
+			$rows .= '<!--raster:s '.$item.'--><li class="dish"><h3>'.$m($title).'</h3><!--raster:a '.$photo.'--><img src="d.jpg" alt="Dish"></li><!--raster:e '.$item.'-->';
+		}
+		$start = microtime(true);
+		$out = cms_editor::settle('<html><head><title>Menu</title></head><body><ul>'.$rows.'</ul></body></html>');
+		$took = microtime(true) - $start;
+		same(0, count(array_filter($template->marks, function ($mark) { return !empty($mark['hidden']); })));
+		check($took < 0.25, 'settle took '.round($took * 1000).' ms for 6,000 marks');
+	} finally {
+		$template->marks = $saved;
+	}
 });
 
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";

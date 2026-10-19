@@ -1311,10 +1311,19 @@ of lists and filter pages come along; drafts and the editor don't.
 - **The in-page editor.** For editors, the page itself is the editor: every
   `print.cms` field, collection, item and item field is editable where it
   shows, in the site's own type (`E` or the Edit button starts, changes save
-  when you leave a field, every change can be undone). Items get a handle to
+  when you leave a field, every change can be undone). A rich field whose
+  place can't hold paragraphs (it is a `<p>`, a heading, an `<li>`, or sits
+  inside one) takes Enter as a line break, and pasted paragraphs, lists,
+  headings and quotes become lines, so what it stores fits where it prints (in a field that is a list,
+  Enter still adds a bullet). A field that already holds paragraphs, say
+  in an `<li>` or an `<a>` card, keeps them. Items get a handle to
   edit details, duplicate, hide, schedule or delete them; each list ends with
   a card for a new item, made from the template's mock-up. Photos (`print.@src`)
-  are replaced by choosing or dropping a picture, framed in the browser. The
+  are replaced by choosing or dropping a picture, framed in the browser.
+  Everything works from the keyboard too: in edit mode Tab reaches each
+  item, photo and new-item card, focus shows the item's handle or the photo
+  button, Enter moves into the handle (Esc comes back), picks a photo or
+  starts the new item. The
   Page panel lists fields the page can't show (in `<head>`, in attributes),
   the lists, and the page's history. The dock sits at the bottom of the
   screen; flick it up (a finger, a mouse dragged and let go, or two fingers
