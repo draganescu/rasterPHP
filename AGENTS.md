@@ -563,8 +563,8 @@ class contact {
 
     Login, reset, account, logout, the booking manage page and the
     newsletter's unsubscribe aren't checked. `lint` warns on a view with
-    `render.newsletter.signup`, `render.authentication.register`,
-    `render.booking.form` or `render.contact.form` that lacks `print.validation.alert('try_again')`
+    `render.newsletter.signup`, `render.authentication.register` or
+    `render.booking.form` that lacks `print.validation.alert('try_again')`
     or `('slow_down')`: word them where the person will see them, as for
     any alert. A site's own form on `cms_records::submit` is covered too,
     but `lint` can't see which views post to it, so add the alerts there
@@ -1331,8 +1331,7 @@ and hides the bundled one completely, and `lint` says so.
   for links and blocked words) is kept with status `spam`, nobody is emailed,
   and the visitor gets the same `sent`, so a bot learns nothing. The same
   email and message again within 10 minutes (a double click) stores nothing
-  and answers `sent`. `lint` asks for the `try_again` and `slow_down` alerts
-  here as on the other forms that check for spam.
+  and answers `sent`.
 - Messages are the `contactmessage` type: `name`, `email`, `phone`,
   `subject`, `message`, and what the model works out (readonly): `title`
   (when it came, `2026-10-18 14:32`, which is also its slug, never the
@@ -1365,7 +1364,8 @@ and hides the bundled one completely, and `lint` says so.
   `mail_from`; with neither, a warning is logged and the message is still
   stored), for each message that isn't spam. The subject is the view's
   `<title>`. `From` stays the site's sender; `Reply-To` is the visitor
-  (`"Ana" <ana@example.com>`, the name without `"`, `<`, `>` and `,`). It
+  (`"Ana" <ana@example.com>`, the name without `"`, `<`, `>`, `,`, `(`,
+  `)`, `[`, `]`, `:`, `;`, `@` and `\`, so it can only be a name). It
   gets the message's fields, `id`, `created_at`, `page_url` (the absolute
   link to `page`), `staff_url` (`contact_staff_page`) and `site_url`. A
   mail that fails leaves the message stored and `new`. Nothing is ever
@@ -1390,8 +1390,6 @@ and hides the bundled one completely, and `lint` says so.
      <!-- print.validation.alert('sent') --><p>Thanks, we'll write back soon.</p><!-- /print.validation.alert('sent') -->
      <!-- print.validation.alert('email_invalid') --><p>Check your email address.</p><!-- /print.validation.alert('email_invalid') -->
      <!-- print.validation.alert('message_invalid') --><p>Write a message, up to 5000 characters.</p><!-- /print.validation.alert('message_invalid') -->
-     <!-- print.validation.alert('try_again') --><p>Please send it again.</p><!-- /print.validation.alert('try_again') -->
-     <!-- print.validation.alert('slow_down') --><p>Please wait a little.</p><!-- /print.validation.alert('slow_down') -->
      <!-- render.contact.form -->
      <form method="post">
        <input name="name"> <input type="email" name="email" required> <input name="subject">
@@ -1438,7 +1436,7 @@ array('name' => 'Ada'))` uses the view's `<title>` as the subject.
     plain SMTP; `localhost` is allowed as is), and `smtps://…:465` uses TLS.
 - Sender: `RASTER_MAIL_FROM`. A name in it, in the recipient, or in a
   `Reply-To` passed in `send_view()`'s headers, that isn't
-  plain ASCII is sent encoded (`Raster =?UTF-8?B?Q2Fmw6k=?=
+  plain ASCII is sent encoded whole (`=?UTF-8?B?UmFzdGVyIENhZsOp?=
   <hello@cafe.test>`), and so is the subject, in words of at most 75
   characters. `mail://` gives sendmail the sender's address with `-f`, so
   bounces go to it.

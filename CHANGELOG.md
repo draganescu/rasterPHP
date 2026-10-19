@@ -9,7 +9,7 @@ Nothing for sites to do. **A bundled contact model.** `render.contact.form` stor
 
 **A site with its own `contact` model keeps it.** Its `render.contact.send` calls its own class and nothing of the bundled model loads; `lint` says the bundled one is hidden. To move: rename your model (or delete it once its messages are elsewhere), put `render.contact.form` around your form with the fields `name email phone subject message`, write `_email/contact_received.html` from your old email, add the alerts (`sent`, `email_invalid`, `message_invalid`, …), and make the staff page from AGENTS.md.
 
-**A record's slug comes from what `fill()` works out too.** A new record whose model fills its title gets its slug from that title, not from the fields the form sent. A `Reply-To` passed to `mail::send_view()` with a name that isn't plain ASCII is sent encoded, as the sender's name is.
+**A record's slug comes from what `fill()` works out too.** A new record whose model fills its title gets its slug from that title, not from the fields the form sent. A name that isn't plain ASCII in `From`, `To` or a `Reply-To` passed to `mail::send_view()` is now sent encoded whole (`=?UTF-8?B?…?= <a@b.test>`), so no part of it can be read as another address; plain ASCII names are sent as before.
 
 ## 2.2.25
 

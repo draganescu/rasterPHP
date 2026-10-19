@@ -5398,7 +5398,7 @@ test('hold() asks again, or to slow down', function () {
 function contact_site($fn) {
 	$theme = APPBASE.config::get('views_path', 'views').'/'.config::get('theme', 'default');
 	$alerts = '';
-	foreach (array('sent', 'try_again', 'slow_down', 'name_invalid', 'email_invalid', 'phone_invalid', 'subject_invalid', 'message_invalid') as $alert) {
+	foreach (array('sent', 'name_invalid', 'email_invalid', 'phone_invalid', 'subject_invalid', 'message_invalid') as $alert) {
 		$alerts .= "<!-- print.validation.alert('$alert') --><p>ALERT $alert</p><!-- /print.validation.alert('$alert') -->";
 	}
 	file_put_contents("$theme/zzcontact.html", "<html><head><title>Write to us</title></head><body>$alerts"
@@ -5612,15 +5612,62 @@ test('contact: header injection is refused and Reply-To is one header', function
 		check(strpos($mails[0]['raw'], "\r\nReply-To: \"Ana The Boss x y\" <boss@example.com>\r\n") !== false, $mails[0]['raw']);
 		check(stripos($mails[0]['raw'], "\nBcc:") === false, 'a Bcc header');
 		same('a@b.test', contact::reply_to('', 'a@b.test'));
-		// a name that isn't ASCII is encoded, outside the quotes
+		// a name that isn't ASCII is encoded whole, outside the quotes
 		$mails = booking_mails(function () {
 			with_settings(array('contact_staff_email' => 'desk@zz.test'), function () {
 				(new contact())->staff_mail(array('name' => 'Ana Café', 'email' => 'ana@example.com', 'subject' => '', 'message' => 'Hi', 'page' => '/', 'who' => 'visitor'));
 			});
 		});
 		same(1, count($mails));
-		check(strpos($mails[0]['raw'], "\r\nReply-To: Ana =?UTF-8?B?".base64_encode('Café')."?= <ana@example.com>\r\n") !== false, $mails[0]['raw']);
+		check(strpos($mails[0]['raw'], "\r\nReply-To: =?UTF-8?B?".base64_encode('Ana Café')."?= <ana@example.com>\r\n") !== false, $mails[0]['raw']);
+		// a group (Ana: x@y; …) or a trailing backslash can't add an address
+		spam_clear();
+		$mails = booking_mails(function () use ($booking_base) {
+			same(303, contact_post($booking_base, array('name' => 'Ana: bad@evil.test; Café', 'email' => 'group@example.com', 'message' => 'Hi group'))[0]);
+			same(303, contact_post($booking_base, array('name' => 'Ana\\', 'email' => 'slash@example.com', 'message' => 'Hi slash'))[0]);
+		});
+		same(2, count($mails));
+		foreach (array('group@example.com', 'slash@example.com') as $n => $email) {
+			same(1, preg_match_all('/^Reply-To: ([^\r\n]*)\r$/m', $mails[$n]['raw'], $line), $email);
+			$reply = $line[1][0];
+			check(substr($reply, -strlen("<$email>")) === "<$email>", $reply);
+			same(1, substr_count($reply, '@'), 'one address: '.$reply);
+		}
+		same('"Ana" <slash@example.com>', contact::reply_to('Ana\\', 'slash@example.com'));
 	});
+});
+
+test('mail: a name that isn\'t plain ASCII is encoded whole, an ASCII one as written', function () use ($maildir) {
+	$dir = "$maildir-names";
+	@mkdir($dir);
+	$was = array(getenv('RASTER_MAIL'), getenv('RASTER_MAIL_FROM'));
+	putenv("RASTER_MAIL=log://$dir");
+	try {
+		putenv('RASTER_MAIL_FROM=Raster Café <hello@cafe.test>');
+		check(mail::send('Ana: bad@evil.test; Pârvu <ana@example.com>', 'Hi', '<p>Hi</p>'), (string)mail::$last_error);
+		putenv('RASTER_MAIL_FROM=Raster Cafe <hello@cafe.test>');
+		check(mail::send('Ana Pop <ana@example.com>', 'Hi', '<p>Hi</p>'), (string)mail::$last_error);
+		$files = glob("$dir/*.eml");
+		sort($files);
+		same(2, count($files));
+		$first = file_get_contents($files[0]);
+		check(strpos($first, "From: =?UTF-8?B?".base64_encode('Raster Café')."?= <hello@cafe.test>\r\n") !== false, $first);
+		check(strpos($first, "\r\nTo: =?UTF-8?B?".base64_encode('Ana: bad@evil.test; Pârvu')."?= <ana@example.com>\r\n") !== false, $first);
+		$second = file_get_contents($files[1]);
+		check(strpos($second, "From: Raster Cafe <hello@cafe.test>\r\n") !== false && strpos($second, "\r\nTo: Ana Pop <ana@example.com>\r\n") !== false, $second);
+		// a long name: words of at most 75 characters, split between characters
+		$words = (new ReflectionMethod('mail', 'words'));
+		$words->setAccessible(true);
+		$long = str_repeat('Café ', 20);
+		$encoded = $words->invoke(null, $long);
+		foreach (explode(' ', $encoded) as $word) check(strlen($word) <= 75 && preg_match('/^=\?UTF-8\?B\?[A-Za-z0-9+\/=]+\?=$/', $word), $word);
+		same($long, mb_decode_mimeheader($encoded));
+	} finally {
+		putenv($was[0] === false ? 'RASTER_MAIL' : "RASTER_MAIL={$was[0]}");
+		putenv($was[1] === false ? 'RASTER_MAIL_FROM' : "RASTER_MAIL_FROM={$was[1]}");
+		array_map('unlink', glob("$dir/*") ?: array());
+		@rmdir($dir);
+	}
 });
 
 test('contact: lengths and a double click', function () use ($booking_base) {
@@ -5706,6 +5753,8 @@ test('contact actions: done, spam, not_spam', function () {
 		same(array('contact.received'), array_column($events, 0));
 		same('staff', $events[0][1]['who']);
 		same(array('not_spam_invalid'), contact_refused(function () use ($m) { cms_records::act('contactmessage', $m['id'], 'not_spam', array(), true); }));
+		// a message longer than a lowered contact_max_length can still be marked done
+		with_settings(array('contact_max_length' => 1), function () use ($m) { same('done', cms_records::act('contactmessage', $m['id'], 'done', array(), true)['status']); });
 		// a write from the editor or MCP keeps new and no page, whatever a
 		// form left behind
 		contact::$reasons = array('no_stamp');
@@ -5782,8 +5831,8 @@ test('lint reports a theme with render.contact.form and no _email/contact_receiv
 		check(!has_problem((new raster_inspector())->lint_path("$theme/zzcontact.html"), 'contact_received'), 'the email is there');
 		unlink("$theme/_email/contact_received.html");
 		check(has_problem((new raster_inspector())->lint_path("$theme/zzcontact.html"), '_email/contact_received'), 'the email is missing');
-		// it is a form that checks for spam
-		check(has_problem(lint_html('<!-- render.contact.form --><form method="post"><input name="email"></form><!-- /render.contact.form -->'), 'render.contact.form can turn a post away as spam'), 'try_again');
+		// a suspect post is thanked with sent, so try_again and slow_down never show there
+		check(!has_problem(lint_html('<!-- render.contact.form --><form method="post"><input name="email"></form><!-- /render.contact.form -->'), 'can turn a post away as spam'), 'lint asks contact for try_again');
 	});
 });
 

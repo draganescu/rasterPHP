@@ -231,8 +231,29 @@ class mail
 	protected static function named($value) {
 		if (!preg_match('/^(.*?)\s*<([^>]+)>$/', $value, $m) || trim($m[1]) === '') return $value;
 		$name = trim($m[1]);
-		if (preg_match('/^"(.*)"$/', $name, $quoted) && preg_match('/[^\x20-\x7e]/', $name)) $name = $quoted[1];
-		return static::encoded($name).' <'.$m[2].'>';
+		// plain ASCII is sent as it is written
+		if (!preg_match('/[^\x20-\x7e]/', $name)) return static::encoded($name).' <'.$m[2].'>';
+		if (preg_match('/^"(.*)"$/', $name, $quoted)) $name = $quoted[1];
+		return static::words($name).' <'.$m[2].'>';
+	}
+
+	// The whole of a text as encoded words, of at most 75 characters each and
+	// split between characters. Unlike mb_encode_mimeheader, which leaves the
+	// ASCII part as it is, nothing of it can be read as an address's syntax
+	// (a : or ; in a name would make a group with another address).
+	protected static function words($text) {
+		$words = array();
+		$chunk = '';
+		// 45 bytes are 60 base64 characters, and =?UTF-8?B??= 12 more
+		foreach (mb_str_split((string)$text, 1, 'UTF-8') as $char) {
+			if (strlen($chunk.$char) > 45) {
+				$words[] = '=?UTF-8?B?'.base64_encode($chunk).'?=';
+				$chunk = '';
+			}
+			$chunk .= $char;
+		}
+		if ($chunk !== '') $words[] = '=?UTF-8?B?'.base64_encode($chunk).'?=';
+		return implode(' ', $words);
 	}
 
 	// whether a link mailed at $stamp (a date and time) went out within

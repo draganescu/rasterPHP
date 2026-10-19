@@ -19,7 +19,7 @@ class validation_spam
 {
 	// regions that can turn a post away as spam: lint wants try_again and
 	// slow_down alerts in any view that has one
-	static $checked_regions = array('render.newsletter.signup', 'render.authentication.register', 'render.booking.form', 'render.contact.form');
+	static $checked_regions = array('render.newsletter.signup', 'render.authentication.register', 'render.booking.form');
 	// warnings already logged in this request, so each is logged once
 	static $warned = array();
 	// the tables were made (or found) in this request

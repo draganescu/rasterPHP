@@ -91,16 +91,23 @@ class contact
 	static function check($type, $after, $before) {
 		if ($type !== 'contactmessage' || $after === null) return array();
 		$problems = array();
-		if (self::unsafe($after['name'], 200)) $problems[] = 'name_invalid';
+		// a field an update leaves as it was keeps it: a message stored before
+		// contact_max_length was lowered can still be marked done
+		if (self::changed('name', $after, $before) && self::unsafe($after['name'], 200)) $problems[] = 'name_invalid';
 		$email = (string)$after['email'];
-		if ($email === '' || self::unsafe($email, 254) || !filter_var($email, FILTER_VALIDATE_EMAIL)) $problems[] = 'email_invalid';
-		if (self::unsafe($after['phone'], 200)) $problems[] = 'phone_invalid';
-		if (self::unsafe($after['subject'], 200)) $problems[] = 'subject_invalid';
+		if (self::changed('email', $after, $before) && ($email === '' || self::unsafe($email, 254) || !filter_var($email, FILTER_VALIDATE_EMAIL))) $problems[] = 'email_invalid';
+		if (self::changed('phone', $after, $before) && self::unsafe($after['phone'], 200)) $problems[] = 'phone_invalid';
+		if (self::changed('subject', $after, $before) && self::unsafe($after['subject'], 200)) $problems[] = 'subject_invalid';
 		$message = (string)$after['message'];
-		if (trim($message) === '' || mb_strlen($message, 'UTF-8') > (int)config::get('contact_max_length', 5000)) $problems[] = 'message_invalid';
+		if (self::changed('message', $after, $before) && (trim($message) === '' || mb_strlen($message, 'UTF-8') > (int)config::get('contact_max_length', 5000))) $problems[] = 'message_invalid';
 		// spam is marked not spam first, so a message is never done unread
 		if ($before && $before['status'] === 'spam' && $after['status'] === 'done') $problems[] = 'not_done_spam';
 		return $problems;
+	}
+
+	// a new message's field, or one the write changes
+	protected static function changed($field, $after, $before) {
+		return !$before || (string)$after[$field] !== (string)$before[$field];
 	}
 
 	// a control character (CR, LF, NUL, …), or longer than $max characters
@@ -153,9 +160,11 @@ class contact
 	}
 
 	// The visitor's name and address for Reply-To; the name without the
-	// characters that would end it. The address is never a recipient.
+	// characters that mean something in an address header (quotes, brackets,
+	// a comma, a group's : and ;, @, a backslash), so it can only ever be a
+	// name. The address is never a recipient.
 	static function reply_to($name, $email) {
-		$name = trim(str_replace(array('"', '<', '>', ','), '', (string)$name));
+		$name = trim(str_replace(array('"', '<', '>', ',', '(', ')', '[', ']', ':', ';', '@', '\\'), '', (string)$name));
 		return $name === '' ? (string)$email : '"'.$name.'" <'.$email.'>';
 	}
 
