@@ -59,12 +59,12 @@ event::unbind('booking.confirmed')->from('booking', 'confirmed_mail');   // remo
 
 **Order.** Listeners run in this order:
 
-1. the framework's own request bindings from `system/config/events.php` (for example the API, MCP and CMS routing on `finding_route`, the CMS and account checks on `route_set`, the editor and alerts on `before_output`)
+1. the framework's own bindings from `system/config/events.php` (for example the API, MCP and CMS routing on `finding_route`, the CMS and account checks on `route_set`, the editor and alerts on `before_output`, the newsletter and booking emails), and the `listens()` of the bundled models (your `the_` override's, if you have one)
 2. your bindings in `the_events.php`
-3. `listens()` declarations
+3. your own models' `listens()` declarations
 4. the framework's core handlers (the controller and the log)
 
-So a `route_set` listener of yours runs after protected pages have been checked, and a `finding_route` listener never sees `/api` or `/mcp` requests, which are answered before it runs.
+So a `route_set` listener of yours runs after protected pages have been checked, a `finding_route` listener never sees `/api` or `/mcp` requests, which are answered before it runs, and a listener of yours on a bundled model's event sees what the bundled model's own listener already did. Any of the framework's listeners, a bundled model's `listens()` included, can be removed with `event::unbind(…)->from(…)` in `the_events.php`.
 
 **Checking.** `php bin/raster lint` reports bindings to models or methods that don't exist, and warns about events nothing sends (usually a typo). `php bin/raster vocabulary` lists every event and who listens to it.
 

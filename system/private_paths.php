@@ -97,17 +97,24 @@ class private_paths {
 			),
 			array(
 				'id' => 'sqlite-sidecars',
+				// tied to the database file, so a page whose slug ends in
+				// -journal (my-travel-journal) is still a page
 				'why' => "SQLite's journal, write-ahead log and shared memory files",
-				'php' => '-(journal|wal|shm)$',
-				'apache' => array('RewriteRule -(journal|wal|shm)$ - [F,L,NC]'),
-				'nginx' => '-(journal|wal|shm)$',
-				'caddy' => '-(journal|wal|shm)$',
+				'php' => '\.sqlite-(journal|wal|shm)$',
+				'apache' => array('RewriteRule \.sqlite-(journal|wal|shm)$ - [F,L,NC]'),
+				'nginx' => '\.sqlite-(journal|wal|shm)$',
+				'caddy' => '\.sqlite-(journal|wal|shm)$',
 			),
 		);
 	}
 
 	// The one path that is always allowed: the site's entry point.
 	const ENTRY = '/index.php';
+
+	// Apache hands the Authorization header to PHP-FPM (and CGI) only when
+	// told to, so MCP over HTTP would never see its token. The .htaccess
+	// copies it into the environment, where mcp::bearer() reads it.
+	const APACHE_AUTHORIZATION = 'RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]';
 
 	// ##Using the rules
 	//
@@ -164,6 +171,10 @@ class private_paths {
 			'# this file; the rules come from system/private_paths.php.',
 			'',
 			'RewriteEngine on',
+			'',
+			'# PHP-FPM gets the Authorization header only this way (MCP over HTTP needs it)',
+			'RewriteCond %{HTTP:Authorization} .',
+			self::APACHE_AUTHORIZATION,
 			'',
 			'# Never serve code, configuration, data or tooling directly',
 		);

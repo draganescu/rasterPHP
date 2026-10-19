@@ -17,7 +17,6 @@ require_once BASE.'models/cms/cms.php';
 */
 class mcp
 {
-	const SERVER_VERSION = '1.0.0';
 	static $protocol_versions = array('2025-06-18', '2025-03-26', '2024-11-05');
 
 	// ##HTTP transport, bound to the finding_route event
@@ -31,8 +30,8 @@ class mcp
 		if ($token === '') {
 			$this->http_reply(404, array('error' => 'The MCP endpoint is disabled. Set mcp_token in application/config/the_app.php or RASTER_MCP_TOKEN.'));
 		}
-		$header = isset($_SERVER['HTTP_AUTHORIZATION']) ? $_SERVER['HTTP_AUTHORIZATION'] : (function_exists('getallheaders') ? (getallheaders()['Authorization'] ?? '') : '');
-		if (!preg_match('/^Bearer\s+(.+)$/i', trim((string)$header), $m) || !hash_equals($token, trim($m[1]))) {
+		$bearer = mcp::bearer($_SERVER);
+		if ($bearer === '' || !hash_equals($token, $bearer)) {
 			header('WWW-Authenticate: Bearer');
 			$this->http_reply(401, array('error' => 'Missing or invalid bearer token'));
 		}
@@ -45,15 +44,29 @@ class mcp
 		if (!is_array($body)) {
 			$this->http_reply(400, $this->error(null, -32700, 'Parse error'));
 		}
-		// a batch is a list of messages
-		if (array_keys($body) === range(0, count($body) - 1)) {
-			$responses = array_values(array_filter(array_map(array($this, 'handle'), $body)));
-			if (!$responses) $this->http_reply(202, null);
-			$this->http_reply(200, $responses);
-		}
-		$response = $this->handle($body);
+		$response = $this->answer($body);
 		if ($response === null) $this->http_reply(202, null);
 		$this->http_reply(200, $response);
+	}
+
+	// The token a request carries. Apache hands the Authorization header to
+	// PHP-FPM only when the .htaccess copies it into the environment, and its
+	// rewrite to index.php renames that REDIRECT_HTTP_AUTHORIZATION, leaving
+	// HTTP_AUTHORIZATION empty; under mod_php only getallheaders() has it.
+	static function bearer($server) {
+		$headers = array();
+		foreach (array('HTTP_AUTHORIZATION', 'REDIRECT_HTTP_AUTHORIZATION') as $name) {
+			if (isset($server[$name])) $headers[] = $server[$name];
+		}
+		if ($server === $_SERVER && function_exists('getallheaders')) {
+			foreach ((array)getallheaders() as $name => $value) {
+				if (strtolower($name) === 'authorization') $headers[] = $value;
+			}
+		}
+		foreach ($headers as $header) {
+			if (preg_match('/^Bearer\s+(.+)$/i', trim((string)$header), $m)) return trim($m[1]);
+		}
+		return '';
 	}
 
 	protected function http_reply($status, $payload) {
@@ -85,8 +98,17 @@ class mcp
 		while (($line = fgets($in)) !== false) {
 			$line = trim($line);
 			if ($line === '') continue;
+			// PHP can't load a class again, so once a file this process
+			// loaded has changed (a model's api(), types() or listens()), a
+			// fresh process answers each message instead
+			if ($this->changed_since_loaded()) {
+				fwrite($out, $this->answer_fresh($line));
+				fflush($out);
+				continue;
+			}
 			$message = json_decode($line, true);
-			$response = is_array($message) ? $this->handle($message) : $this->error(null, -32700, 'Parse error');
+			$response = json_last_error() !== JSON_ERROR_NONE ? $this->error(null, -32700, 'Parse error') : $this->answer($message);
+			$this->changed_since_loaded();
 			if ($response !== null) {
 				fwrite($out, json_encode($response, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)."\n");
 				fflush($out);
@@ -94,15 +116,87 @@ class mcp
 		}
 	}
 
+	// the PHP files this process has loaded, as they were when it first saw them
+	protected $loaded = array();
+
+	protected function changed_since_loaded() {
+		clearstatcache();
+		$changed = false;
+		foreach (get_included_files() as $file) {
+			$stamp = @filemtime($file).' '.@filesize($file);
+			if (!isset($this->loaded[$file])) $this->loaded[$file] = $stamp;
+			elseif ($this->loaded[$file] !== $stamp) $changed = true;
+		}
+		return $changed;
+	}
+
+	// one line answered by `php bin/raster mcp` started for it: its reply
+	// lines, as it wrote them
+	protected function answer_fresh($line) {
+		$root = dirname(rtrim(BASE, '/'));
+		$log = tempnam(sys_get_temp_dir(), 'raster-mcp-');
+		$env = array_merge(getenv(), array('RASTER_APP' => boot::$appname));
+		$process = proc_open(array(mcp::php_binary(), "$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('file', $log, 'w')), $pipes, $root, $env);
+		if (!is_resource($process)) {
+			@unlink($log);
+			return json_encode($this->error(null, -32603, 'Could not start a fresh MCP process'))."\n";
+		}
+		fwrite($pipes[0], $line."\n");
+		fclose($pipes[0]);
+		$reply = stream_get_contents($pipes[1]);
+		fclose($pipes[1]);
+		proc_close($process);
+		$errors = trim((string)file_get_contents($log));
+		@unlink($log);
+		if ($errors !== '') log::warning('MCP: '.substr($errors, 0, 500));
+		if (trim($reply) !== '') return $reply;
+		// the fresh process died before it answered (a model it loads at boot
+		// no longer parses): every request in the line still gets an answer
+		$failed = $this->fresh_failed($line, $errors);
+		return $failed === null ? '' : json_encode($failed, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)."\n";
+	}
+
+	// what a line gets when no fresh process could answer it: ping needs no
+	// site code, a request gets -32603 with what the process wrote on its
+	// way down, a notification nothing
+	protected function fresh_failed($line, $errors) {
+		$body = json_decode($line, true);
+		if (json_last_error() !== JSON_ERROR_NONE) return $this->error(null, -32700, 'Parse error');
+		$batch = is_array($body) && $body && array_keys($body) === range(0, count($body) - 1);
+		$message = 'A fresh MCP process could not answer: '.($errors !== '' ? substr($errors, 0, 2000) : 'it exited without a reply');
+		$responses = array();
+		foreach ($batch ? $body : array($body) as $one) {
+			if (!is_array($one) || !array_key_exists('id', $one)) continue;
+			$id = is_scalar($one['id']) ? $one['id'] : null;
+			$responses[] = isset($one['method']) && $one['method'] === 'ping' ? $this->result($id, new stdClass()) : $this->error($id, -32603, $message);
+		}
+		if (!$responses) return null;
+		return $batch ? $responses : $responses[0];
+	}
+
 	// ##JSON-RPC
+	// One message or a batch (a list of them), from either transport: the
+	// answer, a list of answers, or null when there is nothing to send back.
+	public function answer($body) {
+		if (is_array($body) && $body && array_keys($body) === range(0, count($body) - 1)) {
+			$responses = array_values(array_filter(array_map(array($this, 'handle'), $body)));
+			return $responses ?: null;
+		}
+		return $this->handle($body);
+	}
+
 	public function handle($message) {
 		mcp::load_tools();
-		$id = array_key_exists('id', $message) ? $message['id'] : null;
-		$method = isset($message['method']) ? $message['method'] : null;
+		// anything but an object with a method is refused before it is read:
+		// one bad line must not end the stdio server
+		$id = is_array($message) && array_key_exists('id', $message) && is_scalar($message['id']) ? $message['id'] : null;
+		if (!is_array($message) || !isset($message['method']) || !is_string($message['method'])) {
+			return $this->error($id, -32600, 'Invalid request');
+		}
+		$method = $message['method'];
 		$params = isset($message['params']) && is_array($message['params']) ? $message['params'] : array();
 		$is_notification = !array_key_exists('id', $message);
 
-		if ($method === null) return $is_notification ? null : $this->error($id, -32600, 'Invalid request');
 		if (strpos($method, 'notifications/') === 0) return null;
 
 		switch ($method) {
@@ -111,7 +205,7 @@ class mcp
 				return $this->result($id, array(
 					'protocolVersion' => in_array($requested, self::$protocol_versions) ? $requested : self::$protocol_versions[0],
 					'capabilities' => array('tools' => array('listChanged' => false)),
-					'serverInfo' => array('name' => 'raster', 'version' => self::SERVER_VERSION),
+					'serverInfo' => array('name' => 'raster', 'version' => trim((string)@file_get_contents(BASE.'VERSION'))),
 					'instructions' => 'This is a Raster site: views are plain HTML and the dynamic parts are HTML comments. Call describe first — it returns how URLs reach views, the content model the markup declares, and whether the templates lint clean. Before writing an annotation, check vocabulary (the models and their signatures) and annotations (the grammar); both are read from the code, so neither can be out of date. To change a template use check_view then write_view, which refuses markup that does not lint, and render_url to see the result. Content edits go through get_page/update_page and the item tools: page edits keep revisions, and fields that are not in the templates cannot be written — to add a field, edit the template. In production pages are cached for visitors who are not logged in: Raster\'s own tools clear that cache, but views, theme files, models, config or the database changed any other way do not, so call clear_cache after such a change. render_url never reads the cache, so a fresh render_url does not mean visitors see the change. The in-page editor only marks what the CMS prints: keep lists staff edit on render.cms.<name>, using its options for filters from the URL (field=?param), dates (date>=today) and sorting (order=date,time); for what those cannot say (totals, grouping by day, several types), the render method of a model returns its records through cms_records::listed($type, $rows), which keeps them editable; after changing such a page, call render_url with as="editor" to see that editing still works.',
 				));
 			case 'ping':
@@ -119,8 +213,12 @@ class mcp
 			case 'tools/list':
 				return $this->result($id, array('tools' => $this->tools()));
 			case 'tools/call':
-				$name = isset($params['name']) ? $params['name'] : '';
+				$name = isset($params['name']) && is_string($params['name']) ? $params['name'] : '';
 				$arguments = isset($params['arguments']) && is_array($params['arguments']) ? $params['arguments'] : array();
+				// a tool that isn't offered is the caller's mistake, not the tool's
+				if (!in_array($name, array_map(function ($t) { return $t['name']; }, $this->tools()), true)) {
+					return $this->error($id, -32602, "Unknown tool '$name'. tools/list has the names.");
+				}
 				return $this->result($id, $this->call_tool($name, $arguments));
 			default:
 				return $is_notification ? null : $this->error($id, -32601, "Method not found: $method");
@@ -212,6 +310,9 @@ class mcp
 		// models, views and types an agent writes between calls
 		cms_store::forget();
 		cms_records::forget();
+		raster_inspector::forget();
+		$this->content_model = null;
+		clearstatcache();
 		// what a tool's code prints would break the answer over stdio
 		$level = ob_get_level();
 		ob_start();
@@ -257,13 +358,12 @@ class mcp
 		return $default;
 	}
 
+	// the content model, read once a call: write_view may change it
+	protected $content_model = null;
+
 	protected function model() {
-		static $model = null;
-		if ($model === null) {
-			$inspector = new raster_inspector();
-			$model = $inspector->content_model();
-		}
-		return $model;
+		if ($this->content_model === null) $this->content_model = (new raster_inspector())->content_model();
+		return $this->content_model;
 	}
 
 	protected function find_page($reference) {
@@ -592,7 +692,19 @@ class mcp
 
 	protected function tool_clear_cache($arguments) {
 		$cleared = raster_cache::clear();
+		if (isset($cleared['error'])) throw new RuntimeException(ucfirst($cleared['error']));
 		return array('ok' => true, 'page_cache' => raster_cache::enabled()) + $cleared;
+	}
+
+	// The PHP that runs bin/raster. Over HTTP under PHP-FPM, PHP_BINARY is
+	// php-fpm itself, which can't; the command line PHP of the same version
+	// sits next to it in PHP_BINDIR (php8.2 on Debian, else php).
+	static function php_binary($sapi = PHP_SAPI) {
+		if ($sapi === 'cli' && PHP_BINARY !== '') return PHP_BINARY;
+		foreach (array('php'.PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION, 'php') as $name) {
+			if (is_executable(PHP_BINDIR.'/'.$name)) return PHP_BINDIR.'/'.$name;
+		}
+		return 'php';
 	}
 
 	protected function tool_render_url($arguments) {
@@ -601,23 +713,26 @@ class mcp
 		$limit = max(200, min(200000, (int)$this->arg($arguments, 'limit', 20000)));
 		$root = dirname(rtrim(BASE, '/'));
 		// a separate process: a page that dies, redirects or exits cannot take
-		// this server down between calls
-		$env = array('RASTER_APP' => boot::$appname, 'PATH' => (string)getenv('PATH'), 'HOME' => (string)getenv('HOME'), 'NO_COLOR' => '1');
-		foreach (array('RASTER_DB', 'RASTER_URL', 'RASTER_ENV', 'RASTER_MAIL', 'RASTER_MAIL_FROM') as $name) {
-			$value = getenv($name);
-			if ($value !== false) $env[$name] = $value;
-		}
-		$command = array(PHP_BINARY, "$root/bin/raster", 'render', $url);
+		// this server down between calls. It gets the whole environment, as
+		// `raster send` does, since a site's config may read its own variables.
+		$env = array_merge(getenv(), array('RASTER_APP' => boot::$appname, 'NO_COLOR' => '1'));
+		$command = array(mcp::php_binary(), "$root/bin/raster", 'render', $url);
 		$as = (string)$this->arg($arguments, 'as', '');
 		if ($as !== '' && config::get('environment') === 'production') {
 			throw new InvalidArgumentException("'as' only works outside production: render as staff on a development copy of the site");
 		}
 		if ($as !== '') $command[] = '--as='.$as;
-		$process = proc_open($command, array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, $env);
-		if (!is_resource($process)) throw new RuntimeException('Could not start a process to render '.$url);
+		// what the page logs goes to a file: read from a second pipe after the
+		// page, a page that logs more than a pipe holds would wait on this
+		// server while it waits on the page
+		$log = tempnam(sys_get_temp_dir(), 'raster-render-');
+		$process = proc_open($command, array(0 => array('file', '/dev/null', 'r'), 1 => array('pipe', 'w'), 2 => array('file', $log, 'w')), $pipes, $root, $env);
+		if (!is_resource($process)) { @unlink($log); throw new RuntimeException('Could not start a process to render '.$url); }
 		$html = stream_get_contents($pipes[1]);
-		$errors = trim(stream_get_contents($pipes[2]));
+		fclose($pipes[1]);
 		$exit = proc_close($process);
+		$errors = trim((string)file_get_contents($log));
+		@unlink($log);
 		$status = preg_match('/HTTP (\d{3})/', $errors, $m) ? (int)$m[1] : ($exit === 0 ? 200 : null);
 		$answer = array('url' => $url, 'ok' => $exit === 0, 'status' => $status);
 		if ($as !== '') {

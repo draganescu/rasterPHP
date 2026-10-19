@@ -20,7 +20,7 @@ php bin/raster serve              # http://localhost:8000, no setup, SQLite
 php bin/raster lint               # after every template edit; exit 1 on errors
 php bin/raster lint --fix         # repair what is mechanical, report the rest
 php bin/raster schema             # what the CMS will store, compared with the database
-php bin/raster render /about      # print a page without a server (exit 1 on 4xx/5xx)
+php bin/raster render /about      # print a page without a server (exit 1 on 3xx/4xx/5xx)
 php bin/raster render /staff --as=editor   # as staff see it, says what the editor can edit (not in production)
 php bin/raster cache clear        # after editing files or the database by hand, in production
 php bin/raster doctor             # is this site healthy, up to date, ready for production?
@@ -65,10 +65,16 @@ media/                        uploads from the CMS
 
 - `/` renders `index.html`. `/about` renders `about.html`, and
   `/docs/setup` renders `docs/setup.html`. `/index` is the same page as `/`.
+  A page has one address: a GET for `/menu/` (a trailing slash), or for
+  `/index.php/menu` while `rewrite` is on, answers 301 to `/menu`, query
+  kept. Raster's own links, filter links included, never end in a slash.
 - **Formats:** `/news.rss` renders `news.rss`, and `/sitemap.xml` renders
   `sitemap.xml` (also `.json`, `.txt`, `.atom`). Printed values are escaped
   for the format: XML-escaped in feeds, JSON-escaped in JSON views. HTML views
-  print values as they are.
+  print values as they are. A route or a collection URL with an extension renders
+  the routed view's file in that format (`/news/news_page/2.rss` is page 2
+  of `news.rss`), and is a 404 when there is none. A 404 page is always
+  HTML, whatever the missing URL's extension (`/about.json`).
 - Files and folders starting with `_` are never pages: `_layout.html` for
   partials, `_email/` for emails. Collection URLs follow the same rule:
   `/_email/digest/news_page/1` is a 404 even when `_email/digest.html`
@@ -76,7 +82,10 @@ media/                        uploads from the CMS
 - Unknown URLs return 404, and so does any path with a segment starting
   with a dot (`/./about`, `/.env`); `a//b` is `a/b`. View files themselves (`.html`, `.rss`, `.xml`,
   `.json`, `.txt` under `application/views/`) are never served raw (403); other
-  theme assets are. Links like `href="news.rss"` are rewritten to `/news.rss`.
+  theme assets are. A second path segment named `config`, `models`, `data`
+  or `i18n` is refused (403) under any folder, since those are an app's
+  private folders: `docs/config.html` is a page nobody can open, and `lint`
+  warns about it (the rules are in `system/private_paths.php`). Links like `href="news.rss"` are rewritten to `/news.rss`.
 - In `.json` views, the rows of a render block are separated by commas, so a
   block inside `[ … ]` makes a JSON list.
 - Link to pages by file name, `href="about.html"`. Raster rewrites that to
@@ -319,10 +328,13 @@ class cafe {
   `event::unbind(…)->from(…)`.
 - Listeners get the payload array and run in order: the framework's own
   bindings in `system/config/events.php` (routing, the CMS and account
-  checks, the newsletter's confirmation email, the booking emails), then
-  `the_events.php`, then
-  `listens()`, then the framework's core handlers (controller and log). A
-  listener returning `false` makes
+  checks, the newsletter's confirmation email, the booking emails) and the
+  bundled models' `listens()` (an override's, for a `the_` model), then
+  `the_events.php`, then the site's own models' `listens()`, then the
+  framework's core handlers (controller and log). So a site listener sees
+  the state a bundled model's listener left (an order already marked
+  paid), and `the_events.php` can unbind any of the framework's listeners,
+  `listens()` ones included. A listener returning `false` makes
   `event::dispatch()` return `false`; the sender decides what that means.
 - Name your events `<model>.<what happened>`, in the past tense.
 - `listens()` returns a constant array: Raster keeps what it returns in
@@ -500,7 +512,9 @@ item of a collection is the mock-up content.
   (`print.cms.site_name`) is shared by every page. Put these in `_layout.html`.
 - **Collection URLs** are routed to views that render that collection:
   - `/news/news_item/<slug or id>` renders `news_item.html` (or `news.html`)
-    with that item. If there's no such item, the response is a 404.
+    with that item. If there's no such item, the response is a 404. A
+    number is a slug first: an item titled `1984` opens at
+    `/news/news_item/1984`, and a number no item has as its slug is an id.
   - `/news/news_page/2` is page 2. The page size comes from `news_page_size` or
     `raster_page_size` (10).
   - `/news/news_items/tag/php` lists the items where `tag` is `php`.
@@ -857,6 +871,10 @@ bundled model declares none of its types, and `lint` warns.
   see **Editors and agents**),
   `registration` (false turns sign-up off), `login_page`, `after_login`,
   `password_min_length` (8).
+- A protected page answers a visitor with a 303 to the login page, and
+  `raster render` (MCP `render_url`) does the same: it prints `Location:
+  …` and `HTTP 303` on stderr, no page, and exits 1. `--as` renders it
+  as that person sees it.
 - Five wrong passwords lock an account for 15 minutes. Once 15 minutes have
   passed since the last wrong one, counting starts again from zero.
 - One email, one account: two sign-ups at once with one email (a double
@@ -1286,7 +1304,10 @@ use `'model.method'`: `method(true)` returns
   `config::set('site_url')`). Links in pages and emails then never depend on
   the visitor's `Host` header. In production, emails with links (password
   reset, newsletter confirmation) are not sent without it, and
-  `raster send` needs it. With a path (`https://example.com/shop/`) the site
+  `raster send` needs it. A domain listed in `domain_language` (exactly,
+  port aside) is the site's own too: a request on it keeps its host, so its
+  language, its links and its forms; every other host gets the address.
+  With a path (`https://example.com/shop/`) the site
   lives under it: URLs are matched and links built under `/shop/`, also with
   `raster serve` and behind a proxy that forwards the path unchanged. With
   `php -S` directly, use `RASTER_URL`, not `site_url`. Addresses outside the
@@ -1318,7 +1339,8 @@ use `'model.method'`: `method(true)` returns
 
   `raster serve` is PHP's built in server, for development. In production run
   PHP-FPM behind one of those. `doctor` checks that the `.htaccess` on disk
-  still carries every rule. Matching ignores case on every server, and
+  still carries every rule, and the line that passes the `Authorization`
+  header on to PHP-FPM for MCP over HTTP. Matching ignores case on every server, and
   `/.well-known/` is the one dot folder that is served (certificates,
   `security.txt`).
 - **Page cache**, on by default in production (config `page_cache`):
@@ -1329,8 +1351,14 @@ use `'model.method'`: `method(true)` returns
   - Any content change throws the cache away and deletes the cached files
     (`util::content_changed()` in your own models; inside a transaction
     when it commits), and so does the moment a scheduled item is
-    published. A page whose render overlapped the
+    published, each one of several (`data/cache/next` keeps every time
+    still to come, one per line). A page whose render overlapped the
     change is not kept.
+  - A cached page goes out with the headers it was made with (what models
+    and listeners set: `X-Robots-Tag`, a CORS header, `Link`), never
+    `Set-Cookie`: a page that sets a cookie is not kept. It carries
+    `Last-Modified` (the time it was stored, in GMT), and a request whose
+    `If-Modified-Since` is not older gets a 304 without the page.
   - A filter page with no items (`/news/news_items/tag/nothing`), a page
     past the last one and a filter on a field the list doesn't have answer
     200 but are never cached, so made-up URLs don't fill the disk. Neither
@@ -1343,19 +1371,24 @@ use `'model.method'`: `method(true)` returns
     as on macOS and Windows). A model that decides the same calls
     `raster_cache::skip()`.
   - Settings: `page_cache_ttl` (3600 seconds) and `page_cache_skip` (path
-    patterns). Responses carry `X-Raster-Cache: hit|miss`. `describe` says
+    patterns). Responses carry `X-Raster-Cache: hit|miss` (`miss` only when
+    the page was stored). `describe` says
     whether the cache is on (`site.page_cache`).
   - **Changes Raster doesn't make itself don't clear it.** Raster's own
     writes do (`write_view`, `update_page`, the item tools, the editor,
     forms). A view, theme file, model or config edited with ordinary file
     tools, or the database changed directly, is not seen by visitors who
     aren't logged in until the cache is cleared or `page_cache_ttl` runs
-    out: run `php bin/raster cache clear`, or MCP `clear_cache`.
-    That also deletes `data/cache/models.json`, where Raster keeps what the
+    out: run `php bin/raster cache clear`, or MCP `clear_cache`. When it
+    can't write the cache (its files belong to the web server's user and
+    the command runs as another) it says so and exits 1 (MCP: an error),
+    and visitors keep the old pages: run it as that user. A content change
+    that can't write it logs a warning. `raster upgrade`, and so `update`,
+    clears the cache at the end. That also deletes `data/cache/models.json`, where Raster keeps what the
     models declare; it is made again when a model file changes anyway, and
     a site whose `data/` can't be written to simply looks every time.
-    `render` and `render_url` never read the cache, so a fresh render does
-    not mean visitors see the change.
+    `render` and `render_url` never read or write the cache, so a fresh
+    render does not mean visitors see the change.
 
 ## Static export
 
@@ -1385,7 +1418,9 @@ of lists and filter pages come along; drafts and the editor don't.
 - **Exporting again** to the same folder writes only files that changed and
   removes the ones the site no longer has, so a deploy uploads just those.
   When nothing the site is made of changed (content, templates, models,
-  theme, media), it does nothing. `.raster-export.json` in the folder keeps
+  theme, media) and it is the same day, it does nothing. A new day in the
+  site's time zone always exports again, so `date>=today` lists and what
+  prints from the clock stay current. `.raster-export.json` in the folder keeps
   track; files the export didn't write are left alone. `--clean` starts the
   folder over.
 
@@ -1397,10 +1432,19 @@ of lists and filter pages come along; drafts and the editor don't.
 - **The in-page editor.** For editors, the page itself is the editor: every
   `print.cms` field, collection, item and item field is editable where it
   shows, in the site's own type (`E` or the Edit button starts, changes save
-  when you leave a field, every change can be undone). Items get a handle to
+  when you leave a field, every change can be undone). A rich field whose
+  place can't hold paragraphs (it is a `<p>`, a heading, an `<li>`, or sits
+  inside one) takes Enter as a line break, and pasted paragraphs, lists,
+  headings and quotes become lines, so what it stores fits where it prints (in a field that is a list,
+  Enter still adds a bullet). A field that already holds paragraphs, say
+  in an `<li>` or an `<a>` card, keeps them. Items get a handle to
   edit details, duplicate, hide, schedule or delete them; each list ends with
   a card for a new item, made from the template's mock-up. Photos (`print.@src`)
-  are replaced by choosing or dropping a picture, framed in the browser. The
+  are replaced by choosing or dropping a picture, framed in the browser.
+  Everything works from the keyboard too: in edit mode Tab reaches each
+  item, photo and new-item card, focus shows the item's handle or the photo
+  button, Enter moves into the handle (Esc comes back), picks a photo or
+  starts the new item. The
   Page panel lists fields the page can't show (in `<head>`, in attributes),
   the lists, and the page's history. The dock sits at the bottom of the
   screen; flick it up (a finger, a mouse dragged and let go, or two fingers
@@ -1435,7 +1479,23 @@ of lists and filter pages come along; drafts and the editor don't.
     error in the site's code answers the call with its file and line
     instead of ending the server;
   - over HTTP: POST to `/mcp` with `Authorization: Bearer $RASTER_MCP_TOKEN`.
-    It's off until that token is set.
+    It's off until that token is set. Apache hands that header to PHP-FPM
+    only when told to: the shipped `.htaccess` copies it
+    (`RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]`), and
+    `doctor` reports a `.htaccess` without that line (`authorization`).
+  - Both answer a batch (a list of messages) with a list. A message that
+    isn't an object with a string `method` gets `-32600 Invalid request`,
+    a tool that isn't offered `-32602`, and the server goes on.
+    `serverInfo.version` is Raster's version (`system/VERSION`).
+  - The stdio server lives for the session, and each call reads the
+    templates, models and record types again, so what an agent writes
+    counts on its next call. PHP can't load a class twice: once a PHP file
+    the server has loaded changes (a model's `api()`, `types()` or
+    `listens()`, config), a fresh `bin/raster mcp` answers every later
+    call, under 100 ms each. Restart the server to make it fast again.
+    If that fresh process dies before it answers (a model halfway through
+    an edit no longer parses), `ping` is still answered and every other
+    request gets `-32603` with PHP's message, until the file is fixed.
 - **Tools for the site itself:**
   - `describe` — how URLs reach views, the pages and collections the markup
     declares, the admin pages, the settings that change behaviour, and whether
@@ -1463,7 +1523,10 @@ of lists and filter pages come along; drafts and the editor don't.
     as that person, outside production only, and for staff also says what the in-page editor marks:
     editable fields, items, and each list with whether it gets a card for a
     new item. It runs in its own process, so a page that dies can't take the
-    server down. It never reads the page cache.
+    server down: the command line PHP (next to PHP-FPM's, over HTTP), with
+    the server's whole environment, and what the page logs read after the
+    page, so a page that logs a lot still answers. It never reads the page
+    cache.
   - `clear_cache` — throws the page cache away. Call it after changing
     views, theme files, models or config any way but `write_view`, or the
     database directly; Raster's own tools already clear it.
@@ -1589,7 +1652,11 @@ command-line output). They win over the settings above.
   `update <file.tar.gz>`; `--dry-run` shows what would change). It refuses
   when framework files were edited since they were installed
   (`system/checksums.json` records them); `--force` goes ahead. Replaced
-  files are kept in `application/data/backups/`.
+  files are kept in `application/data/backups/`. A folder or archive must
+  hold `system/boot.php` to count as a release; anything else is refused,
+  `--force` or not. A framework file it can't write or remove stops the
+  update with exit 1 and the file's name, and the old files are put back,
+  so nothing is half updated or recorded as installed.
 - It then runs `php bin/raster upgrade` for every app: the steps in
   `system/upgrades/<version>.php` the app still needs (renamed annotations,
   moved files). The version an app is at is in `config/raster-version`.
@@ -1599,7 +1666,9 @@ command-line output). They win over the settings above.
   that names no app folder (missing, without `config/`, or a framework
   folder such as `system/`) is refused with an error and exit 1, and
   nothing is written. When the version file can't be written, upgrade
-  says so, names the steps that ran, and exits 1.
+  says so, names the steps that ran, and exits 1. Upgrade ends by
+  clearing the page cache, since new framework files and rewritten views
+  make different pages (a cache it can't write is a warning).
   Database changes stay with `raster schema --apply`.
 - `php bin/raster doctor` checks PHP, versions, edited framework files,
   templates, the database, whether `.htaccess` still carries every rule in

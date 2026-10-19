@@ -3,7 +3,7 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
-## 2.2.15
+## 2.2.21
 
 A list that pairs `limit=N` with a pager now shows the same N rows on every page: set `<name>_page_size` instead. A site's own `reservation` or `booking` model keeps working.
 
@@ -14,6 +14,64 @@ A list that pairs `limit=N` with a pager now shows the same N rows on every page
 **lint warns about raw `find()` rows on any page (#125).** Rows a model hands back from `cms_records::find()` without `cms_records::listed()` print a `false` bool as the mock-up and visitor text unescaped, on any page. AGENTS.md now says so. Rows a model makes text itself (`cms_records::for_template()`, `util::e()`) aren't warned about outside admin pages.
 
 **The booking events are listed by name.** `booking.confirmed`, `booking.declined` and `booking.cancelled` now show in the vocabulary, and lint checks bindings to them.
+
+## 2.2.20
+
+- MCP: a malformed message gets a JSON-RPC error (`-32600`) instead of ending the stdio server, and a batch of non-objects over HTTP no longer causes a PHP error. A batch over stdio gets a list back. An unknown tool is a `-32602` error. `serverInfo.version` is Raster's version. (#134)
+- MCP over HTTP works on Apache with PHP-FPM: the `.htaccess` passes the `Authorization` header on, `/mcp` also reads `REDIRECT_HTTP_AUTHORIZATION`, and `doctor` reports a `.htaccess` without the line. `raster update` brings the new `.htaccess`. If you edited yours, add the two lines from `php bin/raster deploy --config=apache`. (#106)
+- `render_url` works over HTTP under PHP-FPM, passes the whole environment to the page, and no longer hangs on a page that logs a lot. (#107)
+- The stdio MCP server sees fields, collections, methods and record types written during the session. After a PHP file it has loaded changes (a model's `api()`, `types()` or `listens()`), a fresh process answers each later call. (#105)
+
+## 2.2.19
+
+Nothing for sites to do.
+
+**`raster render` shows what visitors get.** It never reads or writes the page cache, also in production, so a view edited by hand shows at once. A protected page answers with its 303 to the login page: `Location: …` and `HTTP 303` go to stderr, no page is printed, and the exit code is 1. MCP `render_url` gives status 303. `--as` still renders the page as that person.
+
+**Every scheduled item clears the page cache.** Before, only the earliest did, and later ones were missing from cached pages until `page_cache_ttl` ran out. `data/cache/next` now keeps every time still to come.
+
+**`cache clear` says when it couldn't.** When the cache belongs to another user (the web server's) and nothing could be written, `raster cache clear` says so and exits 1, and MCP `clear_cache` answers an error. Run it as the web server's user. `raster update` and `raster upgrade` now clear the page cache when they finish.
+
+**Cached pages keep their headers and answer 304.** Headers a model or listener sets (`X-Robots-Tag`, CORS, `Link`) are sent on cache hits too. Cached pages carry `Last-Modified`, and a request with a current `If-Modified-Since` gets a 304 with no body.
+
+## 2.2.18
+
+Nothing for sites to do. On nginx or Caddy, print the server config again with `raster deploy` so pages whose slug ends in `-journal`, `-wal` or `-shm` can be opened.
+
+**Items titled with a number open.** An item titled `1984` opens at `/news/news_item/1984`. A number in an item URL is a slug first and an id only when no item has it as its slug.
+
+**A domain per language works with the site's address set.** With `RASTER_URL` set, a request on a domain listed in `domain_language` keeps its host. Its pages come in that language, its links stay on it and its forms are accepted. Every other host still gets the site's address.
+
+**Pages ending in -journal are pages.** Only SQLite's own side files (`.sqlite-journal`, `.sqlite-wal`, `.sqlite-shm`) are refused now, on every server. `lint` warns about a view such as `docs/config.html`, whose address the server refuses because `config/`, `models/`, `data/` and `i18n/` are private under any folder.
+
+**Extensions on routed and missing URLs.** `/specials.json` is a 404 page unless `menu.json` exists, and page 2 of a feed (`/journal/journal_page/2.rss`) is the feed. A missing page is HTML whatever its extension.
+
+**One address per page.** `/menu/`, and `/index.php/menu` while `rewrite` is on, redirect (301) to `/menu`. Filter links no longer end in a slash.
+
+## 2.2.17
+
+Nothing for sites to do.
+
+**The in-page editor is fast on long pages.** Placing the edit marks took time that grew with the square of the page (over half a second for a 500-row list). It now takes one pass, so editors get long lists about as fast as visitors.
+
+**Enter in a paragraph field makes a new line.** A rich field that is a `<p>`, a heading or a list item no longer stores a paragraph inside a paragraph (which split the text and locked the field after a reload). Enter adds a line break, and pasted paragraphs become lines.
+
+**The editor works from the keyboard.** In edit mode, Tab reaches items, photos and the new-item card. Enter on an item opens its handle (Esc returns), Enter on a photo replaces it, and Enter on the card starts a new item.
+
+## 2.2.16
+
+- Listeners of bundled models declared in `listens()` now run with the framework's own bindings: before `config/the_events.php` and before the site's models' `listens()`. A site listener sees what the bundled listener already did, and `the_events.php` can unbind it with `event::unbind(…)->from(…)` (#27).
+- Models now autoload before the config files load.
+
+## 2.2.15
+
+Nothing for sites to do.
+
+**A new day exports again.** `raster export` counts the date (in the site's `timezone`) as part of what the site is made of. A nightly export now drops events that `date>=today` no longer lists, where before it said "Nothing changed since the last export". Pages that come out the same are still not written again.
+
+**`raster update` stops when it can't replace a file.** A framework file it can't write or remove now stops the update with exit 1 and the file's name, and the files already replaced are put back. Before, it said "Updated" while some files were still old. `update <folder>` also refuses a folder that doesn't hold `system/boot.php`, even with `--force`.
+
+**The comment at the top of `bin/raster`** lists the same commands and options as `raster help`.
 
 ## 2.2.14
 

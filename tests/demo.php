@@ -181,6 +181,48 @@ function mcp_stdio($calls) {
 	if ($err !== '') $answers['stderr'] = $err;
 	return $answers;
 }
+// MCP over stdio one call at a time, so a test can change the site between
+// calls of one session, as an agent does. A call with no answer in time
+// fails instead of hanging the run.
+class mcp_session {
+	public $process, $pipes, $id = 100, $errors;
+	function __construct($env = array()) {
+		global $root, $tmp;
+		$this->errors = "$tmp/mcp-session-".uniqid().'.log';
+		$this->process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('file', $this->errors, 'w')), $this->pipes, $root, array_merge(getenv(), $env));
+		stream_set_blocking($this->pipes[1], false);
+	}
+	// one line out, one line back (null when there is none in time)
+	function line($line, $seconds = 30) {
+		fwrite($this->pipes[0], $line."\n");
+		fflush($this->pipes[0]);
+		$answer = '';
+		$until = microtime(true) + $seconds;
+		while (substr($answer, -1) !== "\n" && microtime(true) < $until) {
+			$read = array($this->pipes[1]); $none = null;
+			if (stream_select($read, $none, $none, 0, 200000)) {
+				$chunk = fread($this->pipes[1], 65536);
+				if ($chunk === '' || $chunk === false) { if (feof($this->pipes[1])) break; continue; }
+				$answer .= $chunk;
+			}
+		}
+		return substr($answer, -1) === "\n" ? json_decode($answer, true) : null;
+	}
+	function call($name, $arguments = array(), $seconds = 30) {
+		$message = $this->line(json_encode(array('jsonrpc' => '2.0', 'id' => ++$this->id, 'method' => 'tools/call', 'params' => array('name' => $name, 'arguments' => $arguments ?: new stdClass()))), $seconds);
+		if ($message === null) throw new Exception("mcp $name: no answer in {$seconds}s");
+		$result = $message['result'];
+		return !empty($result['isError']) ? array('error' => $result['content'][0]['text']) : $result['structuredContent'];
+	}
+	function close() {
+		if (!is_resource($this->process)) return;
+		@fclose($this->pipes[0]);
+		if (proc_get_status($this->process)['running']) proc_terminate($this->process, 9);
+		@fclose($this->pipes[1]);
+		proc_close($this->process);
+		@unlink($this->errors);
+	}
+}
 function between($html, $id) {
 	return preg_match('#<section id="'.$id.'">(.*?)</section>#s', $html, $m) ? $m[1] : '';
 }
@@ -257,6 +299,15 @@ test(array('A2', 'A3', 'A4'), 'pages by file name, nested views, /index', functi
 test(array('A5', 'A6'), 'routes file and URL keys', function () use ($base) {
 	has(http('GET', "$base/specials")[1], '<h1>Menu</h1>');
 	same(404, http('GET', "$base/my-specials")[0], 'routes are anchored');
+	// a routed URL with an extension its view has no file for is a 404 page,
+	// in HTML and in the site's theme (#120)
+	foreach (array('/specials.json', '/print/menu.txt', '/about.json') as $url) {
+		list($status, $body, $headers) = http('GET', $base.$url);
+		same(404, $status, $url);
+		has(header_value($headers, 'Content-Type'), 'text/html', $url);
+		has($body, '/demo/views/cafe/', "$url: the 404 page with its base");
+	}
+	has(header_value(http('GET', "$base/journal/journal_page/2.rss")[2], 'Content-Type'), 'application/rss+xml', 'page 2 of the feed is journal.rss');
 	has(between(http('GET', "$base/lab/color/red")[1], 'param'), '<p class="color">red</p>');
 });
 test(array('A7', 'A8'), 'unknown pages and partials are 404', function () use ($base) {
@@ -585,7 +636,7 @@ test(array('E7', 'E9', 'E10', 'E11'), 'filter links, order, limit, template filt
 		mcp($base, 'create_item', array('collection' => 'menu', 'fields' => array('name' => $d[0], 'description' => 'Tasty', 'price' => '10', 'category' => $d[1], 'featured' => $d[2])));
 	}
 	$menu = http('GET', "$base/menu")[1];
-	has($menu, 'href="'.$base.'/menu/menu_items/category/cakes/"');
+	has($menu, 'href="'.$base.'/menu/menu_items/category/cakes"');
 	check(strpos($menu, 'Americano') < strpos($menu, 'Brownie'), 'order=name');
 	$cakes = http('GET', "$base/menu/menu_items/category/cakes")[1];
 	has($cakes, 'Brownie');
@@ -1146,8 +1197,8 @@ test(array('M1', 'M2', 'M3'), 'the MCP endpoint', function () use ($base) {
 	// writing templates stays off over HTTP until the site turns it on
 	check(!in_array('write_view', $names), 'write_view is not offered over HTTP');
 	$refused = json_decode($call(array('jsonrpc' => '2.0', 'id' => 30, 'method' => 'tools/call', 'params' => array('name' => 'write_view', 'arguments' => array('view' => 'x.html', 'content' => 'x'))))[1], true);
-	check(!empty($refused['result']['isError']), 'and calling it anyway is an error');
-	has($refused['result']['content'][0]['text'], 'Unknown tool');
+	same(-32602, $refused['error']['code'], 'and calling it anyway is an error');
+	has($refused['error']['message'], 'Unknown tool');
 	same(count($names), count(array_unique($names)), 'no tool is listed twice');
 	$batch = json_decode($call(array(array('jsonrpc' => '2.0', 'id' => 4, 'method' => 'ping'), array('jsonrpc' => '2.0', 'id' => 5, 'method' => 'nope')))[1], true);
 	same(-32601, $batch[1]['error']['code']);
@@ -1606,6 +1657,51 @@ test('N11', 'exporting again writes only what changed', function () use ($tmp, $
 	$manifest = json_decode(file_get_contents("$out/.raster-export.json"), true);
 	check(isset($manifest['files']['about/index.html']) && !empty($manifest['fingerprint']));
 });
+test('N11', 'a new day exports again: a list of what is coming drops what is past', function () use ($tmp, $base, $views) {
+	// Etc/GMT+12 is UTC-12 and Pacific/Kiritimati UTC+14: their dates always
+	// differ, so moving the site's time zone moves it to another day
+	$yesterday = array('CAFE_TIMEZONE' => 'Etc/GMT+12');
+	$tomorrow = array('CAFE_TIMEZONE' => 'Pacific/Kiritimati');
+	$day = (new DateTime('now', new DateTimeZone('Etc/GMT+12')))->format('Y-m-d');
+	$out = "$tmp/daily";
+	with_file("$views/coming.html", "<!doctype html><html><body><!-- render.cms.events('date>=today&order=date') --><p><!-- print.title -->Jazz night<!-- /print.title --> <!-- print.date -->2026-10-10<!-- /print.date --></p><!-- /render.cms.events('date>=today&order=date') --></body></html>", function () use ($base, $out, $yesterday, $tomorrow, $day) {
+		$gig = mcp($base, 'create_item', array('collection' => 'events', 'fields' => array('title' => 'Last night gig', 'date' => $day, 'summary' => 'x')));
+		try {
+			list($code, $output) = raster(array('export', $out, '--url=https://cafe.example/'), $yesterday);
+			same(0, $code, $output);
+			has(file_get_contents("$out/coming/index.html"), 'Last night gig', 'on its day the event is coming');
+			has(raster(array('export', $out, '--url=https://cafe.example/'), $yesterday)[1], 'Nothing changed since the last export');
+			$about = filemtime("$out/about/index.html");
+			sleep(1);
+			list($code, $output) = raster(array('export', $out, '--url=https://cafe.example/'), $tomorrow);
+			same(0, $code, $output);
+			lacks($output, 'Nothing changed since the last export');
+			lacks(file_get_contents("$out/coming/index.html"), 'Last night gig', 'the next day it is past');
+			same($about, filemtime("$out/about/index.html"), 'pages that did not change are not written again');
+		} finally {
+			mcp($base, 'delete_item', array('collection' => 'events', 'id' => $gig['id']));
+		}
+	});
+});
+test('N11', 'an export that crosses midnight records the day its pages were made on', function () use ($tmp, $root) {
+	// the clock moves to the next day between rendering and saving the
+	// fingerprint: the next day's export must still run
+	$out = "$tmp/midnight";
+	$script = "$tmp/midnight.php";
+	file_put_contents($script, '<?php require '.var_export("$root/system/boot.php", true).'; boot::$appname = "demo"; boot::cli();'
+		.' require_once BASE."tools/inspector.php"; require_once BASE."tools/export.php";'
+		.' class late_export extends raster_export { protected function collect_pages() { date_default_timezone_set("Pacific/Kiritimati"); parent::collect_pages(); } }'
+		.' @mkdir('.var_export($out, true).', 0775, true);'
+		.' $e = (new late_export('.var_export($root, true).', '.var_export($out, true).', "https://cafe.example/"))->run();'
+		.' echo $e->errors ? implode("\n", $e->errors) : "exported";');
+	$process = proc_open(array(PHP_BINARY, $script), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, array_merge(getenv(), array('CAFE_TIMEZONE' => 'Etc/GMT+12')));
+	$output = stream_get_contents($pipes[1]).stream_get_contents($pipes[2]);
+	same(0, proc_close($process), $output);
+	same('exported', trim($output));
+	list($code, $output) = raster(array('export', $out, '--url=https://cafe.example/'), array('CAFE_TIMEZONE' => 'Pacific/Kiritimati'));
+	same(0, $code, $output);
+	lacks($output, 'Nothing changed since the last export', 'the next day exports again');
+});
 test('N16', 'a page that answers an error stops the export, and the last export stays', function () use ($tmp, $root, $views) {
 	$out = "$tmp/failing";
 	same(0, raster(array('export', $out, '--url=https://cafe.example/'))[0]);
@@ -1840,6 +1936,21 @@ test(array('J7', 'J8'), 'a language per domain, the cookie name', function () us
 	$headers = http('GET', "$base/lab?lang=ro")[2];
 	has(implode("\n", $headers), 'Set-Cookie: cafe_lang=ro');
 	lacks(implode("\n", $headers), 'Set-Cookie: lang=');
+});
+test('J7', 'a language per domain with the site address set (#96)', function () use ($db, $maildir) {
+	$port = free_port();
+	$k = server($port, array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'RASTER_URL' => "http://localhost:$port/"));
+	// the site's own domain_language domain keeps its language and its links
+	$body = http('GET', "$k/lab", null, array("Host: ro.localhost:$port"))[1];
+	has($body, '>Meniu</a>');
+	has($body, "href=\"http://ro.localhost:$port/menu\"");
+	same(200, http('POST', "$k/visit", array('raster_form' => 'cafe.contact', 'email' => ''), array("Host: ro.localhost:$port", "Origin: http://ro.localhost:$port"))[0], 'a form sent from that domain');
+	// any other host gets the site's address
+	$body = http('GET', "$k/lab", null, array('Host: evil.example'))[1];
+	has($body, "href=\"http://localhost:$port/menu\"");
+	lacks($body, 'evil.example');
+	// a made-up subdomain of it is another host
+	lacks(http('GET', "$k/lab", null, array("Host: evil.ro.localhost:$port"))[1], 'evil.ro.localhost');
 });
 test('L6', 'site_url in config', function () use ($db, $maildir) {
 	$k = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'CAFE_SITE_URL' => 'https://knob.example/'));
@@ -2397,8 +2508,10 @@ test('R19', 'a record\'s own page is where editors edit what a model view links 
 	has($out, '1 items, lists:');
 	lacks($out, '+ new', 'no card on an item\'s page');
 	list($code, $out) = raster(array('render', '/booking/booking_item/'.$abe->slug));
-	same(1, $code, 'visitors get a 404');
-	has($out, 'HTTP 404');
+	// a protected page answers its redirect, as the web does (#195)
+	same(1, $code, 'visitors are sent to sign in');
+	has($out, 'HTTP 303');
+	has($out, '/login?next=%2Fbooking%2Fbooking_item%2F');
 	lacks($out, 'Abe Window');
 	same(303, http('GET', "$base/booking/booking_item/{$abe->slug}")[0], 'and the page itself is protected (booking_item)');
 });
@@ -2445,6 +2558,73 @@ test('M18', 'MCP over stdio: a PHP error in site code answers the call', functio
 			check(isset($answers[1]['ok']), 'the server goes on, and what the code printed did not break the answers');
 		});
 	} finally { @rmdir("$models/stopper"); }
+});
+
+test('M20', 'one MCP session sees the fields, collections, methods, api() and types() written during it (#105)', function () use ($views) {
+	$cafe = APPBASE.'models/cafe/cafe.php';
+	$booking = APPBASE.'models/the_booking/the_booking.php';
+	$session = new mcp_session();
+	try {
+		// the first calls load the models and read the content model
+		check(!isset($session->call('site_overview')['error']));
+		check(isset($session->call('vocabulary')['models']['cafe']));
+		// a field and a collection the view adds can be written at once
+		$view = "<h1><!-- print.cms.zzmotto -->Motto<!-- /print.cms.zzmotto --></h1>\n<ul><!-- render.cms.zzperks --><li><!-- print.title -->Perk<!-- /print.title --></li><!-- /render.cms.zzperks --></ul>\n";
+		same(true, $session->call('write_view', array('view' => 'zz-motto.html', 'content' => $view))['written']);
+		$page = $session->call('update_page', array('page' => '/zz-motto', 'fields' => array('zzmotto' => 'Good coffee')));
+		check(!isset($page['error']), 'update_page: '.json_encode($page));
+		$item = $session->call('create_item', array('collection' => 'zzperks', 'fields' => array('title' => 'Free refills')));
+		check(isset($item['id']), 'create_item: '.json_encode($item));
+		// a model gains a method and lists it in api(); a record type gains a field
+		$source = file_get_contents($cafe);
+		$more = str_replace("'bookings' => 'editor');", "'bookings' => 'editor', 'zzfresh' => 'visitor');\n\t}\n\tfunction zzfresh() {\n\t\treturn 'Fresh today';", $source);
+		with_file($cafe, $more, function () use ($session, $booking) {
+			with_file($booking, str_replace("\t\treturn \$types;", "\t\t\$types['booking']['fields']['zzallergies'] = '';\n\t\treturn \$types;", file_get_contents($booking)), function () use ($session) {
+				$vocabulary = $session->call('vocabulary');
+				check(isset($vocabulary['models']['cafe']['methods']['zzfresh']), 'vocabulary lacks the new method');
+				same('visitor', ((array)$vocabulary['models']['cafe']['api'])['zzfresh'] ?? null, 'vocabulary has the old api()');
+				same(0, $session->call('check_view', array('content' => '<p><!-- print.cafe.zzfresh /--></p>'))['errors'], 'check_view refuses the new method');
+				$overview = $session->call('site_overview');
+				$fields = array();
+				foreach ($overview['collections'] as $c) if ($c['name'] === 'booking') $fields = $c['fields'];
+				check(in_array('zzallergies', $fields), 'site_overview has the old types(): '.json_encode($fields));
+			});
+		});
+		// and back as it was
+		check(!isset($session->call('vocabulary')['models']['cafe']['methods']['zzfresh']), 'the method is gone again');
+	} finally {
+		$session->close();
+		@unlink("$views/zz-motto.html");
+	}
+});
+
+test('M20', 'a model with a syntax error during an MCP session: ping answers, other calls get an error, and the fix counts (#194)', function () {
+	$cafe = APPBASE.'models/cafe/cafe.php';
+	$session = new mcp_session();
+	try {
+		check(isset($session->call('vocabulary')['models']['cafe']));
+		check(!isset($session->call('render_url', array('url' => '/'))['error']));
+		// an agent halfway through editing a model
+		with_file($cafe, file_get_contents($cafe)."\n}}} broken(\n", function () use ($session) {
+			$ping = $session->line('{"jsonrpc":"2.0","id":3,"method":"ping"}', 15);
+			check($ping !== null, 'ping got no answer');
+			same(3, $ping['id']);
+			check(isset($ping['result']), 'ping: '.json_encode($ping));
+			$vocabulary = $session->line('{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"vocabulary","arguments":{}}}', 15);
+			check($vocabulary !== null, 'vocabulary got no answer');
+			same(4, $vocabulary['id']);
+			same(-32603, $vocabulary['error']['code'] ?? null, json_encode($vocabulary));
+			has($vocabulary['error']['message'], 'cafe.php');
+			has($vocabulary['error']['message'], 'Parse error');
+			same(null, $session->line('{"jsonrpc":"2.0","method":"notifications/initialized"}', 2), 'a notification still gets nothing back');
+			$batch = $session->line('[{"jsonrpc":"2.0","id":5,"method":"tools/list"},{"jsonrpc":"2.0","method":"notifications/x"}]', 15);
+			same(array(5), array_column((array)$batch, 'id'), 'a batch gets an error for each request: '.json_encode($batch));
+		});
+		// fixed, the next call answers again
+		check(isset($session->call('vocabulary')['models']['cafe']), 'vocabulary after the fix');
+	} finally {
+		$session->close();
+	}
 });
 
 // A second model, only while these tests run, for what the café's
@@ -2988,6 +3168,129 @@ test(array('L9', 'L10'), 'page cache: made-up list URLs are not kept, a change d
 	same('200 miss', $cache('/journal/journal_items/author/Mara'));
 });
 
+// ## Page cache and the clock (#158 group 8)
+
+// runs PHP with the demo booted, in the environment given
+function demo_php($code, $env) {
+	global $root;
+	$prefix = '';
+	foreach ($env as $name => $value) $prefix .= $name.'='.escapeshellarg($value).' ';
+	return shell_exec($prefix.escapeshellarg(PHP_BINARY).' -r '.escapeshellarg('require "'.$root.'/system/boot.php"; boot::$appname = "demo"; boot::cli(); '.$code).' 2>&1');
+}
+
+test('L13', 'raster render never reads or writes the page cache, and a protected page answers its redirect', function () use ($root, $tmp, $maildir) {
+	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => test_db("$tmp/prod.sqlite"), 'RASTER_URL' => 'https://cafe.example/', 'RASTER_MAIL' => "log://$maildir");
+	$prod = server(free_port(), $env);
+	raster(array('cache', 'clear'), $env);
+	http('GET', "$prod/faq");
+	same('hit', header_value(http('GET', "$prod/faq")[2], 'X-Raster-Cache'));
+	$faq = "$root/demo/views/cafe/faq.html";
+	with_file($faq, str_replace('</body>', '<p>Edited by hand</p></body>', file_get_contents($faq)), function () use ($env) {
+		list($code, $out) = raster(array('render', '/faq'), $env);
+		same(0, $code, $out);
+		has($out, 'Edited by hand', 'render printed the cached page');
+	});
+	raster(array('render', '/about'), $env);
+	same('miss', header_value(http('GET', "$prod/about")[2], 'X-Raster-Cache'), 'render stored the page');
+	// a protected page: the redirect the web gets, and exit 1
+	list($code, $out) = raster(array('render', '/staff'), $env);
+	same(1, $code, $out);
+	has($out, 'HTTP 303');
+	has($out, 'Location: https://cafe.example/login?next=%2Fstaff');
+	lacks($out, '<html', 'the protected page itself');
+	$answers = mcp_stdio(array(array('render_url', array('url' => '/staff'))));
+	same(303, $answers[0]['status']);
+	same(false, $answers[0]['ok']);
+	has($answers[0]['errors'], '/login?next=%2Fstaff');
+	same('', $answers[0]['html']);
+	// the account a page is rendered as still sees it
+	same(0, raster(array('render', '/staff', '--as=editor'))[0]);
+});
+
+test('L14', 'several scheduled items each clear the page cache when their time comes, in the site\'s time zone', function () use ($root, $tmp, $maildir) {
+	// far from UTC, so a time read in the wrong zone is hours off
+	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => test_db("$tmp/prod.sqlite"), 'RASTER_URL' => 'https://cafe.example/', 'RASTER_MAIL' => "log://$maildir", 'CAFE_TIMEZONE' => 'Pacific/Kiritimati');
+	$prod = server(free_port(), $env);
+	raster(array('cache', 'clear'), $env);
+	$now = time();
+	// dated before every other event, so both are on the first page
+	$out = demo_php('cms_store::connect(); R::freeze(false); foreach (array("First due" => 2, "Second due" => 4) as $title => $later) cms_store::save_item("eventsdata", 0, array("title" => $title, "date" => "2000-01-01", "published_at" => date("Y-m-d H:i:s", '.$now.' + $later)), array("title", "date")); echo date_default_timezone_get();', $env);
+	same('Pacific/Kiritimati', $out);
+	// other tests schedule items for 2099
+	$next = function () use ($root, $now) {
+		return array_values(array_filter(file("$root/demo/data/cache/next", FILE_IGNORE_NEW_LINES), function ($time) use ($now) { return $time < $now + 3600; }));
+	};
+	same(array((string)($now + 2), (string)($now + 4)), $next(), 'every time is kept');
+	http('GET', "$prod/events");
+	list(, $body, $headers) = http('GET', "$prod/events");
+	same('hit', header_value($headers, 'X-Raster-Cache'));
+	lacks($body, 'First due');
+	while (time() < $now + 3) usleep(100000);
+	$body = http('GET', "$prod/events")[1];
+	has($body, 'First due', 'the first is published on time');
+	lacks($body, 'Second due');
+	same(array((string)($now + 4)), $next(), 'the later time stays');
+	same('hit', header_value(http('GET', "$prod/events")[2], 'X-Raster-Cache'));
+	while (time() < $now + 5) usleep(100000);
+	list(, $body, $headers) = http('GET', "$prod/events");
+	same('miss', header_value($headers, 'X-Raster-Cache'));
+	has($body, 'Second due', 'the second is published on time');
+	same(array(), $next(), 'nothing left to wait for');
+	demo_php('cms_store::connect(); R::exec("DELETE FROM eventsdata WHERE title IN (\'First due\', \'Second due\')");', $env);
+});
+
+test('L15', 'cache clear says so when it can\'t write the cache, and upgrade clears it', function () use ($root, $tmp, $maildir) {
+	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => test_db("$tmp/prod.sqlite"), 'RASTER_URL' => 'https://cafe.example/', 'RASTER_MAIL' => "log://$maildir");
+	$prod = server(free_port(), $env);
+	$dir = "$root/demo/data/cache";
+	raster(array('cache', 'clear'), $env);
+	http('GET', "$prod/faq");
+	// the cache belongs to the web server's user, and this is someone else
+	foreach (glob("$dir/*") as $file) chmod($file, 0444);
+	chmod($dir, 0555);
+	try {
+		list($code, $out) = raster(array('cache', 'clear'), $env);
+		same(1, $code, $out);
+		has($out, "error: can't write $dir/version");
+		lacks($out, 'Page cache cleared');
+		$answers = mcp_stdio(array(array('clear_cache')));
+		has(isset($answers[0]['error']) ? $answers[0]['error'] : '', "Can't write $dir/version");
+	} finally {
+		chmod($dir, 0775);
+		foreach (glob("$dir/*") as $file) chmod($file, 0664);
+	}
+	same('hit', header_value(http('GET', "$prod/faq")[2], 'X-Raster-Cache'));
+	list($code, $out) = raster(array('upgrade'), $env);
+	same(0, $code, $out);
+	same('miss', header_value(http('GET', "$prod/faq")[2], 'X-Raster-Cache'), 'the first request after an upgrade');
+});
+
+test('L16', 'a cached page keeps the headers it was made with, has Last-Modified and answers 304', function () use ($root, $tmp, $maildir) {
+	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => test_db("$tmp/prod.sqlite"), 'RASTER_URL' => 'https://cafe.example/', 'RASTER_MAIL' => "log://$maildir", 'CAFE_TIMEZONE' => 'Pacific/Kiritimati');
+	$prod = server(free_port(), $env);
+	raster(array('cache', 'clear'), $env);
+	list(, $first, $miss) = http('GET', "$prod/faq");
+	same('miss', header_value($miss, 'X-Raster-Cache'));
+	list($status, $body, $hit) = http('GET', "$prod/faq");
+	same(200, $status);
+	same('hit', header_value($hit, 'X-Raster-Cache'));
+	same($first, $body);
+	foreach (array('X-Cafe', 'X-Cafe-Done', 'Content-Type') as $name) same(header_value($miss, $name), header_value($hit, $name), $name);
+	same(1, count(preg_grep('/^X-Cafe:/i', $hit)), 'a header is sent once');
+	$modified = header_value($hit, 'Last-Modified');
+	same($modified, header_value($miss, 'Last-Modified'));
+	check(preg_match('/^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/', (string)$modified), 'an HTTP date: '.$modified);
+	check(abs(strtotime($modified) - time()) < 30, 'in GMT, whatever the site\'s time zone: '.$modified);
+	list($status, $body, $headers) = http('GET', "$prod/faq", null, array("If-Modified-Since: $modified"));
+	same(304, $status);
+	same('', $body);
+	same('hit', header_value($headers, 'X-Raster-Cache'));
+	same(200, http('GET', "$prod/faq", null, array('If-Modified-Since: '.gmdate('D, d M Y H:i:s', strtotime($modified) - 60).' GMT'))[0], 'an older copy gets the page');
+	same(200, http('GET', "$prod/faq", null, array('If-Modified-Since: yesterday-ish'))[0], 'a date that is not one');
+	// a session cookie is never kept, nor sent again
+	foreach ($hit as $header) check(stripos($header, 'Set-Cookie:') !== 0, $header);
+});
+
 // ## 2.1.8 batch B: errors and /api
 
 test('C51', 'cms offers over /api only what its api() lists: the editor endpoints, style and logout; an override adds nothing unlisted', function () use ($base, $root) {
@@ -3104,7 +3407,7 @@ test('E31', 'fields named like SQL words (when, from, group) sort, filter and li
 			same(200, $status);
 			same(array('Oslo', 'Lima', 'Rome'), $titles($html, 'by-when'), 'order=when');
 			same(array('Lima', 'Rome'), $titles($html, 'big'), 'group>2&order=-group');
-			has($html, 'href="'.$base.'/zztrips/zztrips_items/from/Paris/"');
+			has($html, 'href="'.$base.'/zztrips/zztrips_items/from/Paris"');
 			list($status, $html) = http('GET', "$base/zztrips/zztrips_items/from/Paris");
 			same(200, $status);
 			same(array('Lima', 'Rome'), $titles($html, 'by-when'), 'the filter page');

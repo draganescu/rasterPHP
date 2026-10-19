@@ -397,6 +397,15 @@ class cms
 		foreach ($uri_filters as $key => $value) {
 			if (array_key_exists($key, $fields) && preg_match('/^[a-z0-9_]+$/', $key) && !cms::canonical_value($fields[$key], $value, isset($expected_properties[$key]) ? $expected_properties[$key] : cms::collection_example($name, $key))) raster_cache::skip();
 		}
+		// an item titled 1984 has the slug 1984: a number that is a slug opens
+		// that item, and only a number no item has as its slug is an id (#90)
+		if (util::param($name) == $name.'_item' && isset($filters['id']) && array_key_exists('slug', $fields)) {
+			$wanted = (string)util::param($name.'_item');
+			if (R::getCell('SELECT COUNT(*) FROM `'.$this->data_name.'` WHERE slug = ?', array($wanted))) {
+				unset($filters['id']);
+				$filters['slug'] = $wanted;
+			}
+		}
 		// what the list shows, as the pager counts it
 		$where = cms_store::list_where($name, $list['conditions'], $filters, $uri_filters);
 		if ($where === null) return array();
@@ -438,7 +447,8 @@ class cms
 				foreach ($filter_fields as $field) {
 					$filter_link .= $field.'/'.rawurlencode(isset($item[$field]) ? $item[$field] : '').'/';
 				}
-				$data[$key]['raster_filter@'.$at_key] = $filter_link;
+				// without the last slash, as item links are (#131)
+				$data[$key]['raster_filter@'.$at_key] = rtrim($filter_link, '/');
 			}
 		}
 

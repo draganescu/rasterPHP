@@ -327,8 +327,7 @@ class raster_inspector {
 	// Finds the file that would be loaded for a model (controller::model)
 	// and lists its public methods.
 	function model_info($model) {
-		static $cache = array();
-		if (isset($cache[$model])) return $cache[$model];
+		if (isset(self::$known[$model])) return self::$known[$model];
 		$found = controller::model($model);
 		$info = false;
 		foreach ($found ? array($found['file']) : array() as $file) {
@@ -383,7 +382,18 @@ class raster_inspector {
 			}
 			break;
 		}
-		return $cache[$model] = $info;
+		return self::$known[$model] = $info;
+	}
+
+	// What model_info() and raised_names() read is kept for the process,
+	// since lint asks for the same models over and over; the stdio MCP server
+	// lives longer than a lint and forgets it before every call.
+	static $known = array();
+	static $raised = null;
+
+	static function forget() {
+		self::$known = array();
+		self::$raised = null;
 	}
 
 	// methods of a system model file, for overrides
@@ -812,8 +822,7 @@ class raster_inspector {
 
 	// every raise('x') and done('x') in the models, so alerts can be checked
 	function raised_names() {
-		static $names = null;
-		if ($names !== null) return $names;
+		if (self::$raised !== null) return self::$raised;
 		$names = array();
 		foreach (array(BASE.'models', APPBASE.config::get('models_path', 'models')) as $dir) {
 			if (!is_dir($dir)) continue;
@@ -837,7 +846,7 @@ class raster_inspector {
 		foreach (cms_records::types() as $info) {
 			foreach ($info['types'] as $field => $type) if ($type !== 'text') $names[] = $field.'_invalid';
 		}
-		return $names = array_unique($names);
+		return self::$raised = array_unique($names);
 	}
 
 	// ##Forms
@@ -1148,10 +1157,23 @@ class raster_inspector {
 		$themes = $themes ?: array($this->theme);
 		foreach ($themes as $theme) {
 			foreach ($this->views($theme) as $view) {
-				$problems = array_merge($problems, $this->lint_file($view, $theme));
+				$problems = array_merge($problems, $this->lint_file($view, $theme), $this->lint_address($view, $theme));
 			}
 		}
 		return array_merge($problems, $this->lint_routes(), $this->lint_events(), $this->lint_queries(), $this->lint_types(), $this->lint_api(), $this->lint_models());
+	}
+
+	// A view whose address the server refuses: the rules that keep an app's
+	// config/, models/, data/ and i18n/ private apply to the second segment
+	// of every URL, so docs/config.html is a page nobody can open (#98).
+	function lint_address($view, $theme) {
+		if (preg_match('#(^|/)_#', $view)) return array();
+		$url = '/'.(substr($view, -strlen($this->ext)) === $this->ext ? substr($view, 0, -strlen($this->ext)) : $view);
+		if ($url === '/index') $url = '/';
+		require_once BASE.'private_paths.php';
+		if (!private_paths::blocked($url)) return array();
+		return array(array('file' => self::short($this->theme_dir($theme).'/'.$view), 'line' => 1, 'column' => 1, 'severity' => 'warning',
+			'message' => "$url is refused by the server (system/private_paths.php keeps config/, models/, data/ and i18n/ private under any folder), so nobody can open this page: give the view another name"));
 	}
 
 	// A site model with a bundled model's name replaces it whole: the

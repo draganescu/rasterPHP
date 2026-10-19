@@ -4,7 +4,8 @@
 // find; set CHROMIUM=/path/to/chrome if needed). Starts the demo café on a
 // fresh database, logs in as an editor and uses the editor the way a person
 // would: edit mode, typing, undo, adding an item with a photo, hiding,
-// deleting and undoing, the page panel. Screenshots go to tests/screens/.
+// deleting and undoing, a keyboard-only pass, Enter in a paragraph field,
+// the page panel. Screenshots go to tests/screens/.
 const { chromium } = require('playwright');
 const { spawn, execFileSync } = require('child_process');
 const fs = require('fs');
@@ -44,6 +45,10 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 		const context = await browser.newContext({ viewport: { width: 1280, height: 860 } });
 		const page = await context.newPage();
 		page.on('pageerror', e => errors.push(e.message));
+		// file choosers stay intercepted all along: a waitForEvent alone turns
+		// interception on without waiting, so a key pressed right after it can
+		// open the chooser before then, and the event never comes
+		page.on('filechooser', () => {});
 		await page.goto(base + '/login');
 		await page.fill('input[name=login]', 'staff@cafe.test');
 		await page.fill('input[name=password]', 'staff password');
@@ -69,6 +74,165 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 		await page.waitForTimeout(800);
 		html = await (await fetch(base + '/')).text();
 		check(html.includes('<h1>Good coffee, slow mornings.</h1>'), 'undo puts it back');
+
+		// Enter in a rich field that is itself a paragraph is a line break,
+		// not a paragraph inside the paragraph (#114)
+		const about = path.join(root, 'demo/views/cafe/about.html');
+		const aboutView = fs.readFileSync(about, 'utf8');
+		fs.writeFileSync(about, aboutView.replace('<h2>Opening hours</h2>', '<p class="lead"><!-- print.cms.lead -->We roast <em>our own</em> beans.<!-- /print.cms.lead --></p><ul class="features"><!-- print.cms.features --><li>Fast</li><li>Cheap</li><!-- /print.cms.features --></ul><article class="note"><!-- print.cms.note -->Fresh <em>bread</em> daily.<!-- /print.cms.note --></article><h2>Opening hours</h2>'));
+		try {
+			await page.goto(base + '/about');
+			await page.waitForTimeout(500);
+			const lead = page.locator('p.lead');
+			check(await lead.getAttribute('data-raster-edit') === 'rich', 'the lead is a rich field');
+			await lead.click();
+			await page.keyboard.press('Control+End');
+			await page.keyboard.press('Enter');
+			await page.keyboard.type('Second line.');
+			await page.mouse.click(5, 5);
+			await page.waitForTimeout(900);
+			html = await (await fetch(base + '/about')).text();
+			check(html.includes('<p class="lead">We roast <em>our own</em> beans.<br>Second line.</p>'), 'Enter saved a line break: ' + (html.match(/<p class="lead">[\s\S]*?<h2>/) || [''])[0]);
+			await page.reload();
+			await page.waitForTimeout(500);
+			check(await page.locator('p.lead[data-raster-field]').count() === 1 && await page.locator('main > p:empty').count() === 0, 'after a reload the lead is still one field, with no empty paragraph');
+			// a pasted paragraph is unwrapped into the line too
+			await lead.click();
+			await page.keyboard.press('Control+End');
+			await lead.evaluate(el => {
+				const data = new DataTransfer();
+				data.setData('text/html', '<p>Pasted one.</p><p>Pasted two.</p>');
+				data.setData('text/plain', 'Pasted one. Pasted two.');
+				el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+			});
+			await page.mouse.click(5, 5);
+			await page.waitForTimeout(900);
+			html = await (await fetch(base + '/about')).text();
+			check(/<p class="lead">We roast <em>our own<\/em> beans\.<br>Second line\.(<br>)?Pasted one\.<br>Pasted two\.<\/p>/.test(html), 'a pasted paragraph stays in the line: ' + (html.match(/<p class="lead">[\s\S]*?<h2>/) || [''])[0]);
+			// and so are a pasted list, heading and quote, at any depth
+			await lead.click();
+			await page.keyboard.press('Control+End');
+			await lead.evaluate(el => {
+				const data = new DataTransfer();
+				data.setData('text/html', '<ul><li>One</li><li>Two</li></ul><h2>Head</h2><blockquote><p>Quote</p></blockquote>');
+				data.setData('text/plain', 'One Two Head Quote');
+				el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+			});
+			await page.mouse.click(5, 5);
+			await page.waitForTimeout(900);
+			html = await (await fetch(base + '/about')).text();
+			check(/<p class="lead">We roast <em>our own<\/em> beans\.<br>Second line\.(<br>)?Pasted one\.<br>Pasted two\.(<br>)?One<br>Two<br>Head<br>Quote<\/p>/.test(html), 'a pasted list, heading and quote become lines: ' + (html.match(/<p class="lead">[\s\S]*?<h2>/) || [''])[0]);
+			await page.reload();
+			await page.waitForTimeout(500);
+			check(await page.locator('p.lead[data-raster-field]').count() === 1 && await page.locator('main > p:empty').count() === 0, 'after a pasted list the lead is still one field');
+			// a rich field that is a list: Enter adds a bullet, as the browser does
+			const features = page.locator('ul.features');
+			await features.locator('li').last().click();
+			await page.keyboard.press('Control+End');
+			await page.keyboard.press('Enter');
+			await page.keyboard.type('Third');
+			await page.mouse.click(5, 5);
+			await page.waitForTimeout(900);
+			html = await (await fetch(base + '/about')).text();
+			check(html.includes('<ul class="features"><li>Fast</li><li>Cheap</li><li>Third</li></ul>'), 'Enter in a list field adds a bullet: ' + (html.match(/<ul class="features">[\s\S]*?<\/ul>/) || [''])[0]);
+			// a field printed straight into an <article> is wrapped in a span
+			// by the editor, but takes paragraphs and lists, as the article does
+			const note = page.locator('article.note [data-raster-field]');
+			await note.click();
+			await page.waitForTimeout(200);
+			check(await inShadow(page, h => !!h.shadowRoot.querySelector('.format button[aria-label=List]')), 'a field in an article offers a list');
+			await page.keyboard.press('Control+End');
+			await note.evaluate(el => {
+				const data = new DataTransfer();
+				data.setData('text/html', '<p>Pasted one.</p><p>Pasted two.</p>');
+				data.setData('text/plain', 'Pasted one. Pasted two.');
+				el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+			});
+			await page.mouse.click(5, 5);
+			await page.waitForTimeout(900);
+			html = await (await fetch(base + '/about')).text();
+			// the browser runs the first pasted paragraph on into the line it lands in
+			check(/<article class="note">Fresh <em>bread<\/em> daily\.(<p>)?Pasted one\.(<\/p>)?<p>Pasted two\.<\/p><\/article>/.test(html), 'a paragraph pasted into a field in an article stays a paragraph: ' + (html.match(/<article class="note">[\s\S]*?<\/article>/) || [''])[0]);
+		} finally {
+			fs.writeFileSync(about, aboutView);
+		}
+
+		// the same for an item's paragraph field, in a new item and in a copy (#114)
+		const menuFile = path.join(root, 'demo/views/cafe/menu.html');
+		const menuView = fs.readFileSync(menuFile, 'utf8');
+		fs.writeFileSync(menuFile, menuView.replace('<!-- print.description -->Double ristretto, steamed milk.', '<!-- print.description -->Double <em>ristretto</em>, steamed milk.'));
+		try {
+			await page.goto(base + '/menu');
+			await page.waitForTimeout(500);
+			const card = page.locator('.raster-ghost').first();
+			await card.click();
+			await page.keyboard.type('Macchiato');
+			await card.locator('[data-raster-name=description]').click();
+			await page.keyboard.press('End');
+			await page.keyboard.press('Enter');
+			await page.keyboard.type('Second');
+			await inShadow(page, h => [...h.shadowRoot.querySelectorAll('.handle button')].find(b => b.textContent === 'Add').click());
+			await page.waitForTimeout(1000);
+			html = await (await fetch(base + '/menu')).text();
+			check(html.includes('<p>Double <em>ristretto</em>, steamed milk.<br>Second</p>'), 'Enter in a new item\'s paragraph field saved a line break: ' + (html.match(/Macchiato[\s\S]*?<p class="price">/) || [''])[0]);
+			// a copy of an item: its fields know they are paragraphs too
+			await page.reload();
+			await page.waitForTimeout(500);
+			const macchiato = page.locator('[data-raster-item]', { hasText: 'Macchiato' }).first();
+			await macchiato.hover({ position: { x: 20, y: 20 }, force: true });
+			await page.waitForTimeout(300);
+			await inShadow(page, h => h.shadowRoot.querySelector('.handle button[aria-label=Duplicate]').click());
+			await page.waitForTimeout(1000);
+			const copy = page.locator('[data-raster-item]', { hasText: 'Macchiato' }).nth(1);
+			await copy.locator('p[data-raster-field]').first().click();
+			await page.keyboard.press('Control+End');
+			await page.keyboard.press('Enter');
+			await page.keyboard.type('Third');
+			await page.mouse.click(5, 5);
+			await page.waitForTimeout(900);
+			html = await (await fetch(base + '/menu')).text();
+			check(html.includes('<p>Double <em>ristretto</em>, steamed milk.<br>Second<br>Third</p>'), 'Enter in a copied item\'s paragraph field saved a line break: ' + (html.match(/<p>Double <em>ristretto<\/em>, steamed milk\.<br>Second[\s\S]*?<\/p>/g) || []).join(' | '));
+			// the two Macchiatos go, so the rest of the run sees the menu it expects
+			for (let i = 0; i < 2; i++) {
+				await page.goto(base + '/menu');
+				await page.waitForTimeout(500);
+				await page.mouse.move(2, 2);
+				await page.locator('[data-raster-item]', { hasText: 'Macchiato' }).first().hover({ position: { x: 20, y: 20 }, force: true });
+				await page.waitForTimeout(300);
+				await inShadow(page, h => h.shadowRoot.querySelector('.handle button[aria-label=Delete]').click());
+				await page.waitForTimeout(900);
+			}
+			check(!(await (await fetch(base + '/menu')).text()).includes('Macchiato'), 'the Macchiatos are gone');
+		} finally {
+			fs.writeFileSync(menuFile, menuView);
+		}
+		// a new item's field printed straight into its <article> takes paragraphs
+		fs.writeFileSync(menuFile, menuView.replace('<p><!-- print.description -->Double ristretto, steamed milk.<!-- /print.description --></p>', '<!-- print.description -->Double <em>ristretto</em>, steamed milk.<!-- /print.description -->'));
+		try {
+			await page.goto(base + '/menu');
+			await page.waitForTimeout(500);
+			const card = page.locator('.raster-ghost').first();
+			await card.click();
+			await page.keyboard.type('Lungo');
+			const description = card.locator('[data-raster-name=description]');
+			check(await description.evaluate(el => el.hasAttribute('data-raster-wrap') && el.parentNode.tagName === 'ARTICLE'), 'the new item\'s description is a wrapper in the article');
+			await description.click();
+			await page.keyboard.press('Control+End');
+			await page.keyboard.press('Enter');
+			await page.keyboard.type('Second');
+			await inShadow(page, h => [...h.shadowRoot.querySelectorAll('.handle button')].find(b => b.textContent === 'Add').click());
+			await page.waitForTimeout(1000);
+			html = await (await fetch(base + '/menu')).text();
+			check(/Lungo[\s\S]*?Double <em>ristretto<\/em>, steamed milk\.<p>Second<\/p>/.test(html) || /Lungo[\s\S]*?<p>Double <em>ristretto<\/em>, steamed milk\.<\/p><p>Second<\/p>/.test(html), 'Enter in a new item\'s field in an article saved a paragraph: ' + (html.match(/Lungo[\s\S]*?<p class="price">/) || [''])[0]);
+			await page.mouse.move(2, 2);
+			await page.locator('[data-raster-item]', { hasText: 'Lungo' }).first().hover({ position: { x: 20, y: 20 }, force: true });
+			await page.waitForTimeout(300);
+			await inShadow(page, h => h.shadowRoot.querySelector('.handle button[aria-label=Delete]').click());
+			await page.waitForTimeout(900);
+			check(!(await (await fetch(base + '/menu')).text()).includes('Lungo'), 'the Lungo is gone');
+		} finally {
+			fs.writeFileSync(menuFile, menuView);
+		}
 
 		// a typed field shows what was stored, the way the page prints it
 		await page.goto(base + '/menu');
@@ -122,6 +286,66 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 		await page.keyboard.press('Control+z');
 		await page.waitForTimeout(1200);
 		check((await (await fetch(base + '/menu')).text()).includes('Cortado'), 'undo brings the item back');
+
+		// keyboard only: Tab reaches items, photos and the new-item card, and
+		// every action on an item works from the keyboard (#121)
+		await page.goto(base + '/menu');
+		await page.waitForTimeout(500);
+		await page.mouse.move(2, 2);
+		const focused = () => page.evaluate(() => {
+			const el = document.activeElement;
+			if (el && el.hasAttribute('data-raster-host')) return { kind: 'host' };
+			if (!el || !el.matches) return { kind: '' };
+			if (el.matches('.raster-ghost')) return { kind: 'ghost' };
+			if (el.matches('img[data-raster-field]')) return { kind: 'photo' };
+			if (el.matches('[data-raster-item]')) return { kind: 'item', text: el.innerText };
+			return { kind: el.tagName };
+		});
+		const reached = {};
+		let photoButton = false, itemHandle = false;
+		for (let i = 0; i < 120 && !reached.ghost; i++) {
+			await page.keyboard.press('Tab');
+			const f = await focused();
+			reached[f.kind] = true;
+			if (f.kind === 'photo') photoButton = photoButton || await inShadow(page, h => !!h.shadowRoot.querySelector('.photo-button'));
+			if (f.kind === 'item') itemHandle = itemHandle || await inShadow(page, h => !!h.shadowRoot.querySelector('.handle button[aria-label=Delete]'));
+		}
+		check(reached.item && reached.photo && reached.ghost, 'Tab reaches an item, a photo and the new-item card: ' + Object.keys(reached).join(', '));
+		check(itemHandle, 'a focused item shows its handle');
+		check(photoButton, 'a focused photo shows the replace button');
+		// to the first dish, Enter into its handle, Tab to Hide, Enter
+		await page.goto(base + '/menu');
+		await page.waitForTimeout(500);
+		await page.mouse.move(2, 2);
+		let first = null;
+		for (let i = 0; i < 120; i++) {
+			await page.keyboard.press('Tab');
+			const f = await focused();
+			if (f.kind === 'item') { first = f.text; break; }
+		}
+		const firstItem = page.locator('[data-raster-item]').first();
+		check(first !== null && await firstItem.evaluate(el => el === document.activeElement), 'Tab lands on the first item');
+		await page.keyboard.press('Enter');
+		check(await inShadow(page, h => !!h.shadowRoot.activeElement && !!h.shadowRoot.activeElement.closest('.handle')), 'Enter on an item moves into its handle');
+		for (let i = 0; i < 8 && !(await inShadow(page, h => h.shadowRoot.activeElement && h.shadowRoot.activeElement.getAttribute('aria-label') === 'Show')); i++) await page.keyboard.press('Tab');
+		await page.keyboard.press('Enter');
+		await page.waitForTimeout(900);
+		check(await firstItem.getAttribute('data-raster-state') === 'live', 'Show, from the keyboard, shows the hidden dish');
+		await firstItem.focus();
+		await page.keyboard.press('Enter');
+		await page.keyboard.press('Escape');
+		check(await firstItem.evaluate(el => el === document.activeElement), 'Esc in the handle goes back to the item');
+		// a focused photo opens the file chooser with Enter
+		const photo = page.locator('img[data-raster-field]').first();
+		await photo.focus();
+		const [picker] = await Promise.all([page.waitForEvent('filechooser', { timeout: 10000 }).catch(() => null), page.keyboard.press('Enter')]);
+		check(!!picker, 'Enter on a photo opens the file chooser: ' + await page.evaluate(() => document.activeElement.outerHTML.slice(0, 200)));
+		// the new-item card opens with Enter
+		const card = page.locator('.raster-ghost').first();
+		await card.focus();
+		await page.keyboard.press('Enter');
+		check(await card.evaluate(el => el.classList.contains('raster-new') && el.contains(document.activeElement)), 'Enter on the new-item card starts a new item');
+		await page.keyboard.press('Escape');
 
 		// a record: the model's actions are buttons, its readonly fields are not editable
 		await fetch(base + '/visit?date=' + tuesday, { method: 'POST', body: new URLSearchParams({ raster_form: 'booking.form', resource: 'dining-room', name: 'Ilinca', email: 'ilinca@example.com', date: tuesday, time: '19:00', people: '2', terms: '1' }), redirect: 'manual' });

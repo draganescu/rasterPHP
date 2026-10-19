@@ -23,10 +23,10 @@ All the rules for what is private are kept in one list, `system/private_paths.ph
 |---|---|
 | dotfiles and dot folders (`.git`, `.env`, `.htaccess`) except `/.well-known/` | version history, secrets, server config |
 | `system/`, `bin/`, `tests/` | the framework and tooling |
-| `config/`, `models/`, `data/`, `i18n/` inside any top-level folder | your settings, code, database, translations |
+| `config/`, `models/`, `data/`, `i18n/` inside any top-level folder | your settings, code, database, translations (so a page at `/docs/config` can't be opened either: `lint` warns about such a view) |
 | view files (`.html`, `.rss`, …) under `views/` | they're templates, not pages |
 | `.php`, `.phar`, `.sqlite`, `.sql`, `.md`, `.lock`, `.ini`, `.bak` anywhere (except `index.php`) | code, databases, dumps, notes |
-| SQLite's `-journal`, `-wal`, `-shm` files | parts of the database |
+| SQLite's `.sqlite-journal`, `.sqlite-wal`, `.sqlite-shm` files | parts of the database |
 
 Everything else (theme CSS and images, `media/`) is served as a normal file, and every other request goes to `index.php`.
 
@@ -40,7 +40,7 @@ Put the project folder on the server, for example `/var/www/site`, with git or r
 
 ### 2. Configure the web server
 
-**Apache.** The `.htaccess` file that ships with Raster already has every rule. Apache needs `mod_rewrite` enabled and `AllowOverride All` (or at least `FileInfo`) for the folder. If your `.htaccess` is from an older Raster, regenerate it:
+**Apache.** The `.htaccess` file that ships with Raster already has every rule, and the line that hands the `Authorization` header to PHP-FPM, which [MCP over HTTP](Working-with-AI-Agents) needs for its token. Apache needs `mod_rewrite` enabled and `AllowOverride All` (or at least `FileInfo`) for the folder. If your `.htaccess` is from an older Raster, regenerate it:
 
 ```sh
 php bin/raster deploy --config=apache > .htaccess

@@ -257,6 +257,10 @@ running it again adds nothing. Until then the booking forms say `not_open`.
 | L10 | page cache: links with only tracking parameters (`utm_*`, `fbclid`, `gclid`, `msclkid`) are cache hits, and their values never reach the cached page |
 | L11 | a database that can't be reached answers 503 outside development (`error_document_503`, views/cafe/503.html; `/api` as JSON, before the method runs), logged, never cached |
 | L12 | the page cache is thrown away and `content_changed` sent once a transaction commits, and not at all when it is rolled back |
+| L13 | `raster render` and MCP `render_url` never read or write the page cache; a protected page answers its 303 to the login page, with exit 1 |
+| L14 | several scheduled items each clear the page cache when their time comes, in the site's `timezone` |
+| L15 | `raster cache clear` and MCP `clear_cache` fail when they can't write the cache; `upgrade` (and so `update`) clears it |
+| L16 | a cached page keeps the headers it was made with, carries `Last-Modified` and answers `If-Modified-Since` with 304 |
 | M1 | MCP needs its token; GET is refused |
 | M2 | initialize, ping, tools/list, batches, errors |
 | M3 | notifications get 202 |
@@ -276,6 +280,7 @@ running it again adds nothing. Until then the booking forms say `not_open`.
 | M17 | `render_url` with `as`: the page as an editor, with what the in-page editor marks |
 | M18 | a PHP error in site code answers the MCP call over stdio with its file and line, and the server goes on |
 | M19 | the view tools take `theme` only as a folder directly under `views/`; a path or a link out of `views/` is refused |
+| M20 | one stdio session sees what is written during it: new fields and collections, a model's new methods, `api()` and `types()` |
 | N1 | raster help and unknown commands |
 | N2 | raster lint and --json, --all-themes |
 | N3 | raster render and its exit codes |
@@ -286,7 +291,7 @@ running it again adds nothing. Until then the booking forms say `not_open`.
 | N8 | raster doctor: .htaccess rules, `allow_deprecated` |
 | N9 | `raster export`: pages, items, lists, feeds, the 404 page, assets and every language as static files; what needs PHP is reported |
 | N10 | `print.if.live` / `print.if.static`: forms on the live site, what shows instead in the export; an unwrapped form stops the export |
-| N11 | exporting again writes only files that changed, removes what the site no longer has, and does nothing when nothing changed |
+| N11 | exporting again writes only files that changed, removes what the site no longer has, and does nothing when nothing changed; a new day always exports again |
 | N12 | raster vocabulary, and --json |
 | N13 | raster describe, and --sections |
 | N14 | `raster render <url> --as=<account or role>`, and a query string in the URL |

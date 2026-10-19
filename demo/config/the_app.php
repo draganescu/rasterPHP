@@ -68,7 +68,9 @@ if ($knob('CAFE_DOUBLE_OPT_IN') === 'off') config::set('newsletter_double_opt_in
 if ($knob('CAFE_LOGIN_PAGE')) config::set('login_page')->to($knob('CAFE_LOGIN_PAGE'));
 if ($knob('CAFE_MCP_TOKEN')) config::set('mcp_token')->to($knob('CAFE_MCP_TOKEN'));
 if ($knob('CAFE_SITE_URL')) config::set('site_url')->to($knob('CAFE_SITE_URL'));
+if ($knob('CAFE_TIMEZONE')) config::set('timezone')->to($knob('CAFE_TIMEZONE'));
 if ($knob('CAFE_PAGE_CACHE')) config::set('page_cache')->to($knob('CAFE_PAGE_CACHE') === 'on');
+if ($knob('CAFE_TIMEZONE')) config::set('timezone')->to($knob('CAFE_TIMEZONE'));
 if ($knob('CAFE_CACHE_TTL')) config::set('page_cache_ttl')->to((int)$knob('CAFE_CACHE_TTL'));
 if ($knob('CAFE_STRICT') === 'off') config::set('strict_templates')->to(false);
 if ($knob('CAFE_REWRITE') === 'off') config::set('rewrite')->to(false);
