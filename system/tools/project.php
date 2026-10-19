@@ -478,6 +478,26 @@ class raster_project
 		} catch (Exception $e) {
 			$add('fail', 'No database', $e->getMessage());
 		}
+		// posts that all come from one private address (a proxy in front)
+		// share one spam count; the web requests note it in today's salt row
+		try {
+			// in development `raster serve` answers 127.0.0.1, which says nothing
+			if ($environment === 'production' && !config::get('trusted_proxies') && cms_store::table_exists('formsalt')) {
+				$salt = database::instance('validation')->salt();
+				if ($salt && $salt[0]['day'] === date('Y-m-d') && (int)$salt[0]['proxied'] === 1) {
+					$add('warn', 'Posts arrive from a private address and `trusted_proxies` is empty, so every visitor shares one spam count', "Behind a proxy, name it: config::set('trusted_proxies')->to(array('10.0.0.0/8')), and config client_ip_header when it sends the visitor's address in another header than X-Forwarded-For (Fly-Client-IP)");
+				}
+			}
+		} catch (Exception $e) {
+			// no database is reported above
+		}
+
+		// the key form stamps are signed with: a file the web server made
+		// can be one this user can't read, and a broken one turns stamps off
+		$secret = $app_dir.'/data/secret';
+		if ((string)getenv('RASTER_SECRET') === '' && file_exists($secret) && (!is_readable($secret) || !preg_match('/^[0-9a-f]{64}$/', trim((string)@file_get_contents($secret))))) {
+			$add('warn', "data/secret can't be read or isn't a key: the spam stamp is off", "Delete it, or make it as the web server's user");
+		}
 
 		// deprecations, minus the ones config allow_deprecated says are on purpose
 		$deprecated = self::deprecations($root, $app);

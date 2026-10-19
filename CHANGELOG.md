@@ -3,6 +3,16 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.24
+
+On a frozen (production) database, run `php bin/raster schema --apply` once after updating: it makes the two new tables, `formhit` and `formsalt`. Until then `doctor` reports that the database and the templates differ, and the limits pass. A form model can call `validation::get()->suspect()` after `valid()` to ask whether a post looks like spam: it checks the form's stamp (sent too fast, forged, missing or replayed), counts posts per IP and per address for each form, and counts links and blocked words. `$v->hold($reasons)` shows the form again with what was typed and the alert `try_again`, or `slow_down` for a limit. No bundled form asks yet; that comes next. Editors are never flagged, and a check that can't run (no key, no table) passes and logs a warning. Behind a proxy, set `trusted_proxies` (doctor says when).
+
+**No raw IP is stored.** Counts are hashed with a salt made each day, and the salt goes with its counts at midnight. They live in the two new tables, which a fluid database makes on first use.
+
+**Settings:** `spam_min_seconds` (3), `spam_max_age` (86400), `spam_per_ip` (5), `spam_per_email` (3), `spam_max_links` (2), `spam_blocklist`, `trusted_proxies` and `client_ip_header` (`X-Forwarded-For`). `describe` lists the ones a site sets.
+
+**doctor** warns when `data/secret` can't be read or isn't a key (make it as the web server's user, or delete it), and in production when posts come from a private address while `trusted_proxies` is empty.
+
 ## 2.2.23
 
 Nothing for sites to do. Every post form that has a render block around it now gets a hidden `raster_ts` field: the time the form was shown, signed with the site's key. Nothing checks it yet; the spam checks that read it come next. The key is `RASTER_SECRET` when set, else Raster makes `data/secret` on first use (make sure `data/` is writable, as for the SQLite file and the cache). Emails, static exports and forms with no render block carry no stamp. The page cache keeps a marker in the stamp's place and writes a fresh stamp into the page on every hit, so cached forms stay fresh too.

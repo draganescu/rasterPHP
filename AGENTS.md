@@ -493,10 +493,65 @@ class contact {
   signed time stamp (the time the form was shown and an HMAC of it with the
   site's key; see `RASTER_SECRET`). It is a hidden field like the others,
   never a field of the form's own, and it is left out of emails, static
-  exports and forms with no render block around them. Nothing reads it yet.
+  exports and forms with no render block around them. `suspect()` reads it
+  (below).
 - **Refused automatically:** posts from other sites (an `Origin: null`
   counts as another site unless `Sec-Fetch-Site` says it is this one), and
   bots that fill the honeypot. The bots get a fake success.
+- **Spam checks.** A form model asks after `valid()`, once per post:
+
+  ```php
+  if ($reasons = $v->suspect()) return $v->hold($reasons);   // the form again, as typed
+  ```
+
+  - `validation::get()->suspect($fields = null)` returns the reasons the
+    post looks like spam, empty when it looks human. `$fields` are the
+    fields looked at for links and blocked words: `null` is every field of
+    the form that was posted, `array()` none (the stamp and the limits
+    still run). Asked twice in a request, it counts the post once.
+
+    | Reason | When |
+    |---|---|
+    | `no_stamp` | the post has no `raster_ts` (a script that never fetched the form) |
+    | `stamp_invalid` | its signature doesn't match (forged, or the key changed) |
+    | `too_fast` | sooner than `spam_min_seconds` after the form was shown |
+    | `stamp_old` | later than `spam_max_age` seconds after it: a replayed stamp |
+    | `too_many_from_ip` | more than `spam_per_ip` posts of this form from this IP in the last hour |
+    | `too_many_from_email` | more than `spam_per_email` posts of this form with this `email` in the last hour |
+    | `too_many_links` | more than `spam_max_links` links (`http://`, `https://`, `www.`, `[url=`) in the checked fields |
+    | `blocked` | a word of `spam_blocklist` in the checked fields, or a domain of it (an entry with a dot, and its subdomains) in their links or the email's domain |
+
+    At most one stamp reason; every other check runs, in this order.
+  - `$v->hold($reasons)` raises `slow_down` when a reason is a limit
+    (`too_many_from_…`), else `try_again`, and returns the form again with
+    what was typed and a fresh stamp. Word both alerts in the view.
+  - **Editors and admins** get no reasons and are not counted, so staff can
+    test their own form. A form that wasn't sent gets none.
+  - **A check that can't run passes:** no key, no table (a frozen
+    database before `schema --apply`), a database error. It logs
+    `spam: …` once per request, without the IP or the address.
+  - **Counting.** Each post that reaches `suspect()` is counted, suspected
+    or not, per form (`raster_form`), and the limit is passed when the
+    hour's count, this post included, is above the setting: with
+    `spam_per_ip` 5 the 6th post is the first `too_many_from_ip`. A post
+    without a valid `email` is counted by IP only. Ask after `valid()`, so a
+    person fixing a typo isn't counted.
+  - **No raw IP is kept.** The counts (table `formhit`) hold
+    `sha256(salt + ip)` and `sha256(salt + email)`, the email lower-cased,
+    an IPv6 address by its /64. The salt (table `formsalt`) is made for the
+    day in the site's `timezone`; at the next day it is deleted with every
+    count made with it, so limits start again at midnight. Counts older
+    than an hour are deleted as new ones are written. Both tables are the
+    validation model's `schema()`: `schema --apply` makes them.
+  - **Behind a proxy** every post comes from the proxy's address, and every
+    visitor shares one count. Name it in `trusted_proxies` (addresses or
+    CIDR ranges, IPv4 and IPv6): a post from one of them is counted by
+    `client_ip_header` (`X-Forwarded-For`, the last entry that isn't a
+    trusted proxy; or one address, `Fly-Client-IP`). A header that is
+    missing or not an address keeps the proxy's. An IPv4 address written as
+    IPv6 (`::ffff:203.0.113.7`) counts as the IPv4 address. In production
+    `doctor` warns when today's posts came from a private address and
+    `trusted_proxies` is empty.
 - **Forms that ask with the URL** (`<form method="get">`, a filter or a
   search) show what the URL asked: `/bookings?stylist=Ana` keeps Ana chosen,
   and `?stylist=` chooses only the option whose value is empty.
@@ -1641,6 +1696,12 @@ Set in `config/the_app.php` with `config::set('name')->to(value)`.
 | `mcp_token` | none | same as `RASTER_MCP_TOKEN` |
 | `mcp_write_views` | false | lets MCP over HTTP write templates (`write_view`); over stdio it always can |
 | `api_system_models` | `cms` | system models reachable at `/api`, for what their `api()` lists |
+| `spam_min_seconds` | 3 | a post sooner than this after its form was shown is `too_fast`; false turns the stamp checks off |
+| `spam_max_age` | 86400 | a stamp older than this many seconds is `stamp_old`; false allows any age |
+| `spam_per_ip`, `spam_per_email` | 5, 3 | posts of one form in an hour from one IP, with one address; false turns that limit off |
+| `spam_max_links` | 2 | links allowed in the checked fields; 0 allows none, false any number |
+| `spam_blocklist` | none | words and domains (`casino`, `pills.example`) that make a post `blocked` |
+| `trusted_proxies`, `client_ip_header` | none, `X-Forwarded-For` | proxies in front of the site (`array('10.0.0.0/8')`), and the header they send the visitor's address in |
 | `allow_deprecated` | none | `array('<id>' => true or path pattern(s))`: uses of deprecated features this site keeps on purpose, so `doctor` counts them apart instead of warning |
 
 Environment variables: `RASTER_ENV`, `RASTER_URL`, `RASTER_DB`,
@@ -1652,7 +1713,9 @@ command-line output). They win over the settings above.
 `describe` never shows it). Without it Raster makes `data/secret` (64 hex
 characters, mode 0600) the first time it needs one and keeps using that file.
 Set the variable instead when several servers share a site, so they all sign
-and check with one key. Changing the key makes the forms already shown fail
+and check with one key. The file must belong to the web server's user: one
+made by a command run as someone else may be one PHP-FPM can't read, and then
+the stamp is off (`doctor` warns). Changing the key makes the forms already shown fail
 their stamp check, so people with a page open send it again.
 
 ## Checklist for a change
@@ -1699,7 +1762,9 @@ their stamp check, so people with a page open send it again.
   templates, the database, whether `.htaccess` still carries every rule in
   `system/private_paths.php`, uses of deprecated features
   (`system/tools/deprecations.php`, minus the ones config `allow_deprecated`
-  says are on purpose) and, in production, the site address, mail, tokens,
+  says are on purpose), a `data/secret` that can't be read or isn't a key,
+  and, in production, posts arriving through a proxy `trusted_proxies`
+  doesn't name, the site address, mail, tokens,
   whether PHP shows errors (`display_errors`) and whether PHP takes the
   editor's pictures: it warns when `upload_max_filesize` is below 12M or
   `post_max_size` below 13M (`cms_editor::UPLOAD_MB` and the rest of the
