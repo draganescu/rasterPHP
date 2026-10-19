@@ -4827,7 +4827,8 @@ test('every post form gets a signed stamp', function () {
 		.'<!-- render.test_stampform.form --><form method="get"><input name="q"></form><!-- /render.test_stampform.form -->');
 	same(1, substr_count($out, 'name="raster_ts"'), $out);
 	check(preg_match('/name="raster_ts" value="(\d{10}\.[0-9a-f]{64})"/', $out, $m) === 1, $out);
-	same(0, validation_spam::stamp_age($m[1]) <= 2 ? 0 : 1);
+	$age = validation_spam::stamp_age($m[1]);
+	check(is_int($age) && $age >= 0 && $age <= 2, var_export($age, true));
 	// the get form is the second one, and has none
 	check(strpos(substr($out, strpos($out, 'method="get"')), 'raster_ts') === false, $out);
 });
@@ -4856,6 +4857,24 @@ test('the key: RASTER_SECRET, else data/secret made once', function () {
 		putenv('RASTER_SECRET=from-the-environment');
 		util::$secret = null;
 		same('from-the-environment', util::secret());
+	} finally {
+		putenv($was === false ? 'RASTER_SECRET' : "RASTER_SECRET=$was");
+		util::$secret = null;
+		if ($kept === null) @unlink($file); else file_put_contents($file, $kept);
+	}
+});
+test('a key file that is empty or partial is not trusted', function () {
+	$file = APPBASE.'data/secret';
+	$kept = is_file($file) ? file_get_contents($file) : null;
+	$was = getenv('RASTER_SECRET');
+	try {
+		putenv('RASTER_SECRET');
+		foreach (array('', 'abc123', str_repeat('g', 64)) as $bad) {
+			file_put_contents($file, $bad);
+			util::$secret = null;
+			same('', util::secret(), 'contents: '.var_export($bad, true));
+			same('', validation_spam::stamp());
+		}
 	} finally {
 		putenv($was === false ? 'RASTER_SECRET' : "RASTER_SECRET=$was");
 		util::$secret = null;
@@ -4908,7 +4927,8 @@ test('a cached page with two forms serves fresh stamps to both', function () use
 		$made = $stamps($second);
 		same(2, count($made), 'two forms');
 		same($made[0], $made[1], 'one stamp for the whole page');
-		check(validation_spam::stamp_age($made[0]) <= 1, 'made at the second request');
+		$age = validation_spam::stamp_age($made[0]);
+		check(is_int($age) && $age >= 0 && $age <= 1, var_export($age, true));
 		check($made[0] !== $stamps($first)[0], 'not the first answer\'s stamp');
 		$files = array_filter(glob(APPBASE.'data/cache/*') ?: array(), function ($f) { return basename($f) !== 'next' && is_file($f) && strpos(file_get_contents($f), 'Two forms') !== false; });
 		same(1, count($files), 'the cached copy');

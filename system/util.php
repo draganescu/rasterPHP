@@ -18,12 +18,27 @@ class util {
 			// write different keys: the loser reads the winner's
 			$handle = @fopen($file, 'x');
 			if ($handle) {
-				fwrite($handle, bin2hex(random_bytes(32)));
+				// private before there is anything in it
+				if (!@chmod($file, 0600)) {
+					fclose($handle);
+					@unlink($file);
+					log::warning("data/secret can't be made private, so there is no key");
+					return self::$secret = '';
+				}
+				$key = bin2hex(random_bytes(32));
+				$written = fwrite($handle, $key);
 				fclose($handle);
-				@chmod($file, 0600);
+				if ($written !== 64) @unlink($file);
 			}
 		}
-		return self::$secret = trim((string)@file_get_contents($file));
+		$key = trim((string)@file_get_contents($file));
+		// an empty or partial file (a crash, a full disk) would switch the
+		// checks off for good, so it is not a key
+		if (!preg_match('/^[0-9a-f]{64}$/', $key)) {
+			if (is_file($file)) log::warning('data/secret is not a valid key; delete it and a new one is made');
+			return self::$secret = '';
+		}
+		return self::$secret = $key;
 	}
 
 	// get the value from a key/value set passed in the url
