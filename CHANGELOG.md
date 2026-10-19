@@ -3,6 +3,16 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.17
+
+Nothing for sites to do.
+
+**The in-page editor is fast on long pages.** Placing the edit marks took time that grew with the square of the page (over half a second for a 500-row list). It now takes one pass, so editors get long lists about as fast as visitors.
+
+**Enter in a paragraph field makes a new line.** A rich field that is a `<p>`, a heading or a list item no longer stores a paragraph inside a paragraph (which split the text and locked the field after a reload). Enter adds a line break, and pasted paragraphs become lines.
+
+**The editor works from the keyboard.** In edit mode, Tab reaches items, photos and the new-item card. Enter on an item opens its handle (Esc returns), Enter on a photo replaces it, and Enter on the card starts a new item.
+
 ## 2.2.16
 
 - Listeners of bundled models declared in `listens()` now run with the framework's own bindings: before `config/the_events.php` and before the site's models' `listens()`. A site listener sees what the bundled listener already did, and `the_events.php` can unbind it with `event::unbind(…)->from(…)` (#27).
