@@ -10,6 +10,8 @@
 
 **Bean.** RedBeanPHP's name for a database row as a PHP object. See [The database](The-Database#working-with-records-redbeanphp).
 
+**Booking.** A record of the bundled booking model: a table at a sitting or an appointment with a stylist, a request that holds its place until staff confirm it. See [Bookings](Bookings).
+
 **Collection.** A CMS list of items with the same fields (news, products), declared by `render.cms.<name>`. See [The CMS](The-CMS#collections).
 
 **CSRF (cross-site request forgery).** An attack where another website makes a visitor's browser submit a form on your site. Raster blocks it. See [Security](Security).
@@ -22,7 +24,7 @@
 
 **dry / res.** `res` names a fragment of a view; `dry` inserts it into another view. Used for shared headers and footers.
 
-**Event.** A named announcement (`reservation.booked`) that other models can listen to. See [Events](Events).
+**Event.** A named announcement (`booking.requested`) that other models can listen to. See [Events](Events).
 
 **Flag.** A true/false value on the template, shown with `print.if.<flag>`.
 

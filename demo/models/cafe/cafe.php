@@ -3,9 +3,10 @@
 // exist so the lab page (views/cafe/lab.html) can show every engine feature.
 class cafe
 {
-	// what /api/cafe/<method> answers, and for whom; nothing else here is reachable there
+	// what /api/cafe/<method> answers, and for whom; nothing else here is
+	// reachable there: not the form handler, not the listeners
 	static function api() {
-		return array('hours' => 'visitor', 'category_count' => 'visitor');
+		return array('hours' => 'visitor', 'category_count' => 'visitor', 'bookings' => 'editor');
 	}
 
 	// ##Pages
@@ -41,6 +42,35 @@ class cafe
 		return true;
 	}
 
+	// /api/cafe/bookings/<date>: one day's bookings as JSON, for staff only,
+	// without their hidden fields (the guests' links). The booking model
+	// (bundled) has no /api of its own.
+	function bookings($date) {
+		if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$date)) return array();
+		$info = cms_records::info('booking');
+		$rows = array();
+		foreach (cms_records::find('booking', array('date' => $date), 'time') as $booking) $rows[] = cms_records::shown($info, $booking);
+		return $rows;
+	}
+
+	// the contact form on /visit uses the rule names older Raster sites had
+	function contact() {
+		$v = validation::get();
+		if (!$v->submitted()) return false;
+		if (!$v->valid()) {
+			// validation::errors() lists what failed, field by field
+			template::set('error_count')->to((string)count($v->errors()));
+			return template::instance()->form_state();
+		}
+		mail::send_view('_email/contact', config::get('cafe_staff_email', 'staff@cafe.test'), array(
+			'email' => (string)util::post('email'),
+			'topic' => (string)util::post('topic'),
+			'message' => (string)util::post('message'),
+		));
+		util::done('contacted');
+		return false;
+	}
+
 	// route_not_found
 	function missing() {
 		if (PHP_SAPI !== 'cli' && !headers_sent()) header('X-Cafe-Missing: yes');
@@ -56,17 +86,18 @@ class cafe
 
 	static function listens() {
 		return array(
-			'reservation.booked' => 'subscribe_guest',
+			'booking.requested' => 'subscribe_guest',
 			'authentication.registered' => 'welcome',
 			'cms.item_saved' => 'remember_change',
 			'cms.item_deleted' => 'remember_change',
 		);
 	}
 
-	// guests who tick "send me the newsletter" when booking get the
-	// newsletter's own confirmation email
+	// guests who tick "send me the newsletter" when they book get the
+	// newsletter's own confirmation email (newsletter is the field
+	// the_booking adds; staff's phone bookings have who 'staff')
 	function subscribe_guest($booking) {
-		if (!$booking['newsletter']) return null;
+		if ($booking['who'] !== 'guest' || empty($booking['newsletter'])) return null;
 		newsletter::subscribe($booking['email'], $booking['name'], '/visit');
 	}
 

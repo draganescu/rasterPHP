@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <!-- dry._layout.head /-->
+  <title>Your booking</title>
+</head>
+<body>
+  <!-- dry._layout.header /-->
+  <main class="narrow">
+    <h1>Your booking</h1>
+    <!-- print.if.static --><p>To change or cancel a booking, call us on <a href="tel:+40721000000">+40 721 000 000</a>.</p><!-- /print.if.static -->
+    <!-- print.if.live -->
+    <!-- print.validation.alert('cancelled') --><p class="notice">Your booking is cancelled. We hope to see you another time.</p><!-- /print.validation.alert('cancelled') -->
+    <!-- print.validation.alert('rescheduled') --><p class="notice">Your booking has moved. It is a request again: we'll write once we confirm the new time.</p><!-- /print.validation.alert('rescheduled') -->
+    <!-- print.validation.alert('link_invalid') --><p class="error">This link no longer works: the booking was cancelled, has passed, or the link is not complete. Call us on +40 721 000 000.</p><!-- /print.validation.alert('link_invalid') -->
+    <!-- print.validation.alert('too_late') --><p class="error">It's too close to your booking to change it here. Call us on +40 721 000 000.</p><!-- /print.validation.alert('too_late') -->
+    <!-- print.validation.alert('fully_booked') --><p class="error">That time is full. Pick another.</p><!-- /print.validation.alert('fully_booked') -->
+    <!-- print.validation.alert('not_a_slot') --><p class="error">Pick one of the times shown for an open day.</p><!-- /print.validation.alert('not_a_slot') -->
+    <!-- print.validation.alert('too_soon') --><p class="error">That is too soon to book online. Call us.</p><!-- /print.validation.alert('too_soon') -->
+    <!-- print.validation.alert('too_far') --><p class="error">We take bookings up to two months ahead.</p><!-- /print.validation.alert('too_far') -->
+    <!-- print.validation.alert('service_unavailable') --><p class="error">That isn't offered on that day.</p><!-- /print.validation.alert('service_unavailable') -->
+    <!-- render.booking.manage -->
+    <dl class="booking-details">
+      <dt>Name</dt><dd><!-- print.name -->Ana<!-- /print.name --></dd>
+      <dt>When</dt><dd><!-- print.date -->2026-10-20<!-- /print.date --> at <!-- print.time -->19:00<!-- /print.time --> to <!-- print.ends -->21:00<!-- /print.ends --></dd>
+      <dt>Where</dt><dd><!-- print.resource_name -->Dining room<!-- /print.resource_name --> <!-- print.service_name --><!-- /print.service_name --></dd>
+      <dt>People</dt><dd><!-- print.people -->2<!-- /print.people --></dd>
+      <dt>Status</dt><dd class="status"><!-- print.status -->requested<!-- /print.status --></dd>
+    </dl>
+    <form method="post">
+      <input type="hidden" name="do" value="cancel">
+      <button class="secondary">Cancel the booking</button>
+    </form>
+    <h2>Change the time</h2>
+    <form method="get" class="filters">
+      <input type="hidden" name="token">
+      <input type="hidden" name="booking">
+      <label>Day <input type="date" name="date"></label>
+      <button>Show times</button>
+    </form>
+    <form method="post" class="stack">
+      <input type="hidden" name="do" value="change">
+      <fieldset class="times"><legend>New time</legend>
+        <!-- render.booking.slots('date=?date&for=manage') -->
+        <!-- print.+class.state --><label class="slot "><!-- print.@value.time --><input type="radio" name="time" value="19:00"><!-- /print.@value.time --> <!-- print.time -->19:00<!-- /print.time --> to <!-- print.ends -->21:00<!-- /print.ends --></label><!-- /print.+class.state -->
+        <!-- /render.booking.slots('date=?date&for=manage') -->
+        <p class="hint">Pick a day above to see its times.</p>
+      </fieldset>
+      <button>Move my booking</button>
+    </form>
+    <!-- /render.booking.manage -->
+    <p><a href="visit.html">Book a table</a> · <a href="salon.html">Book the salon</a></p>
+    <!-- /print.if.live -->
+  </main>
+  <!-- dry._layout.footer /-->
+</body>
+</html>

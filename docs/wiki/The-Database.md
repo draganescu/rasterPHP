@@ -132,21 +132,21 @@ Always call `database::instance()` first in a request: it loads RedBean and conn
 database::instance();
 
 // create
-$booking = R::dispense('reservation');      // a new, unsaved row of type "reservation"
-$booking->name = 'Ada';
-$booking->guests = 4;
-$booking->created_at = R::isoDateTime();   // "2026-09-28 12:00:00"
-$id = R::store($booking);                  // saves it and returns its id
+$visit = R::dispense('visit');            // a new, unsaved row of type "visit"
+$visit->page = '/menu';
+$visit->seconds = 40;
+$visit->created_at = R::isoDateTime();    // "2026-09-28 12:00:00"
+$id = R::store($visit);                   // saves it and returns its id
 
 // read
-$one  = R::load('reservation', $id);                              // by id
-$one  = R::findOne('reservation', ' email = ? ', array($email));  // first match, or null
-$many = R::find('reservation', ' guests > ? ORDER BY id DESC LIMIT 20 ', array(2));
-$all  = R::findAll('reservation', ' ORDER BY id ');
-$n    = R::count('reservation');
+$one  = R::load('visit', $id);                                   // by id
+$one  = R::findOne('visit', ' page = ? ', array($page));         // first match, or null
+$many = R::find('visit', ' seconds > ? ORDER BY id DESC LIMIT 20 ', array(30));
+$all  = R::findAll('visit', ' ORDER BY id ');
+$n    = R::count('visit');
 
 // update and delete
-$one->guests = 5;
+$one->seconds = 45;
 R::store($one);
 R::trash($one);
 
@@ -154,7 +154,9 @@ R::trash($one);
 $rows = R::exportAll($many);
 ```
 
-Type names must be **lowercase letters and digits only**: no underscores, no capitals. `reservation` and `orderitem` work; `order_item` doesn't.
+Type names must be **lowercase letters and digits only**: no underscores, no capitals. `visit` and `orderitem` work; `order_item` doesn't.
+
+Rows people send or staff manage (bookings, orders, requests) are better as [records](Records): the CMS stores them, checks them and lets staff edit them. Bookings come with Raster: see [Bookings](Bookings).
 
 The full RedBean manual is at https://redbeanphp.com.
 
@@ -163,10 +165,10 @@ The full RedBean manual is at https://redbeanphp.com.
 A model that stores its own records should say which tables and columns it uses, with a static `schema()` method. `raster schema --apply` then creates them in production:
 
 ```php
-class reservation {
+class visits {
     static function schema() {
         return array(
-            'reservation' => array('name' => '', 'email' => '', 'guests' => 0, 'created_at' => ''),
+            'visit' => array('page' => '', 'seconds' => 0, 'created_at' => ''),
         );
     }
 }

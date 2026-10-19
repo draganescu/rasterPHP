@@ -54,6 +54,8 @@ If the list uses filters, give pagination the same filters as a second argument 
 
 Filters from the URL (`/news/news_items/tag/php`) are picked up automatically, and so is a filter that reads the query string: with `category=?category` in both, the page links keep `?category=…`.
 
+The pager counts the rows the list shows, because both are built from the same conditions: editors' drafts count for editors, `owner=me` counts the logged in person's own records, and a private record type counts only what the reader may see (a visitor gets no pager over private records). A list with `limit=3` shows the same three on every page, so it has one page and no pager.
+
 ## For your own model
 
 Pagination can ask one of your models instead. Pass `'model.method'`. Raster calls the method with `true` as its only argument, and expects the total and the page size back:

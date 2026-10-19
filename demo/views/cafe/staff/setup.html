@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <!-- dry._layout.head /-->
+  <title>Booking setup</title>
+</head>
+<body>
+  <!-- dry._layout.header /-->
+  <main class="">
+    <h1>Booking setup</h1>
+    <p>What guests can book, and when. Each list is edited in the page; add a row with the card at its end. A change shows in the slots at once. Closing a day or lowering a limit under bookings refuses nothing: the bookings that no longer fit show under Needs attention on <a href="staff.html">the staff page</a>.</p>
+    <h2>What is booked</h2>
+    <p>People is how many at once, bookings how many bookings at once; 0 is no limit.</p>
+    <table class="list"><tbody>
+      <!-- render.cms.bookingresource('order=name') -->
+      <tr class="resource"><td><!-- print.name -->Dining room<!-- /print.name --></td><td><!-- print.slug -->dining-room<!-- /print.slug --></td><td><!-- print.people -->20<!-- /print.people --> people</td><td><!-- print.bookings -->0<!-- /print.bookings --> bookings</td><td>active <!-- print.active -->1<!-- /print.active --></td></tr>
+      <!-- /render.cms.bookingresource('order=name') -->
+    </tbody></table>
+    <h2>Hours</h2>
+    <p>Slots start from starts to ends (the last start), every so many minutes, on the days named (mon,tue,… or daily), for a resource or, left empty, every one.</p>
+    <table class="list"><tbody>
+      <!-- render.cms.bookinghours('order=resource,starts') -->
+      <tr class="hours"><td><!-- print.resource -->dining-room<!-- /print.resource --></td><td><!-- print.days -->tue,wed,thu,fri,sat,sun<!-- /print.days --></td><td><!-- print.starts -->19:00<!-- /print.starts --> to <!-- print.ends -->21:00<!-- /print.ends --></td><td>every <!-- print.every -->120<!-- /print.every --></td><td><!-- print.from --><!-- /print.from --> <!-- print.until --><!-- /print.until --></td></tr>
+      <!-- /render.cms.bookinghours('order=resource,starts') -->
+    </tbody></table>
+    <h2>Closed</h2>
+    <table class="list"><tbody>
+      <!-- render.cms.bookingclosed('order=date') -->
+      <tr class="closed"><td><!-- print.date -->2026-12-25<!-- /print.date --> <!-- print.until --><!-- /print.until --></td><td><!-- print.resource --><!-- /print.resource --></td><td><!-- print.note -->Christmas<!-- /print.note --></td></tr>
+      <!-- /render.cms.bookingclosed('order=date') -->
+    </tbody></table>
+    <h2>Services</h2>
+    <table class="list"><tbody>
+      <!-- render.cms.bookingservice('order=name') -->
+      <tr class="service"><td><!-- print.name -->Cut<!-- /print.name --></td><td><!-- print.minutes -->30<!-- /print.minutes --> minutes</td><td><!-- print.resources -->ana,mihai<!-- /print.resources --></td><td>active <!-- print.active -->1<!-- /print.active --></td></tr>
+      <!-- /render.cms.bookingservice('order=name') -->
+    </tbody></table>
+  </main>
+  <!-- dry._layout.footer /-->
+</body>
+</html>

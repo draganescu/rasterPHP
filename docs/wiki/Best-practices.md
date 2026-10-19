@@ -20,7 +20,7 @@ Recommendations for building and running sites with Raster, collected from how t
 - **Escape what visitors typed** with `util::e()` before returning it to an HTML view.
 - **Keep models about data, not wording.** If you catch yourself returning a sentence, return a flag or a value and let the template hold the words.
 - **Offer over `/api` only what a script needs.** List those methods in `static function api()` with the least role that may call them; everything else stays off `/api`.
-- **Use events for side effects.** When a booking should also subscribe someone to the newsletter, dispatch `reservation.booked` and let another model listen, rather than calling across models.
+- **Use events for side effects.** When a booking should also subscribe someone to the newsletter, listen to `booking.requested` (the bundled booking model sends it) or dispatch your own `<model>.<what happened>`, rather than calling across models.
 - **Declare your tables** with a static `schema()` method so `schema --apply` creates them in production.
 - **Keep SQL in `.sql` files** in the model's `sql/` folder and call each by name (`database::instance()->in_category($c)`), rather than writing SQL strings in PHP. Use RedBean for one row as an object (`R::dispense`, `R::store`), and always bind parameters.
 - **Call `util::content_changed()`** after writing data that pages show, so the cache is refreshed.

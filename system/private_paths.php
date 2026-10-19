@@ -97,17 +97,24 @@ class private_paths {
 			),
 			array(
 				'id' => 'sqlite-sidecars',
+				// tied to the database file, so a page whose slug ends in
+				// -journal (my-travel-journal) is still a page
 				'why' => "SQLite's journal, write-ahead log and shared memory files",
-				'php' => '-(journal|wal|shm)$',
-				'apache' => array('RewriteRule -(journal|wal|shm)$ - [F,L,NC]'),
-				'nginx' => '-(journal|wal|shm)$',
-				'caddy' => '-(journal|wal|shm)$',
+				'php' => '\.sqlite-(journal|wal|shm)$',
+				'apache' => array('RewriteRule \.sqlite-(journal|wal|shm)$ - [F,L,NC]'),
+				'nginx' => '\.sqlite-(journal|wal|shm)$',
+				'caddy' => '\.sqlite-(journal|wal|shm)$',
 			),
 		);
 	}
 
 	// The one path that is always allowed: the site's entry point.
 	const ENTRY = '/index.php';
+
+	// Apache hands the Authorization header to PHP-FPM (and CGI) only when
+	// told to, so MCP over HTTP would never see its token. The .htaccess
+	// copies it into the environment, where mcp::bearer() reads it.
+	const APACHE_AUTHORIZATION = 'RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]';
 
 	// ##Using the rules
 	//
@@ -165,6 +172,10 @@ class private_paths {
 			'',
 			'RewriteEngine on',
 			'',
+			'# PHP-FPM gets the Authorization header only this way (MCP over HTTP needs it)',
+			'RewriteCond %{HTTP:Authorization} .',
+			self::APACHE_AUTHORIZATION,
+			'',
 			'# Never serve code, configuration, data or tooling directly',
 		);
 		foreach (self::rules() as $rule) {
@@ -190,6 +201,14 @@ class private_paths {
 			'    root '.rtrim($options['root'], '/').';',
 			'    index index.php;',
 			'',
+			'    # the editor sends pictures up to 12 MB (cms_editor::UPLOAD_MB), with',
+			'    # the rest of its form; nginx takes 1 MB unless told otherwise',
+			'    client_max_body_size 13m;',
+			'',
+			'    # pages are compressed by default; these are the other text files',
+			'    gzip on;',
+			'    gzip_types text/css text/plain text/xml application/javascript application/json application/xml application/rss+xml application/atom+xml image/svg+xml;',
+			'',
 			'    # the entry point, matched exactly so the rules below never hide it',
 			'    location = /index.php {',
 			'        include fastcgi_params;',
@@ -202,6 +221,14 @@ class private_paths {
 			$lines[] = '    # '.$rule['why'];
 			$lines[] = '    location ~* "'.$rule['nginx'].'" { return 403; }';
 		}
+		$lines[] = '';
+		$lines[] = '    # editor uploads (media/ unless config raster_media_folder says otherwise)';
+		$lines[] = '    # get a new file name each time, so a copy never goes stale; the rules';
+		$lines[] = '    # above still refuse what they refuse here';
+		$lines[] = '    location /media/ {';
+		$lines[] = '        expires 1y;';
+		$lines[] = '        try_files $uri /index.php$is_args$args;';
+		$lines[] = '    }';
 		$lines[] = '';
 		$lines[] = '    # anything else: a real file, or the site';
 		$lines[] = '    location / {';

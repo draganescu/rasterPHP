@@ -298,17 +298,7 @@ class cms
 			$expected_properties[$property] = $content;
 		}
 
-		// pagination
-		$page_size = (int)config::get($name."_page_size");
-		if ($page_size < 1) {
-			$page_size = (int)config::get("raster_page_size");
-			if ($page_size < 1) {
-				$page_size = 10;
-			}
-		}
-
 		$page = (int)util::param($name.'_page', 0);
-		$roffset = $page > 1 ? ($page-1)*$page_size : 0;
 		// /news/news_page/02 shows page 2, but is not a page worth keeping
 		if (!cms::canonical_uri($name)) raster_cache::skip();
 
@@ -336,27 +326,17 @@ class cms
 		// param filters: render.cms.news('featured=1&order=newest&limit=3'),
 		// render.cms.booking('stylist=?stylist&date>=today&order=date,time')
 		// (see cms_store::list_options)
-		$options = array();
-		$compare = array();
-		$asked_mine = false;
-		if (!empty($arguments) && is_string($arguments[0])) {
-			$list = cms_store::list_options($arguments[0]);
-			$options = $list['options'];
-			// fields a list mentions become fields of the collection, starting
-			// with the value a list asks for (featured=1)
-			foreach ($list['fields'] as $field => $value) {
-				if ($value !== '' || !isset($expected_properties[$field])) $expected_properties[$field] = $value;
-			}
-			foreach ($list['conditions'] as $condition) {
-				if ($condition === array('owner', '=', 'me')) $asked_mine = true;
-				if ($condition[1] === '=') $filters[$condition[0]] = $condition[2];
-				else $compare[] = $condition;
-			}
+		$list = cms_store::list_options(!empty($arguments) && is_string($arguments[0]) ? $arguments[0] : '');
+		$options = $list['options'];
+		// fields a list mentions become fields of the collection, starting
+		// with the value a list asks for (featured=1)
+		foreach ($list['fields'] as $field => $value) {
+			if ($value !== '' || !isset($expected_properties[$field])) $expected_properties[$field] = $value;
 		}
-		if (isset($options['limit']) && (int)$options['limit'] > 0) {
-			$page_size = (int)$options['limit'];
-			$roffset = $page > 1 ? ($page-1)*$page_size : 0;
-		}
+		// pages of _page_size (raster_page_size, 10); a limit list shows its
+		// first ones on every page of the site (#88)
+		list($page_size, $limited) = cms_store::page_size($name, $options);
+		$roffset = !$limited && $page > 1 ? ($page-1)*$page_size : 0;
 
 		// a type a model declares: the model's fields, no mock-up row, and
 		// private records only for editors and their owners
@@ -411,51 +391,25 @@ class cms
 
 		// only real columns can be filtered on
 		$fields = cms_store::columns($this->data_name);
-		// drafts (enabled = 0) and future posts are hidden, except for editors
-		list($sql, $bindings) = cms_store::published_sql($fields, cms::loggedin());
-		if ($record) {
-			list($visible, $more) = cms_records::visibility_sql($record);
-			$sql .= $visible;
-			$bindings += $more;
+		// /menu/menu_items/price/14.500 and /events/events_items/date/10 Oct 2026
+		// find what the site's own links (14.50, 2026-10-10) find; they
+		// answer, but there is no end to the spellings
+		foreach ($uri_filters as $key => $value) {
+			if (array_key_exists($key, $fields) && preg_match('/^[a-z0-9_]+$/', $key) && !cms::canonical_value($fields[$key], $value, isset($expected_properties[$key]) ? $expected_properties[$key] : cms::collection_example($name, $key))) raster_cache::skip();
 		}
-		// owner=me: the logged in person's own records, editors included
-		// (their /account shows what they made, not everyone's)
-		if ($record && isset($filters['owner']) && $filters['owner'] === 'me') {
-			$filters['owner'] = cms_records::owner_me($record);
-			if ($filters['owner'] === null) return array();
-		}
-		// a record's hidden fields are no filter for visitors (no asking
-		// "did this email book?"), and neither is owner, except the
-		// template's own owner=me (#89)
-		if ($record && !cms::loggedin()) {
-			$secret = array_merge($record['hidden'], $asked_mine ? array() : array('owner'));
-			if ($asked_mine && isset($uri_filters['owner'])) raster_cache::skip();
-			foreach ($secret as $hidden) {
-				// a filter the URL asks for and the list ignores
-				if (isset($uri_filters[$hidden])) raster_cache::skip();
-				unset($filters[$hidden]);
+		// an item titled 1984 has the slug 1984: a number that is a slug opens
+		// that item, and only a number no item has as its slug is an id (#90)
+		if (util::param($name) == $name.'_item' && isset($filters['id']) && array_key_exists('slug', $fields)) {
+			$wanted = (string)util::param($name.'_item');
+			if (R::getCell('SELECT COUNT(*) FROM `'.$this->data_name.'` WHERE slug = ?', array($wanted))) {
+				unset($filters['id']);
+				$filters['slug'] = $wanted;
 			}
-			$secret[] = 'owner';
-			$compare = array_filter($compare, function ($c) use ($secret) { return !in_array($c[0], $secret, true); });
 		}
-		foreach ($filters as $key => $value) {
-			if (!array_key_exists($key, $fields) || !preg_match('/^[a-z0-9_]+$/', $key)) {
-				if ($key === 'id' || $key === 'slug') return array();
-				// /news/news_items/nonsense/x lists everything; it answers,
-				// but every made-up field would be a page of its own
-				if (array_key_exists($key, $uri_filters)) raster_cache::skip();
-				continue;
-			}
-			// /menu/menu_items/price/14.500 and /events/events_items/date/10 Oct 2026
-			// find what the site's own links (14.50, 2026-10-10) find; they
-			// answer, but there is no end to the spellings
-			if (array_key_exists($key, $uri_filters) && !cms::canonical_value($fields[$key], $value, isset($expected_properties[$key]) ? $expected_properties[$key] : cms::collection_example($name, $key))) raster_cache::skip();
-			$compare[] = array($key, '=', $value);
-		}
-		// featured=1, date>=today, guests>4, each as its field's type
-		list($more, $more_bindings) = cms_store::conditions_sql($compare, $fields);
-		$sql .= $more;
-		$bindings += $more_bindings;
+		// what the list shows, as the pager counts it
+		$where = cms_store::list_where($name, $list['conditions'], $filters, $uri_filters);
+		if ($where === null) return array();
+		list($sql, $bindings) = $where;
 		$sql .= ' ORDER BY '.cms_store::order_sql(isset($options['order']) ? $options['order'] : '', $fields).' LIMIT '.(int)$page_size.' OFFSET '.(int)$roffset;
 		$data = array_values(array_map(array('cms_store', 'export_item'), R::find($this->data_name, $sql, $bindings)));
 		// a filter nothing matches and a page past the last one answer, empty
@@ -493,7 +447,8 @@ class cms
 				foreach ($filter_fields as $field) {
 					$filter_link .= $field.'/'.rawurlencode(isset($item[$field]) ? $item[$field] : '').'/';
 				}
-				$data[$key]['raster_filter@'.$at_key] = $filter_link;
+				// without the last slash, as item links are (#131)
+				$data[$key]['raster_filter@'.$at_key] = rtrim($filter_link, '/');
 			}
 		}
 
