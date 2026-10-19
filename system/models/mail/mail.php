@@ -136,7 +136,11 @@ class mail
 			'MIME-Version' => '1.0',
 			'Content-Type' => 'multipart/alternative; boundary="'.$boundary.'"',
 		);
-		foreach ($headers as $name => $value) $all[static::clean_header($name)] = static::clean_header($value);
+		foreach ($headers as $name => $value) {
+			$name = static::clean_header($name);
+			// a reply goes to a person, whose name is encoded as the sender's is
+			$all[$name] = strcasecmp($name, 'Reply-To') === 0 ? static::named(static::clean_header($value)) : static::clean_header($value);
+		}
 		$body = "--$boundary\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n"
 			.chunk_split(base64_encode($text))
 			."--$boundary\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n"
@@ -221,10 +225,35 @@ class mail
 		return mb_encode_mimeheader((string)$text, 'UTF-8', 'B');
 	}
 
-	// "Name <address>" with the name encoded; a bare address as it is
+	// "Name <address>" with the name encoded; a bare address as it is. An
+	// encoded name can't sit inside quotes, so a quoted one that isn't plain
+	// ASCII loses them ("Ana Café" <a@b.test>).
 	protected static function named($value) {
 		if (!preg_match('/^(.*?)\s*<([^>]+)>$/', $value, $m) || trim($m[1]) === '') return $value;
-		return static::encoded(trim($m[1])).' <'.$m[2].'>';
+		$name = trim($m[1]);
+		// plain ASCII is sent as it is written
+		if (!preg_match('/[^\x20-\x7e]/', $name)) return static::encoded($name).' <'.$m[2].'>';
+		if (preg_match('/^"(.*)"$/', $name, $quoted)) $name = $quoted[1];
+		return static::words($name).' <'.$m[2].'>';
+	}
+
+	// The whole of a text as encoded words, of at most 75 characters each and
+	// split between characters. Unlike mb_encode_mimeheader, which leaves the
+	// ASCII part as it is, nothing of it can be read as an address's syntax
+	// (a : or ; in a name would make a group with another address).
+	protected static function words($text) {
+		$words = array();
+		$chunk = '';
+		// 45 bytes are 60 base64 characters, and =?UTF-8?B??= 12 more
+		foreach (mb_str_split((string)$text, 1, 'UTF-8') as $char) {
+			if (strlen($chunk.$char) > 45) {
+				$words[] = '=?UTF-8?B?'.base64_encode($chunk).'?=';
+				$chunk = '';
+			}
+			$chunk .= $char;
+		}
+		if ($chunk !== '') $words[] = '=?UTF-8?B?'.base64_encode($chunk).'?=';
+		return implode(' ', $words);
 	}
 
 	// whether a link mailed at $stamp (a date and time) went out within

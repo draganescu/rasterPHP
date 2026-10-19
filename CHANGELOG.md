@@ -3,6 +3,14 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.26
+
+Nothing for sites to do. **A bundled contact model.** `render.contact.form` stores every message as a private `contactmessage` record and emails staff about it after the answer (`_email/contact_received`, to `contact_staff_email`, else the sender), with `Reply-To` the visitor. Nothing is mailed to the visitor. A message that looks like spam is kept with status `spam` and its reasons, nobody is emailed, and the visitor is thanked all the same. A newline in the name, email, phone or subject is refused, so nothing a visitor types can add a mail header. A double click stores one message. Spam older than `contact_spam_days` (30) is deleted as new messages come. Staff list the messages with `render.contact.messages` (done, spam and not spam are its buttons) and count them with `print.contact.count`, on a page protected for editors; `lint` warns when it isn't. Events: `contact.received` and `contact.flagged`. Settings: `contact_staff_email`, `contact_staff_page`, `contact_max_length`, `contact_spam_days`. AGENTS.md has the steps and a worked staff page.
+
+**A site with its own `contact` model keeps it.** Its `render.contact.send` calls its own class and nothing of the bundled model loads; `lint` says the bundled one is hidden. To move: rename your model (or delete it once its messages are elsewhere), put `render.contact.form` around your form with the fields `name email phone subject message`, write `_email/contact_received.html` from your old email, add the alerts (`sent`, `email_invalid`, `message_invalid`, …), and make the staff page from AGENTS.md.
+
+**A record's slug comes from what `fill()` works out too.** A new record whose model fills its title gets its slug from that title, not from the fields the form sent. A name that isn't plain ASCII in `From`, `To` or a `Reply-To` passed to `mail::send_view()` is now sent encoded whole (`=?UTF-8?B?…?= <a@b.test>`), so no part of it can be read as another address; plain ASCII names are sent as before.
+
 ## 2.2.25
 
 The newsletter sign-up, the sign-up and forgot-password forms, the booking form and every `cms_records::submit` form (a record type with `create` `visitor` or `member`) now turn away posts that look like spam, using the checks from 2.2.24. A suspect post gets the form again with what was typed and the alert `try_again` (no fresh stamp, or one forged or too young) or `slow_down` (too many posts from one IP or address in the hour). Nothing is stored or mailed. Forgot answers `reset_sent` as for an unknown address when the limits are passed, and mails nothing. Editors are never held. A record type can say `'spam' => false` to run its own checks.

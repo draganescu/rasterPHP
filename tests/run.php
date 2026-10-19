@@ -5424,6 +5424,452 @@ test('hold() asks again, or to slow down', function () {
 	}
 });
 
+// ## Bundled contact
+
+// A view with the contact form (zzcontact.html, an alert for each problem)
+// and the staff email, so the bundled contact model counts. $fn runs with
+// the theme's folder; the views, the messages and the counts are gone after.
+function contact_site($fn) {
+	$theme = APPBASE.config::get('views_path', 'views').'/'.config::get('theme', 'default');
+	$alerts = '';
+	foreach (array('sent', 'name_invalid', 'email_invalid', 'phone_invalid', 'subject_invalid', 'message_invalid') as $alert) {
+		$alerts .= "<!-- print.validation.alert('$alert') --><p>ALERT $alert</p><!-- /print.validation.alert('$alert') -->";
+	}
+	file_put_contents("$theme/zzcontact.html", "<html><head><title>Write to us</title></head><body>$alerts"
+		."<!-- render.contact.form --><form method=\"post\"><input name=\"name\"><input type=\"email\" name=\"email\" required><input name=\"phone\"><input name=\"subject\">"
+		."<textarea name=\"message\" required></textarea><button>Send</button></form><!-- /render.contact.form --></body></html>");
+	file_put_contents("$theme/_email/contact_received.html", "<html><head><title>Message: <!-- print.self.subject -->none<!-- /print.self.subject --></title></head><body>"
+		."<p>From <!-- print.self.name -->Ana<!-- /print.self.name --> on <!-- print.self.page_url -->page<!-- /print.self.page_url --></p>"
+		."<p><!-- print.self.message -->Hi<!-- /print.self.message --></p><p>All of them: <!-- print.self.staff_url -->staff<!-- /print.self.staff_url --></p></body></html>");
+	controller::forget_models();
+	cms_records::forget();
+	cms_store::connect();
+	spam_clear();
+	// this process booted without a view that uses contact, so it binds the
+	// listener system/config/events.php binds for a site that has one
+	event::bind('contact.received')->to('contact', 'staff_mail');
+	try {
+		return $fn($theme);
+	} finally {
+		event::unbind('contact.received')->from('contact', 'staff_mail');
+		R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS contactmessagedata');
+		cms_store::forget();
+		@unlink("$theme/zzcontact.html");
+		@unlink("$theme/_email/contact_received.html");
+		controller::forget_models();
+		cms_records::forget();
+	}
+}
+// what the contact form at $base answers to $fields, sent as a browser
+// sends it: array(status, body, where it redirected to)
+function contact_post($base, $fields) {
+	list($status, $body, $headers) = form_post("$base/zzcontact", array('raster_form' => 'contact.form') + $fields);
+	return array($status, (string)$body, (string)location($headers));
+}
+// the contact events a request to the test server sent while $fn ran, as
+// array(event, payload): a site model of the server's listens to them
+function contact_seen($fn) {
+	$app = APPBASE.config::get('models_path', 'models');
+	$file = sys_get_temp_dir().'/raster-contact-seen-'.getmypid().'.jsonl';
+	@unlink($file);
+	$write = 'file_put_contents('.var_export($file, true).', json_encode(array(%s, $message))."\n", FILE_APPEND);';
+	temp_model("$app/zzcontactseen", array('zzcontactseen.php' => "<?php\nclass zzcontactseen\n{\n"
+		."\tstatic function listens() {\n\t\treturn array('contact.received' => 'received', 'contact.flagged' => 'flagged');\n\t}\n"
+		."\tfunction received(\$message) {\n\t\t".sprintf($write, "'contact.received'")."\n\t}\n"
+		."\tfunction flagged(\$message) {\n\t\t".sprintf($write, "'contact.flagged'")."\n\t}\n}\n"));
+	try {
+		$fn();
+	} finally {
+		remove_dir("$app/zzcontactseen");
+		controller::forget_models();
+	}
+	$seen = array();
+	foreach (array_filter(explode("\n", (string)@file_get_contents($file))) as $line) $seen[] = json_decode($line, true);
+	@unlink($file);
+	return $seen;
+}
+// the contact events this process sent while $fn ran, as array(event, payload)
+function contact_events($fn) {
+	global $booking_seen;
+	$booking_seen = array();
+	$names = array('contact.received', 'contact.flagged');
+	foreach ($names as $name) event::bind($name)->to(null, 'test_booking_seen');
+	try {
+		$fn();
+	} finally {
+		foreach ($names as $name) event::unbind($name)->from(null, 'test_booking_seen');
+	}
+	return $booking_seen;
+}
+// what a write was refused for, or array() when it went through
+function contact_refused($fn) {
+	try {
+		$fn();
+	} catch (cms_refused $e) {
+		return $e->problems;
+	}
+	return array();
+}
+function contact_render($url, $as = null) {
+	global $root, $db;
+	$env = 'RASTER_DB='.escapeshellarg($db).' RASTER_ENV=development';
+	return (string)shell_exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' render '.escapeshellarg($url).($as ? ' --as='.escapeshellarg($as) : '').' 2>&1; echo "[exit $?]"');
+}
+
+test('contact types count only where views use the model', function () use ($root) {
+	controller::forget_models();
+	cms_records::forget();
+	check(cms_records::info('contactmessage') === null, 'contactmessage is declared without a view that uses contact');
+	$dir = sys_get_temp_dir().'/raster-contact-loads-'.getmypid();
+	@mkdir($dir);
+	file_put_contents("$dir/prepend.php", '<?php register_shutdown_function(function () { file_put_contents('.var_export("$dir/out.json", true).', json_encode(get_included_files())); });');
+	$env = 'RASTER_ENV=production RASTER_DB='.escapeshellarg(test_db("$dir/db.sqlite"));
+	shell_exec("$env ".escapeshellarg(PHP_BINARY).' -d auto_prepend_file='.escapeshellarg("$dir/prepend.php").' '.escapeshellarg("$root/bin/raster").' render /about 2>&1');
+	$included = json_decode((string)@file_get_contents("$dir/out.json"), true);
+	array_map('unlink', glob("$dir/*") ?: array());
+	@rmdir($dir);
+	check(is_array($included), 'no report from the render');
+	same(array(), array_values(array_filter($included, function ($f) { return strpos($f, '/system/models/contact/') !== false; })), 'contact files loaded:');
+	contact_site(function () {
+		$info = cms_records::info('contactmessage');
+		same('contact', $info['model']);
+		same(array('title', 'name', 'email', 'phone', 'subject', 'message', 'page', 'status', 'spam'), array_keys($info['fields']));
+		same(array('visitor', false, false, false, false), array($info['create'], $info['public'], $info['owner'], $info['staff_add'], $info['spam']));
+		same(array('done' => 'editor', 'spam' => 'editor', 'not_spam' => 'editor'), $info['actions']);
+		same(true, contact::ready());
+	});
+});
+
+test('a site contact model still answers and the bundled one loads nothing', function () {
+	$app = APPBASE.config::get('models_path', 'models');
+	$view = APPBASE.config::get('views_path', 'views').'/'.config::get('theme', 'default').'/zzown.html';
+	// a site's own, as AGENTS.md and the wiki taught: in processes of their
+	// own, since this one may have the bundled class already
+	temp_model("$app/contact", array('contact.php' => "<?php\nclass contact\n{\n\tfunction send() {\n\t\treturn array(array('x' => 'own'));\n\t}\n}\n"));
+	file_put_contents($view, '<html><head><title>Own</title></head><body><!-- render.contact.send --><p class="own"><!-- print.x -->mock<!-- /print.x --></p><!-- /render.contact.send --></body></html>');
+	try {
+		controller::forget_models();
+		$out = race_php('require_once BASE."tools/inspector.php"; echo json_encode(array(controller::model("contact")["bundled"], cms_records::info("contactmessage") === null, array_column((new raster_inspector())->lint_models(), "message"), array_values(preg_grep("~/system/models/contact/~", get_included_files()))));', 1);
+		$page = contact_render('/zzown');
+	} finally {
+		remove_dir("$app/contact");
+		@unlink($view);
+		controller::forget_models();
+		cms_records::forget();
+	}
+	$out = json_decode($out[0], true);
+	check(is_array($out), 'the process said: '.json_encode($out));
+	same(false, $out[0], 'bundled:');
+	same(true, $out[1], 'contactmessage is undeclared:');
+	check(has_problem(array_map(function ($m) { return array('message' => $m); }, $out[2]), 'models/contact shadows the bundled contact'), 'lint: '.json_encode($out[2]));
+	same(array(), $out[3], 'bundled contact files loaded:');
+	check(strpos($page, '<p class="own">own</p>') !== false && strpos($page, '[exit 0]') !== false, $page);
+});
+
+test('contact: a message is stored and mailed once, after the answer', function () use ($booking_base) {
+	contact_site(function () use ($booking_base) {
+		$mails = array();
+		$seen = contact_seen(function () use ($booking_base, &$mails) {
+			$mails = booking_mails(function () use ($booking_base) {
+				list($status, , $location) = contact_post($booking_base, array('name' => 'Ana', 'email' => 'ana@example.com', 'phone' => '0721 000 000', 'subject' => 'Hello', 'message' => 'Is the terrace open?'));
+				same(303, $status);
+				check(strpos($location, 'done=sent') !== false, $location);
+			});
+		});
+		$rows = cms_records::find('contactmessage');
+		same(1, count($rows));
+		$m = $rows[0];
+		same(array('Ana', 'ana@example.com', '0721 000 000', 'Hello', 'Is the terrace open?', '/zzcontact', 'new', ''), array($m['name'], $m['email'], $m['phone'], $m['subject'], $m['message'], $m['page'], $m['status'], $m['spam']));
+		// the slug is the date and time, never the email
+		check(preg_match('/^\d{4}-\d\d-\d\d \d\d:\d\d$/', $m['title']) === 1, $m['title']);
+		check(preg_match('/^\d{4}-\d\d-\d\d-\d\d-\d\d(-\d+)?$/', $m['slug']) === 1, $m['slug']);
+		same(array('Message: Hello staff@zz.test'), booking_sent($mails));
+		same(1, preg_match_all('/^Reply-To: /m', $mails[0]['raw']));
+		check(strpos($mails[0]['raw'], "\r\nReply-To: \"Ana\" <ana@example.com>\r\n") !== false, $mails[0]['raw']);
+		check(preg_match('/^From: staff@zz\.test\r$/m', $mails[0]['raw']) === 1, 'From stays the site\'s sender');
+		check(strpos($mails[0]['text'], "$booking_base/zzcontact") !== false && strpos($mails[0]['text'], "$booking_base/staff") !== false, $mails[0]['text']);
+		same(array('contact.received'), array_column($seen, 0));
+		same(array('visitor', 'new', '/zzcontact'), array($seen[0][1]['who'], $seen[0][1]['status'], $seen[0][1]['page']));
+		check(!array_key_exists('title', $seen[0][1]), 'the payload has the title');
+		check(strpos(json_encode($seen), '127.0.0.1') === false, 'an IP in the payload');
+		// contact_staff_email, else the sender
+		$payload = contact::payload($m, 'visitor');
+		$mails = booking_mails(function () use ($payload) {
+			with_settings(array('contact_staff_email' => 'desk@zz.test'), function () use ($payload) { (new contact())->staff_mail($payload); });
+		});
+		same(array('Message: Hello desk@zz.test'), booking_sent($mails));
+	});
+});
+
+test('contact: a suspected message is stored as spam and not mailed', function () use ($booking_base) {
+	contact_site(function () use ($booking_base) {
+		$mails = array();
+		$seen = contact_seen(function () use ($booking_base, &$mails) {
+			$mails = booking_mails(function () use ($booking_base) {
+				list($status, , $location) = contact_post($booking_base, array('email' => 'bot@example.com', 'message' => 'Buy now', 'raster_ts' => ''));
+				same(303, $status);
+				check(strpos($location, 'done=sent') !== false, 'a bot learns nothing: '.$location);
+			});
+		});
+		$rows = cms_records::find('contactmessage');
+		same(1, count($rows));
+		same(array('spam', 'no_stamp'), array($rows[0]['status'], $rows[0]['spam']));
+		same(array(), booking_sent($mails));
+		same(array('contact.flagged'), array_column($seen, 0));
+		same('no_stamp', $seen[0][1]['spam']);
+	});
+});
+
+test('contact: header injection is refused and Reply-To is one header', function () use ($booking_base) {
+	contact_site(function () use ($booking_base) {
+		$mails = booking_mails(function () use ($booking_base) {
+			foreach (array('name' => array("Ana\r\nBcc: x@evil.test", 'name_invalid'), 'subject' => array("Hi\nBcc: x@evil.test", 'subject_invalid'), 'phone' => array("0721\rBcc: x@evil.test", 'phone_invalid')) as $field => $case) {
+				list($status, $body) = contact_post($booking_base, array($field => $case[0], 'email' => "$field@example.com", 'message' => 'Hi'));
+				same(200, $status, $field);
+				check(strpos($body, "ALERT {$case[1]}") !== false, "$field: $body");
+			}
+			list($status) = contact_post($booking_base, array('email' => "a@b.test\nBcc: c@d.test", 'message' => 'Hi'));
+			same(200, $status, 'email');
+		});
+		same(array(), booking_sent($mails));
+		same(array(), cms_records::find('contactmessage'));
+		// from any writer
+		same(array('email_invalid'), contact_refused(function () { cms_records::create('contactmessage', array('email' => "a@b.test\nBcc: c@d.test", 'message' => 'Hi')); }));
+		same(array('email_invalid'), contact_refused(function () { cms_records::create('contactmessage', array('email' => '', 'message' => 'Hi')); }));
+		same(array('name_invalid', 'message_invalid'), contact_refused(function () { cms_records::create('contactmessage', array('name' => "Ana\0", 'email' => 'a@b.test', 'message' => '')); }));
+		// quotes, brackets and commas are dropped from the name
+		$mails = booking_mails(function () use ($booking_base) {
+			same(303, contact_post($booking_base, array('name' => 'Ana "The Boss" <x>, y', 'email' => 'boss@example.com', 'message' => 'Hi there'))[0]);
+		});
+		same(1, count($mails));
+		same(1, preg_match_all('/^Reply-To: /m', $mails[0]['raw']));
+		check(strpos($mails[0]['raw'], "\r\nReply-To: \"Ana The Boss x y\" <boss@example.com>\r\n") !== false, $mails[0]['raw']);
+		check(stripos($mails[0]['raw'], "\nBcc:") === false, 'a Bcc header');
+		same('a@b.test', contact::reply_to('', 'a@b.test'));
+		// a name that isn't ASCII is encoded whole, outside the quotes
+		$mails = booking_mails(function () {
+			with_settings(array('contact_staff_email' => 'desk@zz.test'), function () {
+				(new contact())->staff_mail(array('name' => 'Ana Café', 'email' => 'ana@example.com', 'subject' => '', 'message' => 'Hi', 'page' => '/', 'who' => 'visitor'));
+			});
+		});
+		same(1, count($mails));
+		check(strpos($mails[0]['raw'], "\r\nReply-To: =?UTF-8?B?".base64_encode('Ana Café')."?= <ana@example.com>\r\n") !== false, $mails[0]['raw']);
+		// a group (Ana: x@y; …) or a trailing backslash can't add an address
+		spam_clear();
+		$mails = booking_mails(function () use ($booking_base) {
+			same(303, contact_post($booking_base, array('name' => 'Ana: bad@evil.test; Café', 'email' => 'group@example.com', 'message' => 'Hi group'))[0]);
+			same(303, contact_post($booking_base, array('name' => 'Ana\\', 'email' => 'slash@example.com', 'message' => 'Hi slash'))[0]);
+		});
+		same(2, count($mails));
+		foreach (array('group@example.com', 'slash@example.com') as $n => $email) {
+			same(1, preg_match_all('/^Reply-To: ([^\r\n]*)\r$/m', $mails[$n]['raw'], $line), $email);
+			$reply = $line[1][0];
+			check(substr($reply, -strlen("<$email>")) === "<$email>", $reply);
+			same(1, substr_count($reply, '@'), 'one address: '.$reply);
+		}
+		same('"Ana" <slash@example.com>', contact::reply_to('Ana\\', 'slash@example.com'));
+	});
+});
+
+test('mail: a name that isn\'t plain ASCII is encoded whole, an ASCII one as written', function () use ($maildir) {
+	$dir = "$maildir-names";
+	@mkdir($dir);
+	$was = array(getenv('RASTER_MAIL'), getenv('RASTER_MAIL_FROM'));
+	putenv("RASTER_MAIL=log://$dir");
+	try {
+		putenv('RASTER_MAIL_FROM=Raster Café <hello@cafe.test>');
+		check(mail::send('Ana: bad@evil.test; Pârvu <ana@example.com>', 'Hi', '<p>Hi</p>'), (string)mail::$last_error);
+		putenv('RASTER_MAIL_FROM=Raster Cafe <hello@cafe.test>');
+		check(mail::send('Ana Pop <ana@example.com>', 'Hi', '<p>Hi</p>'), (string)mail::$last_error);
+		$files = glob("$dir/*.eml");
+		sort($files);
+		same(2, count($files));
+		$first = file_get_contents($files[0]);
+		check(strpos($first, "From: =?UTF-8?B?".base64_encode('Raster Café')."?= <hello@cafe.test>\r\n") !== false, $first);
+		check(strpos($first, "\r\nTo: =?UTF-8?B?".base64_encode('Ana: bad@evil.test; Pârvu')."?= <ana@example.com>\r\n") !== false, $first);
+		$second = file_get_contents($files[1]);
+		check(strpos($second, "From: Raster Cafe <hello@cafe.test>\r\n") !== false && strpos($second, "\r\nTo: Ana Pop <ana@example.com>\r\n") !== false, $second);
+		// a long name: words of at most 75 characters, split between characters
+		$words = (new ReflectionMethod('mail', 'words'));
+		$words->setAccessible(true);
+		$long = str_repeat('Café ', 20);
+		$encoded = $words->invoke(null, $long);
+		foreach (explode(' ', $encoded) as $word) check(strlen($word) <= 75 && preg_match('/^=\?UTF-8\?B\?[A-Za-z0-9+\/=]+\?=$/', $word), $word);
+		same($long, mb_decode_mimeheader($encoded));
+	} finally {
+		putenv($was[0] === false ? 'RASTER_MAIL' : "RASTER_MAIL={$was[0]}");
+		putenv($was[1] === false ? 'RASTER_MAIL_FROM' : "RASTER_MAIL_FROM={$was[1]}");
+		array_map('unlink', glob("$dir/*") ?: array());
+		@rmdir($dir);
+	}
+});
+
+test('contact: lengths and a double click', function () use ($booking_base) {
+	contact_site(function () use ($booking_base) {
+		list($status, $body) = contact_post($booking_base, array('email' => 'long@example.com', 'message' => str_repeat('a', 5001)));
+		same(200, $status);
+		check(strpos($body, 'ALERT message_invalid') !== false, $body);
+		list($status, $body) = contact_post($booking_base, array('email' => 'long@example.com', 'subject' => str_repeat('s', 201), 'message' => 'Hi'));
+		same(200, $status);
+		check(strpos($body, 'ALERT subject_invalid') !== false, $body);
+		same(array(), cms_records::find('contactmessage'));
+		with_settings(array('contact_max_length' => 10), function () {
+			same(array('message_invalid'), contact_refused(function () { cms_records::create('contactmessage', array('email' => 'a@b.test', 'message' => 'ăăăăăăăăăăă')); }));
+			same(array(), contact_refused(function () { cms_records::create('contactmessage', array('email' => 'a@b.test', 'message' => 'ăăăăăăăăăă')); }), 'ten characters, twenty bytes');
+		});
+		R::exec('DELETE FROM contactmessagedata');
+		spam_clear();
+		$mails = booking_mails(function () use ($booking_base) {
+			foreach (array(1, 2) as $click) {
+				list($status, , $location) = contact_post($booking_base, array('email' => 'twice@example.com', 'message' => 'Do you have oat milk?'));
+				same(303, $status, "click $click");
+				check(strpos($location, 'done=sent') !== false, $location);
+			}
+		});
+		same(1, count(cms_records::find('contactmessage')));
+		same(1, count($mails));
+	});
+});
+
+test('contact: a frozen database without the spam tables still takes messages', function () {
+	sqlite_only('drops a table under a frozen connection');
+	contact_site(function () {
+		cms_records::ensure(cms_records::info('contactmessage'), true);
+		R::exec('DROP TABLE IF EXISTS formhit');
+		cms_store::forget();
+		validation_spam::$ready = false;
+		R::freeze(true);
+		$template = template::instance();
+		$kept = array($_SERVER, $_POST, $template->current_call, $template->forms);
+		try {
+			list($done, $logged) = spam_logged(function () use ($template) {
+				$_SERVER['REQUEST_METHOD'] = 'POST';
+				$_SERVER['REMOTE_ADDR'] = '203.0.113.9';
+				$_POST = array('raster_form' => 'contact.form', 'raster_ts' => stamp_for_tests(60), 'email' => 'frozen@example.com', 'message' => 'Still open?');
+				$template->current_call = 'contact.form';
+				$template->forms['contact.form'] = array('email' => array('type' => 'email', 'required' => true), 'message' => array('required' => true));
+				unset(controller::instance()->objects['validation']);
+				return with_settings(array('contact_staff_email' => 'desk@zz.test'), function () { return (new contact())->form(); });
+			});
+		} finally {
+			list($_SERVER, $_POST, $template->current_call, $template->forms) = $kept;
+			unset(controller::instance()->objects['validation']);
+			R::freeze(false);
+			cms_store::forget();
+			validation_spam::$ready = false;
+		}
+		same(false, $done, 'the form answered sent');
+		$rows = cms_records::find('contactmessage');
+		same(1, count($rows));
+		same(array('new', ''), array($rows[0]['status'], $rows[0]['spam']));
+		check(strpos($logged, 'Raster warning: spam: ') !== false, $logged);
+		check(strpos($logged, '203.0.113.9') === false && strpos($logged, 'frozen@example.com') === false, $logged);
+	});
+});
+
+test('contact actions: done, spam, not_spam', function () {
+	contact_site(function () {
+		cms_records::ensure(cms_records::info('contactmessage'), true);
+		$m = cms_records::create('contactmessage', array('email' => 'a@b.test', 'message' => 'Hi'));
+		same(array('new', '', ''), array($m['status'], $m['page'], $m['spam']));
+		same('done', cms_records::act('contactmessage', $m['id'], 'done', array(), true)['status']);
+		$s = cms_records::act('contactmessage', $m['id'], 'spam', array(), true);
+		same(array('spam', 'staff'), array($s['status'], $s['spam']));
+		same(array('not_done_spam'), contact_refused(function () use ($m) { cms_records::act('contactmessage', $m['id'], 'done', array(), true); }));
+		$mails = array();
+		$events = contact_events(function () use ($m, &$mails) {
+			$mails = booking_mails(function () use ($m) {
+				$n = cms_records::act('contactmessage', $m['id'], 'not_spam', array(), true);
+				same(array('new', ''), array($n['status'], $n['spam']));
+			});
+		});
+		same(array(), booking_sent($mails), 'staff are looking at it:');
+		same(array('contact.received'), array_column($events, 0));
+		same('staff', $events[0][1]['who']);
+		same(array('not_spam_invalid'), contact_refused(function () use ($m) { cms_records::act('contactmessage', $m['id'], 'not_spam', array(), true); }));
+		// a message longer than a lowered contact_max_length can still be marked done
+		with_settings(array('contact_max_length' => 1), function () use ($m) { same('done', cms_records::act('contactmessage', $m['id'], 'done', array(), true)['status']); });
+		// a write from the editor or MCP keeps new and no page, whatever a
+		// form left behind
+		contact::$reasons = array('no_stamp');
+		$e = cms_store::save_item('contactmessagedata', 0, array('email' => 'staff@zz.test', 'message' => 'Called about a table'), cms_records::writable(cms_records::info('contactmessage')), 'editor');
+		contact::$reasons = array();
+		same(array('new', '', ''), array($e['status'], $e['spam'], $e['page']));
+	});
+});
+
+test('contact: spam older than contact_spam_days is deleted when a message arrives', function () use ($booking_base) {
+	contact_site(function () use ($booking_base) {
+		cms_records::ensure(cms_records::info('contactmessage'), true);
+		$old = cms_records::create('contactmessage', array('email' => 'old@zz.test', 'message' => 'old spam', 'status' => 'spam', 'spam' => 'no_stamp'));
+		$recent = cms_records::create('contactmessage', array('email' => 'recent@zz.test', 'message' => 'recent spam', 'status' => 'spam', 'spam' => 'no_stamp'));
+		$done = cms_records::create('contactmessage', array('email' => 'done@zz.test', 'message' => 'answered', 'status' => 'done'));
+		foreach (array(array($old, 31), array($recent, 29), array($done, 400)) as $aged) {
+			R::exec('UPDATE contactmessagedata SET created_at = ? WHERE id = ?', array(date('Y-m-d H:i:s', time() - $aged[1] * 86400), $aged[0]['id']));
+		}
+		booking_mails(function () use ($booking_base) {
+			same(303, contact_post($booking_base, array('email' => 'new@example.com', 'message' => 'Hello'))[0]);
+		});
+		same(null, cms_records::get('contactmessage', $old['id']));
+		check(cms_records::get('contactmessage', $recent['id']) !== null, 'spam within 30 days is kept');
+		check(cms_records::get('contactmessage', $done['id']) !== null, 'real messages stay');
+		same(3, count(cms_records::find('contactmessage')));
+	});
+});
+
+test('contact: messages and count are for staff only', function () {
+	contact_site(function ($theme) {
+		cms_records::ensure(cms_records::info('contactmessage'), true);
+		cms_records::create('contactmessage', array('name' => 'Ana', 'email' => 'ana@zz.test', 'message' => 'A table for two?'));
+		cms_records::create('contactmessage', array('email' => 'bot@zz.test', 'message' => 'Buy now', 'status' => 'spam', 'spam' => 'no_stamp'));
+		file_put_contents("$theme/zzstaff.html", '<html><head><title>Messages</title></head><body><h1>New: <!-- print.contact.count -->3<!-- /print.contact.count --></h1>'
+			.'<ul><!-- render.contact.messages --><li class="message"><!-- print.@href.raster_detail_link --><a href="#"><!-- print.email -->a@b<!-- /print.email --></a><!-- /print.@href.raster_detail_link --></li><!-- /render.contact.messages --></ul></body></html>');
+		try {
+			$out = contact_render('/zzstaff');
+			check(strpos($out, '[exit 0]') !== false && strpos($out, 'New: </h1>') !== false, 'a visitor\'s count: '.$out);
+			check(strpos($out, 'class="message"') === false && strpos($out, 'ana@zz.test') === false, 'a visitor sees messages: '.$out);
+			$out = contact_render('/zzstaff', 'editor');
+			check(strpos($out, 'New: 1</h1>') !== false, 'the count: '.$out);
+			check(strpos($out, 'ana@zz.test') !== false && strpos($out, 'bot@zz.test') === false, 'the new ones: '.$out);
+			check(preg_match('#href="[^"]*/contactmessage/contactmessage_item/\d{4}-#', $out) === 1, 'the detail link: '.$out);
+			check(preg_match('#<script id="raster-editor-config" type="application/json">(.*?)</script>#s', $out, $m) === 1, 'no editor: '.$out);
+			$items = array_values(array_filter(json_decode($m[1], true)['marks'], function ($mark) { return isset($mark['kind']) && $mark['kind'] === 'item' && $mark['collection'] === 'contactmessage'; }));
+			same(1, count($items), 'messages the editor can edit:');
+			same(array('done', 'spam', 'not_spam'), $items[0]['actions']);
+			check(in_array('status', $items[0]['readonly'], true), json_encode($items[0]));
+		} finally {
+			@unlink("$theme/zzstaff.html");
+		}
+	});
+});
+
+test('lint: contact staff page not protected', function () {
+	contact_site(function ($theme) {
+		check(has_problem((new raster_inspector())->lint_types(), "Visitors make 'contactmessage' records"), 'no staff page yet');
+		file_put_contents("$theme/zzstaff.html", '<html><head><title>Messages</title></head><body><ul><!-- render.contact.messages(\'status=spam\') --><li><!-- print.email -->a@b<!-- /print.email --></li><!-- /render.contact.messages(\'status=spam\') --></ul></body></html>');
+		try {
+			check(has_problem((new raster_inspector())->lint_path("$theme/zzstaff.html"), "lists contact messages but isn't protected for editors"), 'unprotected');
+			with_settings(array('protected' => array('account' => 'member', 'zzstaff' => 'editor')), function () use ($theme) {
+				check(!has_problem((new raster_inspector())->lint_path("$theme/zzstaff.html"), "isn't protected for editors"), 'protected');
+			});
+			// render.contact.messages lists the type, as render.cms.contactmessage does
+			check(!has_problem((new raster_inspector())->lint_types(), "Visitors make 'contactmessage' records"), 'listed by render.contact.messages');
+		} finally {
+			@unlink("$theme/zzstaff.html");
+		}
+	});
+});
+
+test('lint reports a theme with render.contact.form and no _email/contact_received', function () {
+	contact_site(function ($theme) {
+		check(!has_problem((new raster_inspector())->lint_path("$theme/zzcontact.html"), 'contact_received'), 'the email is there');
+		unlink("$theme/_email/contact_received.html");
+		check(has_problem((new raster_inspector())->lint_path("$theme/zzcontact.html"), '_email/contact_received'), 'the email is missing');
+		// a suspect post is thanked with sent, so try_again and slow_down never show there
+		check(!has_problem(lint_html('<!-- render.contact.form --><form method="post"><input name="email"></form><!-- /render.contact.form -->'), 'can turn a post away as spam'), 'lint asks contact for try_again');
+	});
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";
 foreach ($skipped as $skip) echo "  - $skip\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";

@@ -1167,7 +1167,7 @@ test(array('I3', 'I4', 'I8', 'I9'), 'SMTP: plain on localhost, STARTTLS and smtp
 	// the sender from config mail_from when RASTER_MAIL_FROM is not set
 	list($port, $log) = $smtp('plain', '127.0.0.1');
 	same('sent', $send("smtp://127.0.0.1:$port", false));
-	has(file_get_contents($log), 'From: Raster =?UTF-8?B?'.base64_encode('Café').'?= <hello@cafe.test>');
+	has(file_get_contents($log), 'From: =?UTF-8?B?'.base64_encode('Raster Café').'?= <hello@cafe.test>');
 });
 
 // ## J. Languages
@@ -1940,7 +1940,7 @@ test(array('I6', 'I7'), 'mail: the default log folder and PHP mail()', function 
 	same('sent', $send('RASTER_MAIL=mail://', '-d '.escapeshellarg("sendmail_path=$tmp/sendmail-keep.sh")));
 	$message = file_get_contents($out);
 	has($message, 'To: owner@cafe.test');
-	has($message, 'From: Raster =?UTF-8?B?'.base64_encode('Café').'?= <hello@cafe.test>');
+	has($message, 'From: =?UTF-8?B?'.base64_encode('Raster Café').'?= <hello@cafe.test>');
 	has($message, 'Subject: ');
 });
 test(array('J7', 'J8'), 'a language per domain, the cookie name', function () use ($base) {
@@ -4103,7 +4103,7 @@ test('I11', 'mail headers are encoded: names, long subjects, and the sender for 
 	same(1, count($files));
 	$raw = file_get_contents($files[0]);
 	$head = "\r\n".substr($raw, 0, strpos($raw, "\r\n\r\n"));
-	has($head, "\r\nFrom: Raster =?UTF-8?B?".base64_encode('Café').'?= <hello@cafe.test>', 'the sender name:');
+	has($head, "\r\nFrom: =?UTF-8?B?".base64_encode('Raster Café').'?= <hello@cafe.test>', 'the sender name:');
 	check(preg_match('/^To: ([^\r\n]*)/m', $head, $to) && strpos($to[1], '=?UTF-8?B?') !== false && strpos($to[1], 'Pâr') === false, 'the recipient name: '.$to[1]);
 	check(preg_match('/^Subject: ([^\r\n]*(?:\r\n[ \t][^\r\n]*)*)/m', $head, $m), 'a subject');
 	preg_match_all('/=\?UTF-8\?B\?[^?]*\?=/', $m[1], $words);
