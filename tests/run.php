@@ -556,6 +556,40 @@ test('pages render', function () use ($base) {
 		check(strpos($body, '<!-- print.') === false && strpos($body, '<!-- render.') === false, "$url leaks annotations");
 	}
 });
+test('theme assets carry a version, pages and files say how long to keep them', function () use ($base, $root) {
+	list(, $body, $headers) = http('GET', "$base/about");
+	check((bool)preg_grep('#^Cache-Control: no-cache$#i', $headers), 'pages are checked each time');
+	check((bool)preg_match('#href="style\.css\?v=([0-9a-f]{8})"#', $body, $m), 'the stylesheet has a version');
+	$version = $m[1];
+	list($status, , $headers) = http('GET', "$base/application/views/default/style.css?v=$version");
+	same(200, $status);
+	check((bool)preg_grep('#^Cache-Control: public, max-age=31536000, immutable$#i', $headers), 'a versioned file is kept');
+	list(, , $headers) = http('GET', "$base/application/views/default/style.css");
+	check((bool)preg_grep('#^Cache-Control: no-cache$#i', $headers), 'a file without a version is checked each time');
+	same(403, http('GET', "$base/application/views/default/about.html?v=1")[0], 'raw views are still refused');
+	// a changed file gets a new version
+	$css = "$root/application/views/default/style.css";
+	$time = filemtime($css);
+	touch($css, $time + 10);
+	try {
+		list(, $body) = http('GET', "$base/about");
+		check(strpos($body, 'href="style.css?v=') !== false && strpos($body, "style.css?v=$version") === false, 'a new version after a change');
+	} finally {
+		touch($css, $time);
+	}
+});
+test('version_assets: only relative URLs to real theme files', function () {
+	$html = '<link href="style.css"><img src="nope.png"><a href="https://x.example/style.css"></a><img src="/style.css">'
+		.'<img src="style.css?x=1"><a href="#top"></a><img src="data:image/png;base64,AA"><a href="about.html"></a><a href="../../config/the_app.php"></a>'
+		.'<img srcset="style.css 1x, nope.png 2x, style.css 3x"><video poster=\'style.css\'></video>';
+	$out = controller::version_assets($html);
+	preg_match('#style\.css\?v=[0-9a-f]{8}#', $out, $m);
+	$v = $m[0];
+	same('<link href="'.$v.'"><img src="nope.png"><a href="https://x.example/style.css"></a><img src="/style.css">'
+		.'<img src="style.css?x=1"><a href="#top"></a><img src="data:image/png;base64,AA"><a href="about.html"></a><a href="../../config/the_app.php"></a>'
+		.'<img srcset="'.$v.' 1x, nope.png 2x, '.$v.' 3x"><video poster=\''.$v.'\'></video>', $out);
+	same($out, controller::version_assets($out), 'a second pass changes nothing');
+});
 test('template defaults become content', function () use ($base) {
 	list(, $body) = http('GET', "$base/");
 	check(strpos($body, '<h1>Write HTML. Get a CMS.</h1>') !== false);

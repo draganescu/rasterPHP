@@ -21,6 +21,17 @@ RewriteRule ^(?!index\.php$).*\.(php|phar|sqlite|sql|md|lock|ini|bak)$ - [F,L,NC
 # SQLite's journal, write-ahead log and shared memory files
 RewriteRule \.sqlite-(journal|wal|shm)$ - [F,L,NC]
 
+# theme files: kept a year with ?v= (Raster adds it, a new one when the
+# file changes), checked each time without
+<IfModule mod_headers.c>
+<If "-f %{REQUEST_FILENAME} && %{REQUEST_URI} =~ m#/views/# && %{QUERY_STRING} =~ /(^|&)v=/">
+Header set Cache-Control "public, max-age=31536000, immutable"
+</If>
+<ElseIf "-f %{REQUEST_FILENAME} && %{REQUEST_URI} =~ m#/views/#">
+Header set Cache-Control "no-cache"
+</ElseIf>
+</IfModule>
+
 # everything else is the site
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteCond %{REQUEST_FILENAME} !-f

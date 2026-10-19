@@ -3,6 +3,12 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.22
+
+Nothing for sites to do. `raster update` brings the new `.htaccess`; behind nginx or Caddy, add the theme file lines from `php bin/raster deploy --config=nginx|caddy`.
+
+**A changed stylesheet shows right after a publish.** Relative links to theme files (`href="style.css"`, `src`, `srcset`, `poster`) get `?v=` and a version made from the file's time and size, so the URL changes when the file does. The `.htaccess` and the nginx and Caddy configs keep a theme file with a version for a year, and have browsers check one without it each time. Pages are sent with `Cache-Control: no-cache`, so a browser asks again each time and gets a 304 when nothing changed. `php -S` sends the same headers. `asset_versions => false` leaves the URLs as written.
+
 ## 2.2.21
 
 A list that pairs `limit=N` with a pager now shows the same N rows on every page: set `<name>_page_size` instead. A site's own `reservation` or `booking` model keeps working.
