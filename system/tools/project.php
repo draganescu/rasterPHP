@@ -496,7 +496,9 @@ class raster_project
 		// can be one this user can't read, and a broken one turns stamps off
 		$secret = $app_dir.'/data/secret';
 		if ((string)getenv('RASTER_SECRET') === '' && file_exists($secret) && (!is_readable($secret) || !preg_match('/^[0-9a-f]{64}$/', trim((string)@file_get_contents($secret))))) {
-			$add('warn', "data/secret can't be read or isn't a key: the spam stamp is off", "Delete it, or make it as the web server's user");
+			// doctor runs as whoever typed it, maybe not the web server's
+			// user, so it can only say what this user sees
+			$add('warn', "this user can't read data/secret (or it isn't a key); if the web server can't either, the spam stamp is off", 'Delete it and let the site make it again, or set RASTER_SECRET');
 		}
 
 		// deprecations, minus the ones config allow_deprecated says are on purpose

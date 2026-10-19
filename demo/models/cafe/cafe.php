@@ -4,7 +4,7 @@
 class cafe
 {
 	// what /api/cafe/<method> answers, and for whom; nothing else here is
-	// reachable there: not the form handler, not the listeners
+	// reachable there: not the methods templates call, not the listeners
 	static function api() {
 		return array('hours' => 'visitor', 'category_count' => 'visitor', 'bookings' => 'editor');
 	}
@@ -53,22 +53,10 @@ class cafe
 		return $rows;
 	}
 
-	// the contact form on /visit uses the rule names older Raster sites had
-	function contact() {
-		$v = validation::get();
-		if (!$v->submitted()) return false;
-		if (!$v->valid()) {
-			// validation::errors() lists what failed, field by field
-			template::set('error_count')->to((string)count($v->errors()));
-			return template::instance()->form_state();
-		}
-		mail::send_view('_email/contact', config::get('cafe_staff_email', 'staff@cafe.test'), array(
-			'email' => (string)util::post('email'),
-			'topic' => (string)util::post('topic'),
-			'message' => (string)util::post('message'),
-		));
-		util::done('contacted');
-		return false;
+	// how many fields the contact form's last post broke: validation::errors()
+	// lists them, field by field (the form itself is the bundled contact model)
+	function problem_count() {
+		return (string)count(validation::get()->errors('contact.form'));
 	}
 
 	// route_not_found

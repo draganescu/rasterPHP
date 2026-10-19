@@ -24,10 +24,10 @@ running it again adds nothing. Until then the booking forms say `not_open`.
 | `/` | page fields, featured dishes (a filtered, limited collection), upcoming events |
 | `/menu`, `/menu/menu_item/<slug>` | a collection with pagination, category filter links, counts from an SQL file |
 | `/events`, `/journal` | ordering, drafts, scheduled items, author filter links |
-| `/visit` | the booking form (a day's sittings as radio buttons) using every validation rule, a contact form, the newsletter form: three forms on one page |
+| `/visit` | the booking form (a day's sittings as radio buttons) using every validation rule, a contact form (the bundled `contact` model, with the older validation regions kept), the newsletter form: three forms on one page |
 | `/salon` | appointments: pick a stylist and a service, then a day and a time |
 | `/booking` | the guest's page, by the link in their emails (`?token=`) or from /account: cancel, or move to another time |
-| `/staff`, `/staff/setup`, `/staff/bookings`, `/booking/booking_item/<slug>` | the staff page from the Records recipe (counts, needs attention, requests, the agenda with the places left, the past), the booking setup, every booking, one booking |
+| `/staff`, `/staff/setup`, `/staff/bookings`, `/booking/booking_item/<slug>` | the staff page from the Records recipe (counts, needs attention, requests, the agenda with the places left, the past, and the contact messages: new, spam, done), the booking setup, every booking, one booking; `/contactmessage/contactmessage_item/<slug>` is one message |
 | `/members`, `/account`, `/login`, `/register`, `/forgot`, `/password/new` | accounts, roles and protected pages; members see their bookings on /account |
 | `/lab` | the engine's edge cases, one section each |
 | `/journal.rss`, `/journal.atom`, `/feed.json`, `/sitemap.xml`, `/hours.txt` | formats |
@@ -336,9 +336,12 @@ running it again adds nothing. Until then the booking forms say `not_open`.
 | P8 | a logged in guest manages their bookings from /account, without a token |
 | P9 | `the_booking` adds a field (`newsletter`) to the bundled type |
 
-### Q. Spam checks on the public forms
+### Q. Spam checks and the contact form
 
 | ID | Feature |
 |---|---|
 | Q1 | a post without a fresh stamp (none, too young) gets the sign-up, newsletter, booking and record forms again with what was typed and the alert `try_again`; forgot answers as usual; a record type can say `'spam' => false`; editors are never held |
 | Q2 | too many posts from one address in an hour: `slow_down`, and nothing stored (the demo's own server has `CAFE_SPAM_LIMITS=off`, since the suite posts from one address) |
+| Q3 | the café's contact form is the bundled contact model: `?done=sent`, one email to staff with `Reply-To` the guest, the message listed on `/staff` for editors only |
+| Q4 | the café's `no_links` rule (D13) turns plain web addresses back before the model sees them; links it doesn't catch (bbcode `[url=…]`) make the model keep the message aside as spam (the visitor is thanked, nobody is emailed). It shows in the Spam list, and `not_spam` moves it to the new ones without a mail |
+| Q5 | the staff page lists the messages (new, spam, done) with the in-page editor and the actions |

@@ -26,8 +26,9 @@
 * (reason staff), not_spam (back to new, its reasons cleared).
 *
 * Alerts: sent, name_invalid, email_invalid, phone_invalid, subject_invalid
-* (a control character, or over 200 characters; an email that isn't one, or
-* over 254), message_invalid (empty, or over contact_max_length characters);
+* (a control character, or over 200 characters; an email that isn't one, is
+* over 254, or isn't a plain address: quotes, brackets, spaces, a second @),
+* message_invalid (empty, or over contact_max_length characters);
 * for the actions not_done_spam and not_spam_invalid.
 *
 * Emails, a view the site writes: _email/contact_received to staff, after
@@ -95,7 +96,7 @@ class contact
 		// contact_max_length was lowered can still be marked done
 		if (self::changed('name', $after, $before) && self::unsafe($after['name'], 200)) $problems[] = 'name_invalid';
 		$email = (string)$after['email'];
-		if (self::changed('email', $after, $before) && ($email === '' || self::unsafe($email, 254) || !filter_var($email, FILTER_VALIDATE_EMAIL))) $problems[] = 'email_invalid';
+		if (self::changed('email', $after, $before) && ($email === '' || self::unsafe($email, 254) || !filter_var($email, FILTER_VALIDATE_EMAIL) || self::not_plain($email))) $problems[] = 'email_invalid';
 		if (self::changed('phone', $after, $before) && self::unsafe($after['phone'], 200)) $problems[] = 'phone_invalid';
 		if (self::changed('subject', $after, $before) && self::unsafe($after['subject'], 200)) $problems[] = 'subject_invalid';
 		$message = (string)$after['message'];
@@ -114,6 +115,14 @@ class contact
 	protected static function unsafe($value, $max) {
 		$value = (string)$value;
 		return preg_match('/[\x00-\x1f\x7f]/', $value) || mb_strlen($value, 'UTF-8') > $max;
+	}
+
+	// An address the filter takes that is more than a plain one: a quoted
+	// local part ("x>,evil@evil.test,<y"@x.com) or a domain in brackets
+	// can carry address syntax into Reply-To, where reply_to() only cleans
+	// the name
+	protected static function not_plain($email) {
+		return preg_match('/[\s"(),:;<>\[\]\\\\]/', $email) || substr_count($email, '@') !== 1;
 	}
 
 	// ##Actions
@@ -230,7 +239,8 @@ class contact
 			util::done('sent');
 			return false;
 		}
-		// the email's domain is checked against the blocklist either way
+		// fields named, so the text checks run, and the email's domain
+		// against the blocklist with them
 		$reasons = $v->suspect(array('name', 'subject', 'message'));
 		self::$reasons = $reasons;
 		self::$writing = true;

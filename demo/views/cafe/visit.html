@@ -35,8 +35,6 @@
         <!-- print.@value.date --><button class="day" name="date" value="2026-10-20"><!-- print.date -->2026-10-20<!-- /print.date -->, <!-- print.slots_free -->2<!-- /print.slots_free --> sittings</button><!-- /print.@value.date -->
         <!-- /render.booking.days('resource=dining-room&people=?people&limit=7') -->
       </form>
-      <!-- print.validation.alert('try_again') --><p class="error">That went by a bit quickly. Give it a moment and send it once more.</p><!-- /print.validation.alert('try_again') -->
-      <!-- print.validation.alert('slow_down') --><p class="error">That's a lot from one place. Try again in an hour, or call us.</p><!-- /print.validation.alert('slow_down') -->
       <!-- render.booking.form -->
       <form method="post" class="stack">
         <input type="hidden" name="resource" value="dining-room">
@@ -73,20 +71,22 @@
       <h2>Write to us</h2>
       <!-- print.if.static --><p>Write to <a href="mailto:hello@cafe.test">hello@cafe.test</a>.</p><!-- /print.if.static -->
       <!-- print.if.live -->
-      <p class="error-count"><!-- print.self.error_count -->0<!-- /print.self.error_count --> problems</p>
-      <!-- print.validation.alert('contacted') --><p class="notice">Thanks, we will write back soon.</p><!-- /print.validation.alert('contacted') -->
-      <!-- render.cafe.contact -->
+      <p class="error-count"><!-- print.cafe.problem_count -->0<!-- /print.cafe.problem_count --> problems</p>
+      <!-- print.validation.alert('sent') --><p class="notice">Thanks, we will write back soon.</p><!-- /print.validation.alert('sent') -->
+      <!-- print.validation.alert('name_invalid') --><p class="error">That name has characters we can't use.</p><!-- /print.validation.alert('name_invalid') -->
+      <!-- print.validation.alert('email_invalid') --><p class="error">We need a valid email to write back.</p><!-- /print.validation.alert('email_invalid') -->
+      <!-- print.validation.alert('phone_invalid') --><p class="error">That phone number has characters we can't use.</p><!-- /print.validation.alert('phone_invalid') -->
+      <!-- print.validation.alert('subject_invalid') --><p class="error">Keep the subject short, on one line.</p><!-- /print.validation.alert('subject_invalid') -->
+      <!-- print.validation.alert('message_invalid') --><p class="error">Write us a message, but not a novel.</p><!-- /print.validation.alert('message_invalid') -->
+      <!-- render.contact.form -->
       <form method="post" class="stack">
+        <label>Name <input type="text" name="name" maxlength="80"></label>
         <label>Email <input type="email" name="email"></label>
         <!-- render.validation.not_empty('email') --><p class="error">Your email, please.</p><!-- /render.validation.not_empty('email') -->
         <!-- render.validation.email_format('email') --><p class="error">That email does not look right.</p><!-- /render.validation.email_format('email') -->
         <label>About
-          <select name="topic"><option value="table">A table</option><option value="event">An event</option><option value="other">Something else</option></select>
+          <select name="subject"><option value="A table">A table</option><option value="An event">An event</option><option value="Something else">Something else</option></select>
         </label>
-        <fieldset><legend>Reply by</legend>
-          <label><input type="radio" name="reply" value="email" checked> Email</label>
-          <label><input type="radio" name="reply" value="phone"> Phone</label>
-        </fieldset>
         <label>Website <input type="url" name="website"></label>
         <!-- render.validation.field('website') --><p class="error">A web address starts with https://</p><!-- /render.validation.field('website') -->
         <label>Message <textarea name="message" required maxlength="2000"></textarea></label>
@@ -94,7 +94,7 @@
         <!-- render.validation.no_links('message') --><p class="error">Please leave out web links: write the address in words.</p><!-- /render.validation.no_links('message') -->
         <button>Send</button>
       </form>
-      <!-- /render.cafe.contact -->
+      <!-- /render.contact.form -->
       <!-- /print.if.live -->
     </section>
   </main>

@@ -3,9 +3,21 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.27
+
+Nothing for sites to do. **The café and the docs move onto the contact model.** The demo café's contact form is `render.contact.form` now (its own `cafe::contact()` is gone), with `_email/contact_received`, `contact_staff_email` and a Messages section on `/staff`: new, spam and done. AGENTS.md and the wiki teach a `feedback` form (a rating and a comment, stored, nothing mailed) in place of the old `contact` model, and a new wiki page, Contact forms, covers the bundled one. The Forms, Static export, Tutorial, Security and Settings pages say how the stamp, the limits and the other spam checks work. #168 Phase 1.5 is done.
+
+**A held post shows its message once.** `lint` now counts the `try_again` and `slow_down` alerts in the fragments a view includes, so they can live once in a layout's `res.header` instead of on each page. The demo café and the starter theme do that; before, a page that also had its own pair showed the message twice. If your layout's footer has the pair and a page has it too, keep one: the top of the page is the best place.
+
+**A long non-ASCII name in a mail header is folded.** The encoded words of a name in `From`, `To` or `Reply-To` are joined with a folding break, so 200 characters of emoji no longer make a header line over 998 characters. A name that fits one word is sent as before.
+
 ## 2.2.26
 
 Nothing for sites to do. **A bundled contact model.** `render.contact.form` stores every message as a private `contactmessage` record and emails staff about it after the answer (`_email/contact_received`, to `contact_staff_email`, else the sender), with `Reply-To` the visitor. Nothing is mailed to the visitor. A message that looks like spam is kept with status `spam` and its reasons, nobody is emailed, and the visitor is thanked all the same. A newline in the name, email, phone or subject is refused, so nothing a visitor types can add a mail header. A double click stores one message. Spam older than `contact_spam_days` (30) is deleted as new messages come. Staff list the messages with `render.contact.messages` (done, spam and not spam are its buttons) and count them with `print.contact.count`, on a page protected for editors; `lint` warns when it isn't. Events: `contact.received` and `contact.flagged`. Settings: `contact_staff_email`, `contact_staff_page`, `contact_max_length`, `contact_spam_days`. AGENTS.md has the steps and a worked staff page.
+
+**Behind a proxy, set `trusted_proxies` before using it** (see 2.2.25). With `trusted_proxies` empty the whole site shares one count, so after five messages in an hour every visitor's message is kept as spam (`too_many_from_ip`) and staff get no email about it. They see it under spam on the staff page.
+
+**An address that is more than an address is refused.** PHP's email filter takes `"x>,evil@evil.test,<y"@x.com`; the contact model refuses, as `email_invalid`, an email with whitespace, a quoted local part, any of `" ( ) , : ; < > [ ] \` or a second `@`, so nothing a visitor types can put another address in `Reply-To`.
 
 **A site with its own `contact` model keeps it.** Its `render.contact.send` calls its own class and nothing of the bundled model loads; `lint` says the bundled one is hidden. To move: rename your model (or delete it once its messages are elsewhere), put `render.contact.form` around your form with the fields `name email phone subject message`, write `_email/contact_received.html` from your old email, add the alerts (`sent`, `email_invalid`, `message_invalid`, …), and make the staff page from AGENTS.md.
 
@@ -15,7 +27,9 @@ Nothing for sites to do. **A bundled contact model.** `render.contact.form` stor
 
 The newsletter sign-up, the sign-up and forgot-password forms, the booking form and every `cms_records::submit` form (a record type with `create` `visitor` or `member`) now turn away posts that look like spam, using the checks from 2.2.24. A suspect post gets the form again with what was typed and the alert `try_again` (no fresh stamp, or one forged or too young) or `slow_down` (too many posts from one IP or address in the hour). Nothing is stored or mailed. Forgot answers `reset_sent` as for an unknown address when the limits are passed, and mails nothing. Editors are never held. A record type can say `'spam' => false` to run its own checks.
 
-**To do:** add `print.validation.alert('try_again')` and `print.validation.alert('slow_down')` to pages with these forms, in your words; `php bin/raster lint` names the pages. A script that posts to your forms without fetching them first now gets `try_again`. Behind a proxy, set `trusted_proxies` first (see 2.2.24), or visitors share one count.
+**Behind a proxy (a load balancer, Cloudflare, a host such as Fly), set `trusted_proxies` and `client_ip_header` before updating.** With `trusted_proxies` empty every post seems to come from the proxy, so the whole site shares one count: after five posts in an hour, forgot-password answers `reset_sent` and sends no email, and the sign-up, newsletter, booking and record forms answer `slow_down` to everyone, for the rest of the hour. `doctor` says when posts come from a private address. On a host that runs the site on several machines, also set `RASTER_SECRET` to one value on all of them, or a form shown by one machine fails its stamp on another (`try_again`).
+
+**To do:** add `print.validation.alert('try_again')` and `print.validation.alert('slow_down')` to pages with these forms, in your words; `php bin/raster lint` names the pages. A script that posts to your forms without fetching them first now gets `try_again`.
 
 ## 2.2.24
 
@@ -25,11 +39,15 @@ On a frozen (production) database, run `php bin/raster schema --apply` once afte
 
 **Settings:** `spam_min_seconds` (3), `spam_max_age` (86400), `spam_per_ip` (5), `spam_per_email` (3), `spam_max_links` (2), `spam_blocklist`, `trusted_proxies` and `client_ip_header` (`X-Forwarded-For`). `describe` lists the ones a site sets.
 
-**doctor** warns when `data/secret` can't be read or isn't a key (make it as the web server's user, or delete it), and in production when posts come from a private address while `trusted_proxies` is empty.
+`suspect(array())` runs no text checks at all, the blocklist on the email's domain included, so a form that answers `try_again` can't refuse a blocked address over and over, a message that could never help; pass the fields to check (`suspect(array('message'))`) to have them. Behind a trusted proxy, an entry of the header with a port or in brackets (`1.2.3.4:5678`, `[2001:db8::1]:443`) counts as its address.
+
+**doctor** warns when the user running it can't read `data/secret`, or it isn't a key: if the web server can't read it either, the stamp is off. Delete it and let the site make it again, or set `RASTER_SECRET`. doctor runs as you, so run it as the web server's user to be sure. It also warns in production when posts come from a private address while `trusted_proxies` is empty.
 
 ## 2.2.23
 
-Nothing for sites to do. Every post form that has a render block around it now gets a hidden `raster_ts` field: the time the form was shown, signed with the site's key. Nothing checks it yet; the spam checks that read it come next. The key is `RASTER_SECRET` when set, else Raster makes `data/secret` on first use (make sure `data/` is writable, as for the SQLite file and the cache). Emails, static exports and forms with no render block carry no stamp. The page cache keeps a marker in the stamp's place and writes a fresh stamp into the page on every hit, so cached forms stay fresh too.
+Nothing for most sites to do. Every post form that has a render block around it now gets a hidden `raster_ts` field: the time the form was shown, signed with the site's key. Nothing checks it yet; the spam checks that read it come next. The key is `RASTER_SECRET` when set, else the first web request that needs one makes `data/secret` (make sure the web server can write to `data/`, as for the SQLite file and the cache). A command (`raster render`, a script) never makes the file, since PHP-FPM might not be able to read one made by another user; with no file it can read, it signs with a key of its own for that process only. Emails, static exports and forms with no render block carry no stamp. The page cache keeps a marker in the stamp's place and writes a fresh stamp into the page on every hit, so cached forms stay fresh too.
+
+**A site model that reads `$_POST` whole:** one that left out Raster's own fields by the old list `raster_form`, `raster_hp`, `csrf` now also gets `raster_ts`. Use `template::$internal_fields` instead of a list of your own, so a field Raster adds later is left out too.
 
 ## 2.2.22
 

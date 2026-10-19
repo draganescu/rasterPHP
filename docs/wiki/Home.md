@@ -20,6 +20,7 @@ The built-in content management system (CMS) reads the same comments to work out
 | Email | emails written as templates, sent through SMTP or PHP's `mail()` | [Sending email](Sending-Email) |
 | Newsletter | double opt-in sign-up, unsubscribe, send any page as an issue | [Newsletter](Newsletter) |
 | Bookings | a café's sittings or a salon's appointments: slots, capacity, the guest's emails and link, a staff page | [Bookings](Bookings) |
+| Contact forms | the bundled contact model: messages kept for staff, spam kept aside, an email to staff with Reply-To the visitor | [Contact forms](Contact-Forms) |
 | Feeds | RSS, Atom, JSON, sitemap and text files | [Feeds, sitemaps and data views](Feeds-Sitemaps-and-Data-Views) |
 | Translations | several languages from one set of templates | [Translations](Translations) |
 | Static export | the whole site as plain files for any static host | [Static export](Static-Export) |
@@ -37,7 +38,7 @@ After that, use the reference pages in the sidebar as you need them.
 
 - Building pages: [Pages and URLs](Pages-and-URLs) · [Annotations](Annotations) · [Models](Models) · [The database](The-Database) · [Events](Events)
 - Content: [The CMS](The-CMS) · [The in-page editor](The-In-Page-Editor) · [Pagination](Pagination) · [Feeds, sitemaps and data views](Feeds-Sitemaps-and-Data-Views) · [Translations](Translations)
-- Visitors: [Forms and validation](Forms-and-Validation) · [Accounts and roles](Accounts-and-Roles) · [Sending email](Sending-Email) · [Newsletter](Newsletter) · [Records](Records) · [Bookings](Bookings)
+- Visitors: [Forms and validation](Forms-and-Validation) · [Accounts and roles](Accounts-and-Roles) · [Sending email](Sending-Email) · [Newsletter](Newsletter) · [Records](Records) · [Bookings](Bookings) · [Contact forms](Contact-Forms)
 - Running a site: [Settings and environments](Settings-and-Environments) · [Command line](Command-Line) · [Deploying to production](Deploying-to-Production) · [Static export](Static-Export) · [Updating Raster](Updating-Raster) · [Security](Security)
 - Going further: [Working with AI agents](Working-with-AI-Agents) · [Extending Raster](Extending-Raster) · [Best practices](Best-practices) · [Troubleshooting](Troubleshooting) · [Glossary](Glossary)
 

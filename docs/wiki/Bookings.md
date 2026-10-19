@@ -8,6 +8,8 @@ The demo café in the Raster repository (`demo/`) is a complete example: table b
 
 Emails go out through the `mail` model, so set up [Sending email](Sending-Email) first.
 
+On a production site the database is frozen: run `php bin/raster schema --apply` once after adding the booking pages, before the form can store anything. That makes the tables of the bookings, their setup and the spam checks. In development they are made on the first use.
+
 ## What can be booked
 
 Staff set this up as records, edited in the page like anything else:

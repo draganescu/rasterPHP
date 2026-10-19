@@ -23,6 +23,7 @@
 - [Forms and validation](Forms-and-Validation)
 - [Records](Records)
 - [Bookings](Bookings)
+- [Contact forms](Contact-Forms)
 - [Accounts and roles](Accounts-and-Roles)
 - [Sending email](Sending-Email)
 - [Newsletter](Newsletter)

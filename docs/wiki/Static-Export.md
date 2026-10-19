@@ -31,9 +31,9 @@ A static host can't receive a form. If a page still shows a form, the export **s
 
 ```html
 <!-- print.if.live -->
-<!-- render.contact.send -->
+<!-- render.contact.form -->
 <form method="post"> … </form>
-<!-- /render.contact.send -->
+<!-- /render.contact.form -->
 <!-- /print.if.live -->
 
 <!-- print.if.static -->

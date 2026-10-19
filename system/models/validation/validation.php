@@ -43,7 +43,10 @@
 *
 * - suspect($fields) checks the stamp (raster_ts), counts the post per IP
 *   and per address for this form, and looks for links and blocked words in
-*   $fields (null: every field of the form that was posted; array(): none).
+*   $fields (null: every field of the form that was posted) and for a
+*   blocked domain in the email. array() runs none of the text checks, the
+*   email's domain included: a form that answers try_again would refuse a
+*   blocked address every time.
 *   Reasons: no_stamp, stamp_invalid, too_fast, stamp_old, too_many_from_ip,
 *   too_many_from_email, too_many_links, blocked.
 * - Editors and admins get none and are not counted. A check that can't run
@@ -121,19 +124,22 @@ class validation
 	// The reasons this post looks like spam (validation_spam::reasons()),
 	// empty when it looks human, or when the form wasn't sent or an editor
 	// sent it. $fields are checked for links and blocked words: null is
-	// every field of the form that was posted, array() none. Asked twice,
-	// it counts the post once.
+	// every field of the form that was posted, array() none (and no
+	// blocked email domain either). Asked twice, it counts the post once.
 	function suspect($fields = null) {
 		$owner = template::instance()->current_call;
 		if (!$this->submitted($owner)) return array();
 		if (isset($this->suspected[$owner])) return $this->suspected[$owner];
 		// staff testing their own form
 		if (authentication::can('editor')) return $this->suspected[$owner] = array();
+		// array() asks for no text checks; null is every field posted, even
+		// when that is none
+		$text = $fields !== array();
 		if ($fields === null) {
 			$forms = template::instance()->forms;
 			$fields = array_keys(array_intersect_key(isset($forms[$owner]) ? $forms[$owner] : array(), $_POST));
 		}
-		return $this->suspected[$owner] = validation_spam::reasons($owner, $fields);
+		return $this->suspected[$owner] = validation_spam::reasons($owner, $fields, $text);
 	}
 
 	// A suspect post: the form again with what was typed (and a fresh

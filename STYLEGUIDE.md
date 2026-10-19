@@ -232,7 +232,7 @@ problem names, as `check()` does.
 // no
 $this->settings->getStaffEmail();
 // yes
-config::get('cafe_staff_email', 'staff@cafe.test');
+config::get('contact_staff_email', 'staff@cafe.test');
 ```
 
 **Don't reformat files you aren't changing.** No sweeping changes of `array()`

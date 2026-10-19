@@ -444,32 +444,46 @@ pasted into the SQL.
 ## Forms
 
 A form posts to its own page. The render block around it is the model that
-handles it:
+handles it. A feedback form, a rating and a comment kept for staff and
+mailed to nobody:
 
 ```html
-<!-- print.validation.alert('sent') --><p>Thanks, we got your message.</p><!-- /print.validation.alert('sent') -->
-<!-- render.contact.send -->
+<!-- print.validation.alert('sent') --><p>Thanks, we read every one.</p><!-- /print.validation.alert('sent') -->
+<!-- print.validation.alert('try_again') --><p>That went by a bit quickly. Send it once more.</p><!-- /print.validation.alert('try_again') -->
+<!-- print.validation.alert('slow_down') --><p>That's a lot from one place. Try again in an hour.</p><!-- /print.validation.alert('slow_down') -->
+<!-- render.feedback.send -->
 <form method="post">
-  <input type="email" name="email" required>
-  <!-- render.validation.field('email') --><p class="error">Enter your email.</p><!-- /render.validation.field('email') -->
-  <textarea name="message" required maxlength="2000"></textarea>
-  <!-- render.validation.field('message') --><p class="error">Write a message (up to 2000 characters).</p><!-- /render.validation.field('message') -->
+  <input type="number" name="rating" min="1" max="5" required>
+  <!-- render.validation.field('rating') --><p class="error">Give us 1 to 5.</p><!-- /render.validation.field('rating') -->
+  <textarea name="comment" maxlength="1000"></textarea>
   <button>Send</button>
 </form>
-<!-- /render.contact.send -->
+<!-- /render.feedback.send -->
 ```
 
 ```php
-class contact {
+class feedback {                                                  // application/models/feedback/feedback.php
+    static function types() {
+        // 'spam' => false: send() runs the spam checks itself
+        return array('feedback' => array('fields' => array('rating' => 0, 'comment' => ''), 'create' => 'visitor', 'spam' => false));
+    }
     function send() {
         $v = validation::get();
-        if (!$v->submitted()) return false;                       // show the form as designed
+        if (!$v->submitted()) return false;                          // show the form as designed
         if (!$v->valid()) return template::instance()->form_state(); // again, with the values
-        mail::send_view('_email/contact', 'me@example.com', array('message' => util::post('message')));
-        util::done('sent');                                       // redirect; the alert shows
+        if ($reasons = $v->suspect()) return $v->hold($reasons);     // looks like spam: again, with try_again or slow_down
+        cms_records::create('feedback', array('rating' => (int)util::post('rating'), 'comment' => (string)util::post('comment')));
+        util::done('sent');                                          // redirect; the alert shows
     }
 }
 ```
+
+A form that only stores what it is sent needs less: `function send() { return
+cms_records::submit('feedback', 'sent'); }` does these steps, spam checks
+included (leave out `'spam' => false`). For a contact form that emails staff,
+use the bundled `contact` model (see **Bundled models**) rather than a model
+of your own. Staff read the feedback on a page that renders
+`render.cms.feedback` (see **Records**).
 
 - **Rules live in the HTML.** `required`, `type` (email, url, number, date),
   `minlength`, `maxlength`, `min`, `max` and `pattern` are enforced on the
@@ -513,8 +527,11 @@ class contact {
   - `validation::get()->suspect($fields = null)` returns the reasons the
     post looks like spam, empty when it looks human. `$fields` are the
     fields looked at for links and blocked words: `null` is every field of
-    the form that was posted, `array()` none (the stamp and the limits
-    still run). Asked twice in a request, it counts the post once.
+    the form that was posted, `array()` none. `array()` turns off every
+    text check, the blocklist on the email's domain included (only the
+    stamp and the limits run): a form that answers `try_again` would
+    refuse a blocked address on every try. Asked twice in a request, it
+    counts the post once.
 
     | Reason | When |
     |---|---|
@@ -525,7 +542,7 @@ class contact {
     | `too_many_from_ip` | more than `spam_per_ip` posts of this form from this IP in the last hour |
     | `too_many_from_email` | more than `spam_per_email` posts of this form with this `email` in the last hour |
     | `too_many_links` | more than `spam_max_links` links (`http://`, `https://`, `www.`, `[url=`) in the checked fields |
-    | `blocked` | a word of `spam_blocklist` in the checked fields, or a domain of it (an entry with a dot, and its subdomains) in their links or the email's domain |
+    | `blocked` | a word of `spam_blocklist` in the checked fields, or a domain of it (an entry with a dot, and its subdomains) in their links or the email's domain; not checked at all with `$fields` `array()` |
 
     At most one stamp reason; every other check runs, in this order.
   - `$v->hold($reasons)` raises `slow_down` when a reason is a limit
@@ -553,14 +570,16 @@ class contact {
     visitor shares one count. Name it in `trusted_proxies` (addresses or
     CIDR ranges, IPv4 and IPv6): a post from one of them is counted by
     `client_ip_header` (`X-Forwarded-For`, the last entry that isn't a
-    trusted proxy; or one address, `Fly-Client-IP`). A header that is
-    missing or not an address keeps the proxy's. An IPv4 address written as
+    trusted proxy; or one address, `Fly-Client-IP`). An entry's port and
+    brackets are left out (`1.2.3.4:5678`, `[2001:db8::1]:443`). A header
+    that is missing or not an address keeps the proxy's. An IPv4 address written as
     IPv6 (`::ffff:203.0.113.7`) counts as the IPv4 address. In production
     `doctor` warns when today's posts came from a private address and
     `trusted_proxies` is empty.
   - **What each bundled public form does with a suspect post.** They ask
-    `suspect(array())` (stamp and limits, no text checks) right after
-    `valid()`, so a person fixing a typo isn't counted:
+    `suspect(array())` (stamp and limits, no text checks and no
+    blocklist, the email's domain included) right after `valid()`, so a
+    person fixing a typo isn't counted:
 
     | Form | A suspect post |
     |---|---|
@@ -569,14 +588,16 @@ class contact {
     | `render.booking.form` | the same |
     | `render.authentication.forgot` | only the limits count: a post over one answers `reset_sent` as for an unknown address and mails nothing; the stamp is not checked |
     | `cms_records::submit` (a record form whose type has `create` `visitor` or `member`) | the form again with `try_again` / `slow_down`; checked before `create` is, so a bot learns nothing about which types need a login |
-    | `render.contact.form` | stored as `spam` with its reasons, nobody emailed, and `sent` as for anyone (see **Bundled models**, contact); it also checks `name`, `subject` and `message` for links and blocked words |
+    | `render.contact.form` | stored as `spam` with its reasons, nobody emailed, and `sent` as for anyone (see **Bundled models**, contact); it also checks `name`, `subject` and `message` for links and blocked words, and the email's domain against the blocklist |
 
     Login, reset, account, logout, the booking manage page and the
     newsletter's unsubscribe aren't checked. `lint` warns on a view with
     `render.newsletter.signup`, `render.authentication.register` or
     `render.booking.form` that lacks `print.validation.alert('try_again')`
     or `('slow_down')`: word them where the person will see them, as for
-    any alert. A site's own form on `cms_records::submit` is covered too,
+    any alert. Put the pair once at the top of the layout's `res.header`
+    (`lint` counts alerts in the fragments a view includes), so a held post
+    shows its message once, and not again beside the form. A site's own form on `cms_records::submit` is covered too,
     but `lint` can't see which views post to it, so add the alerts there
     yourself. A script that posts without ever fetching the form gets
     `try_again`.
@@ -1353,8 +1374,11 @@ and hides the bundled one completely, and `lint` says so.
   `subject_invalid` (a CR, LF, NUL or other control character, or over 200
   characters: they may reach a mail header, so they are refused, not
   cleaned), `email_invalid` (empty, not an address, over 254 characters,
-  or a control character), `message_invalid` (empty, or over
-  `contact_max_length` characters).
+  a control character, or more than a plain address: whitespace, a quoted
+  local part, any of `" ( ) , : ; < > [ ] \`, or a second `@`, which PHP's
+  email filter lets through and could carry a second address into
+  Reply-To), `message_invalid` (empty, or over `contact_max_length`
+  characters).
 - Status: `new` until staff run `done` (they answered it); `spam` (reason
   `staff`) on one staff judge to be spam, `not_spam` on a flagged one (back
   to `new`, its reasons cleared). A message is never `done` straight from
@@ -1857,17 +1881,25 @@ Set in `config/the_app.php` with `config::set('name')->to(value)`.
 
 Environment variables: `RASTER_ENV`, `RASTER_URL`, `RASTER_DB`,
 `RASTER_APP` (the application folder, `application` by default),
-`RASTER_MAIL`, `RASTER_MAIL_FROM`, `RASTER_MCP_TOKEN`, `NO_COLOR` (plain
-command-line output). They win over the settings above.
+`RASTER_MAIL`, `RASTER_MAIL_FROM`, `RASTER_MCP_TOKEN`, `RASTER_SECRET` (the
+site's key, below), `NO_COLOR` (plain command-line output). They win over
+the settings above.
 
 `RASTER_SECRET` is the site's key for signing form stamps (not a setting, so
-`describe` never shows it). Without it Raster makes `data/secret` (64 hex
-characters, mode 0600) the first time it needs one and keeps using that file.
-Set the variable instead when several servers share a site, so they all sign
-and check with one key. The file must belong to the web server's user: one
-made by a command run as someone else may be one PHP-FPM can't read, and then
-the stamp is off (`doctor` warns). Changing the key makes the forms already shown fail
-their stamp check, so people with a page open send it again.
+`describe` never shows it). Without it the first web request that needs a
+key makes `data/secret` (64 hex characters, mode 0600), and the site keeps
+using that file. The command line (`raster render`, a script) never makes
+it: a file made by a command would belong to that command's user, and
+PHP-FPM, running as another, couldn't read it. A command with no file it
+can read signs with a key of its own, for that process only. Set the
+variable instead when several servers share a site, so they all sign and
+check with one key. A `data/secret` the web server can't read, or that
+isn't a key, turns the stamp off and logs a warning on every request.
+`doctor` can only say what its own user sees: it warns when that user can't
+read the file or it isn't a key, so run it as the web server's user to be
+sure. Delete the file and let the site make it again, or set
+`RASTER_SECRET`. Changing the key makes the forms already shown fail their
+stamp check, so people with a page open send it again.
 
 ## Checklist for a change
 
@@ -1913,7 +1945,8 @@ their stamp check, so people with a page open send it again.
   templates, the database, whether `.htaccess` still carries every rule in
   `system/private_paths.php`, uses of deprecated features
   (`system/tools/deprecations.php`, minus the ones config `allow_deprecated`
-  says are on purpose), a `data/secret` that can't be read or isn't a key,
+  says are on purpose), a `data/secret` the user running it can't read or
+  that isn't a key,
   and, in production, posts arriving through a proxy `trusted_proxies`
   doesn't name, the site address, mail, tokens,
   whether PHP shows errors (`display_errors`) and whether PHP takes the
