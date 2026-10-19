@@ -327,10 +327,13 @@ class cafe {
   `event::unbind(…)->from(…)`.
 - Listeners get the payload array and run in order: the framework's own
   bindings in `system/config/events.php` (routing, the CMS and account
-  checks, the newsletter's confirmation email, the booking emails), then
-  `the_events.php`, then
-  `listens()`, then the framework's core handlers (controller and log). A
-  listener returning `false` makes
+  checks, the newsletter's confirmation email, the booking emails) and the
+  bundled models' `listens()` (an override's, for a `the_` model), then
+  `the_events.php`, then the site's own models' `listens()`, then the
+  framework's core handlers (controller and log). So a site listener sees
+  the state a bundled model's listener left (an order already marked
+  paid), and `the_events.php` can unbind any of the framework's listeners,
+  `listens()` ones included. A listener returning `false` makes
   `event::dispatch()` return `false`; the sender decides what that means.
 - Name your events `<model>.<what happened>`, in the past tense.
 - `listens()` returns a constant array: Raster keeps what it returns in
@@ -1234,6 +1237,11 @@ use `'model.method'`: `method(true)` returns
   php bin/raster deploy --config=caddy  --host=site.example --socket=unix//run/php/php-fpm.sock
   ```
 
+  The nginx config also takes request bodies up to 13 MB
+  (`client_max_body_size`; nginx's 1 MB would refuse the editor's larger
+  pictures with a 413), gzips text other than pages, and gives `/media/` a
+  year's `expires`, since an upload never reuses a file name.
+
   `raster serve` is PHP's built in server, for development. In production run
   PHP-FPM behind one of those. `doctor` checks that the `.htaccess` on disk
   still carries every rule. Matching ignores case on every server, and
@@ -1303,7 +1311,9 @@ of lists and filter pages come along; drafts and the editor don't.
 - **Exporting again** to the same folder writes only files that changed and
   removes the ones the site no longer has, so a deploy uploads just those.
   When nothing the site is made of changed (content, templates, models,
-  theme, media), it does nothing. `.raster-export.json` in the folder keeps
+  theme, media) and it is the same day, it does nothing. A new day in the
+  site's time zone always exports again, so `date>=today` lists and what
+  prints from the clock stay current. `.raster-export.json` in the folder keeps
   track; files the export didn't write are left alone. `--clean` starts the
   folder over.
 
@@ -1315,10 +1325,19 @@ of lists and filter pages come along; drafts and the editor don't.
 - **The in-page editor.** For editors, the page itself is the editor: every
   `print.cms` field, collection, item and item field is editable where it
   shows, in the site's own type (`E` or the Edit button starts, changes save
-  when you leave a field, every change can be undone). Items get a handle to
+  when you leave a field, every change can be undone). A rich field whose
+  place can't hold paragraphs (it is a `<p>`, a heading, an `<li>`, or sits
+  inside one) takes Enter as a line break, and pasted paragraphs, lists,
+  headings and quotes become lines, so what it stores fits where it prints (in a field that is a list,
+  Enter still adds a bullet). A field that already holds paragraphs, say
+  in an `<li>` or an `<a>` card, keeps them. Items get a handle to
   edit details, duplicate, hide, schedule or delete them; each list ends with
   a card for a new item, made from the template's mock-up. Photos (`print.@src`)
-  are replaced by choosing or dropping a picture, framed in the browser. The
+  are replaced by choosing or dropping a picture, framed in the browser.
+  Everything works from the keyboard too: in edit mode Tab reaches each
+  item, photo and new-item card, focus shows the item's handle or the photo
+  button, Enter moves into the handle (Esc comes back), picks a photo or
+  starts the new item. The
   Page panel lists fields the page can't show (in `<head>`, in attributes),
   the lists, and the page's history. The dock sits at the bottom of the
   screen; flick it up (a finger, a mouse dragged and let go, or two fingers
@@ -1507,7 +1526,11 @@ command-line output). They win over the settings above.
   `update <file.tar.gz>`; `--dry-run` shows what would change). It refuses
   when framework files were edited since they were installed
   (`system/checksums.json` records them); `--force` goes ahead. Replaced
-  files are kept in `application/data/backups/`.
+  files are kept in `application/data/backups/`. A folder or archive must
+  hold `system/boot.php` to count as a release; anything else is refused,
+  `--force` or not. A framework file it can't write or remove stops the
+  update with exit 1 and the file's name, and the old files are put back,
+  so nothing is half updated or recorded as installed.
 - It then runs `php bin/raster upgrade` for every app: the steps in
   `system/upgrades/<version>.php` the app still needs (renamed annotations,
   moved files). The version an app is at is in `config/raster-version`.
@@ -1523,8 +1546,12 @@ command-line output). They win over the settings above.
   templates, the database, whether `.htaccess` still carries every rule in
   `system/private_paths.php`, uses of deprecated features
   (`system/tools/deprecations.php`, minus the ones config `allow_deprecated`
-  says are on purpose) and, in production, the site address, mail, tokens
-  and whether PHP shows errors (`display_errors`).
+  says are on purpose) and, in production, the site address, mail, tokens,
+  whether PHP shows errors (`display_errors`) and whether PHP takes the
+  editor's pictures: it warns when `upload_max_filesize` is below 12M or
+  `post_max_size` below 13M (`cms_editor::UPLOAD_MB` and the rest of the
+  form). It reads the command line's php.ini, which can differ from
+  PHP-FPM's.
   Exit 1 when something must be fixed.
 - `php bin/raster new <folder>` starts a new site from this copy of Raster.
 - `CHANGELOG.md` in the repository lists what changed in each release.
@@ -1566,4 +1593,7 @@ version it names). To release, bump `system/VERSION` and add a
 `## <version>` section to `CHANGELOG.md`, then merge to `master`: the
 workflow in `.github/workflows/release.yml` runs the tests, tags
 `v<version>` and publishes the release with those notes. Pull requests run
-the same tests.
+the same tests: the four suites and both lints on PHP 8.1, 8.4 and 8.5,
+an update of a new site from GitHub, the framework, demo and shop suites on
+MySQL with PHP 8.1 and 8.4, and `tests/editor-browser.js` in Chromium. The
+jobs run side by side, so the slowest one sets the time.

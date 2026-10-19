@@ -187,23 +187,55 @@
 		for (var n = start.nextSibling; n && n !== end; n = n.nextSibling) nodes.push(n);
 		return nodes;
 	}
+	// whether nodes hold markup, which makes an item's field rich text
+	function tagged(nodes) { return nodes.some(function (n) { return n.nodeType === 1; }); }
 	function meaningful(node) { return !(node.nodeType === 3 && !node.textContent.trim()) && node.nodeType !== 8; }
 	function isBlock(node) {
 		if (node.nodeType !== 1) return false;
-		return /^(P|DIV|UL|OL|H[1-6]|BLOCKQUOTE|TABLE|SECTION|ARTICLE|FIGURE|PRE)$/.test(node.tagName);
+		return /^(P|DIV|UL|OL|DL|H[1-6]|BLOCKQUOTE|TABLE|SECTION|ARTICLE|ASIDE|HEADER|FOOTER|NAV|FIGURE|PRE|HR|FORM)$/.test(node.tagName);
 	}
 	// the element to make editable for the nodes between two marks: their
-	// parent when they are all it holds, or a wrapper around them
-	function region(start, end) {
+	// parent when they are all it holds, or a wrapper around them; for rich
+	// text a <div> when the parent takes paragraphs and the marks have their
+	// own line, so the field takes paragraphs too
+	function region(start, end, rich) {
 		if (!start || !end || start.parentNode !== end.parentNode) return null;
 		var parent = start.parentNode, inside = between(start, end);
 		var outside = Array.prototype.filter.call(parent.childNodes, function (n) { return n !== start && n !== end && inside.indexOf(n) < 0 && meaningful(n); });
 		if (!outside.length && parent !== document.body && !/^(MAIN|BODY|SECTION|ARTICLE|LI|TD)$/.test(parent.tagName)) return parent;
-		var wrapper = document.createElement(inside.some(isBlock) ? 'div' : 'span');
+		var blocks = inside.some(isBlock) || (rich && takesBlocks(parent) && ownLine(start, end));
+		var wrapper = document.createElement(blocks ? 'div' : 'span');
 		wrapper.setAttribute('data-raster-wrap', '');
 		parent.insertBefore(wrapper, end);
 		inside.forEach(function (n) { wrapper.appendChild(n); });
 		return wrapper;
+	}
+	// whether nothing but blocks sits beside the marks, up to the next block
+	// either way, so they don't share a line with other text
+	function ownLine(start, end) {
+		var n;
+		for (n = start.previousSibling; n && !isBlock(n); n = n.previousSibling) if (meaningful(n)) return false;
+		for (n = end.nextSibling; n && !isBlock(n); n = n.nextSibling) if (meaningful(n)) return false;
+		return true;
+	}
+	// whether a region may hold paragraphs, or is a list or a table, where
+	// Enter is the browser's (a new bullet, a new row); a <p>, a heading, an
+	// <li> or a <span> can't, so a rich field there gets line breaks (#114),
+	// unless it holds paragraphs already (holdsBlocks()).
+	// A wrapper's <div> takes them where its parent does, whatever it holds
+	function takesBlocks(el) {
+		if (el.hasAttribute('data-raster-wrap')) return el.tagName === 'DIV' && !!el.parentNode && el.parentNode.nodeType === 1 && takesBlocks(el.parentNode);
+		return /^(DIV|BLOCKQUOTE|SECTION|ARTICLE|ASIDE|MAIN|HEADER|FOOTER|NAV|FIGURE|FIGCAPTION|TD|TH|DD|FORM|FIELDSET|DETAILS|UL|OL|MENU|DL|TABLE|THEAD|TBODY|TFOOT|TR)$/.test(el.tagName);
+	}
+	// whether a rich field takes paragraphs where it sits, or already holds
+	// some: a stored value of paragraphs in an <li> or an <a> card stays
+	// paragraphs, so only a region that can't hold any (a <p>, a heading)
+	// gets line breaks
+	function holdsBlocks(el) {
+		return takesBlocks(el) || Array.prototype.some.call(el.childNodes, isBlock);
+	}
+	function lineBreak() {
+		if (!document.execCommand('insertLineBreak')) document.execCommand('insertHTML', false, '<br>');
 	}
 	// whether an item sits inside a list on the page
 	function holds(list, item) {
@@ -251,10 +283,11 @@
 				field.kind = field.el && field.el.tagName === 'IMG' ? 'image' : 'attr';
 				field.attr = info.attr;
 			} else {
-				field.el = region(pair.s, pair.e);
-				field.kind = (info.rich || (info.kind === 'item_field' && /<[a-z][^>]*>/i.test(field.el ? field.el.innerHTML : ''))) ? 'rich' : 'text';
+				field.kind = (info.rich || (info.kind === 'item_field' && tagged(between(pair.s, pair.e)))) ? 'rich' : 'text';
+				field.el = region(pair.s, pair.e, field.kind === 'rich');
 			}
 			if (!field.el) return;
+			field.inline = !holdsBlocks(field.el);
 			if (info.kind === 'item_field' || info.kind === 'item_attr') {
 				field.item = items[info.item];
 				if (!field.item) return;
@@ -298,6 +331,7 @@
 			'html.raster-editing img[data-raster-field]:hover{filter:brightness(.92);outline-color:var(--raster-a)}',
 			'html.raster-editing [data-raster-item]{transition:opacity .3s,filter .3s,outline-color .2s,transform .35s;outline:2px dashed transparent;outline-offset:6px}',
 			'html.raster-editing [data-raster-item]:hover,html.raster-editing [data-raster-item].raster-active{outline-color:color-mix(in srgb,var(--raster-a) 45%,transparent)}',
+			'html.raster-editing [data-raster-item]:focus-visible,html.raster-editing img[data-raster-field]:focus-visible,.raster-ghost:focus-visible{outline:2px solid var(--raster-a)!important;opacity:1}',
 			'[data-raster-state=draft],[data-raster-state=scheduled]{opacity:.55;filter:saturate(.4)}',
 			'[data-raster-state=draft]:hover,[data-raster-state=scheduled]:hover{opacity:.85}',
 			'.raster-leaving{opacity:0!important;transform:scale(.96)!important;transition:opacity .35s,transform .35s!important}',
@@ -615,7 +649,7 @@
 	// ##Saving fields
 	function fieldValue(field) {
 		if (field.kind === 'text') return field.el.innerText.replace(/ /g, ' ').replace(/\s*\n\s*/g, ' ').trim();
-		return clean(field.el.innerHTML).trim();
+		return clean(field.el.innerHTML, field.inline).trim();
 	}
 	function twins(field) { return fields.filter(function (f) { return f !== field && f.key === field.key; }); }
 	function saveValue(field, value) {
@@ -670,7 +704,11 @@
 		return /^(javascript|data|vbscript):/i.test(plain.replace(/[\x00-\x20]+/g, ''));
 	}
 
-	function clean(html) {
+	// inline: for a region that can't hold paragraphs; its paragraphs,
+	// lists, headings and quotes, at any depth, become lines, so the value
+	// fits where it sits
+	var blocks = 'p,ul,ol,li,h2,h3,h4,blockquote';
+	function clean(html, inline) {
 		var box = document.createElement('template');
 		box.innerHTML = html;
 		(function walk(node) {
@@ -690,6 +728,18 @@
 				if (child.tagName === 'A' && scriptLink(child.getAttribute('href'))) child.removeAttribute('href');
 			});
 		})(box.content);
+		// the outermost block first, so its own blocks are then siblings
+		var br = function (n) { return !!n && n.nodeType === 1 && n.tagName === 'BR'; };
+		for (var child, n, m; inline && (child = box.content.querySelector(blocks));) {
+			if (child.textContent.trim() || child.querySelector('*')) {
+				for (n = child.previousSibling; n && !meaningful(n); n = n.previousSibling);
+				for (m = child.nextSibling; m && !meaningful(m); m = m.nextSibling);
+				if (n && !br(n)) child.parentNode.insertBefore(document.createElement('br'), child);
+				if (m && !br(m) && !br(child.lastChild)) child.parentNode.insertBefore(document.createElement('br'), child.nextSibling);
+				while (child.firstChild) child.parentNode.insertBefore(child.firstChild, child);
+			}
+			child.remove();
+		}
 		var out = document.createElement('div');
 		out.appendChild(box.content.cloneNode(true));
 		return out.innerHTML.replace(/<p><\/p>/g, '');
@@ -706,11 +756,22 @@
 			if (!on) f.el.removeAttribute('contenteditable');
 			if (on && (f.kind === 'text' || f.kind === 'rich')) { f.el.setAttribute('spellcheck', 'true'); if (!f.el.hasAttribute('aria-label')) f.el.setAttribute('aria-label', human(f.info.field)); }
 		});
+		reachable(on);
 		if (on) { glow(); addGhosts(); } else { removeGhosts(); clearFloats(); if (document.activeElement && document.activeElement.isContentEditable) document.activeElement.blur(); }
 		store('raster-editing', on ? '1' : null);
 		updateDock();
 		if (!quiet) toast(on ? t('edit_mode_on') : t('edit_mode_off'));
 		closeBubble();
+	}
+	// in edit mode Tab reaches items, photos and new-item cards, which only a
+	// pointer could reach before: focus shows their handle or photo button
+	function reachable(on) {
+		var els = Object.keys(items).map(function (id) { return items[id].el; }).concat(fields.filter(function (f) { return f.kind === 'image'; }).map(function (f) { return f.el; }));
+		els.forEach(function (el) { tabbable(el, on); });
+	}
+	function tabbable(el, on) {
+		if (on && !el.hasAttribute('tabindex')) { el.setAttribute('tabindex', '0'); el.setAttribute('data-raster-tab', ''); }
+		if (!on && el.hasAttribute('data-raster-tab')) { el.removeAttribute('tabindex'); el.removeAttribute('data-raster-tab'); }
 	}
 	var plaintextOnly = (function () { var d = document.createElement('div'); d.setAttribute('contenteditable', 'plaintext-only'); return d.contentEditable === 'plaintext-only'; })();
 	function updateDock() {
@@ -728,6 +789,12 @@
 
 	// focus, typing, leaving
 	document.addEventListener('focusin', function (e) {
+		if (editing && !touch && e.target !== host) {
+			var itemEl = e.target.closest && e.target.closest('[data-raster-item]');
+			if (itemEl) { cancelDeactivate(); activateItem(items[itemEl.getAttribute('data-raster-item')]); }
+			else if (activeItem && !floating) clearFloats();
+			if (e.target.matches && e.target.matches('img[data-raster-field]')) showPhotoButton(fieldFor(e.target));
+		}
 		var field = fieldFor(e.target);
 		if (!field || !editing || field.kind === 'image') return;
 		if (field.before == null) field.before = { value: fieldValue(field), html: field.el.innerHTML };
@@ -744,6 +811,16 @@
 		}, 0);
 	});
 	document.addEventListener('keydown', function (e) {
+		if (editing && (e.key === 'Enter' || e.key === ' ') && e.target.hasAttribute && e.target.hasAttribute('tabindex') && !e.target.isContentEditable && e.target !== host) {
+			// an item opens its handle; a photo, a new-item card or a photo in it is clicked
+			if (e.target.hasAttribute('data-raster-item') && !e.target.classList.contains('raster-ghost')) {
+				e.preventDefault();
+				activateItem(items[e.target.getAttribute('data-raster-item')]);
+				if (handle) handle.querySelector('button').focus();
+				return;
+			}
+			if (e.target.matches('img, .raster-ghost:not(.raster-new)')) { e.preventDefault(); e.target.click(); return; }
+		}
 		var field = fieldFor(e.target);
 		if (field && editing) {
 			if (e.key === 'Escape') {
@@ -753,8 +830,12 @@
 				return;
 			}
 			if (e.key === 'Enter' && (e.metaKey || e.ctrlKey || field.kind === 'text')) { e.preventDefault(); field.el.blur(); return; }
+			if (e.key === 'Enter' && field.inline) { e.preventDefault(); lineBreak(); return; }
 			return;
 		}
+		// a rich field of a new item, in the card being filled in
+		var fresh = editing && e.key === 'Enter' && !e.metaKey && !e.ctrlKey && e.target.closest && e.target.closest('[data-raster-name][data-raster-edit=rich]');
+		if (fresh && fresh.closest('.raster-new') && !holdsBlocks(fresh)) { e.preventDefault(); lineBreak(); return; }
 		if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable || (host && e.composedPath && e.composedPath().some(function (n) { return n.tagName === 'INPUT' || n.tagName === 'TEXTAREA'; }))) return;
 		if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
 			if (!undoStack.length) { if (editing) { e.preventDefault(); toast(t('nothing_to_undo')); } return; }
@@ -771,7 +852,7 @@
 		if (!field || !editing) return;
 		e.preventDefault();
 		var data = e.clipboardData;
-		if (field.kind === 'rich' && data.getData('text/html')) document.execCommand('insertHTML', false, clean(data.getData('text/html')));
+		if (field.kind === 'rich' && data.getData('text/html')) document.execCommand('insertHTML', false, clean(data.getData('text/html'), field.inline));
 		else document.execCommand('insertText', false, data.getData('text/plain'));
 	});
 	// in edit mode a click on an editable link edits it instead of leaving
@@ -800,6 +881,7 @@
 	function showFormatBar(field) {
 		hideFormatBar();
 		var commands = [['bold', 'bold'], ['italic', 'italic'], ['link', 'link'], ['list', 'insertUnorderedList'], ['clear', 'removeFormat']];
+		if (field.inline) commands = commands.filter(function (c) { return c[0] !== 'list'; });
 		formatBar = h('div', { class: 'float format surface', role: 'toolbar' });
 		commands.forEach(function (c) {
 			formatBar.appendChild(h('button', { title: t(c[0]), 'aria-label': t(c[0]), html: icon(c[0]), onmousedown: function (e) {
@@ -867,6 +949,7 @@
 			record ? null : button('clock', t('schedule'), function () { openSchedule(item); }),
 			button('trash', t('delete'), function () { remove(item); }, 'danger')]
 		));
+		handle.addEventListener('keydown', function (e) { if (e.key === 'Escape') { e.stopPropagation(); item.el.focus(); } });
 		handle.addEventListener('mouseleave', function (e) { if (!item.el.contains(e.relatedTarget)) scheduleDeactivate(); });
 		handle.addEventListener('mouseenter', cancelDeactivate);
 		ui.floats.appendChild(handle);
@@ -1032,6 +1115,7 @@
 		el.setAttribute('data-raster-item', id);
 		el.classList.remove('raster-active', 'raster-ghost', 'raster-new');
 		el.classList.add('raster-arriving');
+		if (editing) tabbable(el, true);
 		var parts = el.querySelectorAll('[data-raster-field]');
 		if (el.hasAttribute('data-raster-field')) parts = [el].concat(Array.prototype.slice.call(parts));
 		Array.prototype.forEach.call(parts, function (node) {
@@ -1043,10 +1127,11 @@
 			var finfo = { kind: old && old.kind === 'image' ? 'item_attr' : 'item_field', item: id, field: name, attr: old ? old.attr : node.getAttribute('data-raster-attr') };
 			marks[fid] = finfo;
 			var kind = old ? old.kind : (node.tagName === 'IMG' ? 'image' : (/<[a-z]/i.test(node.innerHTML) ? 'rich' : 'text'));
-			var field = { id: fid, info: finfo, el: node, kind: kind, attr: finfo.attr, item: item, key: 'item:' + id + ':' + name };
+			var field = { id: fid, info: finfo, el: node, kind: kind, attr: finfo.attr, item: item, key: 'item:' + id + ':' + name, inline: !holdsBlocks(node) };
 			node.setAttribute('data-raster-field', fid);
 			if (kind === 'image' || kind === 'attr') node.removeAttribute('data-raster-edit'); else node.setAttribute('data-raster-edit', kind);
 			if (editing && kind !== 'image') node.setAttribute('contenteditable', kind === 'text' && plaintextOnly ? 'plaintext-only' : 'true');
+			if (kind === 'image' && editing) tabbable(node, true);
 			item.fields.push(field);
 			fields.push(field);
 		});
@@ -1190,8 +1275,8 @@
 				if (m) {
 					var end = c.nextSibling;
 					while (end && !(end.nodeType === 8 && end.data === 'raster:/m')) end = end.nextSibling;
-					var r = region(c, end);
-					if (r) { r.setAttribute('data-raster-name', m[1]); r.setAttribute('data-raster-field', 'new'); r.setAttribute('data-raster-edit', /<[a-z]/i.test(r.innerHTML) ? 'rich' : 'text'); }
+					var rich = tagged(between(c, end)), r = region(c, end, rich);
+					if (r) { r.setAttribute('data-raster-name', m[1]); r.setAttribute('data-raster-field', 'new'); r.setAttribute('data-raster-edit', rich ? 'rich' : 'text'); }
 				} else if (ma) {
 					var target = nextElement(c);
 					if (target) { target.setAttribute('data-raster-name', ma[1]); target.setAttribute('data-raster-attr', ma[2]); target.setAttribute('data-raster-field', 'new'); }
@@ -1206,6 +1291,7 @@
 			ui.floats.appendChild(label);
 			var ghost = { el: el, label: label, list: list };
 			el.addEventListener('click', function (e) { if (!el.classList.contains('raster-new')) { e.preventDefault(); startNew(ghost); } });
+			tabbable(el, true);
 			ghosts.push(ghost);
 		});
 		place();
@@ -1217,11 +1303,13 @@
 	function startNew(ghost) {
 		var el = ghost.el;
 		el.classList.add('raster-new');
+		tabbable(el, false);
 		if (ghost.label) { ghost.label.remove(); ghost.label = null; }
 		var parts = Array.prototype.slice.call(el.querySelectorAll('[data-raster-name]'));
 		if (el.hasAttribute('data-raster-name')) parts.unshift(el);
 		parts.forEach(function (node) {
 			if (node.tagName === 'IMG') {
+				tabbable(node, true);
 				node.addEventListener('click', function () { pickPhoto({ el: node, kind: 'image', attr: node.getAttribute('data-raster-attr'), pending: true, info: { field: node.getAttribute('data-raster-name') } }); });
 				return;
 			}
@@ -1254,7 +1342,7 @@
 			var name = node.getAttribute('data-raster-name');
 			if (readonly(list.info).indexOf(name) >= 0 || (list.info.lists || []).indexOf(name) >= 0) return;
 			if (node.tagName === 'IMG') { fieldsOut[name] = node.getAttribute('data-raster-value') || (list.info.fields || {})[name] || ''; return; }
-			fieldsOut[name] = node.getAttribute('data-raster-edit') === 'text' ? node.innerText.replace(/\s+/g, ' ').trim() : clean(node.innerHTML).trim();
+			fieldsOut[name] = node.getAttribute('data-raster-edit') === 'text' ? node.innerText.replace(/\s+/g, ' ').trim() : clean(node.innerHTML, !holdsBlocks(node)).trim();
 		});
 		working(1);
 		call('editor_save_item', { collection: list.info.collection, id: 0, fields: fieldsOut, examples: list.info.fields }).then(function (saved) {
@@ -1293,6 +1381,7 @@
 			if (photoButton && photoButton.field === field && !field.el.contains(e.relatedTarget) && e.relatedTarget !== host) { photoButton.remove(); photoButton = null; }
 		};
 		field.el.addEventListener('mouseleave', leave, { once: true });
+		field.el.addEventListener('blur', leave, { once: true });
 	}
 	function pickPhoto(field) {
 		var input = document.createElement('input');

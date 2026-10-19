@@ -24,10 +24,10 @@ php bin/raster update raster-2.1.0.tar.gz
 
 What happens:
 
-1. The release is downloaded from GitHub (or read from the folder or archive).
+1. The release is downloaded from GitHub (or read from the folder or archive). A folder or archive without `system/boot.php` isn't a Raster release and is refused, even with `--force`.
 2. **Raster checks whether you edited any framework file** since it was installed. It keeps a fingerprint of every framework file in `system/checksums.json`. If something was changed, added or removed, the update stops and lists the files, so your changes aren't silently lost. Move the changes into your app (see [Extending Raster](Extending-Raster)) and run it again, or pass `--force` to go ahead anyway.
 3. Going back to an older version also needs `--force`.
-4. The framework files are replaced. The old ones are kept in `application/data/backups/`.
+4. The framework files are replaced. The old ones are kept in `application/data/backups/`. If a file can't be written or removed (a read-only file, a full disk), the update stops with an error naming it, puts the old files back and exits 1: the project is as it was, and `raster doctor` agrees.
 5. `raster upgrade` runs for every app in the project (below).
 
 Then:

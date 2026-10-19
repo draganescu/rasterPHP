@@ -1453,6 +1453,12 @@ test('N7', 'deploy prints the server configuration', function () use ($root) {
 		has($out, 'phar', 'the private extensions are in there');
 		lacks($out, '/demo/', 'no rule names an app folder, so adding an app needs no change');
 	}
+	// nginx takes 1 MB bodies by default; the editor sends pictures up to 12 MB (#115)
+	list($code, $nginx) = raster(array('deploy', '--config=nginx'));
+	check(preg_match('/^    client_max_body_size (\d+)m;$/m', $nginx, $m) && (int)$m[1] > 12, 'a body size above the editor\'s 12 MB: '.$nginx);
+	has($nginx, "    gzip on;\n");
+	has($nginx, 'gzip_types text/css');
+	check(preg_match('#location /media/ \{[^}]*expires 1y;#', $nginx), 'media/ is cached for long: its file names never repeat');
 	same(2, raster(array('deploy'))[0], 'no --config is a usage error');
 	same(1, raster(array('deploy', '--config=iis'))[0]);
 });
@@ -1543,6 +1549,51 @@ test('N11', 'exporting again writes only what changed', function () use ($tmp, $
 	check(is_file("$out/extra.txt"), 'files the export did not write are kept');
 	$manifest = json_decode(file_get_contents("$out/.raster-export.json"), true);
 	check(isset($manifest['files']['about/index.html']) && !empty($manifest['fingerprint']));
+});
+test('N11', 'a new day exports again: a list of what is coming drops what is past', function () use ($tmp, $base, $views) {
+	// Etc/GMT+12 is UTC-12 and Pacific/Kiritimati UTC+14: their dates always
+	// differ, so moving the site's time zone moves it to another day
+	$yesterday = array('CAFE_TIMEZONE' => 'Etc/GMT+12');
+	$tomorrow = array('CAFE_TIMEZONE' => 'Pacific/Kiritimati');
+	$day = (new DateTime('now', new DateTimeZone('Etc/GMT+12')))->format('Y-m-d');
+	$out = "$tmp/daily";
+	with_file("$views/coming.html", "<!doctype html><html><body><!-- render.cms.events('date>=today&order=date') --><p><!-- print.title -->Jazz night<!-- /print.title --> <!-- print.date -->2026-10-10<!-- /print.date --></p><!-- /render.cms.events('date>=today&order=date') --></body></html>", function () use ($base, $out, $yesterday, $tomorrow, $day) {
+		$gig = mcp($base, 'create_item', array('collection' => 'events', 'fields' => array('title' => 'Last night gig', 'date' => $day, 'summary' => 'x')));
+		try {
+			list($code, $output) = raster(array('export', $out, '--url=https://cafe.example/'), $yesterday);
+			same(0, $code, $output);
+			has(file_get_contents("$out/coming/index.html"), 'Last night gig', 'on its day the event is coming');
+			has(raster(array('export', $out, '--url=https://cafe.example/'), $yesterday)[1], 'Nothing changed since the last export');
+			$about = filemtime("$out/about/index.html");
+			sleep(1);
+			list($code, $output) = raster(array('export', $out, '--url=https://cafe.example/'), $tomorrow);
+			same(0, $code, $output);
+			lacks($output, 'Nothing changed since the last export');
+			lacks(file_get_contents("$out/coming/index.html"), 'Last night gig', 'the next day it is past');
+			same($about, filemtime("$out/about/index.html"), 'pages that did not change are not written again');
+		} finally {
+			mcp($base, 'delete_item', array('collection' => 'events', 'id' => $gig['id']));
+		}
+	});
+});
+test('N11', 'an export that crosses midnight records the day its pages were made on', function () use ($tmp, $root) {
+	// the clock moves to the next day between rendering and saving the
+	// fingerprint: the next day's export must still run
+	$out = "$tmp/midnight";
+	$script = "$tmp/midnight.php";
+	file_put_contents($script, '<?php require '.var_export("$root/system/boot.php", true).'; boot::$appname = "demo"; boot::cli();'
+		.' require_once BASE."tools/inspector.php"; require_once BASE."tools/export.php";'
+		.' class late_export extends raster_export { protected function collect_pages() { date_default_timezone_set("Pacific/Kiritimati"); parent::collect_pages(); } }'
+		.' @mkdir('.var_export($out, true).', 0775, true);'
+		.' $e = (new late_export('.var_export($root, true).', '.var_export($out, true).', "https://cafe.example/"))->run();'
+		.' echo $e->errors ? implode("\n", $e->errors) : "exported";');
+	$process = proc_open(array(PHP_BINARY, $script), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, array_merge(getenv(), array('CAFE_TIMEZONE' => 'Etc/GMT+12')));
+	$output = stream_get_contents($pipes[1]).stream_get_contents($pipes[2]);
+	same(0, proc_close($process), $output);
+	same('exported', trim($output));
+	list($code, $output) = raster(array('export', $out, '--url=https://cafe.example/'), array('CAFE_TIMEZONE' => 'Pacific/Kiritimati'));
+	same(0, $code, $output);
+	lacks($output, 'Nothing changed since the last export', 'the next day exports again');
 });
 test('N16', 'a page that answers an error stops the export, and the last export stays', function () use ($tmp, $root, $views) {
 	$out = "$tmp/failing";
