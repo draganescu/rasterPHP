@@ -557,7 +557,13 @@ class controller {
 		$template->view_file = raster_path($this->current_route);
 		$template->format = config::get('format', 'html');
 		$types = array('html' => 'text/html', 'xml' => preg_match('/\.rss$/', $this->current_route) ? 'application/rss+xml' : 'application/xml', 'json' => 'application/json', 'txt' => 'text/plain');
-		if (!headers_sent()) header('Content-Type: '.$types[$template->format].'; charset=utf-8');
+		if (!headers_sent()) {
+			header('Content-Type: '.$types[$template->format].'; charset=utf-8');
+			// browsers ask again each time (a 304 when nothing changed), so a
+			// publish shows at once, with the new asset URLs; a model or the
+			// session may send its own
+			header('Cache-Control: no-cache');
+		}
 		
 		$template::set('views_path')->to(boot::$appname.DIRECTORY_SEPARATOR.config::get('views_path'));
 		$template::set('theme')->to(config::get('theme'));
@@ -659,8 +665,45 @@ class controller {
 			return file_exists(controller::build_view_path(substr($m[3], 0, -strlen($m[4]) - 1), '.'.$m[4])) ? $m[1].'='.$m[2].template::get('link_uri').$m[3].$m[2] : $m[0];
 		}, $template->output);
 		$template->output = str_replace(template::get('link_uri')."__", template::get('link_uri').template::get('pad_uri'), $template->output);
+		if ($template->format === 'html' && !$template->is_email && config::get('asset_versions', true)) {
+			$template->output = self::version_assets($template->output);
+		}
 		return $template;
 	} 
+
+	// Theme files a page links to get ?v=<version> (config asset_versions, on
+	// by default). The URL changes when the file does, so browsers keep a copy
+	// for a year and still fetch the new one right after a publish. Only
+	// relative URLs to real files under the views folder; one that already has
+	// a query or a fragment is left alone, so a second pass changes nothing.
+	static function version_assets($html) {
+		require_once BASE.'private_paths.php';
+		$views = realpath(APPBASE.config::get('views_path'));
+		if ($views === false) return $html;
+		$theme = $views.DIRECTORY_SEPARATOR.config::get('theme').DIRECTORY_SEPARATOR;
+		$skip = array_merge(private_paths::$view_extensions, private_paths::$private_extensions);
+		$known = array();
+		$stamp = function ($url) use ($views, $theme, $skip, &$known) {
+			if ($url === '' || preg_match('#^([a-z][a-z0-9+.\-]*:|/|\#)|[?\#]#i', $url)) return $url;
+			if (!isset($known[$url])) {
+				$file = realpath($theme.rawurldecode($url));
+				$ok = $file !== false && strpos($file, $views.DIRECTORY_SEPARATOR) === 0 && is_file($file)
+					&& !in_array(strtolower(pathinfo($file, PATHINFO_EXTENSION)), $skip, true);
+				// the time and size, not the content: a stat, never a read
+				$known[$url] = $ok ? $url.'?v='.substr(md5(filemtime($file).' '.filesize($file)), 0, 8) : $url;
+			}
+			return $known[$url];
+		};
+		return preg_replace_callback('/(\s(src|href|poster|srcset))=(["\'])([^"\']*)\3/i', function ($m) use ($stamp) {
+			// srcset is a list: "a.jpg 1x, b.jpg 2x"
+			if (strtolower($m[2]) === 'srcset') {
+				$value = preg_replace_callback('/(^|,)(\s*)([^\s,]+)/', function ($c) use ($stamp) { return $c[1].$c[2].$stamp($c[3]); }, $m[4]);
+			} else {
+				$value = $stamp($m[4]);
+			}
+			return $m[1].'='.$m[3].$value.$m[3];
+		}, $html);
+	}
 	
 	static function get_object($model) {
 		$controller = controller::instance();
