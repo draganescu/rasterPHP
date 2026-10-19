@@ -965,6 +965,11 @@ class raster_inspector {
 		if ($at !== false && $this->admin_view($this->linting)) {
 			$problems[] = self::problem_at('warning', $html, $at, "render.booking.manage is the guests' page, but config 'protected' keeps this view for staff: protect staff pages by their own names (staff, booking_item), never booking");
 		}
+		// the contact messages are for staff: the region shows visitors
+		// nothing, but the page belongs in the Admin menu, behind the login
+		if (preg_match('/<!-- render\.contact\.messages[ (]/', $html, $m, PREG_OFFSET_CAPTURE) && !$this->admin_view($this->linting)) {
+			$problems[] = self::problem_at('warning', $html, $m[0][1], "$this->linting lists contact messages but isn't protected for editors: add it to config 'protected' (config::set('protected')->to(array('staff' => 'editor')))");
+		}
 	}
 
 	// how many records of a declared type there are, or null when that
@@ -1339,11 +1344,17 @@ class raster_inspector {
 	// Describes the CMS content of the theme: page fields per view and
 	// collections with their fields. Defaults are the placeholder content
 	// in the markup, which is what the CMS stores on first render.
-	// whether a view of any theme renders render.cms.<name> (partials too)
+	// whether a view of any theme renders render.cms.<name> (partials too),
+	// or a model's region that its requires() says lists the type
+	// ('lists' => array('contactmessage' => array('render.contact.messages')))
 	function listed($name) {
+		$regions = array('render.cms.'.$name);
+		$lists = controller::required('lists');
+		if (isset($lists[$name])) $regions = array_merge($regions, (array)$lists[$name]);
+		$pattern = '/<!-- (?:'.implode('|', array_map(function ($region) { return preg_quote($region, '/'); }, $regions)).')(\(| -->)/';
 		foreach (glob($this->views_dir.'/*', GLOB_ONLYDIR) ?: array() as $dir) {
 			foreach ($this->views(basename($dir)) as $view) {
-				if (preg_match('/<!-- render\.cms\.'.preg_quote($name, '/').'(\(| -->)/', file_get_contents("$dir/$view"))) return true;
+				if (preg_match($pattern, file_get_contents("$dir/$view"))) return true;
 			}
 		}
 		return false;

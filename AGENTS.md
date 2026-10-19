@@ -240,6 +240,10 @@ static function requires() {
   (`'render.booking.form' => array('bookingresource')`). `lint` warns on a
   view with the region while there is none, and says nothing when it can't
   reach the database.
+- `lists`: a record type and the model's regions that list it for staff
+  (`'contactmessage' => array('render.contact.messages')`). `lint` counts a
+  view with one of them as the type's staff page, as it counts
+  `render.cms.<type>`.
 - `requires()` is asked when it is needed, never kept in `models.json`, so
   it may read config: a page moved by its setting is left out where it is.
   `controller::required('pages')` merges what every model in use declares;
@@ -359,6 +363,8 @@ alike:
 | `booking.requested` | a booking was made (by a guest on the form, or by staff in the page, over MCP or in model code): its fields but `token_hashes` and `token_expires`, and `who` (`guest` or `staff`). After the commit, as are the four below |
 | `booking.confirmed`, `booking.declined`, `booking.cancelled` | the same, after the status change (`cancelled` by the guest's link has `who` `guest`) |
 | `booking.rescheduled` | the same, after a move of an active booking (its `date`, `time`, `resource` or `service`; a guest's goes back to `requested`) |
+| `contact.received` | a contact message that isn't spam was stored: its fields but `title`, and `who` (`visitor`; `staff` when staff marked one not spam). After the commit, as is the one below |
+| `contact.flagged` | a message kept as spam: the same, with `spam` (the reasons) |
 | `cms.item_saved` | `collection`, `created` (true for new items), `item` |
 | `cms.item_deleted` | `collection`, `item` |
 | `cms.page_saved` | `type`, `slug`, `changed` (field names), `fields` |
@@ -553,11 +559,12 @@ class contact {
     | `render.booking.form` | the same |
     | `render.authentication.forgot` | only the limits count: a post over one answers `reset_sent` as for an unknown address and mails nothing; the stamp is not checked |
     | `cms_records::submit` (a record form whose type has `create` `visitor` or `member`) | the form again with `try_again` / `slow_down`; checked before `create` is, so a bot learns nothing about which types need a login |
+    | `render.contact.form` | stored as `spam` with its reasons, nobody emailed, and `sent` as for anyone (see **Bundled models**, contact); it also checks `name`, `subject` and `message` for links and blocked words |
 
     Login, reset, account, logout, the booking manage page and the
     newsletter's unsubscribe aren't checked. `lint` warns on a view with
-    `render.newsletter.signup`, `render.authentication.register` or
-    `render.booking.form` that lacks `print.validation.alert('try_again')`
+    `render.newsletter.signup`, `render.authentication.register`,
+    `render.booking.form` or `render.contact.form` that lacks `print.validation.alert('try_again')`
     or `('slow_down')`: word them where the person will see them, as for
     any alert. A site's own form on `cms_records::submit` is covered too,
     but `lint` can't see which views post to it, so add the alerts there
@@ -1309,6 +1316,118 @@ its setup from `php demo/seed.php`, and is the worked example of all of it.
      with `cms_records::create`. Until there is one, the form raises
      `not_open` and `lint` warns.
 
+**contact**: the site's contact form, with every message kept for staff.
+The site writes the form, the staff email and the words of each alert; the
+model owns the type, the rules, the spam checks, the email's headers and
+the events. Nothing in `the_app.php` is required. It counts only on a site
+whose views use `render.contact.*` or `print.contact.*`; a site's own
+`models/contact/` (with the `send()` the docs used to teach) keeps working
+and hides the bundled one completely, and `lint` says so.
+- `render.contact.form`: the form, posting fields `name email phone subject
+  message` (a `the_contact` override adds more, as for booking). It stores
+  the message and redirects with `?done=sent`, or shows the form again with
+  the alerts below. Every message is stored: one that looks like spam
+  (`validation::get()->suspect()`, its `name`, `subject` and `message` checked
+  for links and blocked words) is kept with status `spam`, nobody is emailed,
+  and the visitor gets the same `sent`, so a bot learns nothing. The same
+  email and message again within 10 minutes (a double click) stores nothing
+  and answers `sent`. `lint` asks for the `try_again` and `slow_down` alerts
+  here as on the other forms that check for spam.
+- Messages are the `contactmessage` type: `name`, `email`, `phone`,
+  `subject`, `message`, and what the model works out (readonly): `title`
+  (when it came, `2026-10-18 14:32`, which is also its slug, never the
+  email), `page` (the path the form was sent from, `/visit`), `status` and
+  `spam` (the reasons, comma separated: `no_stamp,too_many_links`, or
+  `staff`). Visitors make them, nobody reads their own back (no `owner`),
+  staff don't add them, and they are private.
+- Rules, for every writer: `name_invalid`, `phone_invalid`,
+  `subject_invalid` (a CR, LF, NUL or other control character, or over 200
+  characters: they may reach a mail header, so they are refused, not
+  cleaned), `email_invalid` (empty, not an address, over 254 characters,
+  or a control character), `message_invalid` (empty, or over
+  `contact_max_length` characters).
+- Status: `new` until staff run `done` (they answered it); `spam` (reason
+  `staff`) on one staff judge to be spam, `not_spam` on a flagged one (back
+  to `new`, its reasons cleared). A message is never `done` straight from
+  `spam` (`not_done_spam`: mark it not spam first), and `not_spam` on one
+  that isn't spam is refused `not_spam_invalid`. Spam older than
+  `contact_spam_days` (30) is deleted when a new message is stored; real
+  messages stay until staff delete them.
+- For staff (editors; anyone else gets nothing, wherever the page puts
+  them; neither is page-cached):
+  - `render.contact.messages('status=new&order=-created_at')`: the messages
+    through `cms_records::listed`, editable in place with their actions;
+    options as `cms_records::find` takes them (values only).
+  - `print.contact.count('status=new')`: how many, for the page's heading
+    (`''` for anyone else).
+- Email, after the answer: `_email/contact_received` to staff
+  (`contact_staff_email`, else the sender, `RASTER_MAIL_FROM` or
+  `mail_from`; with neither, a warning is logged and the message is still
+  stored), for each message that isn't spam. The subject is the view's
+  `<title>`. `From` stays the site's sender; `Reply-To` is the visitor
+  (`"Ana" <ana@example.com>`, the name without `"`, `<`, `>` and `,`). It
+  gets the message's fields, `id`, `created_at`, `page_url` (the absolute
+  link to `page`), `staff_url` (`contact_staff_page`) and `site_url`. A
+  mail that fails leaves the message stored and `new`. Nothing is ever
+  mailed to the visitor. `lint` reports a theme with `render.contact.form`
+  and no `_email/contact_received`. The listener is a framework binding
+  (`system/config/events.php`), bound only for the bundled model and only
+  where a view uses it; unbind it to send your own:
+  `event::unbind('contact.received')->from('contact', 'staff_mail')`.
+- Events, after the commit: `contact.received` (a message that isn't spam,
+  `who` `visitor`; or one staff marked not spam, `who` `staff`, which mails
+  nobody) and `contact.flagged` (kept as spam), with the message's fields
+  but `title`. No IP, or its hash, is in either.
+- Settings: `contact_staff_email` (the sender), `contact_staff_page`
+  (`staff`), `contact_max_length` (5000), `contact_spam_days` (30; false
+  keeps spam), and the spam checks' (see **Forms**).
+- From code: `contact::payload($message, $who)` is what the events and the
+  email get, `contact::reply_to($name, $email)` the `Reply-To` value.
+- Taking messages, step by step:
+  1. The form, on any page, with an alert for each problem and `sent`:
+
+     ```html
+     <!-- print.validation.alert('sent') --><p>Thanks, we'll write back soon.</p><!-- /print.validation.alert('sent') -->
+     <!-- print.validation.alert('email_invalid') --><p>Check your email address.</p><!-- /print.validation.alert('email_invalid') -->
+     <!-- print.validation.alert('message_invalid') --><p>Write a message, up to 5000 characters.</p><!-- /print.validation.alert('message_invalid') -->
+     <!-- print.validation.alert('try_again') --><p>Please send it again.</p><!-- /print.validation.alert('try_again') -->
+     <!-- print.validation.alert('slow_down') --><p>Please wait a little.</p><!-- /print.validation.alert('slow_down') -->
+     <!-- render.contact.form -->
+     <form method="post">
+       <input name="name"> <input type="email" name="email" required> <input name="subject">
+       <textarea name="message" required></textarea> <button>Send</button>
+     </form>
+     <!-- /render.contact.form -->
+     ```
+
+  2. `_email/contact_received.html`, with `<title>` as the subject
+     (`print.self.subject` may go there; its newlines can't survive).
+  3. The staff page, from the Records recipe, protected for editors by its
+     own name (`lint` warns on a view with `render.contact.messages` that
+     isn't):
+
+     ```php
+     config::set('protected')->to(array('staff' => 'editor', 'contactmessage_item' => 'editor'));
+     ```
+
+     ```html
+     <!-- staff.html -->
+     <h3>Messages: <!-- print.contact.count -->2<!-- /print.contact.count --> new</h3>
+     <!-- render.contact.messages -->
+     <article><!-- print.@href.raster_detail_link --><a href="#"><!-- print.title -->2026-10-18 14:32<!-- /print.title --></a><!-- /print.@href.raster_detail_link -->
+       <!-- print.name -->Ana<!-- /print.name --> <!-- print.email -->ana@example.com<!-- /print.email --> on <!-- print.page -->/visit<!-- /print.page -->
+       <p><!-- print.message -->Is the terrace open?<!-- /print.message --></p></article>
+     <!-- /render.contact.messages -->
+     <h3>Answered</h3>
+     <!-- render.contact.messages('status=done&order=-created_at&limit=20') -->…<!-- /render.contact.messages('status=done&order=-created_at&limit=20') -->
+     <h3>Spam</h3>
+     <!-- render.contact.messages('status=spam&order=-created_at') -->… <!-- print.spam -->no_stamp<!-- /print.spam -->…<!-- /render.contact.messages('status=spam&order=-created_at') -->
+     ```
+
+     Staff mark each one done, spam or not spam with its buttons.
+     `contactmessage_item.html` rendering `render.cms.contactmessage` is a
+     message's own page (where `raster_detail_link` goes).
+
 **mail**: emails are views. `mail::send_view('_email/welcome', $to,
 array('name' => 'Ada'))` uses the view's `<title>` as the subject.
 - Transport, set with `RASTER_MAIL`:
@@ -1317,7 +1436,8 @@ array('name' => 'Ada'))` uses the view's `<title>` as the subject.
   - `mail://` uses PHP's mail() (the production default).
   - `smtp://user:pass@host:587` requires STARTTLS (add `?insecure=1` to allow
     plain SMTP; `localhost` is allowed as is), and `smtps://…:465` uses TLS.
-- Sender: `RASTER_MAIL_FROM`. A name in it, or in the recipient, that isn't
+- Sender: `RASTER_MAIL_FROM`. A name in it, in the recipient, or in a
+  `Reply-To` passed in `send_view()`'s headers, that isn't
   plain ASCII is sent encoded (`Raster =?UTF-8?B?Q2Fmw6k=?=
   <hello@cafe.test>`), and so is the subject, in words of at most 75
   characters. `mail://` gives sendmail the sender's address with `-f`, so
@@ -1706,6 +1826,10 @@ Set in `config/the_app.php` with `config::set('name')->to(value)`.
 | `booking_cutoff` | 120 | minutes before the start a guest may still cancel or change by their link |
 | `booking_page`, `booking_manage_page` | `book`, `booking` | the booking form's page (`book_url` in emails) and the guest's manage page (their links) |
 | `booking_staff_email` | the sender (`RASTER_MAIL_FROM`, `mail_from`) | where staff's booking emails go |
+| `contact_staff_email` | the sender (`RASTER_MAIL_FROM`, `mail_from`) | where staff's contact emails go |
+| `contact_staff_page` | `staff` | the page with the messages, for `staff_url` in that email |
+| `contact_max_length` | 5000 | characters in a contact message |
+| `contact_spam_days` | 30 | days a message kept as spam stays; false keeps it |
 | `newsletter_double_opt_in` | true | false subscribes without a confirmation |
 | `newsletter_confirm_page`, `newsletter_unsubscribe_page` | `newsletter-confirm`, `newsletter-unsubscribe` | |
 | `mail`, `mail_from` | see `RASTER_MAIL` | transport and sender |

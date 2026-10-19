@@ -476,9 +476,9 @@ class cms_store {
 		if (!empty($bean->published_at) && strtotime($bean->published_at) > time()) {
 			raster_cache::schedule(strtotime($bean->published_at));
 		}
+		// never from a hidden field: the slug is in the record's public URL
+		$skip = $info ? array_merge($info['hidden'], array('owner', 'created_at')) : array();
 		if (empty($bean->slug)) {
-			// never from a hidden field: the slug is in the record's public URL
-			$skip = $info ? array_merge($info['hidden'], array('owner', 'created_at')) : array();
 			$bean->slug = self::unique_slug($type, self::slug_source($bean->export(), $skip), (int)$bean->id);
 		}
 		if ($info && !$id) {
@@ -508,6 +508,9 @@ class cms_store {
 						? json_encode(array_values((array)$value), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
 						: cms_types::clean(isset($types[$field]) ? $types[$field] : 'text', $value, $field);
 				}
+				// a new record's slug comes from what fill() works out too (a
+				// contact message's title, so never its email), unless it was given
+				if ($filled && !$id && !isset($values['slug'])) $bean->slug = self::unique_slug($type, self::slug_source($bean->export(), $skip), 0);
 				if ($filled) $after = cms_records::decode($info, cms_types::read_row($type, $bean->export()));
 				cms_records::check($info, $after, $before);
 			} finally {

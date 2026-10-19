@@ -136,7 +136,11 @@ class mail
 			'MIME-Version' => '1.0',
 			'Content-Type' => 'multipart/alternative; boundary="'.$boundary.'"',
 		);
-		foreach ($headers as $name => $value) $all[static::clean_header($name)] = static::clean_header($value);
+		foreach ($headers as $name => $value) {
+			$name = static::clean_header($name);
+			// a reply goes to a person, whose name is encoded as the sender's is
+			$all[$name] = strcasecmp($name, 'Reply-To') === 0 ? static::named(static::clean_header($value)) : static::clean_header($value);
+		}
 		$body = "--$boundary\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n"
 			.chunk_split(base64_encode($text))
 			."--$boundary\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n"
@@ -221,10 +225,14 @@ class mail
 		return mb_encode_mimeheader((string)$text, 'UTF-8', 'B');
 	}
 
-	// "Name <address>" with the name encoded; a bare address as it is
+	// "Name <address>" with the name encoded; a bare address as it is. An
+	// encoded name can't sit inside quotes, so a quoted one that isn't plain
+	// ASCII loses them ("Ana Café" <a@b.test>).
 	protected static function named($value) {
 		if (!preg_match('/^(.*?)\s*<([^>]+)>$/', $value, $m) || trim($m[1]) === '') return $value;
-		return static::encoded(trim($m[1])).' <'.$m[2].'>';
+		$name = trim($m[1]);
+		if (preg_match('/^"(.*)"$/', $name, $quoted) && preg_match('/[^\x20-\x7e]/', $name)) $name = $quoted[1];
+		return static::encoded($name).' <'.$m[2].'>';
 	}
 
 	// whether a link mailed at $stamp (a date and time) went out within
