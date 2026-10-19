@@ -4722,6 +4722,18 @@ test('booking: requires(): emails, pages, settings and records', function () {
 	});
 });
 
+test('lint warns when a checked form has no try_again alert', function () {
+	$form = "<!-- render.newsletter.signup -->\n<form method=\"post\"><input type=\"email\" name=\"email\" required></form>\n<!-- /render.newsletter.signup -->\n";
+	$try = "<!-- print.validation.alert('try_again') --><p>Again.</p><!-- /print.validation.alert('try_again') -->\n";
+	$slow = "<!-- print.validation.alert('slow_down') --><p>Slow.</p><!-- /print.validation.alert('slow_down') -->\n";
+	$problems = lint_html($form);
+	check(has_problem($problems, "render.newsletter.signup can turn a post away as spam; add print.validation.alert('try_again')"), 'warns with neither alert');
+	check(has_problem(lint_html($try.$form), 'can turn a post away as spam'), 'warns with only try_again');
+	check(has_problem(lint_html($slow.$form), 'can turn a post away as spam'), 'warns with only slow_down');
+	check(!has_problem(lint_html($try.$slow.$form), 'can turn a post away as spam'), 'quiet with both');
+	check(!has_problem(lint_html("<p>No form here.</p>"), 'can turn a post away as spam'), 'quiet without the region');
+});
+
 test('lint warns about raw find() rows on any page (#125)', function () {
 	$app = APPBASE.config::get('models_path', 'models');
 	temp_model("$app/zzraw", array('zzraw.php' => "<?php\nclass zzraw\n{\n\tstatic function types() {\n\t\treturn array('zzraw' => array('fields' => array('name' => '', 'newsletter' => false)));\n\t}\n\tfunction rows() {\n\t\treturn cms_records::find('zzraw');\n\t}\n\tfunction text() {\n\t\treturn array_map(function (\$r) { return cms_records::for_template(cms_records::info('zzraw'), \$r); }, cms_records::find('zzraw'));\n\t}\n\tfunction escaped() {\n\t\t\$rows = array();\n\t\tforeach (cms_records::find('zzraw') as \$r) \$rows[] = array('name' => util::e(\$r['name']), 'newsletter' => \$r['newsletter'] ? '1' : '0');\n\t\treturn \$rows;\n\t}\n\tfunction listed() {\n\t\treturn cms_records::listed('zzraw', cms_records::find('zzraw'));\n\t}\n}\n"));

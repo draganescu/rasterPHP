@@ -34,7 +34,7 @@ class cms_records {
 	// that took the name: booking => array('type' => 'booking', 'by' => 'salon')
 	static $left_out = array();
 	// names a type declaration understands
-	static $keys = array('fields', 'types', 'public', 'owner', 'create', 'staff_add', 'readonly', 'hidden', 'actions', 'html');
+	static $keys = array('fields', 'types', 'public', 'owner', 'create', 'staff_add', 'readonly', 'hidden', 'actions', 'html', 'spam');
 	// the model methods with a meaning of their own, never actions
 	static $hooks = array('types', 'check', 'fill', 'schema', 'listens', 'api', 'requires');
 	// who is writing while fill() and check() run: visitor (a form), editor
@@ -152,6 +152,9 @@ class cms_records {
 			// fields printed as HTML; every other field prints escaped, since
 			// records hold what visitors typed
 			'html' => array_values(array_intersect((array)(isset($d['html']) ? $d['html'] : array()), array_keys($fields))),
+			// visitor forms are checked for spam before anything is stored; a
+			// type that runs its own checks says 'spam' => false
+			'spam' => !isset($d['spam']) || !empty($d['spam']),
 			'unknown' => array_values(array_diff(array_keys($d), self::$keys)),
 		);
 	}
@@ -496,6 +499,8 @@ class cms_records {
 		$v = validation::get();
 		if (!$v->submitted()) return false;
 		if (!$v->valid()) return template::instance()->form_state();
+		// before may_create() refuses, so a bot doesn't learn which types need a login
+		if ($info['spam'] && in_array($info['create'], array('visitor', 'member'), true) && ($reasons = $v->suspect(array()))) return $v->hold($reasons);
 		if (!self::may_create($info)) {
 			$v->raise($info['create'] === 'member' ? 'login_required' : 'not_allowed');
 			return template::instance()->form_state();

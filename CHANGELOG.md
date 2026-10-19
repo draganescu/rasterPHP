@@ -3,6 +3,12 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.25
+
+The newsletter sign-up, the sign-up and forgot-password forms, the booking form and every `cms_records::submit` form (a record type with `create` `visitor` or `member`) now turn away posts that look like spam, using the checks from 2.2.24. A suspect post gets the form again with what was typed and the alert `try_again` (no fresh stamp, or one forged or too young) or `slow_down` (too many posts from one IP or address in the hour). Nothing is stored or mailed. Forgot answers `reset_sent` as for an unknown address when the limits are passed, and mails nothing. Editors are never held. A record type can say `'spam' => false` to run its own checks.
+
+**To do:** add `print.validation.alert('try_again')` and `print.validation.alert('slow_down')` to pages with these forms, in your words; `php bin/raster lint` names the pages. A script that posts to your forms without fetching them first now gets `try_again`. Behind a proxy, set `trusted_proxies` first (see 2.2.24), or visitors share one count.
+
 ## 2.2.24
 
 On a frozen (production) database, run `php bin/raster schema --apply` once after updating: it makes the two new tables, `formhit` and `formsalt`. Until then `doctor` reports that the database and the templates differ, and the limits pass. A form model can call `validation::get()->suspect()` after `valid()` to ask whether a post looks like spam: it checks the form's stamp (sent too fast, forged, missing or replayed), counts posts per IP and per address for each form, and counts links and blocked words. `$v->hold($reasons)` shows the form again with what was typed and the alert `try_again`, or `slow_down` for a limit. No bundled form asks yet; that comes next. Editors are never flagged, and a check that can't run (no key, no table) passes and logs a warning. Behind a proxy, set `trusted_proxies` (doctor says when).
