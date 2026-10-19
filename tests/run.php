@@ -5165,7 +5165,7 @@ test('suspect: limits per IP and per address, per form', function () {
 	for ($i = 1; $i <= 5; $i++) same(array(), spam_post(array('email' => "guest$i@example.com"), array('REMOTE_ADDR' => '203.0.113.7')), "post $i");
 	same(array('too_many_from_ip'), spam_post(array('email' => 'guest6@example.com'), array('REMOTE_ADDR' => '203.0.113.7')), 'the 6th');
 	same(array(), spam_post(array('email' => 'guest7@example.com'), array('REMOTE_ADDR' => '203.0.113.7'), null, 'zz.other'), 'another form counts apart');
-	same(14, spam_hits(), 'one row for the address and one for the IP of each post');
+	same(21, spam_hits(), 'for each post a row for the IP, one for the address, and one for the two together');
 	spam_clear();
 	for ($i = 1; $i <= 3; $i++) same(array(), spam_post(array('email' => 'ana@example.com')), "address post $i");
 	same(array('too_many_from_email'), spam_post(array('email' => 'ANA@example.com ')), 'the 4th, written another way');
@@ -5202,7 +5202,7 @@ test('suspect: limits per IP and per address, per form', function () {
 			$asked++;
 		}
 		same(2, $asked);
-		same(2 * $asked, spam_hits(), 'an IP and an address row for each post that was asked about');
+		same(3 * $asked, spam_hits(), 'an IP, an address and a pair row for each post that was asked about');
 	} finally {
 		list($_SERVER, $_POST, $template->current_call, $template->forms) = $kept;
 		unset(controller::instance()->objects['validation']);
@@ -5228,7 +5228,7 @@ test('a trusted proxy\'s header is read, an untrusted one ignored', function () 
 		$_SERVER['REMOTE_ADDR'] = '10.0.0.2';
 		$_SERVER['HTTP_X_FORWARDED_FOR'] = '198.51.100.1, 10.0.0.9';
 		$_SERVER['HTTP_FLY_CLIENT_IP'] = '198.51.100.44';
-		same('10.0.0.2', validation_spam::client_ip(), 'no trusted_proxies');
+		same('198.51.100.1', validation_spam::client_ip(), 'no trusted_proxies: a private address is a proxy');
 		with_settings(array('trusted_proxies' => array('10.0.0.0/8')), function () {
 			same('198.51.100.1', validation_spam::client_ip(), 'the last entry that is not a proxy');
 			$_SERVER['HTTP_X_FORWARDED_FOR'] = 'nonsense';
@@ -5248,6 +5248,7 @@ test('a trusted proxy\'s header is read, an untrusted one ignored', function () 
 			$_SERVER['HTTP_X_FORWARDED_FOR'] = '::ffff:198.51.100.1, ::ffff:10.0.0.9';
 			same('198.51.100.1', validation_spam::client_ip(), 'a mapped proxy is in its IPv4 range, and its header is unmapped');
 		});
+		unset($_SERVER['HTTP_X_FORWARDED_FOR']);
 		$_SERVER['REMOTE_ADDR'] = '::ffff:10.0.0.2';
 		same('10.0.0.2', validation_spam::client_ip(), 'a mapped REMOTE_ADDR');
 		with_settings(array('trusted_proxies' => array('fd00::/8')), function () {
@@ -5284,6 +5285,37 @@ test('a trusted proxy\'s header is read, an untrusted one ignored', function () 
 	check(!validation_spam::in_range('', '10.0.0.0/8'));
 });
 
+test('with no trusted_proxies, a private address is a proxy and a public one is not', function () {
+	$kept = $_SERVER;
+	try {
+		$_SERVER['HTTP_X_FORWARDED_FOR'] = '203.0.113.9';
+		foreach (array('10.1.2.3', '172.16.0.1', '172.31.255.254', '192.168.1.1', '127.0.0.1', '169.254.1.1', '::1', 'fdaa::1', 'fc00::5', 'fe80::1', '::ffff:10.0.0.2') as $remote) {
+			$_SERVER['REMOTE_ADDR'] = $remote;
+			same('203.0.113.9', validation_spam::client_ip(), "the header, from $remote");
+		}
+		foreach (array('198.51.100.7', '172.32.0.1', '2001:db8::1', 'fec0::1') as $remote) {
+			$_SERVER['REMOTE_ADDR'] = $remote;
+			same($remote, validation_spam::client_ip(), "a public $remote: the header is ignored");
+		}
+		// the visitor wrote the first entry, the proxy the last
+		$_SERVER['REMOTE_ADDR'] = 'fdaa::1';
+		$_SERVER['HTTP_X_FORWARDED_FOR'] = '6.6.6.6, 203.0.113.9';
+		same('203.0.113.9', validation_spam::client_ip(), 'the last entry the proxy wrote');
+		$_SERVER['HTTP_X_FORWARDED_FOR'] = '203.0.113.9, 10.0.0.9';
+		same('203.0.113.9', validation_spam::client_ip(), 'past a second private hop');
+		with_settings(array('trusted_proxies' => array()), function () {
+			same('fdaa::1', validation_spam::client_ip(), 'array(): trust nobody');
+		});
+		with_settings(array('trusted_proxies' => array('10.0.0.0/8')), function () {
+			same('fdaa::1', validation_spam::client_ip(), 'a list replaces the default');
+			$_SERVER['REMOTE_ADDR'] = '10.0.0.2';
+			same('203.0.113.9', validation_spam::client_ip(), 'and trusts what it names');
+		});
+	} finally {
+		$_SERVER = $kept;
+	}
+});
+
 test('no raw IP is stored, logged or kept past the day', function () {
 	spam_clear();
 	$log = log::instance();
@@ -5300,7 +5332,7 @@ test('no raw IP is stored, logged or kept past the day', function () {
 	check(strpos($stored, '203.0.113.7') === false && strpos($stored, 'ip@example.com') === false, $stored);
 	check(strpos($stored, '203.0.113') === false, 'not even part of it');
 	check(strpos($console.$logged, '203.0.113.7') === false, $console.$logged);
-	same(6, spam_hits());
+	same(9, spam_hits());
 	same(1, (int)R::getCell('SELECT COUNT(*) FROM formsalt'), 'one salt');
 	$salt = R::getCell('SELECT salt FROM formsalt');
 	R::exec('UPDATE formsalt SET day = ?', array(date('Y-m-d', strtotime('-1 day'))));
@@ -5406,28 +5438,44 @@ test('editors are never flagged or counted', function () {
 	same(1, spam_hits(), "a visitor's post is counted");
 });
 
-test('doctor warns when posts come from a private address', function () use ($root) {
+test('doctor warns when many people seem to share one address', function () use ($root) {
 	$warned = function ($environment = 'production') use ($root) {
 		foreach (raster_project::doctor($root, 'application', $environment) as $c) {
-			if ($c['status'] === 'warn' && strpos($c['title'], 'trusted_proxies') !== false) return true;
+			if ($c['status'] === 'warn' && strpos($c['title'], 'Many people seem to share one address') !== false) {
+				check(strpos($c['detail'], 'set `trusted_proxies` and `client_ip_header`') !== false, json_encode($c));
+				return true;
+			}
 		}
 		return false;
 	};
-	cms_store::connect();
-	R::exec('DELETE FROM formsalt');
-	spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => '198.51.100.7'));
-	check(!$warned(), 'a public address');
-	spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => '10.0.0.2'));
-	check($warned(), 'a private address');
-	check(!$warned('development'), 'in development raster serve answers 127.0.0.1');
-	with_settings(array('trusted_proxies' => array('10.0.0.0/8')), function () use ($warned) {
-		check(!$warned(), 'once trusted_proxies is set');
+	spam_clear();
+	R::exec('UPDATE formsalt SET proxied = 0');
+	// a private address is a proxy now: six people behind it, each with
+	// their own address in the header, are six visitors
+	for ($i = 1; $i <= 6; $i++) spam_post(array('email' => "behind$i@example.com"), array('REMOTE_ADDR' => '10.0.0.2', 'HTTP_X_FORWARDED_FOR' => "203.0.113.$i"));
+	check(!$warned(), 'six visitors behind a private proxy');
+	// and one visitor behind it with six emails is one address
+	for ($i = 1; $i <= 6; $i++) spam_post(array('email' => "one$i@example.com"), array('REMOTE_ADDR' => '10.0.0.2', 'HTTP_X_FORWARDED_FOR' => '203.0.113.99'));
+	check($warned(), 'one visitor behind a private proxy, six emails');
+	spam_clear();
+	R::exec('UPDATE formsalt SET proxied = 0');
+	// one person posting again and again is one address
+	for ($i = 1; $i <= 8; $i++) spam_post(array('email' => 'again@example.com'), array('REMOTE_ADDR' => '198.51.100.7'));
+	check(!$warned(), 'one email, many times');
+	// five people on one address is a family or an office
+	for ($i = 1; $i <= 5; $i++) spam_post(array('email' => "office$i@example.com"), array('REMOTE_ADDR' => '198.51.100.8'));
+	check(!$warned(), 'five emails');
+	// spread over two forms, each counts apart
+	spam_post(array('email' => 'office6@example.com'), array('REMOTE_ADDR' => '198.51.100.8'), null, 'zz.other');
+	check(!$warned(), 'the 6th on another form');
+	spam_post(array('email' => 'office6@example.com'), array('REMOTE_ADDR' => '198.51.100.8'));
+	check($warned(), 'six emails from one address, one form');
+	check(!$warned('development'), 'production only, as before');
+	R::exec('UPDATE formsalt SET proxied = 0');
+	with_settings(array('spam_per_ip' => false), function () {
+		for ($i = 1; $i <= 7; $i++) spam_post(array('email' => "free$i@example.com"), array('REMOTE_ADDR' => '198.51.100.9'));
 	});
-	R::exec('DELETE FROM formsalt');
-	with_settings(array('trusted_proxies' => array('10.0.0.0/8')), function () {
-		spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => '10.0.0.2'));
-	});
-	check(!$warned(), 'a private address behind a trusted proxy');
+	check(!$warned(), 'nothing is noted when nothing counts by IP');
 	R::exec('DROP TABLE formsalt');
 	cms_store::forget();
 	validation_spam::$ready = false;
@@ -5471,9 +5519,10 @@ test('doctor warns about a key file the site cannot use', function () use ($root
 
 test('describe lists the spam settings that are set', function () {
 	require_once BASE.'tools/describe.php';
-	with_settings(array('spam_per_ip' => 10, 'trusted_proxies' => array('10.0.0.0/8')), function () {
+	with_settings(array('spam_per_ip' => 10, 'trusted_proxies' => array('10.0.0.0/8'), 'spam_ip_blocks' => true), function () {
 		$site = raster_describe::site(array('settings'));
 		same(10, $site['settings']['spam_per_ip']);
+		same(true, $site['settings']['spam_ip_blocks']);
 		same(array('10.0.0.0/8'), $site['settings']['trusted_proxies']);
 	});
 });
@@ -5499,6 +5548,54 @@ test('hold() asks again, or to slow down', function () {
 		list($template->current_block, $_POST) = $kept;
 		unset(controller::instance()->objects['validation']);
 	}
+});
+
+test('holds(): the per-IP count flags, it does not hold, unless spam_ip_blocks', function () {
+	same(array(), validation_spam::holds(array('too_many_from_ip')));
+	same(array('no_stamp', 'too_many_from_email'), validation_spam::holds(array('no_stamp', 'too_many_from_ip', 'too_many_from_email')), 'the rest kept, in order');
+	same(array(), validation_spam::holds(array()));
+	with_settings(array('spam_ip_blocks' => true), function () {
+		same(array('too_many_from_ip'), validation_spam::holds(array('too_many_from_ip')), 'spam_ip_blocks true');
+	});
+});
+
+test('six posts from one address with six emails are all taken, and asks still mail', function () use ($base, $maildir) {
+	spam_clear();
+	$from = function ($ip) { return array('X-Forwarded-For: '.$ip); };
+	// the test server answers 127.0.0.1, a proxy by default, so the header is the visitor
+	for ($i = 1; $i <= 6; $i++) {
+		list($status, , $headers) = form_post("$base/about", array('raster_form' => 'newsletter.signup', 'email' => "shared$i@example.com"), $from('203.0.113.50'));
+		same(303, $status, "newsletter $i");
+		check(strpos((string)location($headers), 'done=check_email') !== false, "newsletter $i: ".location($headers));
+	}
+	cms_store::connect();
+	same(6, (int)R::getCell("SELECT COUNT(*) FROM subscriber WHERE email LIKE 'shared%@example.com'"), 'six subscribers');
+	for ($i = 1; $i <= 6; $i++) {
+		list($status, , $headers) = form_post("$base/register", array('raster_form' => 'authentication.register', 'name' => "Shared $i", 'email' => "shared$i@example.com", 'password' => 'correct horse 1', 'password_again' => 'correct horse 1'), $from('203.0.113.51'));
+		same(303, $status, "register $i");
+		check(strpos((string)location($headers), 'done=registered') !== false, "register $i: ".location($headers));
+	}
+	same(6, (int)R::getCell("SELECT COUNT(*) FROM user WHERE email LIKE 'shared%@example.com'"), 'six accounts');
+	$mails = function () use ($maildir) { return count(glob("$maildir/*.eml") ?: array()); };
+	for ($i = 1; $i <= 6; $i++) {
+		$before = $mails();
+		list($status, , $headers) = form_post("$base/forgot", array('raster_form' => 'authentication.forgot', 'email' => "shared$i@example.com"), $from('203.0.113.52'));
+		same(303, $status, "forgot $i");
+		same($before + 1, $mails(), "ask $i from the shared address mails");
+	}
+	// per address it still stops: the 4th ask for one email (one asked above), from anywhere, mails nothing
+	for ($i = 2; $i <= 4; $i++) {
+		R::exec('UPDATE user SET reset_expires = ? WHERE email = ?', array(date('Y-m-d H:i:s', time() - 7200), 'shared1@example.com'));
+		$before = $mails();
+		same(303, form_post("$base/forgot", array('raster_form' => 'authentication.forgot', 'email' => 'shared1@example.com'), $from("198.51.100.$i"))[0], "ask $i for one email");
+		same($before + ($i < 4 ? 1 : 0), $mails(), $i < 4 ? "ask $i mails" : 'the 4th ask mails nothing');
+	}
+	// the counts were by the header: one row per post for 203.0.113.50 alone
+	same(6, (int)R::getCell("SELECT COUNT(*) FROM formhit WHERE form = 'newsletter.signup' AND kind = 'ip'"), 'one visitor on the newsletter');
+	same(1, (int)R::getCell("SELECT COUNT(DISTINCT hash) FROM formhit WHERE form = 'newsletter.signup' AND kind = 'ip'"));
+	// another header is another visitor: were the header ignored, both would be 127.0.0.1
+	same(303, form_post("$base/about", array('raster_form' => 'newsletter.signup', 'email' => 'shared7@example.com'), $from('203.0.113.53'))[0]);
+	same(2, (int)R::getCell("SELECT COUNT(DISTINCT hash) FROM formhit WHERE form = 'newsletter.signup' AND kind = 'ip'"), 'two headers, two visitors');
 });
 
 // ## Bundled contact
@@ -5694,6 +5791,22 @@ test('contact: a suspected message is stored as spam and not mailed', function (
 		same(array(), booking_sent($mails));
 		same(array('contact.flagged'), array_column($seen, 0));
 		same('no_stamp', $seen[0][1]['spam']);
+	});
+});
+
+test('contact: the 6th message from one address is kept as spam, too_many_from_ip', function () use ($booking_base) {
+	contact_site(function () use ($booking_base) {
+		booking_mails(function () use ($booking_base) {
+			for ($i = 1; $i <= 6; $i++) {
+				list($status, $body) = form_post("$booking_base/zzcontact", array('raster_form' => 'contact.form', 'email' => "office$i@example.com", 'message' => "Hello $i"), array('X-Forwarded-For: 203.0.113.60'));
+				same(303, $status, "message $i");
+			}
+		});
+		$rows = cms_records::find('contactmessage');
+		usort($rows, function ($a, $b) { return $a['id'] - $b['id']; });
+		same(6, count($rows));
+		same(array('new', 'new', 'new', 'new', 'new', 'spam'), array_column($rows, 'status'));
+		same('too_many_from_ip', $rows[5]['spam']);
 	});
 });
 

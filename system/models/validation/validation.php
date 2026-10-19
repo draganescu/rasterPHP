@@ -39,7 +39,7 @@
 * a list of reasons, empty when the post looks human (validation_spam, in
 * spam.php, does the checks):
 *
-*   if ($reasons = $v->suspect(array())) return $v->hold($reasons);
+*   if ($reasons = validation_spam::holds($v->suspect(array()))) return $v->hold($reasons);
 *
 * - suspect($fields) checks the stamp (raster_ts), counts the post per IP
 *   and per address for this form, and looks for links and blocked words in
@@ -51,11 +51,16 @@
 *   too_many_from_email, too_many_links, blocked.
 * - Editors and admins get none and are not counted. A check that can't run
 *   passes and logs a warning.
+* - validation_spam::holds($reasons) keeps the reasons that hold a post
+*   back: too_many_from_ip only flags one (many people can share an
+*   address), unless spam_ip_blocks is true.
 * - hold($reasons) shows the form again as typed, raising slow_down for a
 *   limit and try_again for the rest.
+* - The IP is REMOTE_ADDR, or the client_ip_header a trusted proxy sends:
+*   trusted_proxies, or while that isn't set, any private address.
 * - Settings: spam_min_seconds (3), spam_max_age (86400), spam_per_ip (5),
-*   spam_per_email (3), spam_max_links (2), spam_blocklist, trusted_proxies,
-*   client_ip_header (X-Forwarded-For).
+*   spam_per_email (3), spam_ip_blocks (false), spam_max_links (2),
+*   spam_blocklist, trusted_proxies, client_ip_header (X-Forwarded-For).
 */
 class validation
 {
@@ -71,8 +76,8 @@ class validation
 	protected $suspected = array();
 
 	// the spam checks' tables: the counts (hashes only) and the day's salt.
-	// proxied: today's posts came from a private address with no
-	// trusted_proxies, which doctor reports
+	// proxied: today one IP sent one form more distinct emails in an hour
+	// than a person has (many people share it), which doctor reports
 	static function schema() {
 		return array(
 			'formhit' => array('form' => '', 'kind' => '', 'hash' => '', 'at' => 0),

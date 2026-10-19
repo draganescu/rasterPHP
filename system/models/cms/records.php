@@ -500,7 +500,7 @@ class cms_records {
 		if (!$v->submitted()) return false;
 		if (!$v->valid()) return template::instance()->form_state();
 		// before may_create() refuses, so a bot doesn't learn which types need a login
-		if ($info['spam'] && in_array($info['create'], array('visitor', 'member'), true) && ($reasons = $v->suspect(array()))) return $v->hold($reasons);
+		if ($info['spam'] && in_array($info['create'], array('visitor', 'member'), true) && ($reasons = validation_spam::holds($v->suspect(array())))) return $v->hold($reasons);
 		if (!self::may_create($info)) {
 			$v->raise($info['create'] === 'member' ? 'login_required' : 'not_allowed');
 			return template::instance()->form_state();

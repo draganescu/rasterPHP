@@ -478,14 +478,15 @@ class raster_project
 		} catch (Exception $e) {
 			$add('fail', 'No database', $e->getMessage());
 		}
-		// posts that all come from one private address (a proxy in front)
-		// share one spam count; the web requests note it in today's salt row
+		// one IP that sent one form many distinct emails in an hour: many
+		// people share it (a proxy Raster can't see through, as Cloudflare
+		// is); the web requests note it in today's salt row
 		try {
-			// in development `raster serve` answers 127.0.0.1, which says nothing
-			if ($environment === 'production' && !config::get('trusted_proxies') && cms_store::table_exists('formsalt')) {
+			// in development the posts are the developer's own
+			if ($environment === 'production' && cms_store::table_exists('formsalt')) {
 				$salt = database::instance('validation')->salt();
 				if ($salt && $salt[0]['day'] === date('Y-m-d') && (int)$salt[0]['proxied'] === 1) {
-					$add('warn', 'Posts arrive from a private address and `trusted_proxies` is empty, so every visitor shares one spam count', "Behind a proxy, name it: config::set('trusted_proxies')->to(array('10.0.0.0/8')), and config client_ip_header when it sends the visitor's address in another header than X-Forwarded-For (Fly-Client-IP)");
+					$add('warn', 'Many people seem to share one address', 'If the site is behind Cloudflare or another proxy, set `trusted_proxies` and `client_ip_header`');
 				}
 			}
 		} catch (Exception $e) {

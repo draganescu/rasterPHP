@@ -3,6 +3,16 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.29
+
+Nothing you must do; a site's own form model keeps holding over `spam_per_ip` until it passes the reasons through `validation_spam::holds()` (below). **Real visitors are no longer turned away when many of them share one address** (#208). Before, on shared hosting or behind a proxy every post could come from one address, and after five posts of a form in an hour everyone was held with `slow_down`, or kept as spam on the contact form, without the owner knowing.
+
+**A private address is a proxy by default.** With `trusted_proxies` not set, a post from a private, loopback or link-local address (`10/8`, `172.16/12`, `192.168/16`, `127/8`, `169.254/16`, `::1`, `fc00::/7` with Fly's `fdaa::`, `fe80::/10`) is counted by the visitor's address in `client_ip_header` (`X-Forwarded-For`). Nobody on the open internet can post from such an address, so something on the same network forwarded the post. This holds only when the proxy writes the header itself, setting or overwriting `client_ip_header`; something that only forwards the connection (Docker's port proxy, a NAT port-forward, nginx in front of Apache without `proxy_set_header X-Forwarded-For`) passes on the visitor's own header, which a bot can change on every post. Behind one of those, set `trusted_proxies` to `array()`. raster-builder sites, Fly, and most hosts with nginx or LiteSpeed in front count real visitors with no settings. Setting `trusted_proxies` trusts only what it lists, as before; `array()` trusts nobody.
+
+**Too many posts from one IP flag a post, they don't hold it.** `too_many_from_ip` is still a reason, but the newsletter, sign-up, booking and record forms take the post, and forgot still mails. The contact form still keeps such a message as spam. `spam_ip_blocks` true (a new setting, false by default) holds them back as before. The per-email limit still holds. A site's own form model should pass the reasons through `validation_spam::holds()`: `if ($reasons = validation_spam::holds($v->suspect())) return $v->hold($reasons);`. One that calls `hold()` on `suspect()`'s answer directly still holds back over `spam_per_ip`.
+
+**`doctor` says when many people seem to share one address.** When one IP sends one form more than 5 different emails in an hour, `doctor` warns in production: "Many people seem to share one address. If the site is behind Cloudflare or another proxy, set `trusted_proxies` and `client_ip_header`." It can also be one sender trying many addresses, a bot rather than a crowd. It replaces the warning about posts from a private address, which the new default makes moot. Cloudflare's addresses are public, so a site behind it still sets `trusted_proxies` to Cloudflare's ranges and `client_ip_header` to `CF-Connecting-IP`.
+
 ## 2.2.28
 
 Nothing for sites to do. This release carries 2.2.25, 2.2.26 and 2.2.27: their release runs stopped on the in-page editor's browser test, which posted a booking without the form's time stamp (2.2.23), so 2.2.25 turned it away. The test now sends a stamp, as a browser does. Nothing in the framework changed.
