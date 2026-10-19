@@ -81,6 +81,16 @@ function server($port, $env) {
 	$servers[$port] = $process;
 	return "http://127.0.0.1:$port";
 }
+// tests/fake_smtp.php on $host:$port, stopped with the servers; the first
+// connection when it answers, or false
+function fake_smtp($port, $log, $mode, $cert = '', $host = '127.0.0.1') {
+	global $root, $servers;
+	$servers[] = proc_open(array(PHP_BINARY, "$root/tests/fake_smtp.php", (string)$port, $log, $mode, $cert, $host), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes);
+	// a short timeout: on macOS an address like 127.0.0.2 that lo0 doesn't
+	// have never answers, and the default timeout stalls the whole run
+	for ($up = false, $i = 0; $i < 100 && !($up = @fsockopen($host, $port, $errno, $errstr, 0.2)); $i++) usleep(50000);
+	return $up;
+}
 register_shutdown_function(function () use ($tmp, $root) {
 	global $servers;
 	// with PHP_CLI_SERVER_WORKERS the workers outlive the terminated
@@ -92,6 +102,13 @@ register_shutdown_function(function () use ($tmp, $root) {
 	exec('rm -rf '.escapeshellarg($tmp).' '.escapeshellarg("$root/demo/data/cache").' '.escapeshellarg("$root/demo/data/mail").' '.escapeshellarg("$root/demo/data/changes.log"));
 	foreach (glob("$root/media/*") ?: array() as $file) if (basename($file) !== '.gitignore' && filemtime($file) > time() - 3600) @unlink($file);
 });
+// PHP skips shutdown functions when a signal ends it, which left the
+// servers running after a run stopped with Ctrl-C, kill or a timeout: exit
+// instead, so the shutdown above stops them
+if (function_exists('pcntl_async_signals')) {
+	pcntl_async_signals(true);
+	foreach (array(SIGINT, SIGTERM, SIGHUP) as $signal) pcntl_signal($signal, function ($signal) { exit(128 + $signal); });
+}
 
 function http($method, $url, $body = null, $headers = array()) {
 	if (is_array($body)) {
@@ -1129,12 +1146,7 @@ test(array('I3', 'I4', 'I8', 'I9'), 'SMTP: plain on localhost, STARTTLS and smtp
 	$smtp = function ($mode, $host) use ($root, $tmp, $cert) {
 		$port = free_port();
 		$transcript = "$tmp/smtp-$mode-$host.log";
-		$process = proc_open(array(PHP_BINARY, "$root/tests/fake_smtp.php", (string)$port, $transcript, $mode, $cert, $host), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes);
-		// a short timeout: on macOS an address like 127.0.0.2 that lo0 doesn't
-		// have never answers, and the default timeout stalls the whole run
-		for ($up = false, $i = 0; $i < 100 && !($up = @fsockopen($host, $port, $errno, $errstr, 0.2)); $i++) usleep(50000);
-		$GLOBALS['servers'][] = $process;
-		if (!$up) throw new Exception("the fake SMTP server did not answer on $host:$port".($host === '127.0.0.1' ? '' : "; on macOS add the address with `sudo ifconfig lo0 alias $host up`"));
+		if (!fake_smtp($port, $transcript, $mode, $cert, $host)) throw new Exception("the fake SMTP server did not answer on $host:$port".($host === '127.0.0.1' ? '' : "; on macOS add the address with `sudo ifconfig lo0 alias $host up`"));
 		return array($port, $transcript);
 	};
 	$send = function ($dsn, $from = true) use ($root, $cert) {
@@ -3857,10 +3869,7 @@ test('H15', 'readers a send failed get it on a plain rerun, over one SMTP connec
 	$readers = R::getCol("SELECT email FROM subscriber WHERE status = 'confirmed' ORDER BY id");
 	$port = free_port();
 	$log = "$tmp/smtp-resume.log";
-	$process = proc_open(array(PHP_BINARY, "$root/tests/fake_smtp.php", (string)$port, $log, 'plain'), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes);
-	$GLOBALS['servers'][] = $process;
-	for ($up = false, $i = 0; $i < 100 && !($up = @fsockopen('127.0.0.1', $port, $errno, $errstr, 0.2)); $i++) usleep(50000);
-	check($up, 'the fake SMTP server answers');
+	check($up = fake_smtp($port, $log, 'plain'), 'the fake SMTP server answers');
 	// it serves one connection at a time: let this one go
 	fclose($up);
 	// an '@' in the password: SMTP takes the last one as the end of it, and
@@ -4041,10 +4050,7 @@ test('G25', 'raster login-link logs in once, in production too, never from the p
 test('I10', 'a form that sends mail answers at once, even when the mail server never does (#87)', function () use ($root, $tmp, $db) {
 	$port = free_port();
 	$log = "$tmp/smtp-silent.log";
-	$process = proc_open(array(PHP_BINARY, "$root/tests/fake_smtp.php", (string)$port, $log, 'silent'), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes);
-	$GLOBALS['servers'][] = $process;
-	for ($up = false, $i = 0; $i < 100 && !($up = @fsockopen('127.0.0.1', $port, $errno, $errstr, 0.2)); $i++) usleep(50000);
-	check($up, 'the silent SMTP server takes connections');
+	check($up = fake_smtp($port, $log, 'silent'), 'the silent SMTP server takes connections');
 	fclose($up);
 	// workers of their own, so a held session would show as a held request
 	$site = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "smtp://127.0.0.1:$port", 'PHP_CLI_SERVER_WORKERS' => '4'));
