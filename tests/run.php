@@ -2855,17 +2855,20 @@ test('the site time zone sets today and published_at (#84)', function () use ($r
 	try {
 		cms_records::create('zztzday', array('title' => 'UTC today', 'day' => gmdate('Y-m-d')));
 		cms_records::create('zztzday', array('title' => 'Site today', 'day' => $there->format('Y-m-d')));
-		// a minute ago on the site's clock: hours away on UTC's
-		$minute_ago = (clone $there)->modify('-1 minute')->format('Y-m-d H:i:s');
-		cms_store::save_item('newsdata', 0, array('headline' => 'Zone news', 'published_at' => $minute_ago), array('headline', 'published_at'));
+		// a minute off on the site's clock is hours off on UTC's: ahead of
+		// UTC a minute ago is still to come by UTC; behind it a minute from
+		// now has long passed by UTC
+		$ahead = $there->getOffset() > 0;
+		$stamp_at = (clone $there)->modify($ahead ? '-1 minute' : '+1 minute')->format('Y-m-d H:i:s');
+		cms_store::save_item('newsdata', 0, array('headline' => 'Zone news', 'published_at' => $stamp_at), array('headline', 'published_at'));
 		$utc = $render();
 		check(strpos($utc, '<li>UTC today</li>') !== false && strpos($utc, 'Site today') === false, "without a time zone today is UTC's: $utc");
-		check(strpos($utc, 'Zone news') === false, 'and the news is still scheduled');
+		check((strpos($utc, 'Zone news') !== false) === !$ahead, $ahead ? 'and the news is still scheduled' : 'and the news is already live');
 		file_put_contents($config, $settings."\nconfig::set('timezone')->to('$zone');\n");
 		$zoned = $render();
 		check(strpos($zoned, '<li>Site today</li>') !== false, "today is the site's date: $zoned");
 		check(strpos($zoned, 'UTC today') === false, "an item dated today in UTC is not today on the site: $zoned");
-		check(strpos($zoned, '<li>Zone news</li>') !== false, 'published a minute ago on the site clock is live');
+		check((strpos($zoned, '<li>Zone news</li>') !== false) === $ahead, $ahead ? 'published a minute ago on the site clock is live' : 'published a minute from now on the site clock is scheduled');
 		// stamps follow it too
 		$stamp = with_timezone($zone, function () {
 			$item = cms_records::create('zztzday', array('title' => 'Stamped', 'day' => ''));
