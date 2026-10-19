@@ -563,6 +563,24 @@ test('template defaults become content', function () use ($base) {
 	check(strpos($body, 'href="'.$base.'/news/news_item/raster-runs-on-php-8"') !== false, 'detail link');
 	check(strpos($body, 'href="'.$base.'/news"') !== false, '.html links rewritten');
 });
+test('an extension on a routed or missing URL is never HTML labelled as another type (#120)', function () use ($base) {
+	$type = function ($headers) { return (string)current(preg_grep('/^Content-Type:/i', $headers)); };
+	// a missing page is the 404 page, as HTML
+	list($status, $body, $headers) = http('GET', "$base/nothing-here.json");
+	same(404, $status);
+	check(stripos($type($headers), 'text/html') !== false, $type($headers));
+	// a routed URL renders the routed view in that format: news.rss
+	list($status, $body, $headers) = http('GET', "$base/news/news_page/2.rss");
+	same(200, $status);
+	check(stripos($type($headers), 'application/rss+xml') !== false && strpos($body, '<rss') !== false, $type($headers));
+	// and is a 404 when the view has no file in it
+	list($status, , $headers) = http('GET', "$base/news/news_page/2.json");
+	same(404, $status);
+	check(stripos($type($headers), 'text/html') !== false, $type($headers));
+	// real format views are unchanged
+	same(200, http('GET', "$base/news.rss")[0]);
+	same(200, http('GET', "$base/sitemap.xml")[0]);
+});
 test('missing pages and items are 404', function () use ($base) {
 	same(404, http('GET', "$base/nothing-here")[0]);
 	same(404, http('GET', "$base/news/news_item/999")[0]);
@@ -824,6 +842,18 @@ function location($headers) {
 	return null;
 }
 
+test('one page has one address: a trailing slash and index.php/ redirect (#131)', function () use ($base) {
+	foreach (array('/about/' => '/about', '/index.php/about' => '/about', '/index.php/about/' => '/about', '/news/news_page/2/' => '/news/news_page/2',
+		'/about/?x=1&y=a%20b' => '/about?x=1&y=a%20b', '/news/news_items/headline/Filler%201/' => '/news/news_items/headline/Filler%201') as $asked => $address) {
+		list($status, , $headers) = http('GET', $base.$asked);
+		same(301, $status, $asked);
+		same($base.$address, location($headers), $asked);
+	}
+	same(200, http('GET', "$base/")[0]);
+	same(200, http('GET', "$base/about")[0]);
+	// a form sent to the slashed address is not lost in a redirect
+	same(200, http('POST', "$base/about/", 'x=1', array('Content-Type: application/x-www-form-urlencoded'))[0]);
+});
 test('lint: form conventions', function () {
 	check(has_problem(lint_html('<form method="post"><input name="a"></form>'), 'not inside a render block'));
 	check(has_problem(lint_html("<!-- render.site.nav --><form method=\"post\"><input name=\"a\" required><!-- render.validation.field('b') -->x<!-- /render.validation.field('b') --></form><!-- /render.site.nav -->"), "no input named b"));
@@ -902,7 +932,26 @@ test('collections: slugs, drafts, scheduling, order', function () use ($base) {
 	list(, $body) = http('GET', "$base/news");
 	check(strpos($body, 'Secret draft') === false && strpos($body, 'From the future') === false, 'hidden items shown');
 	same(404, http('GET', "$base/news/news_item/secret-draft")[0]);
+	// a slug ending like one of SQLite's side files is a page (#98)
+	$journal = mcp_call('create_item', array('collection' => 'news', 'fields' => array('headline' => 'My travel journal')))['structuredContent'];
+	same('my-travel-journal', $journal['slug']);
+	same(200, http('GET', "$base/news/news_item/my-travel-journal")[0]);
+	mcp_call('delete_item', array('collection' => 'news', 'id' => $journal['id']));
 	check(strpos($body, 'Ünïcode') < strpos($body, 'Raster runs on PHP 8'), 'order=newest');
+});
+test('an item titled only with digits opens at its own slug (#90)', function () use ($base) {
+	http('GET', "$base/news");
+	$year = mcp_call('create_item', array('collection' => 'news', 'fields' => array('headline' => '1984')))['structuredContent'];
+	$one = mcp_call('create_item', array('collection' => 'news', 'fields' => array('headline' => '1')))['structuredContent'];
+	same('1984', $year['slug']);
+	same('1', $one['slug']);
+	check(strpos(http('GET', "$base/news/news_item/1984")[1], '<h1>1984</h1>') !== false, 'the item titled 1984');
+	// item 1 is the mock-up; the link /news/news_item/1 is the item titled 1
+	check(strpos(http('GET', "$base/news/news_item/1")[1], '<h1>1</h1>') !== false, 'the item titled 1, not item id 1');
+	// an id no slug shadows still opens its item
+	check(strpos(http('GET', "$base/news/news_item/{$year['id']}")[1], '<h1>1984</h1>') !== false, 'by id');
+	mcp_call('delete_item', array('collection' => 'news', 'id' => $year['id']));
+	mcp_call('delete_item', array('collection' => 'news', 'id' => $one['id']));
 });
 test('feeds are well-formed and escaped', function () use ($base) {
 	list($status, $body, $headers) = http('GET', "$base/news.rss");
@@ -1197,6 +1246,22 @@ test('private_paths: the rules, and the apps they name', function () use ($root)
 	check(private_paths::blocked('/.well-known/.env'), 'but not a dotfile inside it');
 	check(private_paths::blocked('/.well-known/x.php'), 'nor code');
 	check(private_paths::blocked('/.well-knownx/y'), 'nor a folder that only starts like it');
+	// SQLite's side files, not every URL that ends like one (#98)
+	foreach (array('/raster.sqlite-journal', '/x/raster.sqlite-wal', '/raster.SQLITE-SHM') as $path) check(private_paths::blocked($path), "$path must be private");
+	foreach (array('/news/news_item/my-travel-journal', '/reading-journal', '/data-wal') as $path) check(!private_paths::blocked($path), "$path must be served");
+});
+test('lint warns about a view whose address the server refuses (#98)', function () use ($root) {
+	$dir = "$root/application/views/default/docs";
+	@mkdir($dir);
+	file_put_contents("$dir/config.html", '<p>Settings</p>');
+	file_put_contents("$dir/setup.html", '<p>Setup</p>');
+	try {
+		$problems = (new raster_inspector())->lint();
+		check(has_problem($problems, '/docs/config is refused'), 'lint said: '.json_encode($problems));
+		check(!has_problem($problems, '/docs/setup is refused'), 'an ordinary page');
+	} finally {
+		remove_dir($dir);
+	}
 });
 test('private_paths: every server config carries every rule', function () use ($root) {
 	require_once BASE.'private_paths.php';

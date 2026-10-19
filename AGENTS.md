@@ -65,10 +65,16 @@ media/                        uploads from the CMS
 
 - `/` renders `index.html`. `/about` renders `about.html`, and
   `/docs/setup` renders `docs/setup.html`. `/index` is the same page as `/`.
+  A page has one address: a GET for `/menu/` (a trailing slash), or for
+  `/index.php/menu` while `rewrite` is on, answers 301 to `/menu`, query
+  kept. Raster's own links, filter links included, never end in a slash.
 - **Formats:** `/news.rss` renders `news.rss`, and `/sitemap.xml` renders
   `sitemap.xml` (also `.json`, `.txt`, `.atom`). Printed values are escaped
   for the format: XML-escaped in feeds, JSON-escaped in JSON views. HTML views
-  print values as they are.
+  print values as they are. A route or a collection URL with an extension renders
+  the routed view's file in that format (`/news/news_page/2.rss` is page 2
+  of `news.rss`), and is a 404 when there is none. A 404 page is always
+  HTML, whatever the missing URL's extension (`/about.json`).
 - Files and folders starting with `_` are never pages: `_layout.html` for
   partials, `_email/` for emails. Collection URLs follow the same rule:
   `/_email/digest/news_page/1` is a 404 even when `_email/digest.html`
@@ -76,7 +82,10 @@ media/                        uploads from the CMS
 - Unknown URLs return 404, and so does any path with a segment starting
   with a dot (`/./about`, `/.env`); `a//b` is `a/b`. View files themselves (`.html`, `.rss`, `.xml`,
   `.json`, `.txt` under `application/views/`) are never served raw (403); other
-  theme assets are. Links like `href="news.rss"` are rewritten to `/news.rss`.
+  theme assets are. A second path segment named `config`, `models`, `data`
+  or `i18n` is refused (403) under any folder, since those are an app's
+  private folders: `docs/config.html` is a page nobody can open, and `lint`
+  warns about it (the rules are in `system/private_paths.php`). Links like `href="news.rss"` are rewritten to `/news.rss`.
 - In `.json` views, the rows of a render block are separated by commas, so a
   block inside `[ … ]` makes a JSON list.
 - Link to pages by file name, `href="about.html"`. Raster rewrites that to
@@ -502,7 +511,9 @@ item of a collection is the mock-up content.
   (`print.cms.site_name`) is shared by every page. Put these in `_layout.html`.
 - **Collection URLs** are routed to views that render that collection:
   - `/news/news_item/<slug or id>` renders `news_item.html` (or `news.html`)
-    with that item. If there's no such item, the response is a 404.
+    with that item. If there's no such item, the response is a 404. A
+    number is a slug first: an item titled `1984` opens at
+    `/news/news_item/1984`, and a number no item has as its slug is an id.
   - `/news/news_page/2` is page 2. The page size comes from `news_page_size` or
     `raster_page_size` (10).
   - `/news/news_items/tag/php` lists the items where `tag` is `php`.
@@ -1198,7 +1209,10 @@ use `'model.method'`: `method(true)` returns
   `config::set('site_url')`). Links in pages and emails then never depend on
   the visitor's `Host` header. In production, emails with links (password
   reset, newsletter confirmation) are not sent without it, and
-  `raster send` needs it. With a path (`https://example.com/shop/`) the site
+  `raster send` needs it. A domain listed in `domain_language` (exactly,
+  port aside) is the site's own too: a request on it keeps its host, so its
+  language, its links and its forms; every other host gets the address.
+  With a path (`https://example.com/shop/`) the site
   lives under it: URLs are matched and links built under `/shop/`, also with
   `raster serve` and behind a proxy that forwards the path unchanged. With
   `php -S` directly, use `RASTER_URL`, not `site_url`. Addresses outside the

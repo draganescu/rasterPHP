@@ -23,10 +23,10 @@ All the rules for what is private are kept in one list, `system/private_paths.ph
 |---|---|
 | dotfiles and dot folders (`.git`, `.env`, `.htaccess`) except `/.well-known/` | version history, secrets, server config |
 | `system/`, `bin/`, `tests/` | the framework and tooling |
-| `config/`, `models/`, `data/`, `i18n/` inside any top-level folder | your settings, code, database, translations |
+| `config/`, `models/`, `data/`, `i18n/` inside any top-level folder | your settings, code, database, translations (so a page at `/docs/config` can't be opened either: `lint` warns about such a view) |
 | view files (`.html`, `.rss`, …) under `views/` | they're templates, not pages |
 | `.php`, `.phar`, `.sqlite`, `.sql`, `.md`, `.lock`, `.ini`, `.bak` anywhere (except `index.php`) | code, databases, dumps, notes |
-| SQLite's `-journal`, `-wal`, `-shm` files | parts of the database |
+| SQLite's `.sqlite-journal`, `.sqlite-wal`, `.sqlite-shm` files | parts of the database |
 
 Everything else (theme CSS and images, `media/`) is served as a normal file, and every other request goes to `index.php`.
 

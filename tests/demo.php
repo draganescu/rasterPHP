@@ -216,6 +216,15 @@ test(array('A2', 'A3', 'A4'), 'pages by file name, nested views, /index', functi
 test(array('A5', 'A6'), 'routes file and URL keys', function () use ($base) {
 	has(http('GET', "$base/specials")[1], '<h1>Menu</h1>');
 	same(404, http('GET', "$base/my-specials")[0], 'routes are anchored');
+	// a routed URL with an extension its view has no file for is a 404 page,
+	// in HTML and in the site's theme (#120)
+	foreach (array('/specials.json', '/print/menu.txt', '/about.json') as $url) {
+		list($status, $body, $headers) = http('GET', $base.$url);
+		same(404, $status, $url);
+		has(header_value($headers, 'Content-Type'), 'text/html', $url);
+		has($body, '/demo/views/cafe/', "$url: the 404 page with its base");
+	}
+	has(header_value(http('GET', "$base/journal/journal_page/2.rss")[2], 'Content-Type'), 'application/rss+xml', 'page 2 of the feed is journal.rss');
 	has(between(http('GET', "$base/lab/color/red")[1], 'param'), '<p class="color">red</p>');
 });
 test(array('A7', 'A8'), 'unknown pages and partials are 404', function () use ($base) {
@@ -528,7 +537,7 @@ test(array('E7', 'E9', 'E10', 'E11'), 'filter links, order, limit, template filt
 		mcp($base, 'create_item', array('collection' => 'menu', 'fields' => array('name' => $d[0], 'description' => 'Tasty', 'price' => '10', 'category' => $d[1], 'featured' => $d[2])));
 	}
 	$menu = http('GET', "$base/menu")[1];
-	has($menu, 'href="'.$base.'/menu/menu_items/category/cakes/"');
+	has($menu, 'href="'.$base.'/menu/menu_items/category/cakes"');
 	check(strpos($menu, 'Americano') < strpos($menu, 'Brownie'), 'order=name');
 	$cakes = http('GET', "$base/menu/menu_items/category/cakes")[1];
 	has($cakes, 'Brownie');
@@ -1821,6 +1830,21 @@ test(array('J7', 'J8'), 'a language per domain, the cookie name', function () us
 	has(implode("\n", $headers), 'Set-Cookie: cafe_lang=ro');
 	lacks(implode("\n", $headers), 'Set-Cookie: lang=');
 });
+test('J7', 'a language per domain with the site address set (#96)', function () use ($db, $maildir) {
+	$port = free_port();
+	$k = server($port, array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'RASTER_URL' => "http://localhost:$port/"));
+	// the site's own domain_language domain keeps its language and its links
+	$body = http('GET', "$k/lab", null, array("Host: ro.localhost:$port"))[1];
+	has($body, '>Meniu</a>');
+	has($body, "href=\"http://ro.localhost:$port/menu\"");
+	same(200, http('POST', "$k/visit", array('raster_form' => 'reservation.contact', 'email' => ''), array("Host: ro.localhost:$port", "Origin: http://ro.localhost:$port"))[0], 'a form sent from that domain');
+	// any other host gets the site's address
+	$body = http('GET', "$k/lab", null, array('Host: evil.example'))[1];
+	has($body, "href=\"http://localhost:$port/menu\"");
+	lacks($body, 'evil.example');
+	// a made-up subdomain of it is another host
+	lacks(http('GET', "$k/lab", null, array("Host: evil.ro.localhost:$port"))[1], 'evil.ro.localhost');
+});
 test('L6', 'site_url in config', function () use ($db, $maildir) {
 	$k = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'CAFE_SITE_URL' => 'https://knob.example/'));
 	$body = http('GET', "$k/about", null, array('Host: evil.example'))[1];
@@ -2227,8 +2251,8 @@ test('R14', 'staff see bookings grouped by status, and one evening at a time', f
 	has($confirm, util::e($new->name), 'a new booking is to confirm');
 	same((int)R::count('reservationdata', ' status = ? AND date >= ? ', array('new', date('Y-m-d'))), booking_rows($confirm), 'only new ones to come are to confirm');
 	lacks($confirm, util::e($cancelled->name), 'not the cancelled ones');
-	has($page, 'href="'.$base.'/reservation/reservation_items/date/'.$new->date.'/"', 'each date links to its evening');
-	$evening = http('GET', "$base/reservation/reservation_items/date/{$new->date}/", null, $h)[1];
+	has($page, 'href="'.$base.'/reservation/reservation_items/date/'.$new->date.'"', 'each date links to its evening');
+	$evening = http('GET', "$base/reservation/reservation_items/date/{$new->date}", null, $h)[1];
 	has($evening, util::e($new->name));
 	same((int)R::count('reservationdata', ' date = ? ', array($new->date)), booking_rows($evening), 'only that evening');
 	$open = http('GET', "$base/reservation/reservation_items/status/new", null, $h)[1];
@@ -3041,7 +3065,7 @@ test('E31', 'fields named like SQL words (when, from, group) sort, filter and li
 			same(200, $status);
 			same(array('Oslo', 'Lima', 'Rome'), $titles($html, 'by-when'), 'order=when');
 			same(array('Lima', 'Rome'), $titles($html, 'big'), 'group>2&order=-group');
-			has($html, 'href="'.$base.'/zztrips/zztrips_items/from/Paris/"');
+			has($html, 'href="'.$base.'/zztrips/zztrips_items/from/Paris"');
 			list($status, $html) = http('GET', "$base/zztrips/zztrips_items/from/Paris");
 			same(200, $status);
 			same(array('Lima', 'Rome'), $titles($html, 'by-when'), 'the filter page');

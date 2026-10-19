@@ -115,7 +115,7 @@ Each collection gets URLs without any routing work:
 | URL | Shows |
 |---|---|
 | `/news/news_item/our-new-office` | one item, by its slug |
-| `/news/news_item/3` | one item, by its id |
+| `/news/news_item/3` | one item, by its id (unless an item's slug is `3`, as for one titled "3") |
 | `/news/news_page/2` | page 2 of the list |
 | `/news/news_items/tag/php` | only the items whose `tag` field is `php` |
 
