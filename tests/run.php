@@ -5450,9 +5450,15 @@ test('doctor warns when many people seem to share one address', function () use 
 	};
 	spam_clear();
 	R::exec('UPDATE formsalt SET proxied = 0');
-	// a private address is a proxy now, so it says nothing by itself
-	spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => '10.0.0.2'));
-	check(!$warned(), 'a private address');
+	// a private address is a proxy now: six people behind it, each with
+	// their own address in the header, are six visitors
+	for ($i = 1; $i <= 6; $i++) spam_post(array('email' => "behind$i@example.com"), array('REMOTE_ADDR' => '10.0.0.2', 'HTTP_X_FORWARDED_FOR' => "203.0.113.$i"));
+	check(!$warned(), 'six visitors behind a private proxy');
+	// and one visitor behind it with six emails is one address
+	for ($i = 1; $i <= 6; $i++) spam_post(array('email' => "one$i@example.com"), array('REMOTE_ADDR' => '10.0.0.2', 'HTTP_X_FORWARDED_FOR' => '203.0.113.99'));
+	check($warned(), 'one visitor behind a private proxy, six emails');
+	spam_clear();
+	R::exec('UPDATE formsalt SET proxied = 0');
 	// one person posting again and again is one address
 	for ($i = 1; $i <= 8; $i++) spam_post(array('email' => 'again@example.com'), array('REMOTE_ADDR' => '198.51.100.7'));
 	check(!$warned(), 'one email, many times');
@@ -5587,6 +5593,9 @@ test('six posts from one address with six emails are all taken, and asks still m
 	// the counts were by the header: one row per post for 203.0.113.50 alone
 	same(6, (int)R::getCell("SELECT COUNT(*) FROM formhit WHERE form = 'newsletter.signup' AND kind = 'ip'"), 'one visitor on the newsletter');
 	same(1, (int)R::getCell("SELECT COUNT(DISTINCT hash) FROM formhit WHERE form = 'newsletter.signup' AND kind = 'ip'"));
+	// another header is another visitor: were the header ignored, both would be 127.0.0.1
+	same(303, form_post("$base/about", array('raster_form' => 'newsletter.signup', 'email' => 'shared7@example.com'), $from('203.0.113.53'))[0]);
+	same(2, (int)R::getCell("SELECT COUNT(DISTINCT hash) FROM formhit WHERE form = 'newsletter.signup' AND kind = 'ip'"), 'two headers, two visitors');
 });
 
 // ## Bundled contact

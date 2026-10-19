@@ -578,10 +578,15 @@ of your own. Staff read the feedback on a page that renders
     address, `Fly-Client-IP`). With `trusted_proxies` not set, every
     private, loopback or link-local address is trusted (`10/8`,
     `172.16/12`, `192.168/16`, `127/8`, `169.254/16`, `::1`, `fc00::/7`,
-    `fe80::/10`): nobody on the open internet can post from one, so the
-    post came through a proxy on the same network. That covers Fly,
+    `fe80::/10`): nobody on the open internet can post from one, so
+    something on the same network forwarded the post. That covers Fly,
     raster-builder sites and most hosts with nginx or LiteSpeed in front,
-    with no settings. Set `trusted_proxies` (addresses or CIDR ranges, IPv4
+    with no settings. It holds only when what is in front writes the
+    header itself, setting or overwriting `client_ip_header`. Something
+    that only forwards the connection (Docker's port proxy, a NAT
+    port-forward, nginx in front of Apache without `proxy_set_header
+    X-Forwarded-For`) passes on the visitor's own header, which a bot can
+    change on every post: behind one, set `trusted_proxies` to `array()`. Set `trusted_proxies` (addresses or CIDR ranges, IPv4
     and IPv6) and only those are trusted; `array()` trusts nobody. An
     entry's port and brackets are left out (`1.2.3.4:5678`,
     `[2001:db8::1]:443`). A header that is missing or not an address keeps
@@ -594,6 +599,8 @@ of your own. Staff read the feedback on a page that renders
     production `doctor` warns: "Many people seem to share one address. If
     the site is behind Cloudflare or another proxy, set `trusted_proxies`
     and `client_ip_header`." One person posting again and again doesn't.
+    It can also be one sender trying many addresses, a bot rather than a
+    crowd.
   - **What each bundled public form does with a suspect post.** They ask
     `suspect(array())` (stamp and limits, no text checks and no
     blocklist, the email's domain included) right after `valid()`, so a
