@@ -216,6 +216,15 @@ test(array('A2', 'A3', 'A4'), 'pages by file name, nested views, /index', functi
 test(array('A5', 'A6'), 'routes file and URL keys', function () use ($base) {
 	has(http('GET', "$base/specials")[1], '<h1>Menu</h1>');
 	same(404, http('GET', "$base/my-specials")[0], 'routes are anchored');
+	// a routed URL with an extension its view has no file for is a 404 page,
+	// in HTML and in the site's theme (#120)
+	foreach (array('/specials.json', '/print/menu.txt', '/about.json') as $url) {
+		list($status, $body, $headers) = http('GET', $base.$url);
+		same(404, $status, $url);
+		has(header_value($headers, 'Content-Type'), 'text/html', $url);
+		has($body, '/demo/views/cafe/', "$url: the 404 page with its base");
+	}
+	has(header_value(http('GET', "$base/journal/journal_page/2.rss")[2], 'Content-Type'), 'application/rss+xml', 'page 2 of the feed is journal.rss');
 	has(between(http('GET', "$base/lab/color/red")[1], 'param'), '<p class="color">red</p>');
 });
 test(array('A7', 'A8'), 'unknown pages and partials are 404', function () use ($base) {
@@ -528,7 +537,7 @@ test(array('E7', 'E9', 'E10', 'E11'), 'filter links, order, limit, template filt
 		mcp($base, 'create_item', array('collection' => 'menu', 'fields' => array('name' => $d[0], 'description' => 'Tasty', 'price' => '10', 'category' => $d[1], 'featured' => $d[2])));
 	}
 	$menu = http('GET', "$base/menu")[1];
-	has($menu, 'href="'.$base.'/menu/menu_items/category/cakes/"');
+	has($menu, 'href="'.$base.'/menu/menu_items/category/cakes"');
 	check(strpos($menu, 'Americano') < strpos($menu, 'Brownie'), 'order=name');
 	$cakes = http('GET', "$base/menu/menu_items/category/cakes")[1];
 	has($cakes, 'Brownie');
@@ -1444,6 +1453,12 @@ test('N7', 'deploy prints the server configuration', function () use ($root) {
 		has($out, 'phar', 'the private extensions are in there');
 		lacks($out, '/demo/', 'no rule names an app folder, so adding an app needs no change');
 	}
+	// nginx takes 1 MB bodies by default; the editor sends pictures up to 12 MB (#115)
+	list($code, $nginx) = raster(array('deploy', '--config=nginx'));
+	check(preg_match('/^    client_max_body_size (\d+)m;$/m', $nginx, $m) && (int)$m[1] > 12, 'a body size above the editor\'s 12 MB: '.$nginx);
+	has($nginx, "    gzip on;\n");
+	has($nginx, 'gzip_types text/css');
+	check(preg_match('#location /media/ \{[^}]*expires 1y;#', $nginx), 'media/ is cached for long: its file names never repeat');
 	same(2, raster(array('deploy'))[0], 'no --config is a usage error');
 	same(1, raster(array('deploy', '--config=iis'))[0]);
 });
@@ -1534,6 +1549,51 @@ test('N11', 'exporting again writes only what changed', function () use ($tmp, $
 	check(is_file("$out/extra.txt"), 'files the export did not write are kept');
 	$manifest = json_decode(file_get_contents("$out/.raster-export.json"), true);
 	check(isset($manifest['files']['about/index.html']) && !empty($manifest['fingerprint']));
+});
+test('N11', 'a new day exports again: a list of what is coming drops what is past', function () use ($tmp, $base, $views) {
+	// Etc/GMT+12 is UTC-12 and Pacific/Kiritimati UTC+14: their dates always
+	// differ, so moving the site's time zone moves it to another day
+	$yesterday = array('CAFE_TIMEZONE' => 'Etc/GMT+12');
+	$tomorrow = array('CAFE_TIMEZONE' => 'Pacific/Kiritimati');
+	$day = (new DateTime('now', new DateTimeZone('Etc/GMT+12')))->format('Y-m-d');
+	$out = "$tmp/daily";
+	with_file("$views/coming.html", "<!doctype html><html><body><!-- render.cms.events('date>=today&order=date') --><p><!-- print.title -->Jazz night<!-- /print.title --> <!-- print.date -->2026-10-10<!-- /print.date --></p><!-- /render.cms.events('date>=today&order=date') --></body></html>", function () use ($base, $out, $yesterday, $tomorrow, $day) {
+		$gig = mcp($base, 'create_item', array('collection' => 'events', 'fields' => array('title' => 'Last night gig', 'date' => $day, 'summary' => 'x')));
+		try {
+			list($code, $output) = raster(array('export', $out, '--url=https://cafe.example/'), $yesterday);
+			same(0, $code, $output);
+			has(file_get_contents("$out/coming/index.html"), 'Last night gig', 'on its day the event is coming');
+			has(raster(array('export', $out, '--url=https://cafe.example/'), $yesterday)[1], 'Nothing changed since the last export');
+			$about = filemtime("$out/about/index.html");
+			sleep(1);
+			list($code, $output) = raster(array('export', $out, '--url=https://cafe.example/'), $tomorrow);
+			same(0, $code, $output);
+			lacks($output, 'Nothing changed since the last export');
+			lacks(file_get_contents("$out/coming/index.html"), 'Last night gig', 'the next day it is past');
+			same($about, filemtime("$out/about/index.html"), 'pages that did not change are not written again');
+		} finally {
+			mcp($base, 'delete_item', array('collection' => 'events', 'id' => $gig['id']));
+		}
+	});
+});
+test('N11', 'an export that crosses midnight records the day its pages were made on', function () use ($tmp, $root) {
+	// the clock moves to the next day between rendering and saving the
+	// fingerprint: the next day's export must still run
+	$out = "$tmp/midnight";
+	$script = "$tmp/midnight.php";
+	file_put_contents($script, '<?php require '.var_export("$root/system/boot.php", true).'; boot::$appname = "demo"; boot::cli();'
+		.' require_once BASE."tools/inspector.php"; require_once BASE."tools/export.php";'
+		.' class late_export extends raster_export { protected function collect_pages() { date_default_timezone_set("Pacific/Kiritimati"); parent::collect_pages(); } }'
+		.' @mkdir('.var_export($out, true).', 0775, true);'
+		.' $e = (new late_export('.var_export($root, true).', '.var_export($out, true).', "https://cafe.example/"))->run();'
+		.' echo $e->errors ? implode("\n", $e->errors) : "exported";');
+	$process = proc_open(array(PHP_BINARY, $script), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, array_merge(getenv(), array('CAFE_TIMEZONE' => 'Etc/GMT+12')));
+	$output = stream_get_contents($pipes[1]).stream_get_contents($pipes[2]);
+	same(0, proc_close($process), $output);
+	same('exported', trim($output));
+	list($code, $output) = raster(array('export', $out, '--url=https://cafe.example/'), array('CAFE_TIMEZONE' => 'Pacific/Kiritimati'));
+	same(0, $code, $output);
+	lacks($output, 'Nothing changed since the last export', 'the next day exports again');
 });
 test('N16', 'a page that answers an error stops the export, and the last export stays', function () use ($tmp, $root, $views) {
 	$out = "$tmp/failing";
@@ -1769,6 +1829,21 @@ test(array('J7', 'J8'), 'a language per domain, the cookie name', function () us
 	$headers = http('GET', "$base/lab?lang=ro")[2];
 	has(implode("\n", $headers), 'Set-Cookie: cafe_lang=ro');
 	lacks(implode("\n", $headers), 'Set-Cookie: lang=');
+});
+test('J7', 'a language per domain with the site address set (#96)', function () use ($db, $maildir) {
+	$port = free_port();
+	$k = server($port, array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'RASTER_URL' => "http://localhost:$port/"));
+	// the site's own domain_language domain keeps its language and its links
+	$body = http('GET', "$k/lab", null, array("Host: ro.localhost:$port"))[1];
+	has($body, '>Meniu</a>');
+	has($body, "href=\"http://ro.localhost:$port/menu\"");
+	same(200, http('POST', "$k/visit", array('raster_form' => 'reservation.contact', 'email' => ''), array("Host: ro.localhost:$port", "Origin: http://ro.localhost:$port"))[0], 'a form sent from that domain');
+	// any other host gets the site's address
+	$body = http('GET', "$k/lab", null, array('Host: evil.example'))[1];
+	has($body, "href=\"http://localhost:$port/menu\"");
+	lacks($body, 'evil.example');
+	// a made-up subdomain of it is another host
+	lacks(http('GET', "$k/lab", null, array("Host: evil.ro.localhost:$port"))[1], 'evil.ro.localhost');
 });
 test('L6', 'site_url in config', function () use ($db, $maildir) {
 	$k = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'CAFE_SITE_URL' => 'https://knob.example/'));
@@ -2176,8 +2251,8 @@ test('R14', 'staff see bookings grouped by status, and one evening at a time', f
 	has($confirm, util::e($new->name), 'a new booking is to confirm');
 	same((int)R::count('reservationdata', ' status = ? AND date >= ? ', array('new', date('Y-m-d'))), booking_rows($confirm), 'only new ones to come are to confirm');
 	lacks($confirm, util::e($cancelled->name), 'not the cancelled ones');
-	has($page, 'href="'.$base.'/reservation/reservation_items/date/'.$new->date.'/"', 'each date links to its evening');
-	$evening = http('GET', "$base/reservation/reservation_items/date/{$new->date}/", null, $h)[1];
+	has($page, 'href="'.$base.'/reservation/reservation_items/date/'.$new->date.'"', 'each date links to its evening');
+	$evening = http('GET', "$base/reservation/reservation_items/date/{$new->date}", null, $h)[1];
 	has($evening, util::e($new->name));
 	same((int)R::count('reservationdata', ' date = ? ', array($new->date)), booking_rows($evening), 'only that evening');
 	$open = http('GET', "$base/reservation/reservation_items/status/new", null, $h)[1];
@@ -3113,7 +3188,7 @@ test('E31', 'fields named like SQL words (when, from, group) sort, filter and li
 			same(200, $status);
 			same(array('Oslo', 'Lima', 'Rome'), $titles($html, 'by-when'), 'order=when');
 			same(array('Lima', 'Rome'), $titles($html, 'big'), 'group>2&order=-group');
-			has($html, 'href="'.$base.'/zztrips/zztrips_items/from/Paris/"');
+			has($html, 'href="'.$base.'/zztrips/zztrips_items/from/Paris"');
 			list($status, $html) = http('GET', "$base/zztrips/zztrips_items/from/Paris");
 			same(200, $status);
 			same(array('Lima', 'Rome'), $titles($html, 'by-when'), 'the filter page');
