@@ -3,6 +3,18 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.21
+
+A list that pairs `limit=N` with a pager now shows the same N rows on every page: set `<name>_page_size` instead. A site's own `reservation` or `booking` model keeps working.
+
+**The demo and the docs use the bundled booking model.** The demo café takes table bookings on `/visit` and a salon's appointments on `/salon`. Guests manage their booking on `/booking`, and the staff pages are made from list options and the booking regions. `php demo/seed.php` sets up what can be booked. AGENTS.md has the steps to take bookings and a worked staff page. Its Records and Events examples, and the wiki's, are now a catering request type rather than a booking model of your own. The wiki has a new Bookings page.
+
+**The pager counts what the list shows (#88).** `pagination.links('cms.<name>', '…')` now counts drafts for editors, `owner=me`, and a private type's records for whoever may read them. Visitors get no pager over private records. A list with `limit=3` shows the same three on every page, so it no longer moves with a paged list beside it, and it has no pager.
+
+**lint warns about raw `find()` rows on any page (#125).** Rows a model hands back from `cms_records::find()` without `cms_records::listed()` print a `false` bool as the mock-up and visitor text unescaped, on any page. AGENTS.md now says so. Rows a model makes text itself (`cms_records::for_template()`, `util::e()`) aren't warned about outside admin pages.
+
+**The booking events are listed by name.** `booking.confirmed`, `booking.declined` and `booking.cancelled` now show in the vocabulary, and lint checks bindings to them.
+
 ## 2.2.20
 
 - MCP: a malformed message gets a JSON-RPC error (`-32600`) instead of ending the stdio server, and a batch of non-objects over HTTP no longer causes a PHP error. A batch over stdio gets a list back. An unknown tool is a `-32602` error. `serverInfo.version` is Raster's version. (#134)

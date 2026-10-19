@@ -24,14 +24,16 @@ function check(condition, message) { if (condition) passed++; else { failures++;
 function port() { return new Promise(r => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); }); }
 const host = page => page.locator('[data-raster-host]');
 const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
-// a day n days from now: the agenda on /staff shows only coming evenings
-const later = n => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
-const booked = later(30), phoned = later(60);
 
 (async () => {
 	const p = await port();
 	const base = 'http://127.0.0.1:' + p;
 	execFileSync('php', [path.join(root, 'bin/raster'), 'user', 'staff@cafe.test', '--role=editor', '--password=staff password', '--name=Sam'], { env });
+	// what the café takes bookings for
+	execFileSync('php', [path.join(root, 'demo/seed.php')], { env });
+	// the coming Tuesday and Wednesday: sitting days, within the two months guests may book
+	const ahead = (weekday, weeks) => { const d = new Date(); d.setUTCDate(d.getUTCDate() + ((weekday - d.getUTCDay() + 7) % 7 || 7) + 7 * (weeks - 1)); return d.toISOString().slice(0, 10); };
+	const tuesday = ahead(2, 1), wednesday = ahead(3, 2);
 	const server = spawn('php', ['-S', '127.0.0.1:' + p, path.join(root, 'index.php')], { cwd: root, env, stdio: 'ignore' });
 	// stopped however the test ends, also when the browser fails to start
 	process.on('exit', () => server.kill());
@@ -346,7 +348,7 @@ const booked = later(30), phoned = later(60);
 		await page.keyboard.press('Escape');
 
 		// a record: the model's actions are buttons, its readonly fields are not editable
-		await fetch(base + '/visit', { method: 'POST', body: new URLSearchParams({ raster_form: 'reservation.book', name: 'Ilinca', email: 'ilinca@example.com', date: booked, guests: '2', terms: '1' }), redirect: 'manual' });
+		await fetch(base + '/visit?date=' + tuesday, { method: 'POST', body: new URLSearchParams({ raster_form: 'booking.form', resource: 'dining-room', name: 'Ilinca', email: 'ilinca@example.com', date: tuesday, time: '19:00', people: '2', terms: '1' }), redirect: 'manual' });
 		await page.goto(base + '/staff');
 		await page.waitForTimeout(500);
 		const booking = page.locator('[data-raster-item]', { hasText: 'Ilinca' }).first();
@@ -357,26 +359,30 @@ const booked = later(30), phoned = later(60);
 		await booking.hover({ position: { x: 10, y: 5 }, force: true });
 		await page.waitForTimeout(300);
 		const buttons = await inShadow(page, h => [...h.shadowRoot.querySelectorAll('.handle button')].map(b => b.textContent || b.getAttribute('aria-label')));
-		check(buttons.includes('Confirm') && buttons.includes('Cancel') && !buttons.includes('Duplicate') && !buttons.includes('Schedule'), 'a booking has its actions instead of duplicate and schedule: ' + buttons.join(', '));
-		await inShadow(page, h => [...h.shadowRoot.querySelectorAll('.handle button')].find(b => b.textContent === 'Confirm').click());
+		check(buttons.includes('Confirm booking') && buttons.includes('Decline') && buttons.includes('Cancel booking') && !buttons.includes('Duplicate') && !buttons.includes('Schedule'), 'a booking has its actions, in the café\'s words, instead of duplicate and schedule: ' + buttons.join(', '));
+		await inShadow(page, h => [...h.shadowRoot.querySelectorAll('.handle button')].find(b => b.textContent === 'Confirm booking').click());
 		await page.waitForTimeout(900);
 		check((await booking.locator('td.status').innerText()).trim() === 'confirmed', 'the action\'s result shows in the page');
 		// staff_add: a booking taken over the phone, from the card at the end of
 		// each render.cms list of bookings
 		const cards = async title => page.locator('h3:has-text("' + title + '") + table .raster-ghost').count();
-		check(await cards('To confirm') === 1 && await cards('Past evenings') === 1, 'a card for a new booking at the end of each list');
+		check(await cards('Requests') === 1 && await cards('Past') === 1, 'a card for a new booking at the end of each list');
 		const phone = page.locator('.raster-ghost').first();
 		await phone.click();
 		await page.waitForTimeout(200);
 		await page.keyboard.type('Phone Pat');
 		// a field of the new card selects its example text when it gets focus
 		await phone.locator('[data-raster-name=date]').click();
-		await page.keyboard.type(phoned);
+		await page.keyboard.type(wednesday);
+		await phone.locator('[data-raster-name=time]').click();
+		await page.keyboard.type('21:00');
+		await phone.locator('[data-raster-name=resource]').click();
+		await page.keyboard.type('dining-room');
 		await inShadow(page, h => [...h.shadowRoot.querySelectorAll('.handle button')].find(b => b.textContent === 'Add').click());
 		await page.waitForTimeout(900);
-		const added = (await (await fetch(base + '/api/reservation/day/' + phoned, { headers: { cookie: (await page.context().cookies()).map(c => c.name + '=' + c.value).join('; ') } })).json());
-		check(Array.isArray(added) && added.some(b => b.name === 'Phone Pat' && b.status === 'new'), 'the phone booking is stored, as new: ' + JSON.stringify(added));
-		check(await page.locator('h3:has-text("To confirm") + table .raster-ghost').count() === 1 && await page.locator('h3:has-text("Past evenings") + table .raster-ghost').count() === 1, 'each list keeps its own card after an add');
+		const added = (await (await fetch(base + '/api/cafe/bookings/' + wednesday, { headers: { cookie: (await page.context().cookies()).map(c => c.name + '=' + c.value).join('; ') } })).json());
+		check(Array.isArray(added) && added.some(b => b.name === 'Phone Pat' && b.status === 'requested'), 'the phone booking is stored, as a request: ' + JSON.stringify(added));
+		check(await page.locator('h3:has-text("Requests") + table .raster-ghost').count() === 1 && await page.locator('h3:has-text("Past") + table .raster-ghost').count() === 1, 'each list keeps its own card after an add');
 
 		// a model's agenda (cms_records::listed): its bookings are edited in place
 		await page.goto(base + '/staff');
@@ -384,9 +390,11 @@ const booked = later(30), phoned = later(60);
 		const inAgenda = page.locator('tr.agenda-booking[data-raster-item]', { hasText: 'Ilinca' }).first();
 		check(await inAgenda.count() === 1, 'the agenda\'s booking is an item the editor knows');
 		check(await inAgenda.locator('td.status').evaluate(el => !el.isContentEditable && !el.querySelector('[contenteditable]')), 'its status is not editable');
-		await inAgenda.locator('td').first().click();
+		// the name's cell: the row starts with the time
+		const nameCell = inAgenda.locator('td', { hasText: 'Ilinca' });
+		await nameCell.click();
 		// the caret at the end of the name
-		await inAgenda.locator('td').first().evaluate(td => {
+		await nameCell.evaluate(td => {
 			const el = td.isContentEditable ? td : td.querySelector('[contenteditable]');
 			const range = document.createRange(); range.selectNodeContents(el); range.collapse(false);
 			const sel = getSelection(); sel.removeAllRanges(); sel.addRange(range);
@@ -394,10 +402,10 @@ const booked = later(30), phoned = later(60);
 		await page.keyboard.type(' Pop');
 		await page.mouse.click(5, 5);
 		await page.waitForTimeout(1200);
-		const day = await (await fetch(base + '/api/reservation/day/' + booked, { headers: { cookie: (await page.context().cookies()).map(c => c.name + '=' + c.value).join('; ') } })).json();
+		const day = await (await fetch(base + '/api/cafe/bookings/' + tuesday, { headers: { cookie: (await page.context().cookies()).map(c => c.name + '=' + c.value).join('; ') } })).json();
 		check(day.some(b => b.name === 'Ilinca Pop'), 'an edit in the agenda is saved: ' + JSON.stringify(day.map(b => b.name)));
-		check(await page.locator('section.evening .raster-ghost').count() === 0, 'the agenda adds no cards: new bookings come from the lists');
-		check((await (await fetch(base + '/api/reservation/confirm')).status) === 404, 'actions are not reachable over /api');
+		check(await page.locator('section.day .raster-ghost').count() === 0, 'the agenda adds no cards: new bookings come from the lists');
+		check((await (await fetch(base + '/api/booking/confirm')).status) === 404, 'actions are not reachable over /api');
 		await page.screenshot({ path: path.join(screens, 'records.png') });
 
 		// the dock is flicked to the top, stays there, and comes back down with two fingers

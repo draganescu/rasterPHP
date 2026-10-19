@@ -42,7 +42,7 @@ application/views/default/team.html:11:20: error: Model 'office' has no public m
 
 ```sh
 php bin/raster render /about
-php bin/raster render '/bookings?stylist=Ana' --as=editor
+php bin/raster render '/staff?resource=ana' --as=editor
 ```
 
 Prints the HTML of a URL without a web server, never from the page cache. Exits with 1 when the page answers with an error (404, 500) or a redirect, which makes it handy in tests. A protected page gets what a visitor gets: no page, `Location: …/login?next=…` and `HTTP 303` on stderr. A query string fills `?…` as a browser's would.

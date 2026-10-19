@@ -4,20 +4,20 @@
 // How models talk to each other without the template knowing. A model
 // announces that something happened, with the details in an array:
 //
-//   event::dispatch('reservation.booked', array('email' => $email, 'name' => $name));
+//   event::dispatch('inquiry.received', array('email' => $email, 'name' => $name));
 //
 // and any model can listen, either by declaring it next to its code:
 //
 //   class cafe {
 //       static function listens() {
-//           return array('reservation.booked' => 'subscribe_guest');
+//           return array('booking.requested' => 'subscribe_guest');
 //       }
 //       function subscribe_guest($booking) { ... $booking['email'] ... }
 //   }
 //
 // or with a binding in config/the_events.php:
 //
-//   event::bind('reservation.booked')->to('cafe', 'subscribe_guest');
+//   event::bind('booking.requested')->to('cafe', 'subscribe_guest');
 //
 // Listeners run in the order they were bound: the framework's own bindings
 // in system/config/events.php and the bundled models' listens() first, then

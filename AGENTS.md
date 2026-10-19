@@ -206,7 +206,7 @@ from `raster schema --apply`:
 
 ```php
 static function schema() {
-    return array('reservation' => array('name' => '', 'guests' => 0, 'created_at' => ''));
+    return array('visit' => array('page' => '', 'seconds' => 0, 'created_at' => ''));
 }
 ```
 
@@ -223,9 +223,9 @@ reach: `schema()` (its tables), `types()` (its records, see **Records**),
 ```php
 static function requires() {
     return array(
-        'emails' => array('render.booking.form' => array('_email/booking_received')),
-        'pages' => array(config::get('booking_cancel_page', 'booking-cancel')),
-        'settings' => array('booking_staff_email', 'booking_cancel_page'),
+        'emails' => array('render.inquiry.form' => array('_email/inquiry_received')),
+        'pages' => array(config::get('inquiry_answer_page', 'inquiry-answer')),
+        'settings' => array('inquiry_staff_email', 'inquiry_answer_page'),
     );
 }
 ```
@@ -308,22 +308,23 @@ newsletter, a new account gets a welcome email), the first model sends an
 event and the second listens. No model in the view does the wiring.
 
 ```php
-// the model that knows something happened
-event::dispatch('reservation.booked', array('email' => $email, 'newsletter' => true));
+// the model that knows something happened (the bundled booking model sends
+// booking.requested with the booking's fields when a guest books)
+event::dispatch('inquiry.received', array('email' => $email, 'newsletter' => true));
 
-// a model that cares declares it next to its code
+// a model that cares declares it next to its code (demo/models/cafe)
 class cafe {
     static function listens() {
-        return array('reservation.booked' => 'subscribe_guest');   // or a list of methods
+        return array('booking.requested' => 'subscribe_guest');   // or a list of methods
     }
     function subscribe_guest($booking) {
-        if ($booking['newsletter']) newsletter::subscribe($booking['email']);
+        if ($booking['who'] === 'guest' && $booking['newsletter']) newsletter::subscribe($booking['email']);
     }
 }
 ```
 
 - Or bind in `config/the_events.php`:
-  `event::bind('reservation.booked')->to('cafe', 'subscribe_guest');`, and
+  `event::bind('booking.requested')->to('cafe', 'subscribe_guest');`, and
   `event::unbind(…)->from(…)`.
 - Listeners get the payload array and run in order: the framework's own
   bindings in `system/config/events.php` (routing, the CMS and account
@@ -416,8 +417,8 @@ failure and tries again. Output the method printed before it threw is
 dropped. A database that can't be reached answers 503 before the method
 runs, so a webhook is never told "no such order" during an outage; a bad
 query on a database that is there is a 500 like any other error. A call
-with too few arguments answers 400 (`/api/reservation/day` for
-`day($date)`). In development the answer also has `exception` and `trace`.
+with too few arguments answers 400 (`/api/cafe/bookings` for
+`bookings($date)`). In development the answer also has `exception` and `trace`.
 
 The database is RedBeanPHP (`R::dispense`, `R::store`, `R::load`) for rows
 as objects, and named queries in `sql/` files for everything you would write
@@ -518,12 +519,17 @@ item of a collection is the mock-up content.
     `raster_page_size` (10).
   - `/news/news_items/tag/php` lists the items where `tag` is `php`.
 - **Options:** `render.cms.news('featured=1&order=newest&limit=3')`, pairs
-  joined by `&`. They work the same in `pagination.links('cms.news', '…')`.
+  joined by `&`. They work the same in `pagination.links('cms.news', '…')`:
+  the list and its pager are built from the same conditions, so the pager
+  counts the rows the list shows, drafts for editors, `owner=me` and a
+  private type's records for whoever may read them (visitors get no pager
+  over private records).
   - `order` is `newest`, `oldest`, `<field>` or `-<field>` (descending), or
     several separated by commas: `order=date,time`, `order=-date,-time`.
     `oldest` is the order items were added, not a date: to sort by a date
     field, name it.
-  - `limit=3` shows at most 3.
+  - `limit=3` shows at most 3, the same 3 on every page: a limit list is
+    one page, and never moves with a paged list beside it.
   - `field=value` is a filter, and adds that field if it's new.
   - `field=?name` takes the value from the URL's `?name=`; when the URL has
     none, or it is empty, that filter is left out. So a plain
@@ -554,9 +560,14 @@ item of a collection is the mock-up content.
   - Models, MCP and `/api` read ints, floats and bools. Templates print
     text: a number with as many decimals as its mock-up (with `14.50` in
     the mock-up, 4.5 prints `4.50`), a bool `1` or `0`, an empty value
-    nothing. That holds for any model's rows, so a model returning
-    `24.0` under a `24.00` mock-up prints `24.00`. The in-page editor
-    shows what was stored the same way.
+    nothing, and what visitors typed as text. That holds for records
+    printed through `render.cms` and `cms_records::listed()`. Rows a model
+    hands back itself follow the plain rules: `false` keeps the mock-up
+    (so a `newsletter` false prints the mock-up's `1`), and values print
+    as they are, unescaped. A number in such a row still prints with its
+    mock-up's decimals (`24.0` under `24.00` prints `24.00`). `lint` warns
+    on any page that shows `find()` rows without `listed()`. The in-page
+    editor shows what was stored the same way.
   - `schema`, `describe` and `site_overview` list each field's type. When
     a mock-up changes type (`14` becomes `14 lei`), `schema` shows the
     column as retyped and `schema --apply` converts it if every stored
@@ -596,37 +607,42 @@ wherever a view renders them, and lets editors and agents change them with
 the same in-page editor and MCP tools as any item.
 
 ```php
-class reservation {
+class inquiry {                                        // catering requests
     static function types() {
-        return array('reservation' => array(
-            'fields'   => array('name' => '', 'date' => '', 'guests' => 0, 'status' => 'new', 'lines' => array()),
+        return array('inquiry' => array(
+            'fields'   => array('name' => '', 'email' => '', 'date' => '', 'people' => 0, 'message' => '', 'status' => 'new', 'dishes' => array()),
             'types'    => array('date' => 'date'),   // the rest come from the defaults: 0 an int, '' text
             'create'   => 'visitor',           // who may send the form: visitor, member, editor (default)
-            'staff_add' => true,               // staff also add them in the page (phone bookings)
+            'staff_add' => true,               // staff also add them in the page (one taken over the phone)
             'owner'    => true,                // remember who made it; they may read their own
             'public'   => false,               // the default: only editors (and owners) see records
             'readonly' => array('status'),     // shown to editors, written only by the model
             'hidden'   => array(),             // never shown to editors or agents, nor made a slug (payment ids, tokens)
             'html'     => array(),             // fields printed as HTML; the rest print escaped
-            'actions'  => array('confirm' => 'editor', 'refund' => 'admin'),
+            'actions'  => array('answer' => 'editor', 'archive' => 'admin'),
         ));   // a type's name is lowercase letters and digits; no field x next to x_id
     }
     static function check($type, $after, $before) {   // every write passes here
         $problems = array();
-        if ($after && $after['guests'] > 8) $problems[] = 'too_many';
+        if ($after && $after['people'] < 10) $problems[] = 'too_few';   // catering starts at ten
         return $problems;                              // names of alerts, or nothing
     }
-    static function confirm($item, $input) {           // an action
-        return cms_records::update('reservation', $item['id'], array('status' => 'confirmed'));
+    static function answer($item, $input) {            // an action
+        return cms_records::update('inquiry', $item['id'], array('status' => 'answered'));
     }
-    function book() {                                  // the form: render.reservation.book
-        return cms_records::submit('reservation', 'booked');
+    function form() {                                  // the form: render.inquiry.form
+        return cms_records::submit('inquiry', 'sent');
     }
 }
 ```
 
-- **The type is a collection** named after it (table `reservationdata`):
-  `render.cms.reservation('order=newest')` lists records, item URLs and
+Bookings (a café's tables, a salon's appointments) need no model of their
+own: the bundled booking model has the type, its rules and its emails (see
+**Bundled models**, booking). A site adds a field to it with a
+`the_booking` override.
+
+- **The type is a collection** named after it (table `inquirydata`):
+  `render.cms.inquiry('order=newest')` lists records, item URLs and
   filters work, and `site_overview`, `describe` and `schema` list it with the
   model that declares it. Its fields come from `types()`, not the markup, and
   no mock-up row is ever stored. Records also get `created_at` and, with
@@ -634,7 +650,7 @@ class reservation {
 - **Field types** come from the defaults: `0` is an int, `0.0` a number,
   `false` a bool, `''` text. `'types'` names the others: `'date'`,
   `'datetime'` or `'time'` (or any type, overriding the default's). The
-  model reads them as such (`$after['guests'] > 8`, `if
+  model reads them as such (`$after['people'] < 10`, `if
   ($booking['newsletter'])`), with no casts. See **Types** above.
 - **`check($type, $after, $before)` runs before every write**, whoever makes
   it: a form, the in-page editor, MCP, or the model's own code. `$after` is
@@ -678,7 +694,7 @@ class reservation {
   `check()` and raises each problem as an alert, or stores
   the record and redirects with `?done=$done` (the type's name by default).
   A value the HTML rules let through but the field's type doesn't (`2.5`
-  guests in a number input) raises `<field>_invalid` (`guests_invalid`).
+  people in a number input) raises `<field>_invalid` (`people_invalid`).
   `$done = false` returns the stored record instead, for a checkout that goes
   on to pay. A visitor who may not create gets `login_required` (member
   types) or `not_allowed`.
@@ -687,8 +703,8 @@ class reservation {
   item's handle has the type's actions instead of Duplicate and Schedule.
   Deleting a record has no undo. The card for a new item at the end of a
   list appears for types staff make themselves (`create` is `editor`, the
-  default), and for types that say `'staff_add' => true`: a salon takes
-  bookings from its form and over the phone. Orders, which come with a
+  default), and for types that say `'staff_add' => true`: a café takes
+  bookings and catering requests from its forms and over the phone. Orders, which come with a
   payment, leave it out. A refused write answers 422 with
   `problems`; MCP returns an error naming them.
 - **Actions** are what staff do to a record beyond changing a field. The type
@@ -702,11 +718,13 @@ class reservation {
   button for each action the person's role allows (`POST
   /api/cms/editor_action`); MCP has `run_action`, trusted like an admin. Name
   a button in the site's words with `application/i18n/<lang>/raster_editor.php`:
-  `'action_confirm' => 'Confirm table'`, and a refusal with `'problem_<name>'`.
+  `'action_confirm' => 'Confirm booking'`, and a refusal with `'problem_<name>'`
+  (`'problem_closed' => 'We are closed that day'`; the demo's
+  `demo/i18n/en/raster_editor.php`).
 - **Every form that saves data gets a staff page.** When a type's records
   come from a form (`create` is `visitor` or `member`), also make a view that
   lists them, `render.cms.<type>('order=newest')`, and protect it for
-  editors: `config::set('protected')->to(array('bookings' => 'editor'))`.
+  editors: `config::set('protected')->to(array('inquiries' => 'editor'))`.
   Without it the records are stored and nobody can see them (`lint` warns).
   Staff confirm, edit and delete them there with the in-page editor and the
   type's actions. The editor's Admin menu lists it, so it needs no link in
@@ -716,10 +734,10 @@ class reservation {
 
      ```html
      <form method="get">
-       <select name="stylist"><option value="">Anyone</option><option>Ana</option></select>
+       <select name="resource"><option value="">Anyone</option><option value="ana">Ana</option></select>
        <input type="date" name="day"> <button>Show</button>
      </form>
-     <!-- render.cms.booking('date>=today&stylist=?stylist&date=?day&order=date,time') -->…<!-- /render.cms.booking('date>=today&stylist=?stylist&date=?day&order=date,time') -->
+     <!-- render.cms.booking('date>=today&resource=?resource&date=?day&order=date,time') -->…<!-- /render.cms.booking('date>=today&resource=?resource&date=?day&order=date,time') -->
      ```
 
      A second list with `date<today` and `order=-date,-time` shows the past;
@@ -735,33 +753,36 @@ class reservation {
      inside them:
 
      ```php
-     function agenda() {                       // render.booking.agenda
+     function by_day() {                       // render.inquiry.by_day
          $days = array();
-         foreach (cms_records::find('booking', 'date>=today&status!=cancelled&order=date,time') as $b) $days[$b['date']][] = $b;
+         foreach (cms_records::find('inquiry', 'date>=today&status!=archived&order=date') as $i) $days[$i['date']][] = $i;
          $rows = array();
-         foreach ($days as $day => $bookings) $rows[] = array('day' => $day, 'bookings' => cms_records::listed('booking', $bookings));
+         foreach ($days as $day => $inquiries) $rows[] = array('day' => $day, 'inquiries' => cms_records::listed('inquiry', $inquiries));
          return $rows;
      }
      ```
 
      ```html
-     <!-- render.booking.agenda -->
+     <!-- render.inquiry.by_day -->
      <h3><!-- print.day -->2026-10-01<!-- /print.day --></h3>
-     <ul><!-- print.bookings --><li><!-- print.name -->Ana<!-- /print.name --></li><!-- /print.bookings --></ul>
-     <!-- /render.booking.agenda -->
+     <ul><!-- print.inquiries --><li><!-- print.name -->Ana<!-- /print.name --></li><!-- /print.inquiries --></ul>
+     <!-- /render.inquiry.by_day -->
      ```
 
      The model decides which records show. Values it adds to a row print
      but aren't editable. New records are added from a `render.cms` list or
-     the record's page, not from a model view.
+     the record's page, not from a model view. The bundled booking model's
+     `render.booking.agenda` and `render.booking.attention` work this way.
   3. **Links to each record's own page**, `print.@href.raster_detail_link`
-     (`/booking/booking_item/<slug>`, shown by a view that renders
-     `render.cms.booking`), where editors edit it. Every listed row has one.
+     (`/inquiry/inquiry_item/<slug>`, shown by a view that renders
+     `render.cms.inquiry`), where editors edit it. Every listed row has one.
   4. Ask only when none of these can show what is needed.
 
   Rows a model returns from `cms_records::find(…)` without `listed()` can't
-  be edited in the page, and `lint` warns about it on admin pages. Check
-  the page with `php bin/raster render /bookings --as=editor` (MCP
+  be edited in the page, print a `false` bool as the mock-up and what
+  visitors typed unescaped; `lint` warns about them on every page (on admin
+  pages, about the editing too). Check
+  the page with `php bin/raster render /inquiries --as=editor` (MCP
   `render_url` with `as`), which says what the editor can edit there.
 - **The model's own code** writes with `cms_records::create($type, $values)`,
   `update($type, $id, $values)` and `delete($type, $id)` (these may write
@@ -771,7 +792,7 @@ class reservation {
   as `render.cms` takes them, `'date>=today&status!=cancelled'`, with
   `order=` and `limit=` in them too; `$order` is as in list options
   (`'date,-time'`, oldest first by default). The values are values: a
-  `?stylist` (the URL's, in a template) throws `InvalidArgumentException`,
+  `?resource` (the URL's, in a template) throws `InvalidArgumentException`,
   so pass `util::param()` or `$_GET` yourself. `owner=me` (or
   `array('owner' => 'me')`) is the logged in person's records, and none
   when nobody is logged in. `find()` returns every record
@@ -924,9 +945,13 @@ bundled model declares none of its types, and `lint` warns.
     does, so sites need no step for it.
 
 **booking**: bookings for a café's sittings or a salon's appointments
-(with or without "with Ana"). So far it has the setup, the slots it makes,
-the bookings and what staff see of them; the guest's emails and manage
-link follow.
+(with or without "with Ana"), taken from the site's own pages. The site
+writes its pages, its emails and the words of each alert; the model owns
+the types, the rules, the status changes, the guest's link, the emails' data
+and the events. Nothing in `the_app.php` is required. It counts only on a
+site whose views use `render.booking.*` or `print.booking.*`. The demo café
+(`demo/`) takes table bookings on `/visit` and a salon's on `/salon`, with
+its setup from `php demo/seed.php`, and is the worked example of all of it.
 - Setup, as records staff edit in the page (`render.cms.bookingresource`
   and so on; each is made by editors and private):
   - `bookingresource`: what is booked. `name`, `people` (most people at
@@ -1129,6 +1154,72 @@ link follow.
   (120 minutes before the start a guest may still cancel or change),
   `booking_page` (`book`, the form, for `book_url`), `booking_manage_page`
   (`booking`), `booking_staff_email` (the sender).
+- More fields on a booking (a dietary note, the café's newsletter box): a
+  `the_booking` override whose `types()` adds them to `parent::types()`.
+  The form, the editor and the events carry them; `fill()`, `check()` and
+  the actions are the bundled ones.
+
+  ```php
+  class the_booking extends booking {           // models/the_booking/the_booking.php
+      static function types() {
+          $types = parent::types();
+          $types['booking']['fields']['newsletter'] = false;
+          return $types;
+      }
+  }
+  ```
+
+- Taking bookings, step by step:
+  1. A page with the form (`booking_page`): a GET form for the day,
+     `render.booking.days` and the day's `render.booking.slots` as radio
+     buttons inside `render.booking.form`, with an alert for each problem
+     the form can raise. With several resources, name the one this form is
+     for (a hidden `resource` input and `resource=…` in the regions), or let
+     the guest choose it in the GET form (`resource=?resource`).
+  2. The manage page (`booking`): `render.booking.manage` with a Cancel
+     form, and a Change form under a GET form for the day that keeps
+     `token` and `booking` as hidden inputs.
+  3. The six `_email/booking_*.html` views (`lint` names a missing one).
+  4. The staff pages, from the Records recipe, protected for editors by
+     their own names:
+
+     ```php
+     config::set('protected')->to(array('staff' => 'editor', 'booking_item' => 'editor'));
+     ```
+
+     ```html
+     <!-- staff.html -->
+     <p><!-- print.booking.count('status=requested&date>=today') -->3<!-- /print.booking.count('status=requested&date>=today') --> requests,
+        <!-- print.booking.count('attention') -->0<!-- /print.booking.count('attention') --> need attention</p>
+     <form method="get"><select name="resource"><option value="">All</option><option value="dining-room">Dining room</option></select>
+       <input type="date" name="day"> <button>Show</button></form>
+     <h3>Needs attention</h3>
+     <!-- render.booking.attention --><p><!-- print.name -->Ana<!-- /print.name -->: <!-- print.attention -->closed<!-- /print.attention --></p><!-- /render.booking.attention -->
+     <h3>Requests</h3>
+     <!-- render.cms.booking('status=requested&date>=today&resource=?resource&date=?day&order=date,time') -->…<!-- /render.cms.booking('status=requested&date>=today&resource=?resource&date=?day&order=date,time') -->
+     <h3>By day</h3>
+     <!-- render.booking.agenda('from=today&days=7&resource=?resource') -->
+     <h4><!-- print.date -->2026-10-20<!-- /print.date --></h4>
+     <ul><!-- print.slots --><li><!-- print.time -->19:00<!-- /print.time -->: <!-- print.left_people -->12<!-- /print.left_people --> left</li><!-- /print.slots --></ul>
+     <ul><!-- print.bookings --><li><!-- print.name -->Ana<!-- /print.name --> <!-- print.status -->requested<!-- /print.status --></li><!-- /print.bookings --></ul>
+     <!-- /render.booking.agenda('from=today&days=7&resource=?resource') -->
+     <h3>Past</h3>
+     <!-- render.cms.booking('date<today&status!=cancelled&resource=?resource&order=-date,-time&limit=20') -->…<!-- /render.cms.booking('date<today&status!=cancelled&resource=?resource&order=-date,-time&limit=20') -->
+     ```
+
+     Staff confirm, decline and cancel with each booking's buttons, move
+     one by editing its date or time, and add a phone booking with the card
+     at the end of a `render.cms.booking` list. A page under `staff/`
+     renders `render.cms.bookingresource`, `bookinghours`, `bookingclosed`
+     and `bookingservice` for the setup, and `booking_item.html` renders
+     `render.cms.booking` for a booking's own page
+     (`/booking/booking_item/<slug>`, where `raster_detail_link` goes).
+     Never protect `booking`: as a prefix it takes the guest's `/booking`
+     too, and `lint` warns.
+  5. What can be booked: staff add the resources and hours on the setup
+     page, or a site ships a seed script (`demo/seed.php`) that makes them
+     with `cms_records::create`. Until there is one, the form raises
+     `not_open` and `lint` warns.
 
 **mail**: emails are views. `mail::send_view('_email/welcome', $to,
 array('name' => 'Ada'))` uses the view's `<title>` as the subject.
@@ -1360,7 +1451,7 @@ of lists and filter pages come along; drafts and the editor don't.
   on a trackpad) and it moves to the top, so nothing under it is out of
   reach. It stays where it was left. Nothing is added for visitors.
 - **Admin pages.** Every view that `protected` keeps for `editor` or `admin`
-  (`config::set('protected')->to(array('bookings' => 'editor'))`) is an
+  (`config::set('protected')->to(array('staff' => 'editor'))`) is an
   admin page: the editor's dock has an **Admin** menu listing the ones the
   person may open, by the view's `<title>`. That's the whole registration, so
   staff pages need no hidden menus or `print.if.is_editor` links. A prefix

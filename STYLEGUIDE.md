@@ -51,7 +51,7 @@ method in `system/` and one camelCase variable (`$removesStarts`).
 - **Config keys** are snake_case strings: `page_cache_ttl`, `login_page`,
   `<collection>_page_size`.
 - **Events** a model sends are `<model>.<what happened>`, in the past tense:
-  `reservation.booked`, `newsletter.confirmed`. The request's own events are
+  `booking.requested`, `newsletter.confirmed`. The request's own events are
   older single words (`launch`, `before_render`) and stay as they are.
 - **Alerts and problems** are snake_case names the template words:
   `fully_booked`, `email_taken`, `orders_are_kept`.
@@ -188,17 +188,17 @@ php tests/shop.php     # records, checkout, payments
 ```php
 // no
 namespace Raster\Models;
-final class ReservationService implements RecordTypeInterface {
+final class InquiryService implements RecordTypeInterface {
     public function __construct(private CmsRecords $records) {}
-    /** @param array<string, mixed> $booking */
-    public function cancel(array $booking, array $input): array {
-        return $this->records->update('reservation', $booking['id'], ['status' => 'cancelled']);
+    /** @param array<string, mixed> $inquiry */
+    public function answer(array $inquiry, array $input): array {
+        return $this->records->update('inquiry', $inquiry['id'], ['status' => 'answered']);
     }
 }
 
-// yes (demo/models/reservation/reservation.php)
-static function cancel($booking, $input) {
-    return cms_records::update('reservation', $booking['id'], array('status' => 'cancelled'));
+// yes (the inquiry example in AGENTS.md, Records)
+static function answer($inquiry, $input) {
+    return cms_records::update('inquiry', $inquiry['id'], array('status' => 'answered'));
 }
 ```
 

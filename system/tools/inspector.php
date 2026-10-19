@@ -728,12 +728,16 @@ class raster_inspector {
 		if ($block['keyword'] === 'render' && $block['type'] === 'open' && trim($block['inner']) !== '' && trim(strip_tags($block['inner'])) === '' && strpos($block['inner'], '<!--') === false && strpos($block['inner'], '<') === false) {
 			$problems[] = self::problem('warning', $block, "{$block['raw']} is empty; render repeats its inner HTML once per item");
 		}
-		// records listed by a model's own rows are invisible to the in-page
-		// editor: staff can't edit them in the page or add one
-		if ($block['keyword'] === 'render' && $ref['model'] !== 'cms' && stripos($block['inner'], '<form') === false && $this->admin_view($this->linting)) {
-			$type = $this->record_rows($info['file'], $method);
-			if ($type !== null) {
+		// records a model hands back itself print a false bool as the
+		// mock-up and what visitors typed as HTML (#125); on a staff page the
+		// in-page editor can't edit them or add one either
+		if ($block['keyword'] === 'render' && $ref['model'] !== 'cms' && stripos($block['inner'], '<form') === false) {
+			$admin = $this->admin_view($this->linting);
+			$type = $this->record_rows($info['file'], $method, !$admin);
+			if ($type !== null && $admin) {
 				$problems[] = self::problem('warning', $block, "{$block['raw']} shows $type records the {$ref['model']} model reads itself without cms_records::listed(), so the in-page editor can't edit them or add one. Return cms_records::listed('$type', \$rows) (for a list inside a row too), or list them with <!-- render.cms.$type('…') -->: filters from the URL (field=?param), dates (date>=today) and order=a,b cover most staff pages.");
+			} elseif ($type !== null) {
+				$problems[] = self::problem('warning', $block, "{$block['raw']} shows $type records the {$ref['model']} model reads itself without cms_records::listed(), so a false bool prints the mock-up and what visitors typed prints as HTML. Return cms_records::listed('$type', \$rows) (for a list inside a row too), or list them with <!-- render.cms.$type('…') -->.");
 			}
 		}
 	}
@@ -750,14 +754,17 @@ class raster_inspector {
 	}
 
 	// the record type a model method reads with cms_records::find() or get()
-	// and hands to the template without cms_records::listed(), or null
-	function record_rows($file, $method) {
+	// and hands to the template without cms_records::listed(), or null. With
+	// $text, rows a method makes text itself, with cms_records::for_template()
+	// or util::e(), are fine too (they print as records do, but aren't
+	// editable).
+	function record_rows($file, $method, $text = false) {
 		$source = @file_get_contents($file);
 		if ($source === false || !preg_match('/function\s+'.preg_quote($method, '/').'\s*\(/', $source, $m, PREG_OFFSET_CAPTURE)) return null;
 		$body = substr($source, $m[0][1]);
 		// up to the next method
 		if (preg_match('/\n\s*(?:(?:public|protected|private|static|final)\s+)*function\s/', $body, $next, PREG_OFFSET_CAPTURE, 1)) $body = substr($body, 0, $next[0][1]);
-		if (strpos($body, 'cms_records::listed(') !== false) return null;
+		if (strpos($body, 'cms_records::listed(') !== false || ($text && (strpos($body, 'cms_records::for_template(') !== false || strpos($body, 'util::e(') !== false))) return null;
 		if (!preg_match_all('/cms_records::(?:find|get)\(\s*[\'"]([a-z][a-z0-9]*)[\'"]/', $body, $found)) return null;
 		foreach ($found[1] as $type) {
 			if (cms_records::info($type)) return $type;
@@ -827,7 +834,7 @@ class raster_inspector {
 				// problems a check() names: $problems[] = 'sold_out'
 				preg_match_all('/\$problems\[\]\s*=\s*[\'"]([a-z0-9_]+)[\'"]/', $source, $m);
 				$names = array_merge($names, $m[1]);
-				// cms_records::submit('reservation', 'booked') redirects with ?done=booked
+				// cms_records::submit('inquiry', 'sent') redirects with ?done=sent
 				// (the type's name when there is no second argument)
 				preg_match_all('/submit\(\s*[\'"]([a-z0-9_]+)[\'"](?:\s*,\s*[\'"]([a-z0-9_]+)[\'"])?/', $source, $m, PREG_SET_ORDER);
 				foreach ($m as $call) $names[] = isset($call[2]) && $call[2] !== '' ? $call[2] : $call[1];

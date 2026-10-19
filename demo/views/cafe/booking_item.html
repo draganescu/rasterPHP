@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <!-- dry._layout.head /-->
+  <title>Booking</title>
+</head>
+<body>
+  <!-- dry._layout.header /-->
+  <main class="narrow">
+    <h1>Booking</h1>
+    <p>One booking, for staff: edit it in the page, or confirm, decline or cancel it with its buttons. <a href="staff.html">Back to staff</a></p>
+    <!-- render.cms.booking -->
+    <dl class="booking-details">
+      <dt>Name</dt><dd><!-- print.name -->Ana<!-- /print.name --></dd>
+      <dt>Email</dt><dd><!-- print.email -->ana@example.com<!-- /print.email --></dd>
+      <dt>Phone</dt><dd><!-- print.phone -->+40 721 000 000<!-- /print.phone --></dd>
+      <dt>When</dt><dd><!-- print.date -->2026-10-20<!-- /print.date --> at <!-- print.time -->19:00<!-- /print.time --> to <!-- print.ends -->21:00<!-- /print.ends --></dd>
+      <dt>Where</dt><dd><!-- print.resource -->dining-room<!-- /print.resource --> <!-- print.service --><!-- /print.service --></dd>
+      <dt>People</dt><dd><!-- print.people -->2<!-- /print.people --></dd>
+      <dt>Notes</dt><dd><!-- print.notes -->Window seat<!-- /print.notes --></dd>
+      <dt>Newsletter</dt><dd><!-- print.newsletter -->0<!-- /print.newsletter --></dd>
+      <dt>Status</dt><dd class="status"><!-- print.status -->requested<!-- /print.status -->, changed <!-- print.changed_at -->2026-10-18 12:00:00<!-- /print.changed_at --></dd>
+    </dl>
+    <!-- /render.cms.booking -->
+  </main>
+  <!-- dry._layout.footer /-->
+</body>
+</html>
