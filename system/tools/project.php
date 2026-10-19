@@ -481,7 +481,8 @@ class raster_project
 		// posts that all come from one private address (a proxy in front)
 		// share one spam count; the web requests note it in today's salt row
 		try {
-			if (!config::get('trusted_proxies') && cms_store::table_exists('formsalt')) {
+			// in development `raster serve` answers 127.0.0.1, which says nothing
+			if ($environment === 'production' && !config::get('trusted_proxies') && cms_store::table_exists('formsalt')) {
 				$salt = database::instance('validation')->salt();
 				if ($salt && $salt[0]['day'] === date('Y-m-d') && (int)$salt[0]['proxied'] === 1) {
 					$add('warn', 'Posts arrive from a private address and `trusted_proxies` is empty, so every visitor shares one spam count', "Behind a proxy, name it: config::set('trusted_proxies')->to(array('10.0.0.0/8')), and config client_ip_header when it sends the visitor's address in another header than X-Forwarded-For (Fly-Client-IP)");

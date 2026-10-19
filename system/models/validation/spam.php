@@ -106,18 +106,28 @@ class validation_spam
 	// then the client_ip_header it sends (for a list, the last entry that
 	// isn't itself trusted). A missing or bad header keeps REMOTE_ADDR.
 	static function client_ip() {
-		$remote = isset($_SERVER['REMOTE_ADDR']) ? (string)$_SERVER['REMOTE_ADDR'] : '';
+		$remote = self::unmapped(isset($_SERVER['REMOTE_ADDR']) ? (string)$_SERVER['REMOTE_ADDR'] : '');
 		$proxies = (array)config::get('trusted_proxies', array());
 		if (!$proxies || !self::trusted($remote, $proxies)) return $remote;
 		$header = 'HTTP_'.strtoupper(str_replace('-', '_', (string)config::get('client_ip_header', 'X-Forwarded-For')));
 		if (empty($_SERVER[$header]) || !is_string($_SERVER[$header])) return $remote;
-		$entries = array_reverse(array_map('trim', explode(',', $_SERVER[$header])));
+		$entries = array_reverse(array_map(array('validation_spam', 'unmapped'), array_map('trim', explode(',', $_SERVER[$header]))));
 		foreach ($entries as $entry) {
 			if (!filter_var($entry, FILTER_VALIDATE_IP)) return $remote;
 			if (!self::trusted($entry, $proxies)) return $entry;
 		}
 		// every hop is trusted: the first is the visitor
 		return end($entries);
+	}
+
+	// An IPv4 address written as IPv6 (::ffff:203.0.113.7, from a server
+	// listening on both) as the IPv4 it is: otherwise every visitor would
+	// share one /64, and no IPv4 range would match it
+	static function unmapped($ip) {
+		if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) return $ip;
+		$packed = inet_pton($ip);
+		if (substr($packed, 0, 12) !== str_repeat("\0", 10)."\xff\xff") return $ip;
+		return inet_ntop(substr($packed, 12));
 	}
 
 	protected static function trusted($ip, $proxies) {
@@ -168,12 +178,14 @@ class validation_spam
 			$db = database::instance('validation');
 			$today = date('Y-m-d');
 			$rows = $db->salt();
-			if ($rows && $rows[0]['day'] === $today) return $rows[0]['salt'];
+			// only ever forward: a request that started before midnight
+			// can't put yesterday's salt back
+			if ($rows && $rows[0]['day'] >= $today) return $rows[0]['salt'];
 			// two requests at midnight wait for each other here, and the
 			// second finds the first one's salt
 			return cms_records::transaction(function () use ($db, $today) {
 				$rows = $db->salt();
-				if ($rows && $rows[0]['day'] === $today) return $rows[0]['salt'];
+				if ($rows && $rows[0]['day'] >= $today) return $rows[0]['salt'];
 				$db->clear_hits();
 				$db->clear_salt();
 				$salt = bin2hex(random_bytes(32));
@@ -190,7 +202,7 @@ class validation_spam
 	// probably in front and every visitor shares one count. doctor runs
 	// on the command line and learns it from today's formsalt row.
 	protected static function note_proxy() {
-		$remote = isset($_SERVER['REMOTE_ADDR']) ? (string)$_SERVER['REMOTE_ADDR'] : '';
+		$remote = self::unmapped(isset($_SERVER['REMOTE_ADDR']) ? (string)$_SERVER['REMOTE_ADDR'] : '');
 		if (!filter_var($remote, FILTER_VALIDATE_IP) || filter_var($remote, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) return;
 		if (config::get('trusted_proxies')) return;
 		try {

@@ -538,8 +538,10 @@ class contact {
     CIDR ranges, IPv4 and IPv6): a post from one of them is counted by
     `client_ip_header` (`X-Forwarded-For`, the last entry that isn't a
     trusted proxy; or one address, `Fly-Client-IP`). A header that is
-    missing or not an address keeps the proxy's. `doctor` warns when today's
-    posts came from a private address and `trusted_proxies` is empty.
+    missing or not an address keeps the proxy's. An IPv4 address written as
+    IPv6 (`::ffff:203.0.113.7`) counts as the IPv4 address. In production
+    `doctor` warns when today's posts came from a private address and
+    `trusted_proxies` is empty.
 - **Forms that ask with the URL** (`<form method="get">`, a filter or a
   search) show what the URL asked: `/bookings?stylist=Ana` keeps Ana chosen,
   and `?stylist=` chooses only the option whose value is empty.
@@ -1750,8 +1752,8 @@ their stamp check, so people with a page open send it again.
   `system/private_paths.php`, uses of deprecated features
   (`system/tools/deprecations.php`, minus the ones config `allow_deprecated`
   says are on purpose), a `data/secret` that can't be read or isn't a key,
-  posts arriving through a proxy `trusted_proxies` doesn't name, and, in
-  production, the site address, mail, tokens,
+  and, in production, posts arriving through a proxy `trusted_proxies`
+  doesn't name, the site address, mail, tokens,
   whether PHP shows errors (`display_errors`) and whether PHP takes the
   editor's pictures: it warns when `upload_max_filesize` is below 12M or
   `post_max_size` below 13M (`cms_editor::UPLOAD_MB` and the rest of the

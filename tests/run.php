@@ -5005,9 +5005,13 @@ function spam_logged($fn) {
 	@unlink($logged);
 	return array($result, $log);
 }
+// an empty formhit that is there: a missing table would also count 0
 function spam_clear() {
 	cms_store::connect();
+	validation_spam::$ready = false;
+	check(validation_spam::salt() !== null, 'the spam tables are made');
 	R::exec('DELETE FROM formhit');
+	check(in_array('formhit', R::inspect()), 'formhit is there');
 }
 function spam_hits() {
 	return (int)R::getCell('SELECT COUNT(*) FROM formhit');
@@ -5103,6 +5107,12 @@ test('suspect: IPv6 counts by /64', function () {
 	for ($i = 1; $i <= 5; $i++) same(array(), spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => "2001:db8:1:2::$i")), "post $i");
 	same(array('too_many_from_ip'), spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => '2001:db8:1:2::6')), 'the 6th of the /64');
 	same(array(), spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => '2001:db8:1:3::1')), 'the next /64');
+	// IPv4 written as IPv6 is IPv4: two of them count apart
+	spam_clear();
+	for ($i = 1; $i <= 5; $i++) spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => '::ffff:203.0.113.7'));
+	same(array('too_many_from_ip'), spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => '::ffff:203.0.113.7')), 'the 6th from one mapped address');
+	same(array(), spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => '::ffff:203.0.113.8')), 'another mapped address');
+	same(array('too_many_from_ip'), spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => '203.0.113.7')), 'the same address written as IPv4');
 });
 
 test('a trusted proxy\'s header is read, an untrusted one ignored', function () {
@@ -5126,6 +5136,13 @@ test('a trusted proxy\'s header is read, an untrusted one ignored', function () 
 			$_SERVER['HTTP_X_FORWARDED_FOR'] = '198.51.100.1';
 			same('10.0.0.2', validation_spam::client_ip(), 'a proxy that is not trusted');
 		});
+		with_settings(array('trusted_proxies' => array('10.0.0.0/8')), function () {
+			$_SERVER['REMOTE_ADDR'] = '::ffff:10.0.0.2';
+			$_SERVER['HTTP_X_FORWARDED_FOR'] = '::ffff:198.51.100.1, ::ffff:10.0.0.9';
+			same('198.51.100.1', validation_spam::client_ip(), 'a mapped proxy is in its IPv4 range, and its header is unmapped');
+		});
+		$_SERVER['REMOTE_ADDR'] = '::ffff:10.0.0.2';
+		same('10.0.0.2', validation_spam::client_ip(), 'a mapped REMOTE_ADDR');
 		with_settings(array('trusted_proxies' => array('fd00::/8')), function () {
 			$_SERVER['REMOTE_ADDR'] = 'fd12::1';
 			$_SERVER['HTTP_X_FORWARDED_FOR'] = '2001:db8::7';
@@ -5171,6 +5188,13 @@ test('no raw IP is stored, logged or kept past the day', function () {
 	check(R::getCell('SELECT salt FROM formsalt') !== $salt, 'a new salt');
 	same(date('Y-m-d'), R::getCell('SELECT day FROM formsalt'));
 	same(1, spam_hits(), "only the new post's row is left");
+	// never backwards: a request that started before midnight keeps the new salt
+	$tomorrow = date('Y-m-d', strtotime('+1 day'));
+	R::exec('UPDATE formsalt SET day = ?', array($tomorrow));
+	$salt = R::getCell('SELECT salt FROM formsalt');
+	same($salt, validation_spam::salt(), 'a stored day after today is kept');
+	same($tomorrow, R::getCell('SELECT day FROM formsalt'));
+	R::exec('UPDATE formsalt SET day = ?', array(date('Y-m-d')));
 });
 
 test('suspect: links and the blocklist', function () {
@@ -5255,11 +5279,13 @@ test('editors are never flagged or counted', function () {
 	});
 	same(array_fill(0, 7, array()), $reasons);
 	same(0, spam_hits());
+	spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => '203.0.113.7'));
+	same(1, spam_hits(), "a visitor's post is counted");
 });
 
 test('doctor warns when posts come from a private address', function () use ($root) {
-	$warned = function () use ($root) {
-		foreach (raster_project::doctor($root, 'application', 'development') as $c) {
+	$warned = function ($environment = 'production') use ($root) {
+		foreach (raster_project::doctor($root, 'application', $environment) as $c) {
 			if ($c['status'] === 'warn' && strpos($c['title'], 'trusted_proxies') !== false) return true;
 		}
 		return false;
@@ -5270,6 +5296,7 @@ test('doctor warns when posts come from a private address', function () use ($ro
 	check(!$warned(), 'a public address');
 	spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => '10.0.0.2'));
 	check($warned(), 'a private address');
+	check(!$warned('development'), 'in development raster serve answers 127.0.0.1');
 	with_settings(array('trusted_proxies' => array('10.0.0.0/8')), function () use ($warned) {
 		check(!$warned(), 'once trusted_proxies is set');
 	});
