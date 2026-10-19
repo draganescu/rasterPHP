@@ -261,6 +261,7 @@ running it again adds nothing. Until then the booking forms say `not_open`.
 | L14 | several scheduled items each clear the page cache when their time comes, in the site's `timezone` |
 | L15 | `raster cache clear` and MCP `clear_cache` fail when they can't write the cache; `upgrade` (and so `update`) clears it |
 | L16 | a cached page keeps the headers it was made with, carries `Last-Modified` and answers `If-Modified-Since` with 304 |
+| L17 | theme assets carry `?v=` from the file's time and size, a new one when the file changes; a versioned file is kept a year, an unversioned one and every page are checked each time |
 | M1 | MCP needs its token; GET is refused |
 | M2 | initialize, ping, tools/list, batches, errors |
 | M3 | notifications get 202 |
