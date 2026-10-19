@@ -3,6 +3,10 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.28
+
+Nothing for sites to do. This release carries 2.2.25, 2.2.26 and 2.2.27: their release runs stopped on the in-page editor's browser test, which posted a booking without the form's time stamp (2.2.23), so 2.2.25 turned it away. The test now sends a stamp, as a browser does. Nothing in the framework changed.
+
 ## 2.2.27
 
 Nothing for sites to do. **The café and the docs move onto the contact model.** The demo café's contact form is `render.contact.form` now (its own `cafe::contact()` is gone), with `_email/contact_received`, `contact_staff_email` and a Messages section on `/staff`: new, spam and done. AGENTS.md and the wiki teach a `feedback` form (a rating and a comment, stored, nothing mailed) in place of the old `contact` model, and a new wiki page, Contact forms, covers the bundled one. The Forms, Static export, Tutorial, Security and Settings pages say how the stamp, the limits and the other spam checks work. #168 Phase 1.5 is done.
