@@ -3,6 +3,20 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.18
+
+Nothing for sites to do. On nginx or Caddy, print the server config again with `raster deploy` so pages whose slug ends in `-journal`, `-wal` or `-shm` can be opened.
+
+**Items titled with a number open.** An item titled `1984` opens at `/news/news_item/1984`. A number in an item URL is a slug first and an id only when no item has it as its slug.
+
+**A domain per language works with the site's address set.** With `RASTER_URL` set, a request on a domain listed in `domain_language` keeps its host. Its pages come in that language, its links stay on it and its forms are accepted. Every other host still gets the site's address.
+
+**Pages ending in -journal are pages.** Only SQLite's own side files (`.sqlite-journal`, `.sqlite-wal`, `.sqlite-shm`) are refused now, on every server. `lint` warns about a view such as `docs/config.html`, whose address the server refuses because `config/`, `models/`, `data/` and `i18n/` are private under any folder.
+
+**Extensions on routed and missing URLs.** `/specials.json` is a 404 page unless `menu.json` exists, and page 2 of a feed (`/journal/journal_page/2.rss`) is the feed. A missing page is HTML whatever its extension.
+
+**One address per page.** `/menu/`, and `/index.php/menu` while `rewrite` is on, redirect (301) to `/menu`. Filter links no longer end in a slash.
+
 ## 2.2.17
 
 Nothing for sites to do.
