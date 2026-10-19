@@ -820,6 +820,109 @@ test('mcp over stdio', function () use ($root, $db) {
 	same(7, $response['id']);
 	same('/about', $response['result']['structuredContent']['url']);
 });
+test('a malformed MCP message is answered and the stdio server goes on (#134)', function () use ($root, $db) {
+	$lines = array(
+		'{"jsonrpc":"2.0","id":1,"method":["x"]}',
+		'{"jsonrpc":"2.0","id":2,"method":"ping"}',
+		'[{"jsonrpc":"2.0","id":3,"method":"ping"},{"jsonrpc":"2.0","id":4,"method":"nope"}]',
+		'[1,2]',
+		'[]',
+		'"just a string"',
+		'{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"no_such_tool"}}',
+		'{"jsonrpc":"2.0","id":6,"method":"initialize","params":{}}',
+	);
+	$process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'PATH' => getenv('PATH')));
+	fwrite($pipes[0], implode("\n", $lines)."\n");
+	fclose($pipes[0]);
+	$out = array_values(array_filter(explode("\n", stream_get_contents($pipes[1]))));
+	$errors = stream_get_contents($pipes[2]);
+	same(0, proc_close($process), $errors);
+	same(count($lines), count($out), 'one answer a line: '.implode("\n", $out).$errors);
+	$answers = array_map(function ($line) { return json_decode($line, true); }, $out);
+	same(-32600, $answers[0]['error']['code'], 'a method that is not a string');
+	same(1, $answers[0]['id']);
+	same(2, $answers[1]['id'], 'the next ping is answered');
+	same(array(3, 4), array_column($answers[2], 'id'), 'a batch gets a list back');
+	same(-32601, $answers[2][1]['error']['code']);
+	same(array(-32600, -32600), array_map(function ($a) { return $a['error']['code']; }, $answers[3]), 'a batch of non-messages');
+	same(-32600, $answers[4]['error']['code'], 'an empty batch');
+	same(-32600, $answers[5]['error']['code'], 'a message that is not an object');
+	same(-32602, $answers[6]['error']['code'], 'an unknown tool is a JSON-RPC error');
+	check(strpos((string)$answers[6]['error']['message'], 'no_such_tool') !== false, 'missing '.'no_such_tool');
+	same(trim(file_get_contents($root.'/system/VERSION')), $answers[7]['result']['serverInfo']['version']);
+});
+test('a malformed MCP message over HTTP gets JSON-RPC errors (#134)', function () use ($base) {
+	list($status, $body) = http('POST', "$base/mcp", '[1,2]', array('Authorization: Bearer test-token', 'Content-Type: application/json'));
+	same(200, $status, $body);
+	same(array(-32600, -32600), array_map(function ($a) { return $a['error']['code']; }, json_decode($body, true)));
+	list($status, $body) = http('POST', "$base/mcp", '{"jsonrpc":"2.0","id":1,"method":{"a":1}}', array('Authorization: Bearer test-token'));
+	same(-32600, json_decode($body, true)['error']['code'], $body);
+});
+test('MCP over HTTP finds the token where Apache and PHP-FPM put it (#106)', function () {
+	// mod_php and php -S: the header
+	same('right', mcp::bearer(array('HTTP_AUTHORIZATION' => 'Bearer right')));
+	// PHP-FPM behind Apache with the shipped .htaccess: the rewrite sets it,
+	// and the rewrite to index.php renames it; the header's own name is empty
+	same('right', mcp::bearer(array('REDIRECT_HTTP_AUTHORIZATION' => 'Bearer right')));
+	same('right', mcp::bearer(array('HTTP_AUTHORIZATION' => '', 'REDIRECT_HTTP_AUTHORIZATION' => 'Bearer right')));
+	same('right', mcp::bearer(array('HTTP_AUTHORIZATION' => 'bearer   right ')));
+	same('', mcp::bearer(array('HTTP_AUTHORIZATION' => 'Basic cmlnaHQ=')));
+	same('', mcp::bearer(array()));
+	// the Apache config passes the header on, and doctor misses the line
+	$apache = private_paths::config('apache');
+	check(strpos((string)$apache, private_paths::APACHE_AUTHORIZATION) !== false, 'missing '.private_paths::APACHE_AUTHORIZATION);
+	$dir = sys_get_temp_dir().'/raster-htaccess-'.getmypid();
+	@mkdir($dir);
+	try {
+		file_put_contents("$dir/.htaccess", $apache);
+		same(array(), raster_project::htaccess_gaps($dir));
+		file_put_contents("$dir/.htaccess", str_replace(private_paths::APACHE_AUTHORIZATION, '', $apache));
+		same(array('authorization'), raster_project::htaccess_gaps($dir));
+	} finally {
+		@unlink("$dir/.htaccess");
+		@rmdir($dir);
+	}
+});
+test('render_url runs PHP itself under PHP-FPM (#107)', function () use ($root) {
+	// under PHP-FPM, PHP_BINARY is php-fpm, which can't run bin/raster
+	foreach (array('fpm-fcgi', 'cgi-fcgi', 'apache2handler') as $sapi) {
+		$php = mcp::php_binary($sapi);
+		check(is_file($php) && is_executable($php), "$sapi: no PHP to run: $php");
+		check(strpos(basename($php), 'fpm') === false, "$sapi: $php");
+		same('cli', shell_exec(escapeshellarg($php).' -r '.escapeshellarg('echo PHP_SAPI;')), $php);
+	}
+	same(PHP_BINARY, mcp::php_binary('cli'));
+});
+test('render_url keeps the environment and reads a page that logs a lot (#107)', function () use ($root) {
+	$app = APPBASE.config::get('models_path', 'models');
+	$views = APPBASE.config::get('views_path', 'views').'/'.config::get('theme');
+	temp_model("$app/zzloud", array('zzloud.php' => "<?php\nclass zzloud\n{\n\tfunction env() { return (string)getenv('ZZ_SITE_SETTING'); }\n\tfunction noise() { for (\$i = 0; \$i < 3000; \$i++) error_log(str_repeat('x', 60).\" \$i\"); return 'done'; }\n}\n"));
+	file_put_contents("$views/zz-loud.html", "<p>env=<!-- print.zzloud.env /--> <!-- print.zzloud.noise /--></p>\n");
+	putenv('ZZ_SITE_SETTING=from-the-environment');
+	// a server of its own, given up on after a while: a hang fails the test
+	// instead of stopping the run
+	$process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, getenv());
+	try {
+		fwrite($pipes[0], json_encode(array('jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => array('name' => 'render_url', 'arguments' => array('url' => '/zz-loud'))))."\n");
+		fclose($pipes[0]);
+		$read = array($pipes[1]); $none = null;
+		check(stream_select($read, $none, $none, 30) === 1, 'render_url gave no answer in 30 s');
+		$answer = json_decode(stream_get_contents($pipes[1]), true)['result'];
+		check(empty($answer['isError']), json_encode($answer));
+		$page = $answer['structuredContent'];
+		same(true, $page['ok'], json_encode($page));
+		check(strpos((string)$page['html'], 'env=from-the-environment') !== false, 'missing '.'env=from-the-environment');
+		check(strpos((string)$page['html'], 'done') !== false, 'missing '.'done');
+		check(strpos((string)$page['errors'], 'x 2999') !== false, 'missing '.'x 2999');
+	} finally {
+		if (proc_get_status($process)['running']) proc_terminate($process, 9);
+		proc_close($process);
+		putenv('ZZ_SITE_SETTING');
+		@unlink("$views/zz-loud.html");
+		remove_dir("$app/zzloud");
+		controller::forget_models();
+	}
+});
 
 
 // ## Forms, accounts, newsletter, feeds

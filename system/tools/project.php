@@ -384,6 +384,9 @@ class raster_project
 			if ($line !== '' && $line[0] !== '#') $have[$line] = true;
 		}
 		$missing = array();
+		// not a rule but needed all the same: without it MCP over HTTP refuses
+		// the right token on PHP-FPM
+		if (!isset($have[private_paths::APACHE_AUTHORIZATION])) $missing[] = 'authorization';
 		foreach (private_paths::rules() as $rule) {
 			foreach ($rule['apache'] as $line) {
 				if (!isset($have[trim($line)])) { $missing[] = $rule['id']; break; }

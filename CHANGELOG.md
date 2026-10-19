@@ -3,6 +3,13 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.20
+
+- MCP: a malformed message gets a JSON-RPC error (`-32600`) instead of ending the stdio server, and a batch of non-objects over HTTP no longer causes a PHP error. A batch over stdio gets a list back. An unknown tool is a `-32602` error. `serverInfo.version` is Raster's version. (#134)
+- MCP over HTTP works on Apache with PHP-FPM: the `.htaccess` passes the `Authorization` header on, `/mcp` also reads `REDIRECT_HTTP_AUTHORIZATION`, and `doctor` reports a `.htaccess` without the line. `raster update` brings the new `.htaccess`. If you edited yours, add the two lines from `php bin/raster deploy --config=apache`. (#106)
+- `render_url` works over HTTP under PHP-FPM, passes the whole environment to the page, and no longer hangs on a page that logs a lot. (#107)
+- The stdio MCP server sees fields, collections, methods and record types written during the session. After a PHP file it has loaded changes (a model's `api()`, `types()` or `listens()`), a fresh process answers each later call. (#105)
+
 ## 2.2.19
 
 Nothing for sites to do.

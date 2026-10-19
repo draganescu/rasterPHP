@@ -3,6 +3,10 @@
 
 RewriteEngine on
 
+# PHP-FPM gets the Authorization header only this way (MCP over HTTP needs it)
+RewriteCond %{HTTP:Authorization} .
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
 # Never serve code, configuration, data or tooling directly
 # dotfiles and dot folders: .git, .env, .htaccess, .github (not .well-known)
 RewriteRule (^|/)\.(?!well-known(/|$)) - [F,L,NC]

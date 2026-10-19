@@ -268,6 +268,7 @@ php tests/demo.php                        # the whole matrix
 | M17 | `render_url` with `as`: the page as an editor, with what the in-page editor marks |
 | M18 | a PHP error in site code answers the MCP call over stdio with its file and line, and the server goes on |
 | M19 | the view tools take `theme` only as a folder directly under `views/`; a path or a link out of `views/` is refused |
+| M20 | one stdio session sees what is written during it: new fields and collections, a model's new methods, `api()` and `types()` |
 | N1 | raster help and unknown commands |
 | N2 | raster lint and --json, --all-themes |
 | N3 | raster render and its exit codes |

@@ -171,6 +171,48 @@ function mcp_stdio($calls) {
 	if ($err !== '') $answers['stderr'] = $err;
 	return $answers;
 }
+// MCP over stdio one call at a time, so a test can change the site between
+// calls of one session, as an agent does. A call with no answer in time
+// fails instead of hanging the run.
+class mcp_session {
+	public $process, $pipes, $id = 100, $errors;
+	function __construct($env = array()) {
+		global $root, $tmp;
+		$this->errors = "$tmp/mcp-session-".uniqid().'.log';
+		$this->process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('file', $this->errors, 'w')), $this->pipes, $root, array_merge(getenv(), $env));
+		stream_set_blocking($this->pipes[1], false);
+	}
+	// one line out, one line back (null when there is none in time)
+	function line($line, $seconds = 30) {
+		fwrite($this->pipes[0], $line."\n");
+		fflush($this->pipes[0]);
+		$answer = '';
+		$until = microtime(true) + $seconds;
+		while (substr($answer, -1) !== "\n" && microtime(true) < $until) {
+			$read = array($this->pipes[1]); $none = null;
+			if (stream_select($read, $none, $none, 0, 200000)) {
+				$chunk = fread($this->pipes[1], 65536);
+				if ($chunk === '' || $chunk === false) { if (feof($this->pipes[1])) break; continue; }
+				$answer .= $chunk;
+			}
+		}
+		return substr($answer, -1) === "\n" ? json_decode($answer, true) : null;
+	}
+	function call($name, $arguments = array(), $seconds = 30) {
+		$message = $this->line(json_encode(array('jsonrpc' => '2.0', 'id' => ++$this->id, 'method' => 'tools/call', 'params' => array('name' => $name, 'arguments' => $arguments ?: new stdClass()))), $seconds);
+		if ($message === null) throw new Exception("mcp $name: no answer in {$seconds}s");
+		$result = $message['result'];
+		return !empty($result['isError']) ? array('error' => $result['content'][0]['text']) : $result['structuredContent'];
+	}
+	function close() {
+		if (!is_resource($this->process)) return;
+		@fclose($this->pipes[0]);
+		if (proc_get_status($this->process)['running']) proc_terminate($this->process, 9);
+		@fclose($this->pipes[1]);
+		proc_close($this->process);
+		@unlink($this->errors);
+	}
+}
 function between($html, $id) {
 	return preg_match('#<section id="'.$id.'">(.*?)</section>#s', $html, $m) ? $m[1] : '';
 }
@@ -1092,8 +1134,8 @@ test(array('M1', 'M2', 'M3'), 'the MCP endpoint', function () use ($base) {
 	// writing templates stays off over HTTP until the site turns it on
 	check(!in_array('write_view', $names), 'write_view is not offered over HTTP');
 	$refused = json_decode($call(array('jsonrpc' => '2.0', 'id' => 30, 'method' => 'tools/call', 'params' => array('name' => 'write_view', 'arguments' => array('view' => 'x.html', 'content' => 'x'))))[1], true);
-	check(!empty($refused['result']['isError']), 'and calling it anyway is an error');
-	has($refused['result']['content'][0]['text'], 'Unknown tool');
+	same(-32602, $refused['error']['code'], 'and calling it anyway is an error');
+	has($refused['error']['message'], 'Unknown tool');
 	same(count($names), count(array_unique($names)), 'no tool is listed twice');
 	$batch = json_decode($call(array(array('jsonrpc' => '2.0', 'id' => 4, 'method' => 'ping'), array('jsonrpc' => '2.0', 'id' => 5, 'method' => 'nope')))[1], true);
 	same(-32601, $batch[1]['error']['code']);
@@ -2424,6 +2466,73 @@ test('M18', 'MCP over stdio: a PHP error in site code answers the call', functio
 			check(isset($answers[1]['ok']), 'the server goes on, and what the code printed did not break the answers');
 		});
 	} finally { @rmdir("$models/stopper"); }
+});
+
+test('M20', 'one MCP session sees the fields, collections, methods, api() and types() written during it (#105)', function () use ($views) {
+	$cafe = APPBASE.'models/cafe/cafe.php';
+	$reservation = APPBASE.'models/reservation/reservation.php';
+	$session = new mcp_session();
+	try {
+		// the first calls load the models and read the content model
+		check(!isset($session->call('site_overview')['error']));
+		check(isset($session->call('vocabulary')['models']['cafe']));
+		// a field and a collection the view adds can be written at once
+		$view = "<h1><!-- print.cms.zzmotto -->Motto<!-- /print.cms.zzmotto --></h1>\n<ul><!-- render.cms.zzperks --><li><!-- print.title -->Perk<!-- /print.title --></li><!-- /render.cms.zzperks --></ul>\n";
+		same(true, $session->call('write_view', array('view' => 'zz-motto.html', 'content' => $view))['written']);
+		$page = $session->call('update_page', array('page' => '/zz-motto', 'fields' => array('zzmotto' => 'Good coffee')));
+		check(!isset($page['error']), 'update_page: '.json_encode($page));
+		$item = $session->call('create_item', array('collection' => 'zzperks', 'fields' => array('title' => 'Free refills')));
+		check(isset($item['id']), 'create_item: '.json_encode($item));
+		// a model gains a method and lists it in api(); a record type gains a field
+		$source = file_get_contents($cafe);
+		$more = str_replace("'category_count' => 'visitor');", "'category_count' => 'visitor', 'zzfresh' => 'visitor');\n\t}\n\tfunction zzfresh() {\n\t\treturn 'Fresh today';", $source);
+		with_file($cafe, $more, function () use ($session, $reservation) {
+			with_file($reservation, str_replace("'status' => 'new',", "'status' => 'new', 'zzallergies' => '',", file_get_contents($reservation)), function () use ($session) {
+				$vocabulary = $session->call('vocabulary');
+				check(isset($vocabulary['models']['cafe']['methods']['zzfresh']), 'vocabulary lacks the new method');
+				same('visitor', ((array)$vocabulary['models']['cafe']['api'])['zzfresh'] ?? null, 'vocabulary has the old api()');
+				same(0, $session->call('check_view', array('content' => '<p><!-- print.cafe.zzfresh /--></p>'))['errors'], 'check_view refuses the new method');
+				$overview = $session->call('site_overview');
+				$fields = array();
+				foreach ($overview['collections'] as $c) if ($c['name'] === 'reservation') $fields = $c['fields'];
+				check(in_array('zzallergies', $fields), 'site_overview has the old types(): '.json_encode($fields));
+			});
+		});
+		// and back as it was
+		check(!isset($session->call('vocabulary')['models']['cafe']['methods']['zzfresh']), 'the method is gone again');
+	} finally {
+		$session->close();
+		@unlink("$views/zz-motto.html");
+	}
+});
+
+test('M20', 'a model with a syntax error during an MCP session: ping answers, other calls get an error, and the fix counts (#194)', function () {
+	$cafe = APPBASE.'models/cafe/cafe.php';
+	$session = new mcp_session();
+	try {
+		check(isset($session->call('vocabulary')['models']['cafe']));
+		check(!isset($session->call('render_url', array('url' => '/'))['error']));
+		// an agent halfway through editing a model
+		with_file($cafe, file_get_contents($cafe)."\n}}} broken(\n", function () use ($session) {
+			$ping = $session->line('{"jsonrpc":"2.0","id":3,"method":"ping"}', 15);
+			check($ping !== null, 'ping got no answer');
+			same(3, $ping['id']);
+			check(isset($ping['result']), 'ping: '.json_encode($ping));
+			$vocabulary = $session->line('{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"vocabulary","arguments":{}}}', 15);
+			check($vocabulary !== null, 'vocabulary got no answer');
+			same(4, $vocabulary['id']);
+			same(-32603, $vocabulary['error']['code'] ?? null, json_encode($vocabulary));
+			has($vocabulary['error']['message'], 'cafe.php');
+			has($vocabulary['error']['message'], 'Parse error');
+			same(null, $session->line('{"jsonrpc":"2.0","method":"notifications/initialized"}', 2), 'a notification still gets nothing back');
+			$batch = $session->line('[{"jsonrpc":"2.0","id":5,"method":"tools/list"},{"jsonrpc":"2.0","method":"notifications/x"}]', 15);
+			same(array(5), array_column((array)$batch, 'id'), 'a batch gets an error for each request: '.json_encode($batch));
+		});
+		// fixed, the next call answers again
+		check(isset($session->call('vocabulary')['models']['cafe']), 'vocabulary after the fix');
+	} finally {
+		$session->close();
+	}
 });
 
 // A second model, only while these tests run, for what the café's

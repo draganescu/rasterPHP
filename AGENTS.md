@@ -1248,7 +1248,8 @@ use `'model.method'`: `method(true)` returns
 
   `raster serve` is PHP's built in server, for development. In production run
   PHP-FPM behind one of those. `doctor` checks that the `.htaccess` on disk
-  still carries every rule. Matching ignores case on every server, and
+  still carries every rule, and the line that passes the `Authorization`
+  header on to PHP-FPM for MCP over HTTP. Matching ignores case on every server, and
   `/.well-known/` is the one dot folder that is served (certificates,
   `security.txt`).
 - **Page cache**, on by default in production (config `page_cache`):
@@ -1387,7 +1388,23 @@ of lists and filter pages come along; drafts and the editor don't.
     error in the site's code answers the call with its file and line
     instead of ending the server;
   - over HTTP: POST to `/mcp` with `Authorization: Bearer $RASTER_MCP_TOKEN`.
-    It's off until that token is set.
+    It's off until that token is set. Apache hands that header to PHP-FPM
+    only when told to: the shipped `.htaccess` copies it
+    (`RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]`), and
+    `doctor` reports a `.htaccess` without that line (`authorization`).
+  - Both answer a batch (a list of messages) with a list. A message that
+    isn't an object with a string `method` gets `-32600 Invalid request`,
+    a tool that isn't offered `-32602`, and the server goes on.
+    `serverInfo.version` is Raster's version (`system/VERSION`).
+  - The stdio server lives for the session, and each call reads the
+    templates, models and record types again, so what an agent writes
+    counts on its next call. PHP can't load a class twice: once a PHP file
+    the server has loaded changes (a model's `api()`, `types()` or
+    `listens()`, config), a fresh `bin/raster mcp` answers every later
+    call, under 100 ms each. Restart the server to make it fast again.
+    If that fresh process dies before it answers (a model halfway through
+    an edit no longer parses), `ping` is still answered and every other
+    request gets `-32603` with PHP's message, until the file is fixed.
 - **Tools for the site itself:**
   - `describe` — how URLs reach views, the pages and collections the markup
     declares, the admin pages, the settings that change behaviour, and whether
@@ -1415,7 +1432,10 @@ of lists and filter pages come along; drafts and the editor don't.
     as that person, outside production only, and for staff also says what the in-page editor marks:
     editable fields, items, and each list with whether it gets a card for a
     new item. It runs in its own process, so a page that dies can't take the
-    server down. It never reads the page cache.
+    server down: the command line PHP (next to PHP-FPM's, over HTTP), with
+    the server's whole environment, and what the page logs read after the
+    page, so a page that logs a lot still answers. It never reads the page
+    cache.
   - `clear_cache` — throws the page cache away. Call it after changing
     views, theme files, models or config any way but `write_view`, or the
     database directly; Raster's own tools already clear it.

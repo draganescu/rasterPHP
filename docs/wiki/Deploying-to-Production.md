@@ -40,7 +40,7 @@ Put the project folder on the server, for example `/var/www/site`, with git or r
 
 ### 2. Configure the web server
 
-**Apache.** The `.htaccess` file that ships with Raster already has every rule. Apache needs `mod_rewrite` enabled and `AllowOverride All` (or at least `FileInfo`) for the folder. If your `.htaccess` is from an older Raster, regenerate it:
+**Apache.** The `.htaccess` file that ships with Raster already has every rule, and the line that hands the `Authorization` header to PHP-FPM, which [MCP over HTTP](Working-with-AI-Agents) needs for its token. Apache needs `mod_rewrite` enabled and `AllowOverride All` (or at least `FileInfo`) for the folder. If your `.htaccess` is from an older Raster, regenerate it:
 
 ```sh
 php bin/raster deploy --config=apache > .htaccess
