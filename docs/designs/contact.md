@@ -1,15 +1,16 @@
 # Spam checks for public forms, and the bundled contact model
 
-Status: draft for approval, 2026-10-18. Tracking: #168 (Phase 1.5).
-Written against master at Raster 2.2.13.
+Status: approved 2026-10-19, with every recommendation taken (see
+**Decisions**). Tracking: #168 (Phase 1.5). Written against master at
+Raster 2.2.13; brought up to 2.2.21 (booking's B4 has landed).
 
 ## Why
 
 Every site has a contact form, and every one was written by hand from the
 example in AGENTS.md (**Forms**) and the wiki (Forms and Validation, the
 tutorial's step 7): a `contact` model whose `send()` mails the message and
-keeps nothing. The café's `reservation::contact()`
-(`demo/models/reservation/reservation.php`) is the same thing. So each site
+keeps nothing. The café's `cafe::contact()` (`demo/models/cafe/cafe.php`,
+where booking's B4 moved it from `reservation`) is the same thing. So each site
 has the same gaps: a message the mail server dropped is gone, staff have no
 list of what came in, and the only spam defence is the framework's
 honeypot.
@@ -140,7 +141,7 @@ are today: field constraints, `form_state()`, filling (the three
 **The page cache.** A cached page (`raster_cache`, an hour by default)
 would hand every visitor the same, ever older stamp, so "too fast" could
 never fire on a cached page and one stamp could be replayed all hour.
-*(Question 2.)* `raster_cache::store()` writes the stamp's value as a fixed
+*(Decision 2.)* `raster_cache::store()` writes the stamp's value as a fixed
 marker and notes it in the copy's first line; `serve()` puts a fresh stamp
 in its place when that note is there (it then reads the copy into memory
 instead of `fpassthru`). Pages without forms are served as today.
@@ -203,7 +204,7 @@ still gets its fake success and nothing is stored or counted.
   comes from `client_ip_header` (`X-Forwarded-For`: the last entry that
   isn't a trusted proxy; or a single-value header such as `Fly-Client-IP`).
   Raster reads no forwarding header today (`REMOTE_ADDR` appears only in
-  `system/config.php`, for the environment). *(Question 3.)* When posts
+  `system/config.php`, for the environment). *(Decision 3.)* When posts
   arrive from a private address and nothing is configured, `doctor` says
   so, since every visitor would share one count.
 - **Links** are counted as `http://`, `https://`, `www.` and `[url=` in the
@@ -212,11 +213,11 @@ still gets its fake success and nothing is stored or counted.
 - **The blocklist** is `spam_blocklist`, a list of words and domains,
   empty by default. A word matches whole and case-insensitively; an entry
   with a dot (`casino.example`) matches that domain and its subdomains in
-  links and in the email's domain. *(Question 7.)*
+  links and in the email's domain. *(Decision 7.)*
 
 ### What each bundled public form does with a suspect post
 
-*(Question 4.)*
+*(Decision 4.)*
 
 | Form | Checks | A suspect post |
 |---|---|---|
@@ -225,7 +226,7 @@ still gets its fake success and nothing is stored or counted.
 | `render.authentication.register` | stamp, both limits | the same |
 | `render.authentication.forgot` | both limits | answers `reset_sent` as it does for an unknown address, mails nothing |
 | `render.booking.form` | stamp, both limits | the form again with `try_again` / `slow_down` |
-| `cms_records::submit` (a site's own record form, `create` visitor or member) | stamp, both limits | the form again with `try_again` / `slow_down` *(Question 5)* |
+| `cms_records::submit` (a site's own record form, `create` visitor or member) | stamp, both limits | the form again with `try_again` / `slow_down` *(Decision 5)* |
 
 Login (its own lockout, and password managers fill and send it in under a
 second), reset, account, logout, the booking manage page and newsletter
@@ -290,10 +291,10 @@ stores every field the type declares that the form sends
   `spam` on a message staff judge to be spam (reason `staff`), `not_spam`
   on a flagged one (its reasons are cleared). `not_spam` doesn't mail
   staff, who are looking at it, but sends `contact.received`, so a
-  listener sees every real message once *(Question 6)*.
+  listener sees every real message once *(Decision 6)*.
 - **Retention.** Messages with status `spam` older than `contact_spam_days`
   (30) are deleted when a new message is stored (no scheduler needed).
-  Real messages stay until staff delete them. *(Question 8.)*
+  Real messages stay until staff delete them. *(Decision 8.)*
 
 ### Emails
 
@@ -378,7 +379,7 @@ turns that check off.
 
 The stamp needs a key nobody outside the site knows, and Raster has none
 (booking's links are random for that reason, `booking.php:439`).
-*(Question 1.)* `RASTER_SECRET` when set (hosts with several machines,
+*(Decision 1.)* `RASTER_SECRET` when set (hosts with several machines,
 read-only disks); otherwise 32 random bytes written on first use to
 `<app>/data/secret` (mode 0600; `data/` is never served,
 `private_paths::$private_app_folders`). `describe` and MCP never show it
@@ -401,19 +402,18 @@ share one count. The queries are files in `system/models/validation/sql/`.
 
 ## Our own examples move onto it
 
-- The café: `reservation::contact()` is removed; `visit.html`'s form
+- The café: `cafe::contact()` is removed; `visit.html`'s form
   becomes `render.contact.form` (its legacy `not_empty`/`email_format`
   regions stay in it, so D14 keeps its test; the `website` URL field stays
   as a validated field the type doesn't store); `_email/contact.html`
   becomes `_email/contact_received.html`; `cafe_staff_email` gives way to
   `contact_staff_email`; `/staff` gets a Messages section built from the
-  recipe. If booking's last step (B4, which removes
-  `demo/models/reservation/`) lands first, the café's contact form moves
-  there; whichever lands second does the move.
+  recipe. (Booking's B4 has landed and moved the form to `cafe`; this is
+  the move.)
 - AGENTS.md **Forms**, the wiki's Forms and Validation and Static Export
   pages: the worked example is no longer a `contact` model. It becomes a
   `feedback` form (a rating and a comment, stored, nothing mailed) that
-  shows `valid()`, `suspect()` and `util::done()`. *(Question 9.)*
+  shows `valid()`, `suspect()` and `util::done()`. *(Decision 9.)*
 - The tutorial's step 7 uses `render.contact.form` and its staff email,
   and says in two lines how to write your own form model.
 - Sites outside this repository with their own `contact` model keep it,
@@ -467,7 +467,11 @@ Nothing new is needed from Phase 1 before this starts.
   example.
 - The demo's words and design.
 
-## Questions for the maintainer
+## Decisions
+
+*(Decided 2026-10-19: every recommendation below is taken. The
+alternatives are kept for the record.)*
+
 
 1. **A site key.** The stamp must be signed, and Raster has no secret.
    Recommend `RASTER_SECRET`, else 32 random bytes made on first use in
