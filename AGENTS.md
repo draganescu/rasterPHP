@@ -542,6 +542,27 @@ class contact {
     IPv6 (`::ffff:203.0.113.7`) counts as the IPv4 address. In production
     `doctor` warns when today's posts came from a private address and
     `trusted_proxies` is empty.
+  - **What each bundled public form does with a suspect post.** They ask
+    `suspect(array())` (stamp and limits, no text checks) right after
+    `valid()`, so a person fixing a typo isn't counted:
+
+    | Form | A suspect post |
+    |---|---|
+    | `render.newsletter.signup` | nothing stored or mailed; the form again with what was typed, and `try_again` (stamp) or `slow_down` (a limit) |
+    | `render.authentication.register` | the same |
+    | `render.booking.form` | the same |
+    | `render.authentication.forgot` | only the limits count: a post over one answers `reset_sent` as for an unknown address and mails nothing; the stamp is not checked |
+    | `cms_records::submit` (a record form whose type has `create` `visitor` or `member`) | the form again with `try_again` / `slow_down`; checked before `create` is, so a bot learns nothing about which types need a login |
+
+    Login, reset, account, logout, the booking manage page and the
+    newsletter's unsubscribe aren't checked. `lint` warns on a view with
+    `render.newsletter.signup`, `render.authentication.register` or
+    `render.booking.form` that lacks `print.validation.alert('try_again')`
+    or `('slow_down')`: word them where the person will see them, as for
+    any alert. A site's own form on `cms_records::submit` is covered too,
+    but `lint` can't see which views post to it, so add the alerts there
+    yourself. A script that posts without ever fetching the form gets
+    `try_again`.
 - **Forms that ask with the URL** (`<form method="get">`, a filter or a
   search) show what the URL asked: `/bookings?stylist=Ana` keeps Ana chosen,
   and `?stylist=` chooses only the option whose value is empty.
@@ -678,6 +699,7 @@ class inquiry {                                        // catering requests
             'readonly' => array('status'),     // shown to editors, written only by the model
             'hidden'   => array(),             // never shown to editors or agents, nor made a slug (payment ids, tokens)
             'html'     => array(),             // fields printed as HTML; the rest print escaped
+            'spam'     => true,                // false: the model runs its own spam checks (see Forms)
             'actions'  => array('answer' => 'editor', 'archive' => 'admin'),
         ));   // a type's name is lowercase letters and digits; no field x next to x_id
     }
@@ -756,7 +778,10 @@ own: the bundled booking model has the type, its rules and its emails (see
   people in a number input) raises `<field>_invalid` (`people_invalid`).
   `$done = false` returns the stored record instead, for a checkout that goes
   on to pay. A visitor who may not create gets `login_required` (member
-  types) or `not_allowed`.
+  types) or `not_allowed`. For a type that visitors or members create,
+  `submit()` first asks `suspect(array())` (see **Forms**): a post that
+  looks like spam gets the form again with `try_again` or `slow_down`, so
+  word both. A type that runs its own checks says `'spam' => false`.
 - **Editors and agents** change records like items, except that readonly
   fields are shown and not editable, hidden fields never reach them, and the
   item's handle has the type's actions instead of Duplicate and Schedule.
@@ -920,7 +945,8 @@ bundled model declares none of its types, and `lint` warns.
   - `me`: rows with `name`, `email`, `role`.
 - Alerts: `login_failed`, `email_taken`, `email_invalid`, `password_short`,
   `reset_sent`, `reset_invalid`, `registered`, `password_changed`,
-  `account_saved`, `current_password_wrong`.
+  `account_saved`, `current_password_wrong`; `try_again` and `slow_down` on
+  `register` (a post that looks like spam; see **Forms**).
 - Flags: `if.logged_in`, `if.logged_out`, `if.is_member`, `if.is_editor`,
   `if.is_admin`.
 - Roles: `admin`, `editor` (edits content), `member`.
@@ -978,7 +1004,8 @@ bundled model declares none of its types, and `lint` warns.
     works. When it was sent is `subscriber.confirm_sent_at` (`schema
     --apply` adds it; until then a frozen database sends every time).
 - Alerts: `check_email`, `subscribed`, `confirmed`, `confirm_invalid`,
-  `unsubscribed`, `unsubscribe_invalid`.
+  `unsubscribed`, `unsubscribe_invalid`, `try_again`, `slow_down` (a post that
+  looks like spam; see **Forms**).
 - **Sending an issue:** `php bin/raster send /news/news_item/my-post
   [--to=you@example.com] [--dry-run] [--again]` emails any page to confirmed
   subscribers. Scripts, forms and `<nav>` are removed, and links become
@@ -1094,7 +1121,9 @@ its setup from `php demo/seed.php`, and is the worked example of all of it.
     chosen where the resource offers some, or one it doesn't offer or that
     is off); `too_soon` / `too_far` (guests: within `booking_notice`, past
     `booking_horizon`); `already_booked` (a guest's second booking of the
-    same start: a double click); `fully_booked`. Any other edit (a phone
+    same start: a double click); `fully_booked`. A booking form post that
+    looks like spam raises `try_again` or `slow_down` first (see **Forms**),
+    word both on the page. Any other edit (a phone
     number, a note) goes through, so a booking stranded by a change of the
     setup never gets stuck.
   - Capacity: at the busiest minute of the booking's span, the other active

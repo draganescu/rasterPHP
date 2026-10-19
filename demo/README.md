@@ -334,3 +334,10 @@ running it again adds nothing. Until then the booking forms say `not_open`.
 | P7 | the salon: two stylists, two services of mixed lengths, one booking at a time, `service_unavailable` |
 | P8 | a logged in guest manages their bookings from /account, without a token |
 | P9 | `the_booking` adds a field (`newsletter`) to the bundled type |
+
+### Q. Spam checks on the public forms
+
+| ID | Feature |
+|---|---|
+| Q1 | a post without a fresh stamp (none, too young) gets the sign-up, newsletter, booking and record forms again with what was typed and the alert `try_again`; forgot answers as usual; a record type can say `'spam' => false`; editors are never held |
+| Q2 | too many posts from one address in an hour: `slow_down`, and nothing stored (the demo's own server has `CAFE_SPAM_LIMITS=off`, since the suite posts from one address) |

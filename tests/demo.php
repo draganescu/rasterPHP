@@ -31,6 +31,14 @@ require_once BASE.'tools/schema.php';
 $passed = 0; $failed = array(); $skipped = array(); $covered = array();
 function test($ids, $name, $fn) {
 	global $passed, $failed, $skipped, $covered;
+	// RASTER_TEST_ONLY=Q runs the tests with an ID starting with Q, or a name with those words
+	$only = getenv('RASTER_TEST_ONLY');
+	if ($only) {
+		// a letter and digits is an ID (Q, Q1), anything else words of the name
+		$match = !preg_match('/^[A-Z]\d*$/', $only) && stripos($name, $only) !== false;
+		foreach ((array)$ids as $id) if (stripos($id, $only) === 0) $match = true;
+		if (!$match) return;
+	}
 	try {
 		$fn();
 		$passed++;
@@ -66,7 +74,7 @@ function free_port() {
 }
 function server($port, $env) {
 	global $root, $servers;
-	$env = array_merge(array('PATH' => getenv('PATH'), 'RASTER_APP' => 'demo', 'RASTER_SECRET' => 'test-secret'), $env);
+	$env = array_merge(array('PATH' => getenv('PATH'), 'RASTER_APP' => 'demo', 'RASTER_SECRET' => 'test-secret', 'CAFE_SPAM_LIMITS' => 'off'), $env);
 	global $tmp;
 	$process = proc_open(array(PHP_BINARY, '-d', 'error_reporting=-1', '-d', 'log_errors=1', '-d', 'display_errors=0', '-d', "error_log=$tmp/php-errors.log", '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, $env);
 	for ($i = 0; $i < 100 && !@fsockopen('127.0.0.1', $port); $i++) usleep(50000);
@@ -250,6 +258,8 @@ function with_file($path, $content, $fn) {
 $port = free_port();
 $base = server($port, array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'RASTER_MCP_TOKEN' => 'demo-token'));
 $views = "$root/demo/views/cafe";
+// the spam tests: the limits stay on (every other server has CAFE_SPAM_LIMITS=off, see server())
+$spam_base = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'CAFE_SPAM_LIMITS' => 'on'));
 
 // what the café takes bookings for: the Dining room's sittings, the salon's
 // stylists and services (demo/seed.php, as a fresh demo is set up)
@@ -3669,6 +3679,8 @@ function posts_at_once($requests) {
 	$multi = curl_multi_init();
 	$handles = array();
 	foreach ($requests as $r) {
+		// as a browser posts: the form's own stamp, shown a minute ago
+		if (isset($r[1]['raster_form']) && !isset($r[1]['raster_ts'])) $r[1]['raster_ts'] = stamp_for_tests(60);
 		$handle = curl_init($r[0]);
 		curl_setopt_array($handle, array(CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true, CURLOPT_HEADER => true, CURLOPT_TIMEOUT => 30,
 			CURLOPT_HTTPHEADER => isset($r[2]) ? array('Cookie: '.$r[2]) : array(), CURLOPT_POSTFIELDS => http_build_query($r[1])));
@@ -4314,6 +4326,130 @@ test('P8', 'a logged in guest manages their own bookings from /account, without 
 	same("$base/booking?booking={$maria->id}&done=cancelled", header_value($headers, 'Location'));
 	same('cancelled', R::getCell('SELECT status FROM bookingdata WHERE id = ?', array($maria->id)));
 	has(http('GET', "$base/account", null, $h)[1], 'people: cancelled');
+});
+
+// ## Q. Spam checks on the bundled forms
+
+// forgets the counts, so a test starts with an hour of room
+function spam_forget() {
+	database::instance('cms');
+	if (in_array('formhit', R::inspect())) R::exec('DELETE FROM formhit');
+}
+function post_to($base, $path, $fields, $ago = 60, $headers = array()) {
+	return http('POST', "$base$path", $fields + array('raster_ts' => stamp_for_tests($ago)), $headers);
+}
+
+test('Q1', 'a post without a fresh stamp gets the form again, with what was typed', function () use ($spam_base) {
+	spam_forget();
+	$mails = count(mails());
+	$try_again = 'That went by a bit quickly';
+	foreach (array('' => 'no stamp', 1 => 'a stamp one second old') as $ago => $why) {
+		$fields = array('raster_form' => 'newsletter.signup', 'email' => "held$ago@example.com");
+		list($status, $body) = $ago === '' ? post_to($spam_base, '/journal', $fields + array('raster_ts' => '')) : post_to($spam_base, '/journal', $fields, $ago);
+		same(200, $status, $why);
+		has($body, $try_again, $why);
+		has($body, 'value="held'.$ago.'@example.com"', "$why: what was typed comes back");
+	}
+	database::instance('cms');
+	same(0, (int)R::getCell("SELECT COUNT(*) FROM subscriber WHERE email LIKE 'held%'"), 'no subscriber');
+	same($mails, count(mails()), 'no mail');
+	// sign-up
+	list($status, $body) = post_to($spam_base, '/register', array('raster_form' => 'authentication.register', 'name' => 'Bot', 'email' => 'held-bot@example.com', 'password' => 'long enough password', 'password_again' => 'long enough password'), 1);
+	same(200, $status, 'register');
+	has($body, $try_again, 'register:');
+	has($body, 'value="held-bot@example.com"');
+	same(0, (int)R::getCell('SELECT COUNT(*) FROM user WHERE email = ?', array('held-bot@example.com')), 'no account');
+	// booking
+	$day = next_open('tue');
+	list($status, $body) = book($spam_base, array('date' => $day, 'name' => 'Held Guest', 'email' => 'held-guest@example.com', 'raster_ts' => ''));
+	same(200, $status, 'booking');
+	has($body, $try_again, 'booking:');
+	has($body, 'value="held-guest@example.com"');
+	same(0, (int)R::count('bookingdata', ' email = ? ', array('held-guest@example.com')), 'no booking');
+	// the same posts with a stamp as a browser has are taken
+	list($status, , $headers) = book($spam_base, array('date' => $day, 'name' => 'Real Guest', 'email' => 'real-guest@example.com'));
+	same(303, $status);
+	same(1, (int)R::count('bookingdata', ' email = ? ', array('real-guest@example.com')), 'the booking');
+});
+
+test('Q1', 'forgot: too many asks answer as for an unknown address', function () use ($spam_base) {
+	spam_forget();
+	raster(array('user', 'forgetful@cafe.test', '--role=member', '--password=first password'));
+	$answers = array();
+	$counts = array();
+	for ($i = 1; $i <= 4; $i++) {
+		// the link sent before is old enough that a new ask sends a new mail,
+		// so only the limit can explain a 4th ask that sends none
+		database::instance('cms');
+		R::exec('UPDATE user SET reset_expires = ? WHERE email = ?', array(date('Y-m-d H:i:s', time() - 7200), 'forgetful@cafe.test'));
+		// each ask names the same address; the 4th is over the limit of 3 for it
+		list($status, , $headers) = post_to($spam_base, '/forgot', array('raster_form' => 'authentication.forgot', 'email' => 'forgetful@cafe.test'));
+		same(303, $status, "ask $i");
+		same("$spam_base/forgot?done=reset_sent", header_value($headers, 'Location'), "ask $i answers the same");
+		$counts[$i] = count(mails());
+	}
+	check($counts[3] > $counts[2], 'the 3rd ask sent a mail');
+	same($counts[3], $counts[4], 'the 4th ask sent nothing');
+});
+
+test('Q2', 'too many posts from one place: slow_down, and nothing stored', function () use ($spam_base) {
+	spam_forget();
+	for ($i = 1; $i <= 5; $i++) {
+		same(303, post_to($spam_base, '/journal', array('raster_form' => 'newsletter.signup', 'email' => "crowd$i@example.com"))[0], "post $i");
+	}
+	list($status, $body) = post_to($spam_base, '/journal', array('raster_form' => 'newsletter.signup', 'email' => 'crowd6@example.com'));
+	same(200, $status);
+	has($body, "That's a lot from one place");
+	lacks($body, 'That went by a bit quickly');
+	has($body, 'value="crowd6@example.com"');
+	database::instance('cms');
+	same(0, (int)R::getCell('SELECT COUNT(*) FROM subscriber WHERE email = ?', array('crowd6@example.com')), 'no subscriber');
+	same(5, (int)R::getCell("SELECT COUNT(*) FROM subscriber WHERE email LIKE 'crowd%'"), 'the five before');
+	// the main server has the limits off: the same post is taken there
+	global $base;
+	same(303, post_to($base, '/journal', array('raster_form' => 'newsletter.signup', 'email' => 'crowd7@example.com'))[0]);
+});
+
+test('Q1', 'a record form is covered without code, and a type can turn it off', function () use ($spam_base, $root, $views) {
+	spam_forget();
+	$model = function ($spam) {
+		return "<?php\nclass zzspam\n{\n\tstatic function types() {\n\t\treturn array('zzspam' => array('fields' => array('title' => '', 'note' => ''), 'create' => 'visitor'".($spam ? '' : ", 'spam' => false")."));\n\t}\n\tfunction form() { return cms_records::submit('zzspam', 'sent'); }\n}\n";
+	};
+	$view = "<html><body>\n<!-- print.validation.alert('try_again') --><p>Again, please.</p><!-- /print.validation.alert('try_again') -->\n<!-- print.validation.alert('slow_down') --><p>Slow down.</p><!-- /print.validation.alert('slow_down') -->\n<!-- render.zzspam.form -->\n<form method=\"post\"><input name=\"title\" required maxlength=\"50\"><input name=\"note\"><button>Send</button></form>\n<!-- /render.zzspam.form -->\n</body></html>\n";
+	@mkdir("$root/demo/models/zzspam");
+	with_file("$views/zz-spam.html", $view, function () use ($spam_base, $root, $model) {
+		foreach (array(true => 'held', false => 'stored') as $spam => $outcome) {
+			with_file("$root/demo/models/zzspam/zzspam.php", $model($spam), function () use ($spam_base, $spam, $outcome) {
+				$title = "T-$outcome";
+				list($status, $body) = http('POST', "$spam_base/zz-spam", array('raster_form' => 'zzspam.form', 'title' => $title, 'raster_ts' => ''));
+				database::instance('cms');
+				if ($spam) {
+					same(200, $status);
+					has($body, 'Again, please.');
+					has($body, 'value="'.$title.'"');
+					same(0, (int)R::count('zzspamdata'), 'a post without a stamp is held');
+				} else {
+					same(303, $status);
+					same(1, (int)R::count('zzspamdata'), 'stored when the type says spam is false');
+				}
+			});
+		}
+	});
+	@rmdir("$root/demo/models/zzspam");
+	R::exec('DROP TABLE IF EXISTS zzspamdata');
+});
+
+test('Q1', 'editors are never held', function () use ($spam_base) {
+	spam_forget();
+	raster(array('user', 'spam-editor@cafe.test', '--role=editor', '--password=editor password'));
+	$cookie = login($spam_base, 'spam-editor@cafe.test', 'editor password');
+	$hits = (int)(database::instance('cms') ? R::getCell('SELECT COUNT(*) FROM formhit') : 0);
+	$csrf = token_in(http('GET', "$spam_base/visit", null, array("Cookie: $cookie"))[1]);
+	check($csrf, 'the editor has a session token');
+	list($status) = book($spam_base, array('date' => next_open('wed'), 'name' => 'By Phone', 'email' => 'by-phone@example.com', 'raster_ts' => '', 'csrf' => $csrf), array("Cookie: $cookie"));
+	same(303, $status);
+	same(1, (int)R::count('bookingdata', ' email = ? ', array('by-phone@example.com')), 'stored');
+	same($hits, (int)R::getCell('SELECT COUNT(*) FROM formhit'), 'and not counted');
 });
 
 // ## No PHP warnings, notices or deprecations on any request

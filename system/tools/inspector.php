@@ -930,6 +930,14 @@ class raster_inspector {
 				$problems[] = self::problem_at('warning', $html, $alert[0][1], "No model raises '{$alert[1][0]}': call validation::get()->raise('{$alert[1][0]}') or util::done('{$alert[1][0]}') for this alert to show");
 			}
 		}
+		// forms that can turn a post away need alerts to say so
+		foreach (validation_spam::$checked_regions as $region) {
+			if (!preg_match('/<!-- '.preg_quote($region, '/').'[ (]/', $html, $m, PREG_OFFSET_CAPTURE)) continue;
+			if (strpos($html, "print.validation.alert('try_again')") === false || strpos($html, "print.validation.alert('slow_down')") === false) {
+				$problems[] = self::problem_at('warning', $html, $m[0][1], "$this->linting: $region can turn a post away as spam; add print.validation.alert('try_again') and print.validation.alert('slow_down') so the person knows to send it again");
+				break;
+			}
+		}
 		// models that send emails need their email views, as their
 		// requires() names them; a region in this view is a use of its
 		// model, so a draft is checked before it is written
