@@ -4867,6 +4867,9 @@ test('a key file that is empty or partial is not trusted', function () {
 	$file = APPBASE.'data/secret';
 	$kept = is_file($file) ? file_get_contents($file) : null;
 	$was = getenv('RASTER_SECRET');
+	$errors = ini_get('error_log');
+	$logged = sys_get_temp_dir().'/raster-secret-log-'.getmypid().'.txt';
+	ini_set('error_log', $logged);
 	try {
 		putenv('RASTER_SECRET');
 		foreach (array('', 'abc123', str_repeat('g', 64)) as $bad) {
@@ -4876,10 +4879,13 @@ test('a key file that is empty or partial is not trusted', function () {
 			same('', validation_spam::stamp());
 		}
 	} finally {
+		ini_set('error_log', (string)$errors);
 		putenv($was === false ? 'RASTER_SECRET' : "RASTER_SECRET=$was");
 		util::$secret = null;
 		if ($kept === null) @unlink($file); else file_put_contents($file, $kept);
 	}
+	same(3, substr_count((string)@file_get_contents($logged), 'Raster warning: data/secret is not a valid key'), 'each bad file is logged');
+	@unlink($logged);
 });
 test('the stamp is not a field', function () {
 	same(array(), template::instance()->constraints('<input name="raster_ts">'));
@@ -4939,6 +4945,409 @@ test('a cached page with two forms serves fresh stamps to both', function () use
 		proc_terminate($server);
 		unlink($view);
 		foreach (glob(APPBASE.'data/cache/*') ?: array() as $f) unlink($f);
+	}
+});
+
+// ## Spam checks: suspect()
+
+// What suspect() says of a post to the form $owner, sent as a browser sends
+// it: with a stamp made 60 s ago unless $fields has raster_ts (null: none),
+// from $server's REMOTE_ADDR (each post its own address unless given) and
+// headers. A fresh validation object, as a new request has.
+function spam_post($fields, $server = array(), $checked = null, $owner = 'zz.form') {
+	static $n = 0;
+	$n++;
+	$template = template::instance();
+	$kept = array($_SERVER, $_POST, $template->current_call, $template->forms);
+	$validation = isset(controller::instance()->objects['validation']) ? controller::instance()->objects['validation'] : null;
+	try {
+		$_SERVER = $server + array('REMOTE_ADDR' => '192.0.2.'.($n % 250 + 1)) + $_SERVER;
+		$_SERVER['REQUEST_METHOD'] = 'POST';
+		if (!array_key_exists('raster_ts', $fields)) $fields['raster_ts'] = stamp_for_tests(60);
+		if ($fields['raster_ts'] === null) unset($fields['raster_ts']);
+		$_POST = array('raster_form' => $owner) + $fields;
+		$template->current_call = $owner;
+		$template->forms[$owner] = array_fill_keys(array_diff(array_keys($fields), template::$internal_fields), array());
+		unset(controller::instance()->objects['validation']);
+		return validation::get()->suspect($checked);
+	} finally {
+		list($_SERVER, $_POST, $template->current_call, $template->forms) = $kept;
+		if ($validation) controller::instance()->objects['validation'] = $validation;
+		else unset(controller::instance()->objects['validation']);
+	}
+}
+// settings for $fn, put back after
+function with_settings($settings, $fn) {
+	$kept = array();
+	foreach ($settings as $name => $value) {
+		$kept[$name] = config::get($name);
+		config::set($name)->to($value);
+	}
+	try {
+		return $fn();
+	} finally {
+		foreach ($kept as $name => $value) config::set($name)->to($value);
+	}
+}
+// what PHP's error log gets while $fn runs: array(result, log)
+function spam_logged($fn) {
+	$errors = ini_get('error_log');
+	$logged = sys_get_temp_dir().'/raster-spam-log-'.getmypid().'.txt';
+	@unlink($logged);
+	ini_set('error_log', $logged);
+	validation_spam::$warned = array();
+	try {
+		$result = $fn();
+	} finally {
+		ini_set('error_log', (string)$errors);
+	}
+	$log = (string)@file_get_contents($logged);
+	@unlink($logged);
+	return array($result, $log);
+}
+function spam_clear() {
+	cms_store::connect();
+	R::exec('DELETE FROM formhit');
+}
+function spam_hits() {
+	return (int)R::getCell('SELECT COUNT(*) FROM formhit');
+}
+
+test('suspect: the stamp', function () {
+	same(array('no_stamp'), spam_post(array('message' => 'Hi', 'raster_ts' => null)));
+	same(array('stamp_invalid'), spam_post(array('message' => 'Hi', 'raster_ts' => time().'.'.str_repeat('a', 64))));
+	same(array('stamp_invalid'), spam_post(array('message' => 'Hi', 'raster_ts' => 'nonsense')));
+	same(array('too_fast'), spam_post(array('message' => 'Hi', 'raster_ts' => stamp_for_tests(1))));
+	same(array('stamp_old'), spam_post(array('message' => 'Hi', 'raster_ts' => stamp_for_tests(90000))));
+	same(array(), spam_post(array('message' => 'Hi', 'raster_ts' => stamp_for_tests(60))));
+	with_settings(array('spam_min_seconds' => false), function () {
+		same(array(), spam_post(array('message' => 'Hi', 'raster_ts' => null)), 'spam_min_seconds false');
+		same(array(), spam_post(array('message' => 'Hi', 'raster_ts' => stamp_for_tests(90000))), 'spam_min_seconds false');
+	});
+	with_settings(array('spam_max_age' => false), function () {
+		same(array(), spam_post(array('message' => 'Hi', 'raster_ts' => stamp_for_tests(90000))), 'spam_max_age false');
+		same(array('too_fast'), spam_post(array('message' => 'Hi', 'raster_ts' => stamp_for_tests(1))), 'the rest still checked');
+	});
+	with_settings(array('spam_min_seconds' => 10), function () {
+		same(array('too_fast'), spam_post(array('message' => 'Hi', 'raster_ts' => stamp_for_tests(5))));
+	});
+	// a form that wasn't sent, and a GET, have nothing to suspect
+	$template = template::instance();
+	$kept = array($_SERVER, $_POST, $template->current_call);
+	try {
+		$_SERVER['REQUEST_METHOD'] = 'POST';
+		$_POST = array('raster_form' => 'zz.other', 'message' => 'Hi');
+		$template->current_call = 'zz.form';
+		unset(controller::instance()->objects['validation']);
+		same(array(), validation::get()->suspect(), 'another form was sent');
+		$_SERVER['REQUEST_METHOD'] = 'GET';
+		unset(controller::instance()->objects['validation']);
+		same(array(), validation::get()->suspect(), 'a GET');
+	} finally {
+		list($_SERVER, $_POST, $template->current_call) = $kept;
+		unset(controller::instance()->objects['validation']);
+	}
+});
+
+test('suspect: limits per IP and per address, per form', function () {
+	spam_clear();
+	for ($i = 1; $i <= 5; $i++) same(array(), spam_post(array('email' => "guest$i@example.com"), array('REMOTE_ADDR' => '203.0.113.7')), "post $i");
+	same(array('too_many_from_ip'), spam_post(array('email' => 'guest6@example.com'), array('REMOTE_ADDR' => '203.0.113.7')), 'the 6th');
+	same(array(), spam_post(array('email' => 'guest7@example.com'), array('REMOTE_ADDR' => '203.0.113.7'), null, 'zz.other'), 'another form counts apart');
+	same(14, spam_hits(), 'one row for the address and one for the IP of each post');
+	spam_clear();
+	for ($i = 1; $i <= 3; $i++) same(array(), spam_post(array('email' => 'ana@example.com')), "address post $i");
+	same(array('too_many_from_email'), spam_post(array('email' => 'ANA@example.com ')), 'the 4th, written another way');
+	with_settings(array('spam_per_email' => false), function () {
+		same(array(), spam_post(array('email' => 'ana@example.com')), 'spam_per_email false');
+	});
+	with_settings(array('spam_per_ip' => false), function () {
+		spam_clear();
+		for ($i = 1; $i <= 7; $i++) same(array(), spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => '203.0.113.8')), "spam_per_ip false, post $i");
+		same(0, spam_hits(), 'nothing is counted that nothing checks');
+	});
+	with_settings(array('spam_per_ip' => 1), function () {
+		spam_clear();
+		same(array(), spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => '203.0.113.9')));
+		same(array('too_many_from_ip'), spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => '203.0.113.9')));
+	});
+	// a post that fails valid() is never counted: the model asks only after it
+	spam_clear();
+	$template = template::instance();
+	$kept = array($_SERVER, $_POST, $template->current_call, $template->forms);
+	try {
+		$_SERVER['REQUEST_METHOD'] = 'POST';
+		$_SERVER['REMOTE_ADDR'] = '203.0.113.10';
+		$template->current_call = 'zz.form';
+		$template->forms['zz.form'] = array('email' => array('required' => true, 'type' => 'email'));
+		$asked = 0;
+		foreach (array('', 'not an address', 'ana@example.com', '', 'bo@example.com') as $email) {
+			$_POST = array('raster_form' => 'zz.form', 'raster_ts' => stamp_for_tests(60), 'email' => $email);
+			unset(controller::instance()->objects['validation']);
+			$v = validation::get();
+			if (!$v->valid()) continue;
+			$v->suspect();
+			same(array(), $v->suspect(), 'asked twice, counted once');
+			$asked++;
+		}
+		same(2, $asked);
+		same(2 * $asked, spam_hits(), 'an IP and an address row for each post that was asked about');
+	} finally {
+		list($_SERVER, $_POST, $template->current_call, $template->forms) = $kept;
+		unset(controller::instance()->objects['validation']);
+	}
+});
+
+test('suspect: IPv6 counts by /64', function () {
+	spam_clear();
+	for ($i = 1; $i <= 5; $i++) same(array(), spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => "2001:db8:1:2::$i")), "post $i");
+	same(array('too_many_from_ip'), spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => '2001:db8:1:2::6')), 'the 6th of the /64');
+	same(array(), spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => '2001:db8:1:3::1')), 'the next /64');
+});
+
+test('a trusted proxy\'s header is read, an untrusted one ignored', function () {
+	$kept = $_SERVER;
+	try {
+		$_SERVER['REMOTE_ADDR'] = '10.0.0.2';
+		$_SERVER['HTTP_X_FORWARDED_FOR'] = '198.51.100.1, 10.0.0.9';
+		$_SERVER['HTTP_FLY_CLIENT_IP'] = '198.51.100.44';
+		same('10.0.0.2', validation_spam::client_ip(), 'no trusted_proxies');
+		with_settings(array('trusted_proxies' => array('10.0.0.0/8')), function () {
+			same('198.51.100.1', validation_spam::client_ip(), 'the last entry that is not a proxy');
+			$_SERVER['HTTP_X_FORWARDED_FOR'] = 'nonsense';
+			same('10.0.0.2', validation_spam::client_ip(), 'a header that is not an IP');
+			unset($_SERVER['HTTP_X_FORWARDED_FOR']);
+			same('10.0.0.2', validation_spam::client_ip(), 'no header');
+			with_settings(array('client_ip_header' => 'Fly-Client-IP'), function () {
+				same('198.51.100.44', validation_spam::client_ip(), 'a single-value header');
+			});
+		});
+		with_settings(array('trusted_proxies' => array('10.0.0.3')), function () {
+			$_SERVER['HTTP_X_FORWARDED_FOR'] = '198.51.100.1';
+			same('10.0.0.2', validation_spam::client_ip(), 'a proxy that is not trusted');
+		});
+		with_settings(array('trusted_proxies' => array('fd00::/8')), function () {
+			$_SERVER['REMOTE_ADDR'] = 'fd12::1';
+			$_SERVER['HTTP_X_FORWARDED_FOR'] = '2001:db8::7';
+			same('2001:db8::7', validation_spam::client_ip(), 'IPv6');
+		});
+	} finally {
+		$_SERVER = $kept;
+	}
+	check(validation_spam::in_range('10.1.2.3', '10.0.0.0/8'));
+	check(!validation_spam::in_range('11.1.2.3', '10.0.0.0/8'));
+	check(validation_spam::in_range('192.168.1.130', '192.168.1.128/25'));
+	check(!validation_spam::in_range('192.168.1.127', '192.168.1.128/25'));
+	check(validation_spam::in_range('10.0.0.2', '10.0.0.2'));
+	check(validation_spam::in_range('2001:db8::1', '2001:db8::/32'));
+	check(!validation_spam::in_range('2001:db9::1', '2001:db8::/32'));
+	check(!validation_spam::in_range('10.0.0.2', '::/0'), 'IPv4 is never in an IPv6 range');
+	check(!validation_spam::in_range('10.0.0.2', 'nonsense/8'));
+	check(!validation_spam::in_range('', '10.0.0.0/8'));
+});
+
+test('no raw IP is stored, logged or kept past the day', function () {
+	spam_clear();
+	$log = log::instance();
+	log::enable();
+	try {
+		list(, $logged) = spam_logged(function () {
+			for ($i = 0; $i < 3; $i++) spam_post(array('email' => 'ip@example.com'), array('REMOTE_ADDR' => '203.0.113.7'));
+		});
+		$console = $log->javascript_console();
+	} finally {
+		log::disable();
+	}
+	$stored = json_encode(array(R::getAll('SELECT * FROM formhit'), R::getAll('SELECT * FROM formsalt')));
+	check(strpos($stored, '203.0.113.7') === false && strpos($stored, 'ip@example.com') === false, $stored);
+	check(strpos($stored, '203.0.113') === false, 'not even part of it');
+	check(strpos($console.$logged, '203.0.113.7') === false, $console.$logged);
+	same(6, spam_hits());
+	same(1, (int)R::getCell('SELECT COUNT(*) FROM formsalt'), 'one salt');
+	$salt = R::getCell('SELECT salt FROM formsalt');
+	R::exec('UPDATE formsalt SET day = ?', array(date('Y-m-d', strtotime('-1 day'))));
+	same(array(), spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => '203.0.113.7')));
+	same(1, (int)R::getCell('SELECT COUNT(*) FROM formsalt'), 'the old salt is gone');
+	check(R::getCell('SELECT salt FROM formsalt') !== $salt, 'a new salt');
+	same(date('Y-m-d'), R::getCell('SELECT day FROM formsalt'));
+	same(1, spam_hits(), "only the new post's row is left");
+});
+
+test('suspect: links and the blocklist', function () {
+	same(array('too_many_links'), spam_post(array('message' => 'http://a.example https://b.example and www.c.example')));
+	same(array('too_many_links'), spam_post(array('message' => '[url=x]a[/url] [URL=y]b[/URL] HTTP://c.example')), 'any case');
+	same(array(), spam_post(array('message' => 'http://a.example and https://b.example')));
+	same(array(), spam_post(array('message' => 'http://a.example https://b.example www.c.example'), array(), array()), 'array(): no text check');
+	same(array(), spam_post(array('name' => 'http://a.example https://b.example www.c.example', 'message' => 'Hi'), array(), array('message')), 'only the fields named');
+	same(array('too_many_links'), spam_post(array('name' => 'http://a.example https://b.example', 'message' => 'www.c.example'), array(), array('name', 'message')), 'fields are counted together');
+	with_settings(array('spam_max_links' => 0), function () {
+		same(array('too_many_links'), spam_post(array('message' => 'see www.a.example')), '0 allows none');
+		same(array(), spam_post(array('message' => 'no links')));
+	});
+	with_settings(array('spam_max_links' => false), function () {
+		same(array(), spam_post(array('message' => 'http://a.example https://b.example www.c.example http://d.example')), 'false is off');
+	});
+	with_settings(array('spam_blocklist' => array('casino', 'pills.example')), function () {
+		same(array('blocked'), spam_post(array('message' => 'Casino night!')));
+		same(array(), spam_post(array('message' => 'We like casinos')), 'a word matches whole');
+		same(array('blocked'), spam_post(array('message' => 'see https://shop.pills.example/x')), 'a subdomain');
+		same(array('blocked'), spam_post(array('message' => 'see www.pills.example')));
+		same(array('blocked'), spam_post(array('email' => 'a@pills.example', 'message' => 'Hi'), array(), array()), "the email's domain, whatever the fields");
+		same(array(), spam_post(array('email' => 'a@notpills.example', 'message' => 'see https://notpills.example/x')), 'another domain');
+		same(array(), spam_post(array('message' => 'Hi')));
+		same(array('too_many_links', 'blocked'), spam_post(array('message' => 'http://casino.example https://b.example http://pills.example')), 'every check runs');
+	});
+	same(array(), spam_post(array('message' => 'Casino night!')), 'an empty blocklist checks nothing');
+	same(array('no_stamp', 'too_many_links'), spam_post(array('message' => 'http://a.example https://b.example www.c.example', 'raster_ts' => null)), 'in the order of the table');
+});
+
+test('checks that can\'t run pass and log', function () {
+	sqlite_only('drops a table under a frozen connection');
+	cms_store::connect();
+	R::exec('DROP TABLE IF EXISTS formhit');
+	cms_store::forget();
+	validation_spam::$ready = false;
+	R::freeze(true);
+	try {
+		list($reasons, $logged) = spam_logged(function () {
+			$first = spam_post(array('email' => 'frozen@example.com', 'message' => 'Hi'), array('REMOTE_ADDR' => '203.0.113.7'));
+			spam_post(array('email' => 'frozen@example.com', 'message' => 'Hi'), array('REMOTE_ADDR' => '203.0.113.7'));
+			return $first;
+		});
+		same(array(), $reasons, 'a good stamp, and limits that cannot be counted');
+		check(strpos($logged, 'Raster warning: spam: ') !== false, $logged);
+		same(1, substr_count($logged, 'Raster warning: spam: '), 'once per request: '.$logged);
+		check(strpos($logged, '203.0.113.7') === false && strpos($logged, 'frozen@example.com') === false, $logged);
+		same(array('no_stamp'), spam_post(array('message' => 'Hi', 'raster_ts' => null)), 'the stamp needs no table');
+	} finally {
+		R::freeze(false);
+		cms_store::forget();
+		validation_spam::$ready = false;
+	}
+	// no key: the file can't be made (here a folder is in its way)
+	$file = APPBASE.'data/secret';
+	$kept = is_file($file) ? file_get_contents($file) : null;
+	$was = getenv('RASTER_SECRET');
+	@unlink($file);
+	mkdir($file);
+	try {
+		putenv('RASTER_SECRET');
+		util::$secret = null;
+		list($reasons, $logged) = spam_logged(function () {
+			return array(spam_post(array('message' => 'Hi', 'raster_ts' => null)), spam_post(array('message' => 'Hi', 'raster_ts' => stamp_for_tests(1))));
+		});
+		same(array(array(), array()), $reasons, 'no key: the stamp check passes');
+		same(1, substr_count($logged, 'Raster warning: spam: '), $logged);
+	} finally {
+		rmdir($file);
+		putenv($was === false ? 'RASTER_SECRET' : "RASTER_SECRET=$was");
+		util::$secret = null;
+		if ($kept !== null) file_put_contents($file, $kept);
+	}
+});
+
+test('editors are never flagged or counted', function () {
+	spam_clear();
+	$reasons = booking_as_editor(function () {
+		$all = array();
+		for ($i = 0; $i < 7; $i++) $all[] = spam_post(array('email' => 'staff@example.com', 'message' => 'http://a.example https://b.example www.c.example', 'raster_ts' => null), array('REMOTE_ADDR' => '203.0.113.7'));
+		return $all;
+	});
+	same(array_fill(0, 7, array()), $reasons);
+	same(0, spam_hits());
+});
+
+test('doctor warns when posts come from a private address', function () use ($root) {
+	$warned = function () use ($root) {
+		foreach (raster_project::doctor($root, 'application', 'development') as $c) {
+			if ($c['status'] === 'warn' && strpos($c['title'], 'trusted_proxies') !== false) return true;
+		}
+		return false;
+	};
+	cms_store::connect();
+	R::exec('DELETE FROM formsalt');
+	spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => '198.51.100.7'));
+	check(!$warned(), 'a public address');
+	spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => '10.0.0.2'));
+	check($warned(), 'a private address');
+	with_settings(array('trusted_proxies' => array('10.0.0.0/8')), function () use ($warned) {
+		check(!$warned(), 'once trusted_proxies is set');
+	});
+	R::exec('DELETE FROM formsalt');
+	with_settings(array('trusted_proxies' => array('10.0.0.0/8')), function () {
+		spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => '10.0.0.2'));
+	});
+	check(!$warned(), 'a private address behind a trusted proxy');
+	R::exec('DROP TABLE formsalt');
+	cms_store::forget();
+	validation_spam::$ready = false;
+	check(!$warned(), 'no table');
+});
+
+test('doctor warns about a key file the site cannot use', function () use ($root) {
+	$file = APPBASE.'data/secret';
+	$kept = is_file($file) ? file_get_contents($file) : null;
+	$was = getenv('RASTER_SECRET');
+	$warned = function () use ($root) {
+		foreach (raster_project::doctor($root, 'application', 'development') as $c) {
+			if ($c['status'] === 'warn' && strpos($c['title'], "data/secret can't be read or isn't a key") !== false) return true;
+		}
+		return false;
+	};
+	try {
+		putenv('RASTER_SECRET');
+		@unlink($file);
+		check(!$warned(), 'no file');
+		file_put_contents($file, str_repeat('ab', 32));
+		check(!$warned(), 'a key');
+		file_put_contents($file, 'abc');
+		check($warned(), 'not a key');
+		if (function_exists('posix_geteuid') && posix_geteuid() !== 0) {
+			file_put_contents($file, str_repeat('ab', 32));
+			chmod($file, 0200);
+			check($warned(), "a key this user can't read");
+			chmod($file, 0600);
+		}
+		putenv('RASTER_SECRET=from-the-environment');
+		file_put_contents($file, 'abc');
+		check(!$warned(), 'RASTER_SECRET is used instead');
+	} finally {
+		putenv($was === false ? 'RASTER_SECRET' : "RASTER_SECRET=$was");
+		util::$secret = null;
+		if (is_file($file)) chmod($file, 0600);
+		if ($kept === null) @unlink($file); else file_put_contents($file, $kept);
+	}
+});
+
+test('describe lists the spam settings that are set', function () {
+	require_once BASE.'tools/describe.php';
+	with_settings(array('spam_per_ip' => 10, 'trusted_proxies' => array('10.0.0.0/8')), function () {
+		$site = raster_describe::site(array('settings'));
+		same(10, $site['settings']['spam_per_ip']);
+		same(array('10.0.0.0/8'), $site['settings']['trusted_proxies']);
+	});
+});
+
+test('hold() asks again, or to slow down', function () {
+	$raised = new ReflectionProperty('validation', 'raised');
+	$raised->setAccessible(true);
+	$template = template::instance();
+	$kept = array($template->current_block, $_POST);
+	try {
+		$template->current_block = '<form method="post"><input name="email"></form>';
+		$_POST = array('email' => 'ana@example.com');
+		unset(controller::instance()->objects['validation']);
+		$v = validation::get();
+		$html = $v->hold(array('too_fast'));
+		check(strpos($html, 'value="ana@example.com"') !== false, $html);
+		same(array('try_again'), array_keys($raised->getValue($v)));
+		unset(controller::instance()->objects['validation']);
+		$v = validation::get();
+		$v->hold(array('no_stamp', 'too_many_from_email'));
+		same(array('slow_down'), array_keys($raised->getValue($v)));
+	} finally {
+		list($template->current_block, $_POST) = $kept;
+		unset(controller::instance()->objects['validation']);
 	}
 });
 

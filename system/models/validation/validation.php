@@ -34,6 +34,25 @@
 *   if (!$v->valid()) return template::instance()->form_state(); // show it again
 *   ...                                            // do the work
 *   util::done('subscribed');                      // redirect, show the alert
+*
+* Spam checks: a form model asks after valid(), once per post. The answer is
+* a list of reasons, empty when the post looks human (validation_spam, in
+* spam.php, does the checks):
+*
+*   if ($reasons = $v->suspect(array())) return $v->hold($reasons);
+*
+* - suspect($fields) checks the stamp (raster_ts), counts the post per IP
+*   and per address for this form, and looks for links and blocked words in
+*   $fields (null: every field of the form that was posted; array(): none).
+*   Reasons: no_stamp, stamp_invalid, too_fast, stamp_old, too_many_from_ip,
+*   too_many_from_email, too_many_links, blocked.
+* - Editors and admins get none and are not counted. A check that can't run
+*   passes and logs a warning.
+* - hold($reasons) shows the form again as typed, raising slow_down for a
+*   limit and try_again for the rest.
+* - Settings: spam_min_seconds (3), spam_max_age (86400), spam_per_ip (5),
+*   spam_per_email (3), spam_max_links (2), spam_blocklist, trusted_proxies,
+*   client_ip_header (X-Forwarded-For).
 */
 class validation
 {
@@ -45,6 +64,18 @@ class validation
 	protected $raised = array();
 	// the form of the tag being evaluated (from its method__fN name)
 	protected $form_owner = null;
+	// owner => the reasons suspect() found, so a post is counted once
+	protected $suspected = array();
+
+	// the spam checks' tables: the counts (hashes only) and the day's salt.
+	// proxied: today's posts came from a private address with no
+	// trusted_proxies, which doctor reports
+	static function schema() {
+		return array(
+			'formhit' => array('form' => '', 'kind' => '', 'hash' => '', 'at' => 0),
+			'formsalt' => array('day' => '', 'salt' => '', 'proxied' => 0),
+		);
+	}
 
 	static function get() {
 		controller::load_model('validation');
@@ -85,6 +116,36 @@ class validation
 			}
 		}
 		return empty($this->failures[$owner]);
+	}
+
+	// The reasons this post looks like spam (validation_spam::reasons()),
+	// empty when it looks human, or when the form wasn't sent or an editor
+	// sent it. $fields are checked for links and blocked words: null is
+	// every field of the form that was posted, array() none. Asked twice,
+	// it counts the post once.
+	function suspect($fields = null) {
+		$owner = template::instance()->current_call;
+		if (!$this->submitted($owner)) return array();
+		if (isset($this->suspected[$owner])) return $this->suspected[$owner];
+		// staff testing their own form
+		if (authentication::can('editor')) return $this->suspected[$owner] = array();
+		if ($fields === null) {
+			$forms = template::instance()->forms;
+			$fields = array_keys(array_intersect_key(isset($forms[$owner]) ? $forms[$owner] : array(), $_POST));
+		}
+		return $this->suspected[$owner] = validation_spam::reasons($owner, $fields);
+	}
+
+	// A suspect post: the form again with what was typed (and a fresh
+	// stamp), and slow_down for a limit, try_again for the rest
+	function hold($reasons) {
+		$limit = false;
+		foreach ((array)$reasons as $reason) {
+			if (strpos($reason, 'too_many_from_') === 0) $limit = true;
+		}
+		if ($limit) $this->raise('slow_down');
+		else $this->raise('try_again');
+		return template::instance()->form_state();
 	}
 
 	// the fields that failed in a form, field => rules
