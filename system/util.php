@@ -5,13 +5,19 @@
 class util {
 
 	// the site's key for signing things (the form stamp): RASTER_SECRET, else
-	// data/secret, made on the first use. '' when there is none to be had.
+	// data/secret, made by the first web request that needs it. '' when there
+	// is none to be had.
 	static $secret = null;
 	static function secret() {
 		if (self::$secret !== null) return self::$secret;
 		$env = getenv('RASTER_SECRET');
 		if ($env !== false && $env !== '') return self::$secret = $env;
 		$file = APPBASE.'data/secret';
+		// a command (raster render, a script) would make the file as its own
+		// user, mode 0600, and PHP-FPM, running as another, could never read
+		// it: the stamp would be off for good. So the command line signs with
+		// a key of its own, for this process only, and the site makes the file.
+		if (PHP_SAPI === 'cli' && !(is_file($file) && is_readable($file))) return self::$secret = bin2hex(random_bytes(32));
 		if (!is_file($file)) {
 			if (!is_dir(dirname($file))) @mkdir(dirname($file), 0775, true);
 			// 'x' fails when the file exists, so two first requests can't
@@ -30,6 +36,10 @@ class util {
 				fclose($handle);
 				if ($written !== 64) @unlink($file);
 			}
+		}
+		if (is_file($file) && !is_readable($file)) {
+			log::warning("data/secret can't be read by this user (made by another, such as a command?), so there is no key; delete it and the site makes a new one, or set RASTER_SECRET");
+			return self::$secret = '';
 		}
 		$key = trim((string)@file_get_contents($file));
 		// an empty or partial file (a crash, a full disk) would switch the

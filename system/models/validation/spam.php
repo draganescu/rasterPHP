@@ -45,8 +45,9 @@ class validation_spam
 
 	// The reasons a post to $owner looks like spam, in the order of the
 	// design's table; empty when it looks human. $fields are the fields
-	// looked at for links and blocked words. The post is counted here.
-	static function reasons($owner, $fields) {
+	// looked at for links and blocked words; $text false skips those checks,
+	// the email's domain included. The post is counted here.
+	static function reasons($owner, $fields, $text = true) {
 		$reasons = array();
 
 		// the stamp: spam_min_seconds false turns all of it off
@@ -83,17 +84,20 @@ class validation_spam
 			}
 		}
 
-		// the text: the fields named, joined; the email's domain always
-		$text = array();
+		// the text: the fields named, joined, and the email's domain. Only
+		// when the form asks: a form that answers try_again can't let a
+		// blocklisted domain through on a second try, so it never checks one
+		if (!$text) return $reasons;
+		$words = array();
 		foreach ((array)$fields as $field) {
 			foreach ((array)validation::value($field) as $value) {
-				if (is_string($value)) $text[] = $value;
+				if (is_string($value)) $words[] = $value;
 			}
 		}
-		$text = implode("\n", $text);
+		$words = implode("\n", $words);
 		$links = config::get('spam_max_links', 2);
-		if ($links !== false && self::links($text) > (int)$links) $reasons[] = 'too_many_links';
-		if (self::blocked($text, $email)) $reasons[] = 'blocked';
+		if ($links !== false && self::links($words) > (int)$links) $reasons[] = 'too_many_links';
+		if (self::blocked($words, $email)) $reasons[] = 'blocked';
 		return $reasons;
 	}
 
@@ -107,20 +111,31 @@ class validation_spam
 
 	// The visitor's address: REMOTE_ADDR, unless that is a trusted proxy,
 	// then the client_ip_header it sends (for a list, the last entry that
-	// isn't itself trusted). A missing or bad header keeps REMOTE_ADDR.
+	// isn't itself trusted; an entry's port and brackets left out). A
+	// missing or bad header keeps REMOTE_ADDR.
 	static function client_ip() {
 		$remote = self::unmapped(isset($_SERVER['REMOTE_ADDR']) ? (string)$_SERVER['REMOTE_ADDR'] : '');
 		$proxies = (array)config::get('trusted_proxies', array());
 		if (!$proxies || !self::trusted($remote, $proxies)) return $remote;
 		$header = 'HTTP_'.strtoupper(str_replace('-', '_', (string)config::get('client_ip_header', 'X-Forwarded-For')));
 		if (empty($_SERVER[$header]) || !is_string($_SERVER[$header])) return $remote;
-		$entries = array_reverse(array_map(array('validation_spam', 'unmapped'), array_map('trim', explode(',', $_SERVER[$header]))));
+		$entries = array_reverse(array_map(array('validation_spam', 'unmapped'), array_map(array('validation_spam', 'bare'), explode(',', $_SERVER[$header]))));
 		foreach ($entries as $entry) {
 			if (!filter_var($entry, FILTER_VALIDATE_IP)) return $remote;
 			if (!self::trusted($entry, $proxies)) return $entry;
 		}
 		// every hop is trusted: the first is the visitor
 		return end($entries);
+	}
+
+	// An entry as some proxies write it, with a port (1.2.3.4:5678) or in
+	// brackets ([2001:db8::1], [2001:db8::1]:443), as the address alone:
+	// otherwise it isn't an IP, and the whole header is thrown away
+	static function bare($entry) {
+		$entry = trim((string)$entry);
+		if (preg_match('/^\[([^\]]*)\](?::\d+)?$/', $entry, $m)) return $m[1];
+		if (preg_match('/^(\d{1,3}(?:\.\d{1,3}){3}):\d+$/', $entry, $m)) return $m[1];
+		return $entry;
 	}
 
 	// An IPv4 address written as IPv6 (::ffff:203.0.113.7, from a server

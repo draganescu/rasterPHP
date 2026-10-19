@@ -188,7 +188,7 @@ A form posts back to its own page. The `render` block around it names the model 
 <h2>Write to us</h2>
 <!-- print.validation.alert('sent') --><p class="notice">Thanks, we got your message.</p><!-- /print.validation.alert('sent') -->
 <!-- print.validation.alert('email_invalid') --><p class="error">Check your email address.</p><!-- /print.validation.alert('email_invalid') -->
-<!-- print.validation.alert('message_invalid') --><p class="error">Write a message, up to 5000 characters.</p><!-- /print.validation.alert('message_invalid') -->
+<!-- print.validation.alert('message_invalid') --><p class="error">Write a message, up to 2000 characters.</p><!-- /print.validation.alert('message_invalid') -->
 <!-- render.contact.form -->
 <form method="post">
   <label>Your name <input name="name"></label>
@@ -238,8 +238,10 @@ array('label' => 'Team', 'url' => '/team'),
 
 ```sh
 php bin/raster lint     # no errors expected
-php bin/raster schema   # shows the new fields: title, heading, and the team collection
+php bin/raster schema   # shows the new fields: title, heading, the team collection, and contactmessage
 ```
+
+`contactmessage` is where the contact form's messages are kept. `lint` shows a warning about it until there is a staff page that lists the messages: nobody can read them otherwise. [Contact forms](Contact-Forms#the-staff-page) shows how to make one.
 
 Try breaking something on purpose. Change `print.office.today` to `print.office.todya` in both tags and run `lint`:
 

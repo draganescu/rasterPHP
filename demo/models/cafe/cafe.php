@@ -4,7 +4,7 @@
 class cafe
 {
 	// what /api/cafe/<method> answers, and for whom; nothing else here is
-	// reachable there: not the form handler, not the listeners
+	// reachable there: not the methods templates call, not the listeners
 	static function api() {
 		return array('hours' => 'visitor', 'category_count' => 'visitor', 'bookings' => 'editor');
 	}

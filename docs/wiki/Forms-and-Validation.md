@@ -216,7 +216,7 @@ You don't need to add anything to your forms for this.
 | `too_many_links` | more than `spam_max_links` (2) links in the fields it checked |
 | `blocked` | a word or domain of `spam_blocklist` in the fields it checked, or in the email's domain |
 
-`suspect()` checks the stamp and the limits. Pass the fields to look through for links and blocked words, `suspect(array('subject', 'message'))`; with none, `suspect()` looks through every field the form posted, and `suspect(array())` through none. Editors are never held, so you can test your own form. A check that can't run (no table yet, no key) passes, and logs a warning.
+`suspect()` checks the stamp and the limits. Pass the fields to look through for links and blocked words, `suspect(array('subject', 'message'))`; with none, `suspect()` looks through every field the form posted, and `suspect(array())` through none: then no text is checked at all, not even the email's domain against the blocklist, since a form that answers `try_again` would turn a blocked address away on every try. Editors are never held, so you can test your own form. A check that can't run (no table yet, no key) passes, and logs a warning.
 
 `hold($reasons)` shows the form again as it was typed, with a fresh stamp, and the alert `try_again` (the stamp) or `slow_down` (a limit). Word both in the template, once, at the top of the layout, so a held post shows its message once; `raster lint` asks for them on a page with a bundled form that can hold a post, and counts alerts in the fragments the page includes (`<!-- dry._layout.header /-->`).
 

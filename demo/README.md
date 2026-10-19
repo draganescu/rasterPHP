@@ -342,5 +342,5 @@ running it again adds nothing. Until then the booking forms say `not_open`.
 | Q1 | a post without a fresh stamp (none, too young) gets the sign-up, newsletter, booking and record forms again with what was typed and the alert `try_again`; forgot answers as usual; a record type can say `'spam' => false`; editors are never held |
 | Q2 | too many posts from one address in an hour: `slow_down`, and nothing stored (the demo's own server has `CAFE_SPAM_LIMITS=off`, since the suite posts from one address) |
 | Q3 | the café's contact form is the bundled contact model: `?done=sent`, one email to staff with `Reply-To` the guest, the message listed on `/staff` for editors only |
-| Q4 | a message with too many links is kept aside as spam (the visitor is thanked, nobody is emailed), shows in the Spam list, and `not_spam` moves it to the new ones without a mail |
+| Q4 | the café's `no_links` rule (D13) turns plain web addresses back before the model sees them; links it doesn't catch (bbcode `[url=…]`) make the model keep the message aside as spam (the visitor is thanked, nobody is emailed). It shows in the Spam list, and `not_spam` moves it to the new ones without a mail |
 | Q5 | the staff page lists the messages (new, spam, done) with the in-page editor and the actions |

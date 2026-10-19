@@ -614,8 +614,13 @@ test('D20', 'forms filled with data and spa_ classes', function () use ($base) {
 });
 test('D21', '/api never runs form models', function () use ($base) {
 	$before = count(mails());
-	list($status, $body) = http('POST', "$base/api/contact/form", array('email' => 'x@example.com', 'message' => 'via api'));
-	same(404, $status, 'a form handler the model does not list');
+	// the café's own model: a public method its api() doesn't list (a
+	// listener that subscribes a guest) is not reachable
+	list($status, $body) = http('POST', "$base/api/cafe/subscribe_guest", array('email' => 'x@example.com', 'name' => 'via api'));
+	same(404, $status, "a public method of the site's own model that its api() does not list");
+	same(404, http('POST', "$base/api/cafe/problem_count")[0], 'nor a method the templates call');
+	// bundled models aren't reachable at /api at all
+	same(404, http('POST', "$base/api/contact/form", array('email' => 'x@example.com', 'message' => 'via api'))[0], 'nor a bundled form handler');
 	same(404, http('POST', "$base/api/booking/form", array('name' => 'x'))[0], 'nor a bundled one');
 	// and one a model does list is not a form submission there
 	$dir = dirname(__DIR__).'/demo/models/zzform';

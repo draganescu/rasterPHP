@@ -4869,7 +4869,48 @@ test('a stamp is checked by its signature', function () {
 	same(null, validation_spam::stamp_age(null));
 	same(30, validation_spam::stamp_age(validation_spam::stamp(time() - 30)));
 });
-test('the key: RASTER_SECRET, else data/secret made once', function () {
+test('the key: RASTER_SECRET, else data/secret made once, by the site', function () use ($root, $db) {
+	$file = APPBASE.'data/secret';
+	$kept = is_file($file) ? file_get_contents($file) : null;
+	@unlink($file);
+	$was = getenv('RASTER_SECRET');
+	$server = null;
+	try {
+		// a web request (here php -S, as PHP-FPM would) makes the file, as
+		// the web server's user
+		$port = free_port();
+		$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'PATH' => getenv('PATH')));
+		for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
+		list($status, $body) = http('GET', "http://127.0.0.1:$port/login");
+		same(200, $status);
+		check((bool)preg_match('/name="raster_ts" value="([^"]+)"/', $body, $stamp), $body);
+		check(is_file($file), 'the site made data/secret');
+		$made = (string)file_get_contents($file);
+		check((bool)preg_match('/^[0-9a-f]{64}$/', $made), "key: $made");
+		if (DIRECTORY_SEPARATOR === '/') same('0600', substr(sprintf('%o', fileperms($file)), -4));
+		http('GET', "http://127.0.0.1:$port/login");
+		same($made, (string)file_get_contents($file), 'a second request keeps the key');
+		// a command reads the key the site made, and the page's stamp is
+		// signed with it
+		putenv('RASTER_SECRET');
+		util::$secret = null;
+		same($made, util::secret());
+		$age = validation_spam::stamp_age($stamp[1]);
+		check(is_int($age) && $age >= 0 && $age <= 5, var_export($age, true));
+		putenv('RASTER_SECRET=from-the-environment');
+		util::$secret = null;
+		same('from-the-environment', util::secret());
+	} finally {
+		if ($server) {
+			proc_terminate($server);
+			proc_close($server);
+		}
+		putenv($was === false ? 'RASTER_SECRET' : "RASTER_SECRET=$was");
+		util::$secret = null;
+		if ($kept === null) @unlink($file); else file_put_contents($file, $kept);
+	}
+});
+test('a command makes no key file, and still stamps', function () use ($root, $db) {
 	$file = APPBASE.'data/secret';
 	$kept = is_file($file) ? file_get_contents($file) : null;
 	@unlink($file);
@@ -4877,15 +4918,18 @@ test('the key: RASTER_SECRET, else data/secret made once', function () {
 	try {
 		putenv('RASTER_SECRET');
 		util::$secret = null;
-		$made = util::secret();
-		check((bool)preg_match('/^[0-9a-f]{64}$/', $made), "key: $made");
-		same($made, file_get_contents($file));
-		if (DIRECTORY_SEPARATOR === '/') same('0600', substr(sprintf('%o', fileperms($file)), -4));
+		$key = util::secret();
+		check((bool)preg_match('/^[0-9a-f]{64}$/', $key), "key: $key");
+		check(!file_exists($file), 'the command line made data/secret');
+		same($key, util::secret(), 'one key for the whole process');
+		same(30, validation_spam::stamp_age(validation_spam::stamp(time() - 30)));
+		// raster render, as someone other than the web server may run it
+		$out = (string)shell_exec('RASTER_DB='.escapeshellarg($db).' RASTER_ENV=development '.escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' render /login 2>&1');
+		check((bool)preg_match('/name="raster_ts" value="\d+\.[0-9a-f]{64}"/', $out), $out);
+		check(!file_exists($file), 'raster render made data/secret');
+		// the next command gets another key: nothing is kept between them
 		util::$secret = null;
-		same($made, util::secret(), 'a second request reads the same key');
-		putenv('RASTER_SECRET=from-the-environment');
-		util::$secret = null;
-		same('from-the-environment', util::secret());
+		check(util::secret() !== $key, 'a key kept between commands');
 	} finally {
 		putenv($was === false ? 'RASTER_SECRET' : "RASTER_SECRET=$was");
 		util::$secret = null;
@@ -5176,6 +5220,20 @@ test('a trusted proxy\'s header is read, an untrusted one ignored', function () 
 			$_SERVER['REMOTE_ADDR'] = 'fd12::1';
 			$_SERVER['HTTP_X_FORWARDED_FOR'] = '2001:db8::7';
 			same('2001:db8::7', validation_spam::client_ip(), 'IPv6');
+			// a port, or brackets, as some proxies write them
+			$_SERVER['HTTP_X_FORWARDED_FOR'] = '[2001:db8::1]';
+			same('2001:db8::1', validation_spam::client_ip(), 'IPv6 in brackets');
+			$_SERVER['HTTP_X_FORWARDED_FOR'] = '[2001:db8::1]:443';
+			same('2001:db8::1', validation_spam::client_ip(), 'IPv6 in brackets, with a port');
+			$_SERVER['HTTP_X_FORWARDED_FOR'] = '198.51.100.1:5678, [fd12::9]:80';
+			same('198.51.100.1', validation_spam::client_ip(), 'IPv4 with a port, behind a proxy with one');
+			$_SERVER['HTTP_X_FORWARDED_FOR'] = '[nonsense]:80';
+			same('fd12::1', validation_spam::client_ip(), 'brackets around what is not an IP');
+		});
+		with_settings(array('trusted_proxies' => array('10.0.0.0/8')), function () {
+			$_SERVER['REMOTE_ADDR'] = '10.0.0.2';
+			$_SERVER['HTTP_X_FORWARDED_FOR'] = '1.2.3.4:5678';
+			same('1.2.3.4', validation_spam::client_ip(), 'IPv4 with a port');
 		});
 	} finally {
 		$_SERVER = $kept;
@@ -5245,7 +5303,10 @@ test('suspect: links and the blocklist', function () {
 		same(array(), spam_post(array('message' => 'We like casinos')), 'a word matches whole');
 		same(array('blocked'), spam_post(array('message' => 'see https://shop.pills.example/x')), 'a subdomain');
 		same(array('blocked'), spam_post(array('message' => 'see www.pills.example')));
-		same(array('blocked'), spam_post(array('email' => 'a@pills.example', 'message' => 'Hi'), array(), array()), "the email's domain, whatever the fields");
+		same(array('blocked'), spam_post(array('email' => 'a@pills.example', 'name' => 'Ana', 'message' => 'Hi'), array(), array('name', 'subject', 'message')), "the email's domain, whatever the fields say");
+		// a hold-type form (newsletter, sign-up, booking) would answer
+		// try_again to that address forever, so array() checks no text
+		same(array(), spam_post(array('email' => 'b@pills.example', 'message' => 'Casino night!'), array(), array()), 'array(): no blocklist, the email included');
 		same(array(), spam_post(array('email' => 'a@notpills.example', 'message' => 'see https://notpills.example/x')), 'another domain');
 		same(array(), spam_post(array('message' => 'Hi')));
 		same(array('too_many_links', 'blocked'), spam_post(array('message' => 'http://casino.example https://b.example http://pills.example')), 'every check runs');
@@ -5277,12 +5338,12 @@ test('checks that can\'t run pass and log', function () {
 		cms_store::forget();
 		validation_spam::$ready = false;
 	}
-	// no key: the file can't be made (here a folder is in its way)
+	// no key: the file isn't one (the command line makes a key of its own
+	// when there is no file, so a broken one is the way to have none here)
 	$file = APPBASE.'data/secret';
 	$kept = is_file($file) ? file_get_contents($file) : null;
 	$was = getenv('RASTER_SECRET');
-	@unlink($file);
-	mkdir($file);
+	file_put_contents($file, 'abc');
 	try {
 		putenv('RASTER_SECRET');
 		util::$secret = null;
@@ -5292,10 +5353,9 @@ test('checks that can\'t run pass and log', function () {
 		same(array(array(), array()), $reasons, 'no key: the stamp check passes');
 		same(1, substr_count($logged, 'Raster warning: spam: '), $logged);
 	} finally {
-		rmdir($file);
 		putenv($was === false ? 'RASTER_SECRET' : "RASTER_SECRET=$was");
 		util::$secret = null;
-		if ($kept !== null) file_put_contents($file, $kept);
+		if ($kept === null) @unlink($file); else file_put_contents($file, $kept);
 	}
 });
 
@@ -5346,7 +5406,7 @@ test('doctor warns about a key file the site cannot use', function () use ($root
 	$was = getenv('RASTER_SECRET');
 	$warned = function () use ($root) {
 		foreach (raster_project::doctor($root, 'application', 'development') as $c) {
-			if ($c['status'] === 'warn' && strpos($c['title'], "data/secret can't be read or isn't a key") !== false) return true;
+			if ($c['status'] === 'warn' && strpos($c['title'], "this user can't read data/secret (or it isn't a key)") !== false) return true;
 		}
 		return false;
 	};
@@ -5619,6 +5679,20 @@ test('contact: header injection is refused and Reply-To is one header', function
 		// from any writer
 		same(array('email_invalid'), contact_refused(function () { cms_records::create('contactmessage', array('email' => "a@b.test\nBcc: c@d.test", 'message' => 'Hi')); }));
 		same(array('email_invalid'), contact_refused(function () { cms_records::create('contactmessage', array('email' => '', 'message' => 'Hi')); }));
+		// addresses PHP's filter takes that would carry more than one
+		// address, or address syntax, into Reply-To
+		$quoted = '"x>,evil@evil.test,<y"@x.com';
+		check((bool)filter_var($quoted, FILTER_VALIDATE_EMAIL), 'the filter takes it, so the check must be on top');
+		foreach (array($quoted, '"ana"@example.com', 'ana@[192.0.2.1]', 'a b@example.com', 'a(b)@example.com', 'a,b@example.com', 'a;b@example.com', 'a:b@example.com', 'a\\b@example.com', 'a@b@example.com') as $email) {
+			same(array('email_invalid'), contact_refused(function () use ($email) { cms_records::create('contactmessage', array('email' => $email, 'message' => 'Hi')); }), $email);
+		}
+		$mails = booking_mails(function () use ($booking_base, $quoted) {
+			list($status, $body) = contact_post($booking_base, array('name' => 'Ana', 'email' => $quoted, 'message' => 'Hi quoted'));
+			same(200, $status, 'a quoted local part');
+			check(strpos($body, 'ALERT email_invalid') !== false, $body);
+		});
+		same(array(), booking_sent($mails));
+		same(array(), cms_records::find('contactmessage'));
 		same(array('name_invalid', 'message_invalid'), contact_refused(function () { cms_records::create('contactmessage', array('name' => "Ana\0", 'email' => 'a@b.test', 'message' => '')); }));
 		// quotes, brackets and commas are dropped from the name
 		$mails = booking_mails(function () use ($booking_base) {

@@ -8,6 +8,8 @@ The demo café in the Raster repository (`demo/`) is a complete example: the for
 
 Emails go out through the `mail` model, so set up [Sending email](Sending-Email) first.
 
+On a production site the database is frozen: run `php bin/raster schema --apply` once after adding the form, before it can store anything. That makes the messages' table (`contactmessagedata`) and the spam checks' tables. In development they are made on the first use.
+
 ## The form
 
 ```html

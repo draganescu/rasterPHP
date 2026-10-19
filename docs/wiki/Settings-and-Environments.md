@@ -168,6 +168,6 @@ Environment variables win over the settings above. Set them in your server's con
 | `RASTER_MAIL` | the mail transport: `log://`, `mail://`, `smtp://…`, `smtps://…` |
 | `RASTER_MAIL_FROM` | the sender, e.g. `My Site <hello@example.com>` |
 | `RASTER_MCP_TOKEN` | turns on MCP over HTTP; clients must send this token |
-| `RASTER_SECRET` | the site's key for signing form stamps. Without it Raster makes `application/data/secret` (mode 0600) the first time it needs one. Set it when several servers share a site, so all of them sign and check with one key. Changing it makes forms already open send their stamp again |
+| `RASTER_SECRET` | the site's key for signing form stamps. Without it the site makes `application/data/secret` (mode 0600) the first time a web request needs one; a command (`raster render`, a script) never makes it, since the web server's user might not be able to read a file it made, and signs with a key of its own instead. Set it when several servers share a site, so all of them sign and check with one key. Changing it makes forms already open send their stamp again |
 | `NO_COLOR` | plain command-line output, without colours |
 | `RASTER_REPO` | the GitHub repository `raster update` downloads from (default `draganescu/rasterPHP`), for forks |
