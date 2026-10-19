@@ -116,6 +116,13 @@ class private_paths {
 	// copies it into the environment, where mcp::bearer() reads it.
 	const APACHE_AUTHORIZATION = 'RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]';
 
+	// Theme files carry ?v= in the pages' URLs (controller::version_assets), a
+	// new value whenever the file changes, so a browser keeps those a year.
+	// Without it, it asks each time and gets a 304 when nothing changed. The
+	// same as the router in index.php sends.
+	const KEEP = 'public, max-age=31536000, immutable';
+	const ASK = 'no-cache';
+
 	// ##Using the rules
 	//
 	// The app folders of a site: every top level folder with a config/ inside,
@@ -183,6 +190,17 @@ class private_paths {
 			foreach ($rule['apache'] as $line) $lines[] = $line;
 		}
 		$lines[] = '';
+		$lines[] = '# theme files: kept a year with ?v= (Raster adds it, a new one when the';
+		$lines[] = '# file changes), checked each time without';
+		$lines[] = '<IfModule mod_headers.c>';
+		$lines[] = '<If "-f %{REQUEST_FILENAME} && %{REQUEST_URI} =~ m#/views/# && %{QUERY_STRING} =~ /(^|&)v=/">';
+		$lines[] = 'Header set Cache-Control "'.self::KEEP.'"';
+		$lines[] = '</If>';
+		$lines[] = '<ElseIf "-f %{REQUEST_FILENAME} && %{REQUEST_URI} =~ m#/views/#">';
+		$lines[] = 'Header set Cache-Control "'.self::ASK.'"';
+		$lines[] = '</ElseIf>';
+		$lines[] = '</IfModule>';
+		$lines[] = '';
 		$lines[] = '# everything else is the site';
 		$lines[] = 'RewriteCond %{REQUEST_FILENAME} !-d';
 		$lines[] = 'RewriteCond %{REQUEST_FILENAME} !-f';
@@ -230,6 +248,17 @@ class private_paths {
 		$lines[] = '        try_files $uri /index.php$is_args$args;';
 		$lines[] = '    }';
 		$lines[] = '';
+		$lines[] = '    # theme files: kept a year with ?v= (Raster adds it, a new one when the';
+		$lines[] = '    # file changes), checked each time without; after the rules above, so';
+		$lines[] = '    # raw views are still refused';
+		$lines[] = '    location ~ "^/[^/]+/views/" {';
+		$lines[] = '        try_files $uri /index.php$is_args$args;';
+		$lines[] = '        add_header Cache-Control "'.self::ASK.'";';
+		$lines[] = '        if ($arg_v) {';
+		$lines[] = '            add_header Cache-Control "'.self::KEEP.'";';
+		$lines[] = '        }';
+		$lines[] = '    }';
+		$lines[] = '';
 		$lines[] = '    # anything else: a real file, or the site';
 		$lines[] = '    location / {';
 		$lines[] = '        try_files $uri /index.php$is_args$args;';
@@ -271,6 +300,21 @@ class private_paths {
 			'        path_regexp private (?i)'.implode('|', $fragments),
 			'    }',
 			'    respond @private 403',
+			'',
+			'    # theme files: kept a year with ?v= (Raster adds it, a new one when the',
+			'    # file changes), checked each time without',
+			'    @versioned {',
+			'        path_regexp ^/[^/]+/views/',
+			'        file',
+			'        query v=*',
+			'    }',
+			'    header @versioned Cache-Control "'.self::KEEP.'"',
+			'    @theme {',
+			'        path_regexp ^/[^/]+/views/',
+			'        file',
+			'        not query v=*',
+			'    }',
+			'    header @theme Cache-Control "'.self::ASK.'"',
 			'',
 			'    php_fastcgi '.$options['socket'],
 			'    file_server',

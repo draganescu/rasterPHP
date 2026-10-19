@@ -17,6 +17,12 @@ On a frozen (production) database, run `php bin/raster schema --apply` once afte
 
 Nothing for sites to do. Every post form that has a render block around it now gets a hidden `raster_ts` field: the time the form was shown, signed with the site's key. Nothing checks it yet; the spam checks that read it come next. The key is `RASTER_SECRET` when set, else Raster makes `data/secret` on first use (make sure `data/` is writable, as for the SQLite file and the cache). Emails, static exports and forms with no render block carry no stamp. The page cache keeps a marker in the stamp's place and writes a fresh stamp into the page on every hit, so cached forms stay fresh too.
 
+## 2.2.22
+
+Nothing for sites to do. `raster update` brings the new `.htaccess`; behind nginx or Caddy, add the theme file lines from `php bin/raster deploy --config=nginx|caddy`.
+
+**A changed stylesheet shows right after a publish.** Relative links to theme files (`href="style.css"`, `src`, `srcset`, `poster`) get `?v=` and a version made from the file's time and size, so the URL changes when the file does. The `.htaccess` and the nginx and Caddy configs keep a theme file with a version for a year, and have browsers check one without it each time. Pages are sent with `Cache-Control: no-cache`, so a browser asks again each time and gets a 304 when nothing changed. `php -S` sends the same headers. `asset_versions => false` leaves the URLs as written.
+
 ## 2.2.21
 
 A list that pairs `limit=N` with a pager now shows the same N rows on every page: set `<name>_page_size` instead. A site's own `reservation` or `booking` model keeps working.
