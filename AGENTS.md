@@ -91,6 +91,16 @@ media/                        uploads from the CMS
 - Link to pages by file name, `href="about.html"`. Raster rewrites that to
   `/about`, and `index.html` becomes `/`, so the file still works as a static
   mock-up. Asset paths are relative to the theme folder.
+- **Asset versions.** A relative URL to a real file in the theme
+  (`href="style.css"`, `src`, `srcset`, `poster`) gets `?v=<version>`, made
+  from the file's time and size, so it changes when the file does
+  (`controller::version_assets`, config `asset_versions`, on by default). A
+  URL that already has a query or a fragment is left alone. The servers
+  keep a theme file with `?v=` for a year (`immutable`) and have browsers
+  check one without it each time; pages are `Cache-Control: no-cache`. So a
+  browser keeps the CSS and still sees a new one right after a publish.
+  CSS's own `url(…)` (fonts, backgrounds) gets no version and is checked each
+  time.
 - Routes, for URLs that should render a differently named view
   (`application/config/the_routes.php`):
   `controller::route('blog/post')->to('post');`. Patterns are regular
@@ -1857,6 +1867,7 @@ Set in `config/the_app.php` with `config::set('name')->to(value)`.
 | `mail`, `mail_from` | see `RASTER_MAIL` | transport and sender |
 | `languages`, `domain_language`, `language_cookie` | none, none, `lang` | |
 | `page_cache`, `page_cache_ttl`, `page_cache_skip` | on in production, 3600, none | |
+| `asset_versions` | true | false leaves theme asset URLs as they are written |
 | `mcp_token` | none | same as `RASTER_MCP_TOKEN` |
 | `mcp_write_views` | false | lets MCP over HTTP write templates (`write_view`); over stdio it always can |
 | `api_system_models` | `cms` | system models reachable at `/api`, for what their `api()` lists |

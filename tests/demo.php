@@ -877,7 +877,7 @@ test(array('E17', 'E20', 'E27'), 'the editor: only for editors, marks where the 
 	has($page, "<h1><!--raster:s $id-->About us<!--raster:e $id--></h1>");
 	list($id, $photo) = mark_of($config, 'field', function ($m) { return $m['field'] === 'photo'; });
 	same('src', $photo['attr']);
-	has($page, "<!--raster:a $id--><img class=\"photo wide\" src=\"img/about.jpg\"");
+	has($page, "<!--raster:a $id--><img class=\"photo wide\" src=\"img/about.jpg?v=");
 	list($id, $body) = mark_of($config, 'field', function ($m) { return $m['field'] === 'body'; });
 	same(true, $body['rich']);
 	// a field in <head> can't be edited in place: the panel offers it
@@ -891,7 +891,7 @@ test(array('E17', 'E20', 'E27'), 'the editor: only for editors, marks where the 
 	list($list_id, $list) = mark_of($config, 'collection', function ($m) { return $m['collection'] === 'menu'; });
 	same('img/menu/flat-white.jpg', $list['fields']['photo']);
 	has($menu, '<template data-raster-mockup="'.$list_id.'">');
-	has($menu, '<!--raster:ma photo src--><img class="photo" src="img/menu/flat-white.jpg" alt="">');
+	has($menu, '<!--raster:ma photo src--><img class="photo" src="img/menu/flat-white.jpg?v=');
 	has($menu, '<!--raster:m name-->Flat white<!--raster:/m-->');
 	list($item_id, $item) = mark_of($config, 'item', function ($m) { return $m['values']['name'] === 'Americano'; });
 	check($item, 'an item mark');
@@ -1031,14 +1031,14 @@ test(array('E21', 'E29', 'C44'), 'pictures: upload, page and item photos, empty 
 	http('POST', "$base/api/cms/editor_save_field", array('csrf' => $token, 'type' => 'aboutpage', 'slug' => '/about', 'field' => 'photo', 'value' => '/preview/abc'.$file), $h);
 	has(http('GET', "$base/about")[1], '<img class="photo wide" src="'.$file.'"', 'a picture saved under another folder shows under this one');
 	http('POST', "$base/api/cms/editor_save_field", array('csrf' => $token, 'type' => 'aboutpage', 'slug' => '/about', 'field' => 'photo', 'value' => ''), $h);
-	has(http('GET', "$base/about")[1], '<img class="photo wide" src="img/about.jpg"', 'empty shows the template\'s picture');
+	has(http('GET', "$base/about")[1], '<img class="photo wide" src="img/about.jpg?v=', 'empty shows the template\'s picture');
 	// an item photo
 	$item = null;
 	foreach (mcp($base, 'list_items', array('collection' => 'menu', 'limit' => 100))['items'] as $row) if ($row['name'] === 'Americano') $item = $row;
 	http('POST', "$base/api/cms/editor_save_item", array('csrf' => $token, 'collection' => 'menu', 'id' => $item['id'], 'fields' => array('photo' => $upload['url'])), $h);
 	has(http('GET', "$base/menu/menu_item/americano")[1], '<img class="photo wide" src="'.$upload['url'].'"');
 	http('POST', "$base/api/cms/editor_save_item", array('csrf' => $token, 'collection' => 'menu', 'id' => $item['id'], 'fields' => array('photo' => '')), $h);
-	has(http('GET', "$base/menu/menu_item/americano")[1], '<img class="photo wide" src="img/menu/flat-white.jpg"', 'empty keeps the mock-up');
+	has(http('GET', "$base/menu/menu_item/americano")[1], '<img class="photo wide" src="img/menu/flat-white.jpg?v=', 'empty keeps the mock-up');
 });
 
 // ## H. Newsletter
@@ -3309,6 +3309,24 @@ test('L16', 'a cached page keeps the headers it was made with, has Last-Modified
 	same(200, http('GET', "$prod/faq", null, array('If-Modified-Since: yesterday-ish'))[0], 'a date that is not one');
 	// a session cookie is never kept, nor sent again
 	foreach ($hit as $header) check(stripos($header, 'Set-Cookie:') !== 0, $header);
+});
+
+test('L17', 'theme assets carry a version; a versioned file is kept a year, the rest and every page are checked each time', function () use ($root, $tmp, $maildir) {
+	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => test_db("$tmp/prod.sqlite"), 'RASTER_URL' => 'https://cafe.example/', 'RASTER_MAIL' => "log://$maildir");
+	$prod = server(free_port(), $env);
+	raster(array('cache', 'clear'), $env);
+	list(, $miss, $headers) = http('GET', "$prod/faq");
+	same('no-cache', header_value($headers, 'Cache-Control'));
+	check((bool)preg_match('#href="style\.css\?v=[0-9a-f]{8}"#', $miss), 'the stylesheet has a version');
+	list(, $hit, $headers) = http('GET', "$prod/faq");
+	same('hit', header_value($headers, 'X-Raster-Cache'));
+	same('no-cache', header_value($headers, 'Cache-Control'), 'a cached copy says the same');
+	same($miss, $hit);
+	preg_match('#style\.css\?v=[0-9a-f]{8}#', $hit, $m);
+	list($status, , $headers) = http('GET', "$prod/demo/views/cafe/".$m[0]);
+	same(200, $status);
+	same('public, max-age=31536000, immutable', header_value($headers, 'Cache-Control'));
+	same('no-cache', header_value(http('GET', "$prod/demo/views/cafe/style.css")[2], 'Cache-Control'));
 });
 
 // ## 2.1.8 batch B: errors and /api
