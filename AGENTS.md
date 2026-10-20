@@ -619,7 +619,7 @@ of your own. Staff read the feedback on a page that renders
     | `cms_records::submit` (a record form whose type has `create` `visitor` or `member`) | the form again with `try_again` / `slow_down` (as the newsletter: not for `too_many_from_ip` alone); checked before `create` is, so a bot learns nothing about which types need a login |
     | `render.contact.form` | stored as `spam` with its reasons (`too_many_from_ip` included), nobody emailed, and `sent` as for anyone (see **Bundled models**, contact); it also checks `name`, `subject` and `message` for links and blocked words, and the email's domain against the blocklist |
 
-    Login, reset, account, logout, the booking manage page and the
+    Login, reset, account, logout, the booking and rsvp manage pages and the
     newsletter's unsubscribe aren't checked. `lint` warns on a view with
     `render.newsletter.signup`, `render.authentication.register` or
     `render.booking.form` that lacks `print.validation.alert('try_again')`
@@ -1496,9 +1496,10 @@ model owns the replies, the place arithmetic, the waitlist and the events.
 Nothing in `the_app.php` is required when the collection is called
 `events`. It counts only on a site whose views use `render.rsvp.*` or
 `print.rsvp.*`; a site's own `rsvp` model or type keeps the name, and
-`lint` warns. The reply form, the guest's link and its emails, and the
-staff regions come in the next releases; until then replies are made by
-staff in the page (`render.cms.rsvp`), over MCP or by model code.
+`lint` warns. The reply form and the staff regions come in the next
+releases; until then replies are made by staff in the page
+(`render.cms.rsvp`), over MCP or by model code, and the guest gets an
+email with their link at each step.
 - **The event is an item** of `rsvp_collection` (`events`), read with
   `cms_store::get_item()`, never written. Four of its fields, written in
   its item view like any other (`<!-- print.places -->40<!-- /print.places -->`),
@@ -1593,6 +1594,78 @@ staff in the page (`render.cms.rsvp`), over MCP or by model code.
   <!-- render.rsvp.event --><!-- print.+class.state --><p class="places"><!-- print.left -->12<!-- /print.left --> of <!-- print.places -->40<!-- /print.places --> places left</p><!-- /print.+class.state --><!-- /render.rsvp.event -->
   ```
 
+- `render.rsvp.manage`: the guest's page (the `rsvp` view, or
+  `rsvp_manage_page`), one row: the reply without its hidden fields, with
+  `event_title`, `event_date`, `event_starts`, `event_url`, `deadline`
+  (`2026-11-20 18:00`) and `position` (in the queue, `''` unless
+  waiting). See **The guest's link**.
+
+  ```html
+  <!-- rsvp.html -->
+  <!-- print.validation.alert('link_invalid') --><p>This link no longer works. Write to us or phone.</p><!-- /print.validation.alert('link_invalid') -->
+  <!-- print.validation.alert('changed') --><p>Done: we've emailed you your reply.</p><!-- /print.validation.alert('changed') -->
+  <!-- print.validation.alert('closed') --><p>Replies are closed: you can still tell us you can't come, or come with fewer.</p><!-- /print.validation.alert('closed') -->
+  <!-- print.validation.alert('full_for_more') --><p>There aren't places for more of you; your places are kept.</p><!-- /print.validation.alert('full_for_more') -->
+  <!-- render.rsvp.manage -->
+  <p><!-- print.name -->Ana<!-- /print.name -->, for <!-- print.event_title -->Jazz night<!-- /print.event_title -->: <!-- print.status -->going<!-- /print.status --></p>
+  <form method="post"><input type="hidden" name="do" value="change">
+    <label><input type="radio" name="answer" value="yes"> Yes</label> <label><input type="radio" name="answer" value="maybe"> Maybe</label>
+    <label><input type="radio" name="answer" value="no"> No</label> <input type="number" name="people" min="1"> <button>Change my reply</button></form>
+  <!-- /render.rsvp.manage -->
+  ```
+
+- The guest's link. Each email to the guest carries a new one in
+  `manage_url`: `<rsvp_manage_page>?token=<64 hex>`, 32 random bytes sent
+  only in that email. The reply keeps their sha256 (the newest 20, in the
+  hidden `token_hashes`), so the first email's link still works after a
+  promotion. A link works until the event starts, read from the event
+  each time, so it follows a moved event, and after a no too, so the
+  guest can say yes again before the deadline. It is dead once the event
+  is hidden (a draft, scheduled) or deleted; a dead, unknown or malformed
+  one raises `link_invalid`.
+  - A GET shows the reply and changes nothing, so a mail scanner opening
+    the link does no harm. The page's form posts to the page itself (the
+    token stays in the URL, never in a hidden field) with `do=change`,
+    `answer` and `people` (either may be left out). The cross-site check
+    applies.
+  - The change is checked as a guest's (`closed`, `full_for_more`,
+    `too_many`, …, raised on the page, the reply as it was); places it
+    frees go to the waitlist in the same transaction. The same answer and
+    people again writes and sends nothing. Afterwards the page redirects
+    to `?done=changed` without the token, and shows only that alert.
+  - A logged in guest manages their own reply (its `owner`) by
+    `?reply=<id>`, without a token; the redirect keeps `?reply=`.
+  - The page is never page-cached, sends `Referrer-Policy: same-origin`, and
+    is left out of the sitemap and `raster export`. The raw token is in no
+    event, log, record or cache: the model hands it to its own email
+    listener within the request. Don't protect `rsvp` for staff
+    (`protected`): `lint` warns, since guests would get the login page.
+- Emails, after the answer (the site writes the views, and `lint` reports a
+  missing one where `render.rsvp.manage` is):
+
+  | View | To | When |
+  |---|---|---|
+  | `_email/rsvp_going` | guest | the reply becomes `going`, or a going party changes size, by the guest or staff |
+  | `_email/rsvp_waiting` | guest | the reply becomes `waiting`, or a waiting party changes size |
+  | `_email/rsvp_promoted` | guest | moved in from the waitlist (or by the `promote` action) |
+  | `_email/rsvp_noted` | guest | the reply becomes `no` or `maybe` |
+  | `_email/rsvp_new` | staff | a guest replied or changed their reply; only when `rsvp_staff_email` is set |
+
+  Each gets the reply's fields (not the hidden ones), `who`, `manage_url`
+  (their new link; empty for staff), `position` (`1` for the head of the
+  queue, `''` unless waiting), `event_title`, `event_date`,
+  `event_starts`, `event_url` (the item's page), `deadline` and
+  `site_url`. A reply with no email sends the guest nothing, and gets no
+  link. Each change sends each email once; one that changes neither
+  status nor people (a note, a phone number), or an edit of the event,
+  sends nothing. A reply staff add or change in the page or over MCP
+  emails the guest through the model's `cms.item_saved` listener; staff
+  aren't emailed about their own. A site with no `rsvp_staff_email` sends
+  staff nothing: a jazz night's forty replies are on the staff page.
+  Unbind one to send your own:
+  `event::unbind('rsvp.promoted')->from('rsvp', 'promoted_mail')` (also
+  `replied_mail` and `changed_mail`, which send `rsvp_going`,
+  `rsvp_waiting`, `rsvp_noted` and `rsvp_new`).
 - Events, after the commit: `rsvp.replied` (a reply was made), `rsvp.changed`
   (its `answer`, `people` or `event` changed, with `was` and `was_people`,
   its status and party before) and `rsvp.promoted`. Each has the reply's
@@ -1607,15 +1680,22 @@ staff in the page (`render.cms.rsvp`), over MCP or by model code.
 - Settings: `rsvp_collection` (`events`), `rsvp_max_people` (6 in a
   guest's reply), `rsvp_closes` (0 minutes before the start, for an event
   without `rsvp_until`), `rsvp_waitlist` (true; false refuses a yes that
-  doesn't fit with `full`).
+  doesn't fit with `full`), `rsvp_manage_page` (`rsvp`, the guest's page
+  their links open), `rsvp_staff_email` (empty: staff get no emails).
 - From code: `rsvp::item($id)` is the event as the model reads it (`id`,
   `title`, `slug`, `date`, `starts`, `places`, `rsvp_until`, `visible`,
   `starts_at`, `deadline`, `url`), or null; `rsvp::page_event()` the
   page's; `rsvp::deadline($event)` when its replies close;
   `rsvp::going($event, $id)` the people going, reply `$id` left out;
   `rsvp::promote_waiting($event)` moves its queue in now and gives the
-  replies moved. Model code that writes replies with
-  `cms_records::create/update` is trusted like staff.
+  replies moved. `rsvp::change($id, $values, $who)` changes a reply's
+  `answer` and `people` in one write, sends `rsvp.changed` (and the
+  guest's email with a new link) and moves the waitlist in the same
+  transaction; a guest's (`$who` `'guest'`) needs a live link
+  (`link_invalid`) and gets the guest rules, staff's (`'staff'`) doesn't.
+  `rsvp::by_token($raw)` gives the reply a link is for (or null),
+  `rsvp::position($reply)` its place in the queue. Model code that writes
+  replies with `cms_records::create/update` is trusted like staff.
 
 **mail**: emails are views. `mail::send_view('_email/welcome', $to,
 array('name' => 'Ada'))` uses the view's `<title>` as the subject.
@@ -2023,6 +2103,8 @@ Set in `config/the_app.php` with `config::set('name')->to(value)`.
 | `rsvp_max_people` | 6 | people in one reply, for guests; staff may add more |
 | `rsvp_closes` | 0 | minutes before the start replies close, for an event without `rsvp_until` |
 | `rsvp_waitlist` | true | false refuses a yes that doesn't fit (`full`) instead of putting it on the waitlist |
+| `rsvp_manage_page` | `rsvp` | the guest's page their links open |
+| `rsvp_staff_email` | none | where staff's rsvp emails go (`rsvp_new`); empty sends none |
 | `newsletter_double_opt_in` | true | false subscribes without a confirmation |
 | `newsletter_confirm_page`, `newsletter_unsubscribe_page` | `newsletter-confirm`, `newsletter-unsubscribe` | |
 | `mail`, `mail_from` | see `RASTER_MAIL` | transport and sender |

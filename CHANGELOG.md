@@ -3,6 +3,10 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.32
+
+To email guests, add `_email/rsvp_going`, `rsvp_waiting`, `rsvp_promoted` and `rsvp_noted` (lint names any missing) and a page `rsvp` with `render.rsvp.manage`. **The guest's link** opens their reply; a GET changes nothing, the page's form changes it, and it works until the event starts, after a no too. **Staff emails** (`_email/rsvp_new`) only when `rsvp_staff_email` is set. Settings: `rsvp_manage_page`, `rsvp_staff_email`.
+
 ## 2.2.31
 
 **On MySQL or MariaDB, run `php bin/raster schema --apply` once.** SQLite sites have nothing to do. **A text field holds more than 64 KB on MySQL** (#211). Text columns are now `LONGTEXT`; until now they were `TEXT`, which stops at 64 KB, so a long page or post could fail to save in production, or be cut short. SQLite never had a limit. `schema --check` lists the text columns that are still `TEXT` or `VARCHAR`, in page and collection tables as well as model tables, and `--apply` widens them. Values already stored are kept as they are. Before, `--apply` widened the small columns of model tables only; a page table made in development on MySQL kept its `VARCHAR(191)` columns in production. Slugs keep their columns: they are indexed, and never longer than 80 characters.
