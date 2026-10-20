@@ -174,6 +174,8 @@ function test_move_aside($root, $relative) {
 function test_sweep($root, $patterns = array('zz*', '_zz*'), $folders = array()) {
 	$tracked = test_tracked($root);
 	if ($tracked === null || realpath($root) === false) return;
+	// this run's own list first, locked, so no other run's sweep takes it
+	$own = test_own_list($root);
 	$moved = array();
 	$sweep = function ($relative, $limit) use ($root, $tracked, &$moved) {
 		if ($relative === null || isset($moved[$relative]) || test_is_tracked($tracked, $relative)) return;
@@ -182,7 +184,9 @@ function test_sweep($root, $patterns = array('zz*', '_zz*'), $folders = array())
 		if ($limit !== null && test_newest($path) > $limit) return;
 		if (test_move_aside($root, $relative)) $moved[$relative] = true;
 	};
+	$alive = false;
 	foreach (glob(test_fixtures_dir($root).'/*.list', GLOB_NOESCAPE) ?: array() as $list) {
+		if ($own && $list === $own[1]) continue;
 		$handle = @fopen($list, 'r+');
 		if (!$handle) continue;
 		if (flock($handle, LOCK_EX | LOCK_NB)) {
@@ -190,30 +194,49 @@ function test_sweep($root, $patterns = array('zz*', '_zz*'), $folders = array())
 			$limit = filemtime($list) + 2;
 			foreach (array_unique(array_filter(explode("\n", (string)stream_get_contents($handle)))) as $path) $sweep(test_relative($root, $path), $limit);
 			unlink($list);
+		} else {
+			// another run is going in this checkout: its zz* files are not leftovers
+			$alive = true;
 		}
 		fclose($handle);
 	}
+	if ($alive) return;
 	// zz* and _zz* in the folders the tests write to
 	foreach ($folders as $folder) {
 		foreach (@scandir(realpath($root)."/$folder") ?: array() as $name) {
-			foreach ($patterns as $pattern) if (fnmatch($pattern, $name)) $sweep($folder === '' ? $name : "$folder/$name", null);
+			foreach ($patterns as $pattern) if (fnmatch($pattern, $name)) $sweep(test_relative($root, realpath($root)."/$folder/$name"), null);
 		}
 	}
+}
+
+// this run's list of fixtures: array(handle, path), made and locked once
+// (null when it can't be). A list another run's sweep unlinked between the
+// open and the lock is made again.
+function test_own_list($root) {
+	static $own = false;
+	if ($own !== false) return $own;
+	$own = null;
+	$dir = test_fixtures_dir($root);
+	@mkdir($dir, 0775, true);
+	$file = "$dir/".getmypid().'.list';
+	for ($try = 0; $try < 5; $try++) {
+		$handle = @fopen($file, 'c+');
+		if (!$handle || !flock($handle, LOCK_EX | LOCK_NB)) return $own;
+		$stat = @stat($file);
+		if ($stat && $stat['ino'] === fstat($handle)['ino']) {
+			register_shutdown_function(function () use ($handle, $file) { fclose($handle); @unlink($file); });
+			return $own = array($handle, $file);
+		}
+		fclose($handle);
+	}
+	return $own;
 }
 
 // names a path this run is about to create in the checkout
 function test_fixture($path) {
 	global $root;
-	static $handle = null, $file = null;
-	if ($handle === null) {
-		$dir = test_fixtures_dir($root);
-		@mkdir($dir, 0775, true);
-		$file = "$dir/".getmypid().'.list';
-		$handle = fopen($file, 'c+');
-		if (!$handle || !flock($handle, LOCK_EX | LOCK_NB)) { $handle = false; return; }
-		register_shutdown_function(function () use (&$handle, $file) { if ($handle) { fclose($handle); @unlink($file); } });
-	}
-	if ($handle) { fseek($handle, 0, SEEK_END); fwrite($handle, test_normal_path($path)."\n"); fflush($handle); }
+	$own = test_own_list($root);
+	if ($own) { fseek($own[0], 0, SEEK_END); fwrite($own[0], test_normal_path($path)."\n"); fflush($own[0]); }
 }
 
 // The stamp a browser would post: a form shown $ago seconds ago, signed with
