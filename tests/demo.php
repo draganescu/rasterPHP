@@ -4348,6 +4348,14 @@ test('P7', 'the salon: two stylists, two services of different lengths, one book
 	has($page, 'name="time" value="17:30"> 17:30 to 19:00', 'the last start');
 	has($page, '<option value="ana" selected>Ana</option></select>', 'only Ana offers colour');
 	lacks($page, '<option value="mihai"');
+	// both cut: the select keeps the stylist the URL chose, and only that one
+	foreach (array('ana' => 'Ana', 'mihai' => 'Mihai') as $slug => $name) {
+		$cut = http('GET', "$base/salon?resource=$slug&service=cut&date=$day")[1];
+		$stylists = substr($cut, strpos($cut, '<select name="resource">'));
+		$stylists = substr($stylists, 0, strpos($stylists, '</select>'));
+		has($stylists, '<option value="'.$slug.'" selected>'.$name.'</option>', 'the stylist stays chosen');
+		same(1, substr_count($stylists, 'selected'), $stylists);
+	}
 	foreach (array('date' => $day, 'resource' => 'ana', 'service' => 'colour') as $name => $value) has($page, '<input type="hidden" name="'.$name.'" value="'.$value.'">', 'what the URL chose comes back as hidden inputs');
 	$salon = function ($resource, $service, $date, $fields) use ($base) {
 		$choice = array('resource' => $resource, 'service' => $service, 'date' => $date);

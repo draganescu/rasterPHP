@@ -3,6 +3,10 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.36
+
+Nothing for sites to do. **A filter's select keeps the option a model lists.** A `<form method="get">` was filled from the URL before the page's render blocks ran, so an option a model listed (`render.booking.resources` on a salon's page, `render.rsvp.events` on the replies' staff page) was never chosen, and when the URL asked for the mock-up option's value, every row copied from it was marked chosen. Now the URL's values go in two steps. Options, checkboxes and radios are chosen once the page is rendered, whoever listed them, and exactly one option of a single select is chosen. Text inputs, hidden inputs and textareas are filled before, as until now, so a value a model prints into one (`print.@value`) wins over the URL's: a form per row, with its own hidden id, keeps that id whatever the URL says. An option without a `value` is chosen by its text, without the editor's marks.
+
 ## 2.2.34
 
 Nothing for sites to do. To give staff a page for the replies, add one protected for editors (`lint` warns while it isn't). **The staff page.** `render.rsvp.events('from=today')` lists the events to come, drafts included, with their places, people going, places left, and the replies waiting, maybe and no, and each event's replies, editable in place with the `promote` button, each with its place in the queue. `render.rsvp.attention` lists the replies an edit of their event left out of place: `event_gone` (deleted), `event_hidden` (a draft or scheduled again), `over_places` (places lowered under the people going) and `moved` (the date or start changed since the guest replied). Nobody is moved out or emailed for these; an editor's save of the reply clears `moved`. `print.rsvp.count('status=waiting')` counts replies, or `count('attention')`. `render.cms.rsvp('event=?event&order=status,waiting_since')` lists one event's replies, and its card for a new reply starts with that event, so staff add a phone reply in the page.

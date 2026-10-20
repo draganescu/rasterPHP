@@ -386,15 +386,10 @@ class template {
   	if (stripos($html, '<form') === false) return;
 
   	// a form that asks with the URL (a filter: <form method="get">) shows
-  	// what was asked, so /bookings?stylist=ana keeps Ana chosen
-  	if ($_GET && !$this->is_email && preg_match_all('/<form\b[^>]*>/i', $html, $opens, PREG_OFFSET_CAPTURE)) {
-  		foreach (array_reverse($opens[0]) as $open) {
-  			if (preg_match('/\bmethod\s*=\s*["\']?post/i', $open[0])) continue;
-  			$close = stripos($html, '</form>', $open[1]);
-  			$end = $close === false ? strlen($html) : $close;
-  			$html = substr($html, 0, $open[1]).$this->fill_form(substr($html, $open[1], $end - $open[1]), $_GET).substr($html, $end);
-  		}
-  	}
+  	// what was asked: its text inputs and textareas now, so a value a model
+  	// prints into one (print.@value) wins; its choices once the page is
+  	// rendered (fill_get_forms)
+  	$html = $this->fill_get($html, 'values');
 
   	// render blocks with their ranges
   	preg_match_all('/<!-- (\/?)render\.([a-z0-9_\-]+\.[^ ]*(?:\([^)]*\))?) -->/', $html, $tags, PREG_OFFSET_CAPTURE | PREG_SET_ORDER);
@@ -601,11 +596,36 @@ class template {
 		return $this->current_block;
 	}
 
+	// The choices of a form that asks with the URL (<form method="get">):
+	// its options, checkboxes and radios, once the render blocks have run,
+	// so /bookings?stylist=ana keeps Ana chosen when a model lists the
+	// stylists, and a mock-up option is never marked before it is copied
+	// into every row. Its text inputs were filled before (index_forms).
+	function fill_get_forms() {
+		$this->output = $this->fill_get($this->output, 'choices');
+	}
+
+	// the GET forms of $html filled from the URL: their 'values' or 'choices'
+	protected function fill_get($html, $part) {
+		if (!$_GET || $this->is_email || stripos($html, '<form') === false || !preg_match_all('/<form\b[^>]*>/i', $html, $opens, PREG_OFFSET_CAPTURE)) return $html;
+		foreach (array_reverse($opens[0]) as $open) {
+			if (preg_match('/\bmethod\s*=\s*["\']?post/i', $open[0])) continue;
+			$close = stripos($html, '</form>', $open[1]);
+			$end = $close === false ? strlen($html) : $close;
+			$html = substr($html, 0, $open[1]).$this->fill_form(substr($html, $open[1], $end - $open[1]), $_GET, false, false, $part).substr($html, $end);
+		}
+		return $html;
+	}
+
 	// the inputs, selects and textareas of $block with the values in $data;
 	// with $keep_rest, values no field took become hidden inputs. $posted
 	// says $data is what the form sent: a box it doesn't name was unticked.
-	function fill_form($block, $data, $keep_rest = false, $posted = false)
+	// $part 'values' fills only text inputs and textareas, 'choices' only
+	// checkboxes, radios and selects; 'all' both.
+	function fill_form($block, $data, $keep_rest = false, $posted = false, $part = 'all')
 	{
+		$values = $part !== 'choices';
+		$choices = $part !== 'values';
 		$data = (array)$data;
 		foreach (self::$internal_fields as $internal) unset($data[$internal]);
 		$used = array();
@@ -623,12 +643,13 @@ class template {
 		};
 		$e = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
 
-		$block = preg_replace_callback('/<input\b[^>]*>/i', function ($m) use ($attr, $without, $lookup, $e, $posted) {
+		$block = preg_replace_callback('/<input\b[^>]*>/i', function ($m) use ($attr, $without, $lookup, $e, $posted, $values, $choices) {
 			$tag = $m[0];
 			$name = $attr($tag, 'name');
 			if ($name === null || in_array($name, self::$internal_fields)) return $tag;
 			$type = strtolower((string)$attr($tag, 'type') ?: 'text');
 			if (in_array($type, array('password', 'submit', 'button', 'reset', 'image', 'file'))) return $tag;
+			if (!(($type === 'checkbox' || $type === 'radio') ? $choices : $values)) return $tag;
 			list($found, $value) = $lookup($name);
 			// a browser sends no unticked box: one ticked in the template that
 			// the post leaves out was unticked by the visitor
@@ -645,26 +666,27 @@ class template {
 			return preg_replace_callback('/\s*\/?>$/', function ($m) use ($e, $value) { return ' value="'.$e($value).'"'.$m[0]; }, $tag);
 		}, $block);
 
-		$block = preg_replace_callback('/(<textarea\b[^>]*>)(.*?)(<\/textarea>)/is', function ($m) use ($attr, $lookup, $e) {
+		if ($values) $block = preg_replace_callback('/(<textarea\b[^>]*>)(.*?)(<\/textarea>)/is', function ($m) use ($attr, $lookup, $e) {
 			list($found, $value) = $lookup($attr($m[1], 'name'));
 			return $found && !is_array($value) ? $m[1].$e($value).$m[3] : $m[0];
 		}, $block);
 
-		$block = preg_replace_callback('/(<select\b[^>]*>)(.*?)(<\/select>)/is', function ($m) use ($attr, $without, $lookup) {
+		if ($choices) $block = preg_replace_callback('/(<select\b[^>]*>)(.*?)(<\/select>)/is', function ($m) use ($attr, $without, $lookup) {
 			list($found, $value) = $lookup($attr($m[1], 'name'));
 			if (!$found) return $m[0];
 			$values = array_map('strval', (array)$value);
-			// an option without a value sends its text, as browsers do
-			$options = preg_replace_callback('/(<option\b[^>]*>)([^<]*)/i', function ($o) use ($attr, $without, $values) {
+			// an option without a value sends its text, as browsers do; the
+			// editor's marks (<!--raster:s 3-->) are no part of it
+			$options = preg_replace_callback('/(<option\b[^>]*>)((?:(?!<option\b|<\/option|<\/select).)*)/is', function ($o) use ($attr, $without, $values) {
 				$tag = $without($o[1], 'selected');
 				$own = $attr($tag, 'value');
-				if ($own === null) $own = trim(preg_replace('/\s+/', ' ', html_entity_decode($o[2], ENT_QUOTES, 'UTF-8')));
+				if ($own === null) $own = trim(preg_replace('/\s+/', ' ', html_entity_decode(preg_replace('/<!--.*?-->/s', '', $o[2]), ENT_QUOTES, 'UTF-8')));
 				return (in_array((string)$own, $values, true) ? preg_replace('/>$/', ' selected>', $tag) : $tag).$o[2];
 			}, $m[2]);
 			return $m[1].$options.$m[3];
 		}, $block);
 
-		foreach ($data as $key => $value) {
+		if ($values) foreach ($data as $key => $value) {
 			if (is_scalar($value)) {
 				$block = preg_replace_callback('/class="spa_'.preg_quote($key, '/').'">(.*?)<\//', function ($m) use ($key, $e, $value) { return 'class="spa_'.$key.'">'.$e($value).'</'; }, $block);
 			}
