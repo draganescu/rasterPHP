@@ -40,7 +40,11 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 	execFileSync('php', [path.join(root, 'demo/seed.php')], { env });
 	// the coming Tuesday and Wednesday: sitting days, within the two months guests may book
 	const ahead = (weekday, weeks) => { const d = new Date(); d.setUTCDate(d.getUTCDate() + ((weekday - d.getUTCDay() + 7) % 7 || 7) + 7 * (weeks - 1)); return d.toISOString().slice(0, 10); };
-	const tuesday = ahead(2, 1), wednesday = ahead(3, 2);
+	const wednesday = ahead(3, 2);
+	// the staff agenda shows today and the 6 days after it, so its booking is
+	// made tomorrow, or the day after when tomorrow is Monday (the café is
+	// closed): "next Tuesday" is 7 days away on a Tuesday, past the agenda
+	const soon = (() => { const d = new Date(); d.setUTCDate(d.getUTCDate() + (d.getUTCDay() === 0 ? 2 : 1)); return d.toISOString().slice(0, 10); })();
 	const server = spawn('php', ['-S', '127.0.0.1:' + p, path.join(root, 'index.php')], { cwd: root, env, stdio: 'ignore' });
 	// stopped however the test ends, also when the browser fails to start
 	process.on('exit', () => server.kill());
@@ -355,7 +359,7 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 		await page.keyboard.press('Escape');
 
 		// a record: the model's actions are buttons, its readonly fields are not editable
-		await fetch(base + '/visit?date=' + tuesday, { method: 'POST', body: new URLSearchParams({ raster_form: 'booking.form', raster_ts: stamp(), resource: 'dining-room', name: 'Ilinca', email: 'ilinca@example.com', date: tuesday, time: '19:00', people: '2', terms: '1' }), redirect: 'manual' });
+		await fetch(base + '/visit?date=' + soon, { method: 'POST', body: new URLSearchParams({ raster_form: 'booking.form', raster_ts: stamp(), resource: 'dining-room', name: 'Ilinca', email: 'ilinca@example.com', date: soon, time: '19:00', people: '2', terms: '1' }), redirect: 'manual' });
 		await page.goto(base + '/staff');
 		await page.waitForTimeout(500);
 		const booking = page.locator('[data-raster-item]', { hasText: 'Ilinca' }).first();
@@ -409,7 +413,7 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 		await page.keyboard.type(' Pop');
 		await page.mouse.click(5, 5);
 		await page.waitForTimeout(1200);
-		const day = await (await fetch(base + '/api/cafe/bookings/' + tuesday, { headers: { cookie: (await page.context().cookies()).map(c => c.name + '=' + c.value).join('; ') } })).json();
+		const day = await (await fetch(base + '/api/cafe/bookings/' + soon, { headers: { cookie: (await page.context().cookies()).map(c => c.name + '=' + c.value).join('; ') } })).json();
 		check(day.some(b => b.name === 'Ilinca Pop'), 'an edit in the agenda is saved: ' + JSON.stringify(day.map(b => b.name)));
 		check(await page.locator('section.day .raster-ghost').count() === 0, 'the agenda adds no cards: new bookings come from the lists');
 		check((await (await fetch(base + '/api/booking/confirm')).status) === 404, 'actions are not reachable over /api');

@@ -6550,6 +6550,9 @@ test('rsvp: other edits always go through', function () {
 test('rsvp events wait for the commit, with no hidden fields', function () {
 	rsvp_site(function () {
 		$event = rsvp_event(array('title' => 'Jazz night', 'places' => 2));
+		// the table is made before the transaction: on MySQL a new table
+		// commits, so the reply it was made for could not be rolled back
+		cms_records::ensure(cms_records::info('rsvp'));
 		$seen = rsvp_events(function () use ($event) {
 			try {
 				cms_records::transaction(function () use ($event) {
