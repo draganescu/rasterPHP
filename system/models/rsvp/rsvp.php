@@ -323,8 +323,8 @@ class rsvp
 
 	// Runs the model's own write $work for $who ('guest', 'staff' or
 	// 'waitlist') in one transaction, so its events wait for the commit;
-	// places it freed go to the waitlist before then. A link issued for a
-	// write that didn't happen is dropped, the promotions' with it.
+	// places it freed go to the waitlist before then. The links stay as
+	// they were when the write doesn't happen, so none for it is mailed.
 	protected static function writing($who, $id, $work) {
 		$acting = self::$acting;
 		$writing = self::$writing;
@@ -342,8 +342,7 @@ class rsvp
 				return $result;
 			});
 		} catch (Throwable $e) {
-			unset(self::$links[(int)$id]);
-			self::$links = array_intersect_key(self::$links, $links);
+			self::$links = $links;
 			self::$freed = array();
 			throw $e;
 		} finally {
@@ -648,13 +647,14 @@ class rsvp
 	}
 
 	// a reply stays made when its email can't go: the failure is logged,
-	// without the address or the link
+	// without the address or the link, so not the error's text either (an
+	// SMTP server's reply can name the recipient)
 	protected static function send($view, $to, $vars) {
 		$mail = controller::model_class('mail');
 		try {
 			if ($mail::send_view($view, $to, $vars)) return true;
 		} catch (Exception $e) {
-			log::error("rsvp: $view: ".$e->getMessage());
+			log::error("rsvp: $view: not sent (".get_class($e).")");
 			return false;
 		}
 		log::error("rsvp: $view was not sent");

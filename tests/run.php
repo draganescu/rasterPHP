@@ -6992,6 +6992,23 @@ test('a site can unbind an rsvp email', function () {
 	});
 });
 
+test('rsvp: a mail that fails is logged without the address', function () {
+	rsvp_site(function () {
+		$event = rsvp_event();
+		$was = getenv('RASTER_MAIL');
+		putenv('RASTER_MAIL=zz://nowhere');
+		try {
+			list($reply, $log) = spam_logged(function () use ($event) { return rsvp_reply(array('event' => $event['id'], 'email' => 'ana@example.test'), 'editor'); });
+		} finally {
+			putenv("RASTER_MAIL=$was");
+		}
+		same('going', rsvp_status($reply['id']), 'the reply is kept:');
+		$lines = array_values(preg_grep('/rsvp: /', explode("\n", $log)));
+		check($lines !== array(), 'nothing logged: '.$log);
+		foreach ($lines as $line) check(strpos($line, '@') === false && !preg_match('/[a-f0-9]{64}/', $line), 'logged: '.$line);
+	});
+});
+
 test('rsvp requires(): emails, pages, settings', function () {
 	rsvp_site(function ($theme) {
 		$messages = function ($view) {
