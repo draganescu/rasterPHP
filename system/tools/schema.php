@@ -7,6 +7,8 @@
 // - orphan: a column no template uses any more (often a renamed field)
 // - retyped: a column of another type than the field now has (its mock-up
 //   went from 14 to 14 lei); --apply converts it when every value fits
+// - narrow: a MySQL text column too small for what SQLite would hold
+//   (varchar(191), TEXT); --apply makes it LONGTEXT
 //
 // In development missing columns appear on the next request that renders
 // them. In production the database is frozen: run `raster schema --apply`.
@@ -58,6 +60,7 @@ class raster_schema {
 		$drift = !empty($unused);
 		foreach ($tables as $table) {
 			if ((!$table['exists'] && $table['fields']) || $table['missing'] || $table['orphans'] || $table['retyped']) $drift = true;
+			if ($table['narrow'] && database::$frozen) $drift = true;
 		}
 
 		// tables the bundled models use (accounts, subscribers). A fluid
@@ -151,6 +154,10 @@ class raster_schema {
 			}
 		}
 
+		// the slug stays as it is: it is indexed whole when it's a varchar,
+		// and never longer than 80 characters
+		$narrow = $exists ? cms_types::narrow($type, array_diff_key(array_map(function ($f) { return $f['type']; }, $fields), array('slug' => 1))) : array();
+
 		return $meta + array(
 			'kind' => $kind,
 			'table' => $type,
@@ -159,6 +166,7 @@ class raster_schema {
 			'fields' => $status,
 			'missing' => $missing,
 			'retyped' => $retyped,
+			'narrow' => $narrow,
 			'orphans' => $orphans,
 			'rename_candidates' => $renames,
 		);
@@ -174,6 +182,9 @@ class raster_schema {
 		R::freeze(false);
 		try {
 			foreach ($status['tables'] as $table) {
+				foreach (cms_types::widen($table['table'], $table['narrow']) as $field => $type) {
+					$changes[] = "widened {$table['table']}.$field to ".cms_types::sql($type);
+				}
 				foreach ($table['retyped'] as $retype) {
 					try {
 						$bad = cms_types::retype($table['table'], $retype['field'], $retype['to']);

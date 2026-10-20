@@ -3,6 +3,10 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.30
+
+**On MySQL or MariaDB, run `php bin/raster schema --apply` once.** SQLite sites have nothing to do. **A text field holds more than 64 KB on MySQL** (#211). Text columns are now `LONGTEXT`; until now they were `TEXT`, which stops at 64 KB, so a long page or post could fail to save in production, or be cut short. SQLite never had a limit. `schema --check` lists the text columns that are still `TEXT` or `VARCHAR`, in page and collection tables as well as model tables, and `--apply` widens them. Values already stored are kept as they are. Before, `--apply` widened the small columns of model tables only; a page table made in development on MySQL kept its `VARCHAR(191)` columns in production. Slugs keep their columns: they are indexed, and never longer than 80 characters.
+
 ## 2.2.29
 
 Nothing you must do; a site's own form model keeps holding over `spam_per_ip` until it passes the reasons through `validation_spam::holds()` (below). **Real visitors are no longer turned away when many of them share one address** (#208). Before, on shared hosting or behind a proxy every post could come from one address, and after five posts of a form in an hour everyone was held with `slow_down`, or kept as spam on the contact form, without the owner knowing.
