@@ -32,14 +32,16 @@ $contact = controller::model('contact');
 if ($contact && $contact['bundled'] && controller::uses('contact')) event::bind('contact.received')->to('contact', 'staff_mail');
 unset($contact);
 // Replies to events: the waitlist moves in when places free up, after the
-// commit, as staff edit a reply or the event in the page (or over MCP).
-// Only the bundled rsvp model, and only where a view uses it.
+// commit, as staff edit a reply or the event in the page (or over MCP),
+// and the guest is emailed at each step, with their link. Only the bundled
+// rsvp model, and only where a view uses it.
 $rsvp = controller::model('rsvp');
 if ($rsvp && $rsvp['bundled'] && controller::uses('rsvp')) {
 	event::bind('cms.item_saved')->to('rsvp', 'saved');
 	event::bind('cms.item_deleted')->to('rsvp', 'deleted');
+	foreach (array('replied', 'changed', 'promoted') as $step) event::bind("rsvp.$step")->to('rsvp', $step.'_mail');
 }
-unset($rsvp);
+unset($rsvp, $step);
 // What the bundled models declare in listens() (an override's, for a
 // the_ model), here so it runs before the site's listeners and
 // config/the_events.php can unbind it; the site's models are bound at boot

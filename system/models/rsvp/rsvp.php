@@ -29,13 +29,26 @@
 *     /events/events_item/<slug>, else ?event=<id>): event, places and left
 *     ('' for no limit), going (people), waiting (replies), state (open,
 *     full, closed, over) and deadline. Never page-cached.
+*   <!-- render.rsvp.manage -->  the guest's page, by the link in their
+*     emails (?token=) or, logged in, ?reply=<id>: the reply, with
+*     event_title, event_date, event_starts, event_url, deadline and
+*     position, and a form posting do=change with answer and people. A GET
+*     changes nothing. The link works until the event starts, after a no
+*     too, and dies when the event is hidden or deleted.
 *
 * The action: promote (editors), a waiting reply in now, out of turn, if
 * its party fits, also after the deadline.
 *
 * Alerts: not_open, name_invalid, email_invalid, answer_invalid,
 * people_invalid, too_many, closed, full, already_replied, full_for_more,
-* not_enough_places; for the action not_waiting.
+* not_enough_places; for the action not_waiting. On the manage page:
+* link_invalid, and changed after the change.
+*
+* Emails, views the site writes: _email/rsvp_going (the reply became
+* going, or its party changed), rsvp_waiting (with position), rsvp_promoted
+* and rsvp_noted (no or maybe) to the guest, each with print.self.manage_url,
+* their new link; rsvp_new to rsvp_staff_email when a guest replied or
+* changed their reply, only when that is set.
 *
 * Events, after the commit: rsvp.replied, rsvp.changed (with was and
 * was_people, the status and party before), rsvp.promoted. Each has the
@@ -47,6 +60,8 @@
 *   config::set('rsvp_max_people')->to(6);         people in a guest's reply
 *   config::set('rsvp_closes')->to(0);             minutes before the start replies close, without rsvp_until
 *   config::set('rsvp_waitlist')->to(true);        false: a yes that doesn't fit is refused (full)
+*   config::set('rsvp_manage_page')->to('rsvp');   the guest's page their links open
+*   config::set('rsvp_staff_email')->to('staff@example.com');  staff emails; empty sends none
 */
 class rsvp
 {
@@ -65,10 +80,13 @@ class rsvp
 	static $changed = array();
 	// the events read in this request, id => event (item())
 	static $events = array();
-	// the guest's new links, id => raw token: this request only
+	// the guest's new links, id => raw token: this request only, for the
+	// model's own email listener, never stored, logged or sent with an event
 	static $links = array();
 	// the id of the page's event (page_event()), false until it is read
 	static $page = false;
+	// the reply the manage page is about, by its ?token= or ?reply=
+	static $managed = array();
 
 	static function types() {
 		return array(
@@ -278,7 +296,9 @@ class rsvp
 			foreach (self::queue($id) as $row) {
 				if ($left !== null && $left < 1) break;
 				if ($left !== null && (int)$row['people'] > $left) continue;
-				$saved = cms_records::update('rsvp', $row['id'], array('status' => 'going', 'waiting_since' => ''));
+				// the promoted guest's email carries a new link
+				$reply = cms_records::get('rsvp', $row['id']);
+				$saved = cms_records::update('rsvp', $reply['id'], array('status' => 'going', 'waiting_since' => '') + self::issue($reply));
 				cms_records::dispatch('rsvp.promoted', self::payload($saved, 'waitlist'));
 				if ($left !== null) $left -= (int)$saved['people'];
 				$moved[] = $saved;
@@ -295,7 +315,7 @@ class rsvp
 			$reply = cms_records::get('rsvp', $reply['id']);
 			if (!$reply) throw new InvalidArgumentException('No rsvp');
 			if ($reply['status'] !== 'waiting') cms_records::refuse('not_waiting');
-			$saved = cms_records::update('rsvp', $reply['id'], array('status' => 'going', 'waiting_since' => ''));
+			$saved = cms_records::update('rsvp', $reply['id'], array('status' => 'going', 'waiting_since' => '') + self::issue($reply));
 			cms_records::dispatch('rsvp.promoted', self::payload($saved, 'staff'));
 			return $saved;
 		});
@@ -304,10 +324,11 @@ class rsvp
 	// Runs the model's own write $work for $who ('guest', 'staff' or
 	// 'waitlist') in one transaction, so its events wait for the commit;
 	// places it freed go to the waitlist before then. A link issued for a
-	// write that didn't happen is dropped.
+	// write that didn't happen is dropped, the promotions' with it.
 	protected static function writing($who, $id, $work) {
 		$acting = self::$acting;
 		$writing = self::$writing;
+		$links = self::$links;
 		self::$acting = in_array($who, array('guest', 'waitlist'), true) ? $who : 'staff';
 		self::$writing = true;
 		try {
@@ -322,12 +343,102 @@ class rsvp
 			});
 		} catch (Throwable $e) {
 			unset(self::$links[(int)$id]);
+			self::$links = array_intersect_key(self::$links, $links);
 			self::$freed = array();
 			throw $e;
 		} finally {
 			self::$acting = $acting;
 			self::$writing = $writing;
 		}
+	}
+
+	// ##The guest's link
+	// Each email to the guest carries a new link to their reply: 32 random
+	// bytes, sent only in that email. The reply keeps the sha256 of the
+	// newest 20 (token_hashes), so the first email's link still works after
+	// a promotion. A link works while the event is there, visitors see it
+	// and it hasn't started, read from the event each time, so it follows a
+	// moved event; a no reply's link too, so a guest can come after all.
+
+	// The values to write with a change so the guest gets a new link
+	// (token_hashes), or array() when the reply has no email. The raw token
+	// waits in self::$links for the email listener.
+	static function issue($reply) {
+		if (trim((string)$reply['email']) === '') return array();
+		$raw = bin2hex(random_bytes(32));
+		$hashes = isset($reply['token_hashes']) ? array_values((array)$reply['token_hashes']) : array();
+		$hashes[] = hash('sha256', $raw);
+		self::$links[(int)$reply['id']] = $raw;
+		return array('token_hashes' => array_slice($hashes, -20));
+	}
+
+	// the reply a link is for, or null: a malformed or unknown token, or a
+	// reply whose event is gone, hidden or started
+	static function by_token($raw) {
+		if (!is_string($raw) || !preg_match('/^[a-f0-9]{64}$/', $raw) || !self::ready() || !cms_store::table_exists('rsvpdata')) return null;
+		$hash = hash('sha256', $raw);
+		foreach (database::instance('rsvp')->by_token('%'.$hash.'%') as $row) {
+			$hashes = json_decode((string)$row['token_hashes'], true);
+			foreach (is_array($hashes) ? $hashes : array() as $kept) {
+				if (!is_string($kept) || !hash_equals($kept, $hash)) continue;
+				$reply = cms_records::get('rsvp', $row['id']);
+				return $reply && self::is_live($reply) ? $reply : null;
+			}
+		}
+		return null;
+	}
+
+	// a reply its guest can still reach, whatever its answer: its event is
+	// there, visitors see it, and it hasn't started
+	protected static function is_live($reply) {
+		$event = self::item($reply['event']);
+		return $event && $event['visible'] && time() < $event['starts_at'];
+	}
+
+	// The reply the manage page shows: the one ?token= is for, or the
+	// logged in guest's own by ?reply=<id>. Null when neither; read once
+	// per request (forget() reads it again).
+	static function managed() {
+		$token = util::get('token');
+		$id = util::get('reply');
+		$key = is_string($token) && $token !== '' ? "token:$token" : (is_string($id) && $id !== '' ? "reply:$id" : '');
+		if ($key === '' || !self::ready()) return null;
+		if (array_key_exists($key, self::$managed)) return self::$managed[$key];
+		$reply = null;
+		if (strpos($key, 'token:') === 0) {
+			$reply = self::by_token($token);
+		} elseif (ctype_digit($id) && cms_store::table_exists('rsvpdata')) {
+			$me = cms_records::owner_me(cms_records::info('rsvp'));
+			$found = $me === null ? null : cms_records::get('rsvp', (int)$id);
+			if ($found && (string)$found['owner'] === $me && self::is_live($found)) $reply = $found;
+		}
+		return self::$managed[$key] = $reply;
+	}
+
+	// A reply's answer and people from $values, in one write, with
+	// rsvp.changed; places it frees go to the waitlist in the same
+	// transaction. A guest's ($who 'guest', from the manage page) needs a
+	// live link (link_invalid) and gets the guest rules. The same answer
+	// and people again write and send nothing.
+	static function change($id, $values, $who) {
+		$changes = array_intersect_key((array)$values, array_flip(array('answer', 'people')));
+		return self::writing($who, $id, function () use ($id, $changes, $who) {
+			$reply = cms_records::get('rsvp', $id);
+			if (!$reply) throw new InvalidArgumentException("No rsvp $id");
+			if ($who === 'guest' && !self::is_live($reply)) cms_records::refuse('link_invalid');
+			if (!self::changed($changes, array_intersect_key($reply, $changes), array_keys($changes))) return $reply;
+			$saved = cms_records::update('rsvp', $id, $changes);
+			$saved = self::with_link($saved, $reply['status'], $reply['people']);
+			cms_records::dispatch('rsvp.changed', self::payload($saved, $who) + array('was' => $reply['status'], 'was_people' => (int)$reply['people']));
+			return $saved;
+		});
+	}
+
+	// the reply with a new link written, when the change emails its guest
+	protected static function with_link($reply, $was, $was_people) {
+		if (self::guest_view($reply, $was, $was_people) === null) return $reply;
+		$values = self::issue($reply);
+		return $values ? cms_records::update('rsvp', $reply['id'], $values) : $reply;
 	}
 
 	// ##The event
@@ -410,6 +521,7 @@ class rsvp
 	static function forget() {
 		self::$events = array();
 		self::$page = false;
+		self::$managed = array();
 	}
 
 	// ##Events
@@ -430,8 +542,9 @@ class rsvp
 
 	// cms.item_saved: an event saved in the page (places raised or emptied,
 	// published again) moves its waitlist in; a reply staff wrote in the
-	// page, over MCP or in model code gets its event (who: staff), and the
-	// places it freed go to the waitlist. In a transaction of its own.
+	// page, over MCP or in model code gets its event (who: staff) and, when
+	// that emails the guest, their new link, and the places it freed go to
+	// the waitlist. In a transaction of its own.
 	function saved($saved) {
 		if (!is_array($saved) || !isset($saved['collection'], $saved['item']['id']) || !self::ready()) return null;
 		if ($saved['collection'].'data' === self::table()) {
@@ -440,15 +553,21 @@ class rsvp
 		}
 		if ($saved['collection'] !== 'rsvp' || self::$writing) return null;
 		$id = (int)$saved['item']['id'];
-		$changed = isset(self::$changed[$id]) ? self::$changed[$id] : null;
+		$changed = isset(self::$changed[$id]) && self::$changed[$id]['answered'] ? self::$changed[$id] : null;
 		unset(self::$changed[$id]);
-		if ($saved['created']) cms_records::dispatch('rsvp.replied', self::payload($saved['item'], 'staff'));
-		elseif ($changed && $changed['answered']) cms_records::dispatch('rsvp.changed', self::payload($saved['item'], 'staff') + array('was' => $changed['was'], 'was_people' => $changed['was_people']));
-		while (self::$freed) {
-			$event = key(self::$freed);
-			unset(self::$freed[$event]);
-			self::promote_waiting($event);
-		}
+		// a note, or the model's own write after its commit: nothing to do
+		if (!$saved['created'] && !$changed && !self::$freed) return null;
+		self::writing('staff', $id, function () use ($id, $saved, $changed) {
+			$reply = cms_records::get('rsvp', $id);
+			if (!$reply) return;
+			if ($saved['created']) {
+				$reply = self::with_link($reply, '', $reply['people']);
+				cms_records::dispatch('rsvp.replied', self::payload($reply, 'staff'));
+			} elseif ($changed) {
+				$reply = self::with_link($reply, $changed['was'], $changed['was_people']);
+				cms_records::dispatch('rsvp.changed', self::payload($reply, 'staff') + array('was' => $changed['was'], 'was_people' => $changed['was_people']));
+			}
+		});
 		return null;
 	}
 
@@ -458,6 +577,88 @@ class rsvp
 		if (self::$writing || !is_array($deleted) || !isset($deleted['collection'], $deleted['item']['status']) || $deleted['collection'] !== 'rsvp' || !self::ready()) return null;
 		if ($deleted['item']['status'] === 'going') self::promote_waiting((int)$deleted['item']['event']);
 		return null;
+	}
+
+	// ##Emails
+	// The model's listeners (system/config/events.php) send them; a site
+	// unbinds one in config/the_events.php to send its own:
+	//   event::unbind('rsvp.promoted')->from('rsvp', 'promoted_mail');
+
+	function replied_mail($reply) {
+		if (!is_array($reply) || !isset($reply['status'], $reply['people'])) return null;
+		return self::mail($reply, self::guest_view($reply, '', $reply['people']), true);
+	}
+
+	function changed_mail($reply) {
+		if (!is_array($reply) || !isset($reply['status'], $reply['people'], $reply['was'], $reply['was_people'])) return null;
+		return self::mail($reply, self::guest_view($reply, $reply['was'], $reply['was_people']), true);
+	}
+
+	function promoted_mail($reply) {
+		return self::mail($reply, 'rsvp_promoted', false);
+	}
+
+	// The guest's email for a reply made or changed, or null when nothing
+	// changed for them: going when it became going or its party changed,
+	// waiting the same (with its place in the queue), noted when it became
+	// no or maybe. Promotions have their own (promoted_mail).
+	protected static function guest_view($reply, $was, $was_people) {
+		$status = (string)$reply['status'];
+		$resized = (int)$reply['people'] !== (int)$was_people;
+		if ($status === 'going' && ($was !== 'going' || $resized)) return 'rsvp_going';
+		if ($status === 'waiting' && ($was !== 'waiting' || $resized)) return 'rsvp_waiting';
+		if (($status === 'no' || $status === 'maybe') && $was !== $status) return 'rsvp_noted';
+		return null;
+	}
+
+	// The guest's email $guest (null: none), with their new link when the
+	// change made one, and with $staff rsvp_new to rsvp_staff_email when
+	// the guest made the change and the site set it. The views get the
+	// reply's fields, who, manage_url, position, event_title, event_date,
+	// event_starts, event_url, deadline and site_url.
+	protected static function mail($reply, $guest, $staff) {
+		if (!is_array($reply) || !isset($reply['id'], $reply['event'], $reply['email']) || !self::ready()) return null;
+		$id = (int)$reply['id'];
+		$event = self::item($reply['event']);
+		$vars = $reply;
+		$vars['manage_url'] = isset(self::$links[$id]) ? util::url(config::get('rsvp_manage_page', 'rsvp'), array('token' => self::$links[$id])) : '';
+		unset(self::$links[$id]);
+		$vars['position'] = (string)self::position($reply);
+		$vars['event_url'] = $event ? $event['url'] : '';
+		$vars['deadline'] = $event ? date('Y-m-d H:i', $event['deadline']) : '';
+		$vars['site_url'] = util::url('');
+		if ($guest !== null && trim((string)$reply['email']) !== '') self::send('_email/'.$guest, $reply['email'], $vars);
+		// staff asked for these, or a jazz night would send forty
+		$to = trim((string)config::get('rsvp_staff_email', ''));
+		if (!$staff || $to === '' || !isset($reply['who']) || $reply['who'] !== 'guest') return null;
+		$vars['manage_url'] = '';
+		self::send('_email/rsvp_new', $to, $vars);
+		return null;
+	}
+
+	// a waiting reply's place in its event's queue, from 1; '' for the rest
+	static function position($reply) {
+		if ((string)$reply['status'] !== 'waiting') return '';
+		$place = 1;
+		foreach (self::queue($reply['event']) as $row) {
+			if ((int)$row['id'] === (int)$reply['id']) return $place;
+			$place++;
+		}
+		return '';
+	}
+
+	// a reply stays made when its email can't go: the failure is logged,
+	// without the address or the link
+	protected static function send($view, $to, $vars) {
+		$mail = controller::model_class('mail');
+		try {
+			if ($mail::send_view($view, $to, $vars)) return true;
+		} catch (Exception $e) {
+			log::error("rsvp: $view: ".$e->getMessage());
+			return false;
+		}
+		log::error("rsvp: $view was not sent");
+		return false;
 	}
 
 	// ##The setup
@@ -470,10 +671,16 @@ class rsvp
 		return $info !== null && $info['model'] === 'rsvp';
 	}
 
-	// what a site taking replies has: the settings
+	// what a site taking replies needs: the emails' views (rsvp_new only
+	// when staff asked for it), the manage page (left out of the sitemap
+	// and an export) and the settings
 	static function requires() {
+		$emails = array('_email/rsvp_going', '_email/rsvp_waiting', '_email/rsvp_promoted', '_email/rsvp_noted');
+		if (trim((string)config::get('rsvp_staff_email', '')) !== '') $emails[] = '_email/rsvp_new';
 		return array(
-			'settings' => array('rsvp_collection', 'rsvp_max_people', 'rsvp_closes', 'rsvp_waitlist'),
+			'emails' => array('render.rsvp.manage' => $emails),
+			'pages' => array(config::get('rsvp_manage_page', 'rsvp')),
+			'settings' => array('rsvp_collection', 'rsvp_manage_page', 'rsvp_staff_email', 'rsvp_max_people', 'rsvp_closes', 'rsvp_waitlist'),
 		);
 	}
 
@@ -517,5 +724,61 @@ class rsvp
 			'state' => $state,
 			'deadline' => date('Y-m-d H:i', $event['deadline']),
 		));
+	}
+
+	// The guest's page, by the link in their emails (?token=) or, logged in,
+	// by ?reply=<id>: the reply without its hidden fields, with
+	// event_title, event_date, event_starts, event_url, deadline and
+	// position. A GET changes nothing; its form posts do=change with answer
+	// and people. Alerts: link_invalid, and the rules' (closed,
+	// full_for_more, …); changed after the change, on the page without the
+	// token.
+	function manage() {
+		// the link is a key: no cache keeps it, and no Referer takes it along
+		raster_cache::skip();
+		if (PHP_SAPI !== 'cli' && !headers_sent()) header('Referrer-Policy: same-origin');
+		if (!self::ready()) return array();
+		$v = validation::get();
+		$reply = self::managed();
+		if (!$reply) {
+			// after a change the page has ?done= and no link any more
+			if (!is_string(util::get('done')) || util::get('done') === '') $v->raise('link_invalid');
+			return array();
+		}
+		// back to this page without the token (the owner's keeps ?reply=)
+		$back = config::get('link_uri').ltrim(strtok((string)config::get('uri_string'), '?'), '/');
+		if (!is_string(util::get('token')) || util::get('token') === '') $back .= '?reply='.(int)$reply['id'];
+		if ($v->submitted() && util::post('do') === 'change') {
+			$values = array();
+			foreach (array('answer', 'people') as $field) {
+				$value = util::post($field);
+				if (is_string($value) && trim($value) !== '') $values[$field] = trim($value);
+			}
+			try {
+				$saved = self::change($reply['id'], $values, 'guest');
+				if (self::changed($saved, $reply, array('answer', 'people'))) return self::manage_done('changed', $back);
+			} catch (cms_refused $e) {
+				foreach ($e->problems as $problem) $v->raise($problem);
+			}
+			$reply = cms_records::get('rsvp', $reply['id']);
+		}
+		$event = self::item($reply['event']);
+		$row = cms_records::shown(cms_records::info('rsvp'), $reply) + array(
+			'event_title' => $event ? $event['title'] : '',
+			'event_date' => $event ? $event['date'] : '',
+			'event_starts' => $event ? $event['starts'] : '',
+			'event_url' => $event ? $event['url'] : '',
+			'deadline' => $event ? date('Y-m-d H:i', $event['deadline']) : '',
+			'position' => (string)self::position($reply),
+		);
+		return array(cms_records::for_template(cms_records::info('rsvp'), $row));
+	}
+
+	// util::done exits in a request; on the command line the page shows
+	// nothing more
+	protected static function manage_done($done, $back) {
+		self::forget();
+		util::done($done, $back);
+		return array();
 	}
 }

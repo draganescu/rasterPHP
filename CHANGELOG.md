@@ -3,6 +3,10 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.31
+
+To email guests, add `_email/rsvp_going`, `rsvp_waiting`, `rsvp_promoted` and `rsvp_noted` (lint names any missing) and a page `rsvp` with `render.rsvp.manage`. **The guest's link** opens their reply; a GET changes nothing, the page's form changes it, and it works until the event starts, after a no too. **Staff emails** (`_email/rsvp_new`) only when `rsvp_staff_email` is set. Settings: `rsvp_manage_page`, `rsvp_staff_email`.
+
 ## 2.2.30
 
 Nothing for sites to do. **Replies to events.** A new bundled model, `rsvp`, keeps replies (yes, no, maybe, a party size) to the items of the site's `events` collection (`rsvp_collection`) as private `rsvp` records. An item's `places` and `rsvp_until` fields, written in its view, set the limit and the deadline. A yes that doesn't fit waits; when places free up the model moves in, oldest first, every waiting party that fits. Staff add and edit replies in the page; `render.rsvp.event` shows the places left. Events: `rsvp.replied`, `rsvp.changed`, `rsvp.promoted`. Settings: `rsvp_collection`, `rsvp_max_people`, `rsvp_closes`, `rsvp_waitlist`. Guests' emails and the form come in the next releases.
