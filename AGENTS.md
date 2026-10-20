@@ -164,8 +164,9 @@ in, so write the short form if it is quicker and let the fix finish it.
   the method is called once and every row gets the same value (or hides
   the block), however long the list.
 - `print.@attr.key` wraps a tag and sets its `attr` to the value (escaped).
-  `print.+attr.key` appends the value to the attribute instead. The attribute
-  must already exist on the tag.
+  `print.+attr.key` appends the value to the attribute instead, after a
+  space, as for `class` (so it can't finish a URL: `href="?event="` becomes
+  `?event= 7`). The attribute must already exist on the tag.
 - A value that is itself a list of rows repeats its `print.key` block once for
   each nested row, for example a post with its comments.
 - An empty array renders nothing. `false` keeps the mock-up content. For

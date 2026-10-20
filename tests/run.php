@@ -6210,7 +6210,7 @@ function rsvp_site($fn) {
 		.'<form method="get"><select name="event"><!-- render.rsvp.events --><!-- print.@value.event --><option value="">'
 		.'<!-- print.event_title -->Jazz night<!-- /print.event_title --></option><!-- /print.@value.event --><!-- /render.rsvp.events --></select><button>Show</button></form>'
 		."<!-- $list --><p class=\"phone\"><!-- print.name -->Ana<!-- /print.name --> <!-- print.people -->2<!-- /print.people --></p><!-- /$list --></body></html>");
-	$emails =array('rsvp_going', 'rsvp_waiting', 'rsvp_promoted', 'rsvp_noted', 'rsvp_link', 'rsvp_new');
+	$emails = array('rsvp_going', 'rsvp_waiting', 'rsvp_promoted', 'rsvp_noted', 'rsvp_link', 'rsvp_new');
 	foreach ($emails as $email) {
 		test_fixture("$theme/_email/$email.html");
 		file_put_contents("$theme/_email/$email.html", "<html><head><title>$email</title></head><body><p><!-- print.self.name -->Ana<!-- /print.self.name -->:"
@@ -7569,6 +7569,10 @@ test('rsvp staff page in the editor', function () {
 		$out = contact_render('/zzrsvpstaff');
 		check(strpos($out, '[exit 0]') !== false && strpos($out, 'waiting= attention=</h1>') !== false, 'a visitor: '.$out);
 		check(strpos($out, 'Ana Popescu') === false && strpos($out, 'class="event"') === false && strpos($out, 'class="attention"') === false, 'a visitor: '.$out);
+		// a member, logged in, gets nothing either: these are editors' regions
+		$out = contact_render('/zzrsvpstaff', 'member');
+		check(strpos($out, '[exit 0]') !== false && strpos($out, 'waiting= attention=</h1>') !== false, 'a member: '.$out);
+		check(strpos($out, 'Ana Popescu') === false && strpos($out, 'class="event"') === false && strpos($out, 'class="attention"') === false, 'a member: '.$out);
 		$out = contact_render('/zzrsvpstaff?event='.$event['id'], 'editor');
 		check(strpos($out, '[exit 0]') !== false && strpos($out, 'waiting=1 attention=0</h1>') !== false, 'the counts: '.$out);
 		check(strpos($out, 'Jazz night going=2 left=0 waiting=1</h2>') !== false && strpos($out, 'Ion Waits') !== false, 'the event: '.$out);
