@@ -57,6 +57,8 @@ class raster_inspector {
 	public $theme;
 	public $views_dir;
 	public $ext;
+	// the content model of each theme, for collection_fields()
+	protected $models = array();
 
 	function __construct($views_dir = null, $theme = null, $ext = null) {
 		$this->views_dir = rtrim($views_dir ?: APPBASE.config::get('views_path', 'views'), '/');
@@ -1448,8 +1450,6 @@ class raster_inspector {
 
 	// the fields a markup collection has in a theme's views, from the
 	// content model, read once per theme
-	protected $models = array();
-
 	function collection_fields($name, $theme = null) {
 		$theme = $theme ?: $this->theme;
 		if (!isset($this->models[$theme])) $this->models[$theme] = $this->content_model($theme);

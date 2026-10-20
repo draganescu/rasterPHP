@@ -7318,6 +7318,32 @@ test('rsvp form: a reply inside the site\'s own transaction sends its event and 
 	});
 });
 
+test('rsvp form: the_rsvp adds a field', function () use ($booking_base) {
+	$app = APPBASE.config::get('models_path', 'models');
+	rsvp_site(function ($theme) use ($app, $booking_base) {
+		spam_clear();
+		temp_model("$app/the_rsvp", array('the_rsvp.php' => "<?php\nclass the_rsvp extends rsvp\n{\n\tstatic function types() {\n\t\t\$types = parent::types();\n\t\t\$types['rsvp']['fields']['dietary'] = '';\n\t\treturn \$types;\n\t}\n}\n"));
+		$view = "$theme/zzrsvp.html";
+		$html = file_get_contents($view);
+		file_put_contents($view, str_replace('<textarea name="notes">', '<input name="dietary"><textarea name="notes">', $html));
+		try {
+			controller::forget_models();
+			cms_records::forget();
+			same('the_rsvp', cms_records::info('rsvp')['class']);
+			$event = rsvp_event();
+			list($status, $body) = rsvp_post("$booking_base/zzrsvp?event={$event['id']}", array('name' => 'Vegan Guest', 'email' => 'vegan.rsvp@example.test', 'people' => '2', 'dietary' => 'vegan'));
+			same(303, $status, $body);
+			$stored = cms_records::find('rsvp', array('email' => 'vegan.rsvp@example.test'));
+			same(array('vegan', 'going', (int)$event['id']), array($stored[0]['dietary'], $stored[0]['status'], $stored[0]['event']));
+		} finally {
+			file_put_contents($view, $html);
+			remove_dir("$app/the_rsvp");
+			controller::forget_models();
+			cms_records::forget();
+		}
+	});
+});
+
 test('lint: rsvp form alerts and the event\'s fields', function () {
 	rsvp_site(function ($theme) {
 		$messages = function ($html) {

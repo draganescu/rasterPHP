@@ -828,12 +828,17 @@ class rsvp
 		}
 		$posting = self::$posting;
 		self::$posting = $event ? $event['id'] : null;
+		// inside a site's own transaction saved() runs after its commit, when
+		// $writing no longer says the write was ours (alone, it does)
+		$outer = cms_records::$depth > 0;
 		try {
 			// the reply, its link and rsvp.replied go together
-			$reply = self::writing('guest', 0, function () {
+			$reply = self::writing('guest', 0, function () use ($outer) {
 				$item = cms_records::submit('rsvp', false);
 				if (!is_array($item)) return $item;
-				self::$made[(int)$item['id']] = true;
+				// left behind if the site's transaction rolls back: a later
+				// reply that gets the same id in this request then sends nothing
+				if ($outer) self::$made[(int)$item['id']] = true;
 				$reply = self::with_link(cms_records::get('rsvp', $item['id']), '', $item['people']);
 				cms_records::dispatch('rsvp.replied', self::payload($reply, 'guest'));
 				return $reply;
