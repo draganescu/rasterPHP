@@ -290,7 +290,9 @@ class cms_records {
 	static function visibility_sql($info) {
 		if ($info['public'] || cms::loggedin()) return array('', array());
 		$user = $info['owner'] ? authentication::user() : null;
-		if (!$user) return array(' AND 1 = 0 ', array());
+		// a person with no account (render --as=member) owns nothing, not
+		// every record staff and model code made with owner 0
+		if (!$user || !$user['id']) return array(' AND 1 = 0 ', array());
 		return array(' AND owner = :raster_owner ', array(':raster_owner' => (int)$user['id']));
 	}
 

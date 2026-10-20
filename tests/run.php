@@ -6197,6 +6197,19 @@ function rsvp_site($fn) {
 		.' <!-- print.status -->going<!-- /print.status --> <!-- print.event_title -->Jazz night<!-- /print.event_title --> <!-- print.position -->1<!-- /print.position --></p>'
 		.'<form method="post"><input type="hidden" name="do" value="change"><input type="radio" name="answer" value="yes"><input type="radio" name="answer" value="no">'
 		.'<input type="radio" name="answer" value="maybe"><input type="number" name="people"><button>Change</button></form><!-- /render.rsvp.manage --></body></html>');
+	// the staff page: the counts, what needs attention, every event to come
+	// with its replies, and one event's replies (?event=) with the card for a
+	// phone reply
+	$list = "render.cms.rsvp('event=?event&order=status,waiting_since')";
+	file_put_contents("$theme/zzrsvpstaff.html", '<html><head><title>Replies</title></head><body>'
+		."<h1>waiting=<!-- print.rsvp.count('status=waiting') -->3<!-- /print.rsvp.count('status=waiting') --> attention=<!-- print.rsvp.count('attention') -->1<!-- /print.rsvp.count('attention') --></h1>"
+		.'<!-- render.rsvp.attention --><p class="attention"><!-- print.name -->Ana<!-- /print.name -->: <!-- print.attention -->moved<!-- /print.attention --></p><!-- /render.rsvp.attention -->'
+		.'<!-- render.rsvp.events --><section class="event"><h2><!-- print.event_title -->Jazz night<!-- /print.event_title --> going=<!-- print.going -->4<!-- /print.going -->'
+		.' left=<!-- print.left -->6<!-- /print.left --> waiting=<!-- print.waiting -->0<!-- /print.waiting --></h2><ul><!-- print.replies --><li class="reply"><!-- print.name -->Ana<!-- /print.name -->'
+		.' <!-- print.status -->going<!-- /print.status --> <!-- print.position -->1<!-- /print.position --></li><!-- /print.replies --></ul></section><!-- /render.rsvp.events -->'
+		.'<form method="get"><select name="event"><!-- render.rsvp.events --><!-- print.@value.event --><option value="">'
+		.'<!-- print.event_title -->Jazz night<!-- /print.event_title --></option><!-- /print.@value.event --><!-- /render.rsvp.events --></select><button>Show</button></form>'
+		."<!-- $list --><p class=\"phone\"><!-- print.name -->Ana<!-- /print.name --> <!-- print.people -->2<!-- /print.people --></p><!-- /$list --></body></html>");
 	$emails = array('rsvp_going', 'rsvp_waiting', 'rsvp_promoted', 'rsvp_noted', 'rsvp_link', 'rsvp_new');
 	foreach ($emails as $email) {
 		test_fixture("$theme/_email/$email.html");
@@ -6223,6 +6236,7 @@ function rsvp_site($fn) {
 		@unlink("$theme/events_item.html");
 		@unlink("$theme/zzrsvp.html");
 		@unlink("$theme/rsvp.html");
+		@unlink("$theme/zzrsvpstaff.html");
 		foreach ($emails as $email) @unlink("$theme/_email/$email.html");
 		controller::forget_models();
 		cms_records::forget();
@@ -7418,6 +7432,185 @@ test('lint: rsvp form alerts and the event\'s fields', function () {
 			file_put_contents($link, $html);
 		}
 		same(array(), array_values(preg_grep('/^error/', $messages($alerts.$form))));
+	});
+});
+
+// ## Bundled rsvp: for staff
+
+test('render.rsvp.events: counts and replies, for staff only', function () {
+	rsvp_site(function () {
+		$later = rsvp_event(array('title' => 'Later', 'date' => date('Y-m-d', strtotime('+12 days')), 'places' => 4));
+		$sooner = rsvp_event(array('title' => 'Sooner', 'date' => date('Y-m-d', strtotime('+5 days')), 'starts' => '19:30', 'places' => 10));
+		$past = rsvp_event(array('title' => 'Past', 'date' => date('Y-m-d', strtotime('-3 days'))));
+		// staff see what they hid
+		$draft = rsvp_event(array('title' => 'Draft', 'date' => date('Y-m-d', strtotime('+8 days')), 'enabled' => 0, 'places' => ''));
+		rsvp_reply(array('event' => $sooner['id'], 'people' => 3));
+		rsvp_reply(array('event' => $sooner['id'], 'people' => 2));
+		rsvp_reply(array('event' => $sooner['id'], 'answer' => 'maybe', 'people' => 2));
+		rsvp_reply(array('event' => $sooner['id'], 'answer' => 'no'));
+		rsvp_reply(array('event' => $later['id'], 'people' => 4));
+		$first = rsvp_reply(array('event' => $later['id'], 'people' => 2));
+		$second = rsvp_reply(array('event' => $later['id'], 'people' => 1));
+		same(array('waiting', 'waiting'), array($first['status'], $second['status']));
+		rsvp_reply(array('event' => $past['id'], 'people' => 2));
+		rsvp_reply(array('event' => $draft['id'], 'people' => 2));
+		$r = new rsvp();
+		same(array(), $r->events(), 'a visitor:');
+		booking_as_editor(function () use ($r, $sooner, $later, $draft, $first, $second) {
+			$rows = $r->events();
+			same(array('Sooner', 'Draft', 'Later'), array_column($rows, 'event_title'));
+			$counts = function ($row) {
+				return array_intersect_key($row, array_flip(array('event', 'event_date', 'event_starts', 'places', 'going', 'left', 'waiting', 'maybe', 'no')));
+			};
+			same(array('event' => (string)$sooner['id'], 'event_date' => $sooner['date'], 'event_starts' => '19:30', 'places' => '10', 'going' => '5', 'left' => '5', 'waiting' => '0', 'maybe' => '1', 'no' => '1'), $counts($rows[0]));
+			same(array('event' => (string)$draft['id'], 'event_date' => $draft['date'], 'event_starts' => '20:00', 'places' => '', 'going' => '2', 'left' => '', 'waiting' => '0', 'maybe' => '0', 'no' => '0'), $counts($rows[1]));
+			same(array('event' => (string)$later['id'], 'event_date' => $later['date'], 'event_starts' => '20:00', 'places' => '4', 'going' => '4', 'left' => '0', 'waiting' => '2', 'maybe' => '0', 'no' => '0'), $counts($rows[2]));
+			same(array(4, 1, 3), array_map(function ($row) { return count($row['replies']); }, $rows));
+			$positions = array_column($rows[2]['replies'], 'position', 'name');
+			same(array('1', '2'), array($positions[$first['name']], $positions[$second['name']]));
+			same(array('', '', '', '', 'event_hidden', '', '', ''), array_merge(array_column($rows[0]['replies'], 'attention'), array_column($rows[1]['replies'], 'attention'), array_column($rows[2]['replies'], 'attention')));
+			foreach ($rows as $row) {
+				foreach ($row['replies'] as $reply) {
+					same('rsvp', $reply['raster_record']);
+					check(strpos($reply['raster_detail_link'], '/rsvp/rsvp_item/') !== false, $reply['raster_detail_link']);
+					check(!array_key_exists('token_hashes', $reply) && !array_key_exists('link_sent_at', $reply), 'hidden fields reach the staff page: '.json_encode($reply));
+					same($row['event'], (string)$reply['event']);
+				}
+			}
+			// from= another day takes the past in too
+			same(array('Past', 'Sooner', 'Draft', 'Later'), array_column($r->events('from='.date('Y-m-d', strtotime('-7 days'))), 'event_title'));
+		});
+	});
+});
+
+test('rsvp: needs attention: gone, hidden, over places, moved', function () {
+	rsvp_site(function () {
+		$gone = rsvp_event(array('title' => 'Gone'));
+		$hidden = rsvp_event(array('title' => 'Hidden'));
+		$over = rsvp_event(array('title' => 'Over', 'places' => 10));
+		$moved = rsvp_event(array('title' => 'Moved'));
+		$fine = rsvp_event(array('title' => 'Fine'));
+		$replies = array(
+			rsvp_reply(array('event' => $gone['id'], 'name' => 'Gone guest')),
+			rsvp_reply(array('event' => $hidden['id'], 'name' => 'Hidden guest')),
+			rsvp_reply(array('event' => $over['id'], 'name' => 'Over one', 'people' => 4)),
+			rsvp_reply(array('event' => $over['id'], 'name' => 'Over two', 'people' => 4)),
+			rsvp_reply(array('event' => $moved['id'], 'name' => 'Moved guest')),
+			rsvp_reply(array('event' => $fine['id'], 'name' => 'Fine guest')),
+		);
+		// a no takes no places: nothing to fix there
+		rsvp_reply(array('event' => $gone['id'], 'name' => 'Gone no', 'answer' => 'no'));
+		rsvp_reply(array('event' => $over['id'], 'name' => 'Over maybe', 'answer' => 'maybe'));
+		$mails = booking_mails(function () use ($gone, $hidden, $over, $moved) {
+			cms_store::delete_item('eventsdata', $gone['id']);
+			cms_store::save_item('eventsdata', $hidden['id'], array('enabled' => 0), array('enabled'), 'editor');
+			cms_store::save_item('eventsdata', $over['id'], array('places' => 5), array('places'), 'editor');
+			cms_store::save_item('eventsdata', $moved['id'], array('date' => date('Y-m-d', strtotime('+11 days'))), array('date'), 'editor');
+		});
+		same(array(), booking_sent($mails), 'editing the event mails nobody:');
+		// nobody is moved out
+		same(array_fill(0, 6, 'going'), array_map(function ($reply) { return rsvp_status($reply['id']); }, $replies));
+		rsvp::forget();
+		$r = new rsvp();
+		same(array(), $r->attention(), 'a visitor:');
+		same('', $r->count('attention'), 'a visitor:');
+		booking_as_editor(function () use ($r, $replies) {
+			$why = array_column($r->attention(), 'attention', 'name');
+			ksort($why);
+			same(array('Gone guest' => 'event_gone', 'Hidden guest' => 'event_hidden', 'Moved guest' => 'moved', 'Over one' => 'over_places', 'Over two' => 'over_places'), $why);
+			same('5', $r->count('attention'));
+			foreach ($r->attention() as $row) {
+				same('rsvp', $row['raster_record']);
+				check(!array_key_exists('token_hashes', $row), json_encode($row));
+			}
+			// the staff page's lists say the same of the events still there
+			$listed = array();
+			foreach ($r->events() as $event) $listed += array_column($event['replies'], 'attention', 'name');
+			ksort($listed);
+			same(array('Fine guest' => '', 'Hidden guest' => 'event_hidden', 'Moved guest' => 'moved', 'Over maybe' => '', 'Over one' => 'over_places', 'Over two' => 'over_places'), $listed);
+			// staff phoned the guest and noted it: their save says the guest knows the new start
+			cms_store::save_item('rsvpdata', $replies[4]['id'], array('notes' => 'Phoned, fine'), array('notes'), 'editor');
+			rsvp::forget();
+			same('4', $r->count('attention'));
+			check(!in_array('Moved guest', array_column($r->attention(), 'name'), true), json_encode($r->attention()));
+		});
+	});
+});
+
+test('print.rsvp.count: options and privacy', function () {
+	rsvp_site(function () {
+		$event = rsvp_event(array('places' => 2));
+		$other = rsvp_event();
+		rsvp_reply(array('event' => $event['id'], 'people' => 2));
+		rsvp_reply(array('event' => $event['id']));
+		rsvp_reply(array('event' => $event['id']));
+		rsvp_reply(array('event' => $event['id'], 'answer' => 'no'));
+		rsvp_reply(array('event' => $other['id']));
+		$r = new rsvp();
+		same('', $r->count());
+		same('', $r->count('status=going'));
+		booking_as_editor(function () use ($r, $event) {
+			same('2', $r->count());
+			same('2', $r->count('status=waiting'));
+			same('2', $r->count('status=going'));
+			same('1', $r->count('status=going&event='.$event['id']));
+			same('4', $r->count('event='.$event['id']));
+			same('0', $r->count('attention'));
+		});
+	});
+});
+
+test('rsvp staff page in the editor', function () {
+	rsvp_site(function ($theme) {
+		$event = rsvp_event(array('title' => 'Jazz night', 'places' => 2));
+		rsvp_reply(array('event' => $event['id'], 'name' => 'Ana Popescu', 'people' => 2));
+		rsvp_reply(array('event' => $event['id'], 'name' => 'Ion Waits'));
+		// a visitor (the page isn't protected here) gets no rows and no counts
+		$out = contact_render('/zzrsvpstaff');
+		check(strpos($out, '[exit 0]') !== false && strpos($out, 'waiting= attention=</h1>') !== false, 'a visitor: '.$out);
+		check(strpos($out, 'Ana Popescu') === false && strpos($out, 'class="event"') === false && strpos($out, 'class="attention"') === false, 'a visitor: '.$out);
+		// a member, logged in, gets nothing either: these are editors' regions
+		$out = contact_render('/zzrsvpstaff', 'member');
+		check(strpos($out, '[exit 0]') !== false && strpos($out, 'waiting= attention=</h1>') !== false, 'a member: '.$out);
+		check(strpos($out, 'Ana Popescu') === false && strpos($out, 'class="event"') === false && strpos($out, 'class="attention"') === false, 'a member: '.$out);
+		$out = contact_render('/zzrsvpstaff?event='.$event['id'], 'editor');
+		check(strpos($out, '[exit 0]') !== false && strpos($out, 'waiting=1 attention=0</h1>') !== false, 'the counts: '.$out);
+		check(strpos($out, 'Jazz night going=2 left=0 waiting=1</h2>') !== false && strpos($out, 'Ion Waits') !== false, 'the event: '.$out);
+		check(strpos($out, '<option value="'.$event['id'].'"') !== false, 'the event to choose: '.$out);
+		check(preg_match('#<script id="raster-editor-config" type="application/json">(.*?)</script>#s', $out, $m) === 1, 'no editor: '.$out);
+		$marks = json_decode($m[1], true)['marks'];
+		// both replies, in the event's row and in the event's list
+		$items = array_values(array_filter($marks, function ($mark) { return isset($mark['kind']) && $mark['kind'] === 'item' && $mark['collection'] === 'rsvp'; }));
+		same(4, count($items), 'replies the editor can edit:');
+		foreach ($items as $item) {
+			same(array('promote'), $item['actions']);
+			check(in_array('status', $item['readonly'], true) && !array_key_exists('token_hashes', $item['values']), json_encode($item));
+		}
+		// the list's card for a phone reply starts with the event
+		$lists = array_values(array_filter($marks, function ($mark) { return isset($mark['kind']) && $mark['kind'] === 'collection' && $mark['collection'] === 'rsvp'; }));
+		same(1, count($lists));
+		same(true, $lists[0]['addable']);
+		same(array('event' => (string)$event['id']), $lists[0]['filters']);
+		// lint: a staff page belongs behind the login
+		$lint = function () use ($theme) { return (new raster_inspector())->lint_path("$theme/zzrsvpstaff.html"); };
+		check(has_problem($lint(), "lists rsvp replies but isn't protected for editors"), 'unprotected');
+		check(!has_problem($lint(), 'without cms_records::listed()'), json_encode($lint()));
+		check(has_problem(lint_html('<!-- render.rsvp.attention --><p><!-- print.name -->Ana<!-- /print.name --></p><!-- /render.rsvp.attention -->'), "lists rsvp replies but isn't protected for editors"), 'attention unprotected');
+		with_settings(array('protected' => array('account' => 'member', 'zzrsvpstaff' => 'editor')), function () use ($lint) {
+			check(!has_problem($lint(), "isn't protected for editors"), 'protected');
+			check(!has_problem($lint(), 'without cms_records::listed()'), json_encode($lint()));
+		});
+		// render.rsvp.events lists the type, as render.cms.rsvp does
+		same(array('render.rsvp.events'), controller::required('lists')['rsvp']);
+		$staff = file_get_contents("$theme/zzrsvpstaff.html");
+		unlink("$theme/zzrsvpstaff.html");
+		try {
+			check(has_problem((new raster_inspector())->lint_types(), "Visitors make 'rsvp' records"), 'no staff page yet');
+			file_put_contents("$theme/zzrsvpstaff.html", '<html><head><title>Replies</title></head><body><!-- render.rsvp.events --><p><!-- print.event_title -->Jazz night<!-- /print.event_title --></p><!-- /render.rsvp.events --></body></html>');
+			check(!has_problem((new raster_inspector())->lint_types(), "Visitors make 'rsvp' records"), 'listed by render.rsvp.events');
+		} finally {
+			file_put_contents("$theme/zzrsvpstaff.html", $staff);
+		}
 	});
 });
 

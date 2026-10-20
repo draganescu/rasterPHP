@@ -990,6 +990,10 @@ class raster_inspector {
 		if (preg_match('/<!-- render\.contact\.messages[ (]/', $html, $m, PREG_OFFSET_CAPTURE) && !$this->admin_view($this->linting)) {
 			$problems[] = self::problem_at('warning', $html, $m[0][1], "$this->linting lists contact messages but isn't protected for editors: add it to config 'protected' (config::set('protected')->to(array('staff' => 'editor')))");
 		}
+		// so are the rsvp replies and their counts
+		if (preg_match('/<!-- render\.rsvp\.(?:events|attention)[ (]/', $html, $m, PREG_OFFSET_CAPTURE) && !$this->admin_view($this->linting)) {
+			$problems[] = self::problem_at('warning', $html, $m[0][1], "$this->linting lists rsvp replies but isn't protected for editors: add it to config 'protected' (config::set('protected')->to(array('staff' => 'editor'))), never rsvp, the guests' page");
+		}
 	}
 
 	// how many records of a declared type there are, or null when that

@@ -43,6 +43,18 @@
 *     changes nothing. The link works until the event starts, after a no
 *     too, and dies when the event is hidden or deleted.
 *
+* For staff (editors; anyone else gets nothing, and none is page-cached):
+*   <!-- render.rsvp.events('from=today') -->  every event from that day,
+*     drafts too, with event_title, event_date, event_starts, places, going,
+*     left, waiting, maybe, no and its replies, editable in place, each with
+*     attention and position.
+*   <!-- render.rsvp.attention -->  the active replies an edit of their
+*     event left out of place: event_gone, event_hidden, over_places, moved.
+*   <!-- print.rsvp.count('status=waiting') -->  how many replies match, or
+*     count('attention').
+*   One event's replies, with the card for a phone reply that starts with
+*   the event: render.cms.rsvp('event=?event&order=status,waiting_since').
+*
 * The action: promote (editors), a waiting reply in now, out of turn, if
 * its party fits, also after the deadline.
 *
@@ -468,9 +480,14 @@ class rsvp
 		if ($id < 1) return null;
 		if (array_key_exists($id, self::$events)) return self::$events[$id];
 		$table = self::table();
-		$item = $table === null ? null : cms_store::get_item($table, $id);
+		return self::$events[$id] = self::from_item($table === null ? null : cms_store::get_item($table, $id));
+	}
+
+	// an item of the events collection as the model reads it (item()), or
+	// null
+	protected static function from_item($item) {
 		$event = null;
-		if ($item && (string)$item['date'] !== '') {
+		if ($item && isset($item['date']) && (string)$item['date'] !== '') {
 			$starts = isset($item['starts']) && (string)$item['starts'] !== '' ? $item['starts'] : (isset($item['time']) && (string)$item['time'] !== '' ? $item['time'] : '00:00');
 			$starts = substr((string)$starts, 0, 5);
 			$published = isset($item['published_at']) ? (string)$item['published_at'] : '';
@@ -489,7 +506,7 @@ class rsvp
 			if ($event['starts_at'] === false) $event = null;
 			else $event['deadline'] = self::deadline($event);
 		}
-		return self::$events[$id] = $event;
+		return $event;
 	}
 
 	// when replies close, as a Unix time: rsvp_until, else rsvp_closes
@@ -705,6 +722,8 @@ class rsvp
 			'emails' => array('render.rsvp.form' => array_merge($emails, array('_email/rsvp_link')), 'render.rsvp.manage' => $emails),
 			'pages' => array(config::get('rsvp_manage_page', 'rsvp')),
 			'settings' => array('rsvp_collection', 'rsvp_manage_page', 'rsvp_staff_email', 'rsvp_max_people', 'rsvp_closes', 'rsvp_waitlist'),
+			// a view with the staff list is the replies' staff page
+			'lists' => array('rsvp' => array('render.rsvp.events')),
 		);
 	}
 
@@ -879,5 +898,184 @@ class rsvp
 		self::forget();
 		util::done($done, $back);
 		return array();
+	}
+
+	// ##For staff
+	// Private wherever a page puts them: anyone but an editor gets nothing.
+	// The counts change with every reply, so none is page-cached.
+
+	// The events from from= (today) on, by date and start, drafts and
+	// scheduled ones too (staff see what they hid): event, event_title,
+	// event_date, event_starts, places and left ('' for no limit), going
+	// (people), waiting, maybe and no (replies), and replies: the event's
+	// replies, editable in place, each with attention and position.
+	function events($options = 'from=today') {
+		raster_cache::skip();
+		if (!self::ready() || !authentication::can('editor')) return array();
+		$options = self::options($options);
+		$from = isset($options['from']) && preg_match('/^\d{4}-\d\d-\d\d$/', $options['from']) ? $options['from'] : date('Y-m-d');
+		$events = self::dated($from);
+		$counts = self::counts(array_keys($events));
+		$replies = self::replies_to(array_keys($events));
+		$rows = array();
+		foreach ($events as $id => $event) {
+			$going = self::tally($counts, $id, 'going', 'people');
+			$listed = isset($replies[$id]) ? $replies[$id] : array();
+			$rows[] = array(
+				'event' => (string)$id,
+				'event_title' => $event['title'],
+				'event_date' => $event['date'],
+				'event_starts' => $event['starts'],
+				'places' => $event['places'] > 0 ? (string)$event['places'] : '',
+				'going' => (string)$going,
+				'left' => $event['places'] > 0 ? (string)max(0, $event['places'] - $going) : '',
+				'waiting' => (string)self::tally($counts, $id, 'waiting', 'replies'),
+				'maybe' => (string)self::tally($counts, $id, 'maybe', 'replies'),
+				'no' => (string)self::tally($counts, $id, 'no', 'replies'),
+				'replies' => self::for_staff($listed, $counts, self::positions($listed)),
+			);
+		}
+		return $rows;
+	}
+
+	// The active replies (going, waiting) that need attention, with the
+	// reason (reason()), by their event's start: those to events to come,
+	// and those whose start the guest was told is still to come, so a
+	// deleted event's and one moved into the past are there too.
+	function attention() {
+		raster_cache::skip();
+		if (!self::ready() || !authentication::can('editor')) return array();
+		$today = date('Y-m-d');
+		$replies = array();
+		$positions = array();
+		foreach (self::replies_to(array_keys(self::dated($today))) as $listed) {
+			foreach ($listed as $reply) $replies[(int)$reply['id']] = $reply;
+			$positions += self::positions($listed);
+		}
+		foreach (self::told($today) as $reply) {
+			$id = (int)$reply['id'];
+			if (isset($replies[$id])) continue;
+			$replies[$id] = $reply;
+			if ($reply['status'] === 'waiting') $positions[$id] = (string)self::position($reply);
+		}
+		$events = array();
+		foreach ($replies as $reply) $events[] = (int)$reply['event'];
+		// by the start: the event's now, or the one the guest was told
+		$starts = function ($reply) {
+			$event = self::item($reply['event']);
+			return $event ? $event['starts_at'] : (int)strtotime((string)$reply['event_at']);
+		};
+		uasort($replies, function ($a, $b) use ($starts) { return ($starts($a) - $starts($b)) ?: ((int)$a['id'] - (int)$b['id']); });
+		$rows = array();
+		foreach (self::for_staff(array_values($replies), self::counts($events), $positions) as $row) {
+			if ($row['attention'] !== '') $rows[] = $row;
+		}
+		return $rows;
+	}
+
+	// how many replies match the options ('status=waiting&event=7', values
+	// as cms_records::find takes them), or 'attention' for how many need
+	// it: for a staff page's heading ('' for anyone but an editor)
+	function count($options = 'status=waiting') {
+		raster_cache::skip();
+		if (!self::ready() || !authentication::can('editor')) return '';
+		if ($options === 'attention') return (string)count($this->attention());
+		if (!cms_store::table_exists('rsvpdata')) return '0';
+		return (string)count(cms_records::find('rsvp', (string)$options));
+	}
+
+	// Why an active reply (going or waiting) needs attention after staff
+	// edited its event, or '': event_gone (deleted, or its date emptied),
+	// event_hidden (a draft or scheduled again), over_places (places
+	// lowered under the people going, $going: every going reply of it),
+	// moved (its date or start isn't the one the guest was told, event_at).
+	// Worked out as replies are listed, never stored: nobody is moved out
+	// or emailed for it, and staff clear moved by saving the reply.
+	static function reason($reply, $event, $going) {
+		$status = (string)$reply['status'];
+		if ($status !== 'going' && $status !== 'waiting') return '';
+		if (!$event) return 'event_gone';
+		if (!$event['visible']) return 'event_hidden';
+		if ($status === 'going' && $event['places'] > 0 && (int)$going > $event['places']) return 'over_places';
+		$told = (string)$reply['event_at'] !== '' ? strtotime((string)$reply['event_at']) : false;
+		if ($told !== false && $told !== $event['starts_at']) return 'moved';
+		return '';
+	}
+
+	// The events dated $from or later, id => event as item() reads it, by
+	// start. One query on the collection's table: its name is the setting's,
+	// checked (collection()), and the date is bound.
+	protected static function dated($from) {
+		$table = self::table();
+		if ($table === null || !cms_store::table_exists($table) || !array_key_exists('date', cms_store::columns($table))) return array();
+		$events = array();
+		foreach (database::instance('rsvp')->query("SELECT * FROM `$table` WHERE `date` >= ? ORDER BY `date`, id", array($from)) as $row) {
+			$row['id'] = (int)$row['id'];
+			$event = self::from_item(cms_types::read_row($table, $row));
+			if ($event) $events[$event['id']] = self::$events[$event['id']] = $event;
+		}
+		uasort($events, function ($a, $b) { return ($a['starts_at'] - $b['starts_at']) ?: ($a['id'] - $b['id']); });
+		return $events;
+	}
+
+	// replies and people of each status, event => status => replies, people
+	protected static function counts($events) {
+		if (!$events || !cms_store::table_exists('rsvpdata')) return array();
+		$counts = array();
+		foreach (database::instance('rsvp')->counts(min($events), max($events)) as $row) {
+			$counts[(int)$row['event']][(string)$row['status']] = array('replies' => (int)$row['replies'], 'people' => (int)$row['people']);
+		}
+		return $counts;
+	}
+
+	protected static function tally($counts, $event, $status, $what) {
+		return isset($counts[$event][$status]) ? $counts[$event][$status][$what] : 0;
+	}
+
+	// the replies to these events, event => replies, in one read: the
+	// queue first, oldest first, then the rest as they came
+	protected static function replies_to($events) {
+		if (!$events || !cms_store::table_exists('rsvpdata')) return array();
+		$min = min($events);
+		$max = max($events);
+		$replies = array();
+		foreach (cms_records::find('rsvp', "event>=$min&event<=$max&order=waiting_since,created_at") as $reply) $replies[(int)$reply['event']][] = $reply;
+		return $replies;
+	}
+
+	// the active replies whose start, as the guest was told it, is $from or later
+	protected static function told($from) {
+		if (!cms_store::table_exists('rsvpdata')) return array();
+		return cms_records::find('rsvp', "event_at>=$from&status!=no&status!=maybe");
+	}
+
+	// each waiting reply's place in its event's queue, id => '1', '2', …,
+	// from all of the event's replies: oldest waiting_since first, as
+	// sql/queue.sql orders them
+	protected static function positions($replies) {
+		$queue = array_values(array_filter($replies, function ($reply) { return $reply['status'] === 'waiting'; }));
+		usort($queue, function ($a, $b) { return strcmp((string)$a['waiting_since'], (string)$b['waiting_since']) ?: ((int)$a['id'] - (int)$b['id']); });
+		$positions = array();
+		foreach ($queue as $n => $reply) $positions[(int)$reply['id']] = (string)($n + 1);
+		return $positions;
+	}
+
+	// replies for a staff page: without the hidden fields, with why each
+	// needs attention, its place in the queue ('' unless waiting) and its
+	// event's title, date and start, editable in place
+	protected static function for_staff($replies, $counts, $positions) {
+		$info = cms_records::info('rsvp');
+		$rows = array();
+		foreach ($replies as $reply) {
+			$event = self::item($reply['event']);
+			$row = cms_records::shown($info, $reply);
+			$row['attention'] = self::reason($reply, $event, self::tally($counts, (int)$reply['event'], 'going', 'people'));
+			$row['position'] = isset($positions[(int)$reply['id']]) ? $positions[(int)$reply['id']] : '';
+			$row['event_title'] = $event ? $event['title'] : '';
+			$row['event_date'] = $event ? $event['date'] : '';
+			$row['event_starts'] = $event ? $event['starts'] : '';
+			$rows[] = $row;
+		}
+		return cms_records::listed('rsvp', $rows);
 	}
 }
