@@ -155,6 +155,13 @@ class rsvp
 	// reply made going, or a going party made bigger, must fit.
 	static function check($type, $after, $before) {
 		if ($type !== 'rsvp' || $after === null) return array();
+		$problems = self::problems($after, $before);
+		// a refused write frees nothing: fill() noted it before the rules ran
+		if ($problems && $before) unset(self::$freed[(int)$before['event']]);
+		return $problems;
+	}
+
+	protected static function problems($after, $before) {
 		if (!$before || self::changed($after, $before, array('answer', 'people', 'event', 'email'))) {
 			$problems = self::rules($after, $before);
 			if ($problems) return $problems;
@@ -193,14 +200,16 @@ class rsvp
 		$people = (int)$after['people'];
 		if ($yes && $people < 1) $problems[] = 'people_invalid';
 		if ($problems) return $problems;
-		// a party bigger than the event could never fit
-		if ($yes && (($event['places'] > 0 && $people > $event['places']) || (!$staff && $people > (int)config::get('rsvp_max_people', 6)))) $problems[] = 'too_many';
-		if ($problems) return $problems;
 		$moved = $before && (int)$after['event'] !== (int)$before['event'];
+		// a yes that takes places: new, moved, from no or maybe, or more people
+		$takes = $yes && (!$before || $moved || $before['answer'] !== 'yes' || $people > (int)$before['people']);
+		// a party bigger than the event could never fit; one already in
+		// (places lowered under it) may still shrink or change its email
+		if ($takes && (($event['places'] > 0 && $people > $event['places']) || (!$staff && $people > (int)config::get('rsvp_max_people', 6)))) $problems[] = 'too_many';
+		if ($problems) return $problems;
 		if (!$staff) {
 			// from the deadline a guest only gives places back; from the start
 			// a guest changes nothing. Real seconds, on the site's clock.
-			$takes = $yes && (!$before || $moved || $before['answer'] !== 'yes' || $people > (int)$before['people']);
 			if (time() >= $event['starts_at'] || ($takes && time() >= $event['deadline'])) $problems[] = 'closed';
 			if ($problems) return $problems;
 		}

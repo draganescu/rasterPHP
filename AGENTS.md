@@ -1537,7 +1537,9 @@ staff in the page (`render.cms.rsvp`), over MCP or by model code.
   character, over 200 characters), `email_invalid` (a guest's empty;
   anyone's not an address, a control character, over 254),
   `answer_invalid`, `people_invalid` (a yes below 1), `too_many` (a yes
-  over `places` for anyone, over `rsvp_max_people` for guests), `closed`
+  that takes places, new, from no or maybe, moved or bigger, over
+  `places` for anyone, over `rsvp_max_people` for guests; a party already
+  in may still shrink or change its email), `closed`
   (guests: from the deadline a new yes, a no or maybe becoming yes, or
   more people; from the start, any change), `full` (it would wait while
   `rsvp_waitlist` is false), `already_replied` (another reply to this

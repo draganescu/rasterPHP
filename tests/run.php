@@ -6369,7 +6369,7 @@ test('rsvp: two yeses for the last place at once', function () {
 	});
 });
 
-test('promotion moves every party that fits, oldest first, once', function () {
+test('rsvp: promotion moves every party that fits, oldest first, once', function () {
 	rsvp_site(function () {
 		$event = rsvp_event(array('places' => 10));
 		$e = $event['id'];
@@ -6446,7 +6446,7 @@ test('rsvp: places freed by a no, a smaller party, a delete, a move', function (
 	});
 });
 
-test('places raised in the page promotes; lowered moves nobody', function () {
+test('rsvp: places raised in the page promotes; lowered moves nobody', function () {
 	rsvp_site(function () {
 		$event = rsvp_event(array('places' => 10));
 		rsvp_reply(array('event' => $event['id'], 'people' => 10));
@@ -6501,6 +6501,36 @@ test('rsvp: a going guest is never moved out', function () {
 		same(array('going', 2), array($reply['status'], $reply['people']));
 		cms_store::save_item('eventsdata', $event['id'], array('places' => 2), array('places'), 'editor');
 		same('going', rsvp_status($id));
+	});
+});
+
+test('rsvp: a party already in may shrink or change its email under lowered places', function () {
+	rsvp_site(function () {
+		$event = rsvp_event(array('places' => 6));
+		$id = rsvp_reply(array('event' => $event['id'], 'people' => 4), 'visitor')['id'];
+		cms_store::save_item('eventsdata', $event['id'], array('places' => 2), array('places'), 'editor');
+		rsvp_as_guest(function () use ($id) {
+			same(array('going', 3), array(cms_records::update('rsvp', $id, array('people' => 3))['status'], cms_records::get('rsvp', $id)['people']));
+		});
+		same('fixed@example.test', cms_store::save_item('rsvpdata', $id, array('email' => 'fixed@example.test'), array('email'), 'editor')['email']);
+		// staff's party over rsvp_max_people, and a guest's link shrinking it
+		$open = rsvp_event(array('places' => 0));
+		$big = rsvp_reply(array('event' => $open['id'], 'people' => 9), 'editor')['id'];
+		rsvp_as_guest(function () use ($big) {
+			same(8, cms_records::update('rsvp', $big, array('people' => 8))['people']);
+			same(array('too_many'), booking_problems(function () use ($big) { cms_records::update('rsvp', $big, array('people' => 9)); }));
+		});
+	});
+});
+
+test('rsvp: a refused write frees no places', function () {
+	rsvp_site(function () {
+		$event = rsvp_event(array('places' => 4));
+		$id = rsvp_reply(array('event' => $event['id'], 'people' => 4))['id'];
+		// a smaller party with a bad email: refused, and nothing is noted
+		same(array('email_invalid'), booking_problems(function () use ($id) { cms_records::update('rsvp', $id, array('people' => 2, 'email' => 'nope')); }));
+		same(array(), rsvp::$freed);
+		same(array(4, 'going'), array(cms_records::get('rsvp', $id)['people'], rsvp_status($id)));
 	});
 });
 
