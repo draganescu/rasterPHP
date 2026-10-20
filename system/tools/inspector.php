@@ -961,11 +961,15 @@ class raster_inspector {
 				$problems[] = self::problem_at('warning', $html, $at, "$tag needs at least one $type record, and there is none yet: staff add one in a page that renders render.cms.$type, or over MCP (create_item)");
 			}
 		}
-		// the guest's manage page answers links from emails: an editors' page
-		// would send every guest to the login
+		// the guests' manage pages (booking's, rsvp's) answer links from
+		// emails: an editors' page would send every guest to the login
 		$at = strpos($html, '<!-- render.booking.manage -->');
 		if ($at !== false && $this->admin_view($this->linting)) {
 			$problems[] = self::problem_at('warning', $html, $at, "render.booking.manage is the guests' page, but config 'protected' keeps this view for staff: protect staff pages by their own names (staff, booking_item), never booking");
+		}
+		$at = strpos($html, '<!-- render.rsvp.manage -->');
+		if ($at !== false && $this->admin_view($this->linting)) {
+			$problems[] = self::problem_at('warning', $html, $at, "render.rsvp.manage is the guests' page, but config 'protected' keeps this view for staff: protect staff pages by their own names (staff, rsvp_item), never rsvp");
 		}
 		// the contact messages are for staff: the region shows visitors
 		// nothing, but the page belongs in the Admin menu, behind the login

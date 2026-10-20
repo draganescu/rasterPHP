@@ -6137,9 +6137,9 @@ test('lint reports a theme with render.contact.form and no _email/contact_receiv
 // The site's events collection with the two fields rsvp reads (places,
 // rsvp_until) and render.rsvp.event on the item's page (events_item.html),
 // and a page that shows an event by ?event= (zzrsvp.html), so the bundled
-// rsvp model counts. eventsdata is made with the mock-up's types. $fn runs
-// with the theme's folder; the views, the tables and the listeners are gone
-// after.
+// rsvp model counts, with the guest's manage page (rsvp.html) and the six
+// emails. eventsdata is made with the mock-up's types. $fn runs with the
+// theme's folder; the views, the tables and the listeners are gone after.
 function rsvp_site($fn) {
 	$theme = APPBASE.config::get('views_path', 'views').'/'.config::get('theme', 'default');
 	$region = '<!-- render.rsvp.event --><p class="rsvp">event=<!-- print.event -->1<!-- /print.event --> places=<!-- print.places -->40<!-- /print.places -->'
@@ -6149,6 +6149,22 @@ function rsvp_site($fn) {
 		.'<p><!-- print.date -->2026-11-20<!-- /print.date --> at <!-- print.starts -->20:00<!-- /print.starts -->, <!-- print.places -->40<!-- /print.places --> places,'
 		.' replies until <!-- print.rsvp_until -->2026-11-20 18:00<!-- /print.rsvp_until --></p><!-- /render.cms.events -->'.$region.'</body></html>');
 	file_put_contents("$theme/zzrsvp.html", '<html><head><title>Reply</title></head><body>'.$region.'</body></html>');
+	// the guest's manage page, and the emails, each with its name as the subject
+	$alerts = '';
+	foreach (array('link_invalid', 'closed', 'full_for_more', 'changed') as $alert) {
+		$alerts .= "<!-- print.validation.alert('$alert') --><p>ALERT $alert</p><!-- /print.validation.alert('$alert') -->";
+	}
+	file_put_contents("$theme/rsvp.html", "<html><head><title>Your reply</title></head><body>$alerts"
+		.'<!-- render.rsvp.manage --><p class="reply"><!-- print.name -->Ana<!-- /print.name --> <!-- print.answer -->yes<!-- /print.answer --> <!-- print.people -->2<!-- /print.people -->'
+		.' <!-- print.status -->going<!-- /print.status --> <!-- print.event_title -->Jazz night<!-- /print.event_title --> <!-- print.position -->1<!-- /print.position --></p>'
+		.'<form method="post"><input type="hidden" name="do" value="change"><input type="radio" name="answer" value="yes"><input type="radio" name="answer" value="no">'
+		.'<input type="radio" name="answer" value="maybe"><input type="number" name="people"><button>Change</button></form><!-- /render.rsvp.manage --></body></html>');
+	$emails = array('rsvp_going', 'rsvp_waiting', 'rsvp_promoted', 'rsvp_noted', 'rsvp_link', 'rsvp_new');
+	foreach ($emails as $email) {
+		file_put_contents("$theme/_email/$email.html", "<html><head><title>$email</title></head><body><p><!-- print.self.name -->Ana<!-- /print.self.name -->:"
+			.' <!-- print.self.event_title -->Jazz night<!-- /print.self.event_title --> <!-- print.self.status -->going<!-- /print.self.status --> by <!-- print.self.who -->guest<!-- /print.self.who --></p>'
+			.'<p>Position: <!-- print.self.position -->1<!-- /print.self.position -->.</p><p>Manage: <!-- print.self.manage_url -->none<!-- /print.self.manage_url --></p></body></html>');
+	}
 	controller::forget_models();
 	cms_records::forget();
 	cms_store::connect();
@@ -6157,7 +6173,7 @@ function rsvp_site($fn) {
 	if (class_exists('rsvp', false)) rsvp::forget();
 	// this process booted without a view that uses rsvp, so it binds the
 	// listeners system/config/events.php binds for a site that has one
-	$listeners = array('cms.item_saved' => 'saved', 'cms.item_deleted' => 'deleted');
+	$listeners = array('cms.item_saved' => 'saved', 'cms.item_deleted' => 'deleted', 'rsvp.replied' => 'replied_mail', 'rsvp.changed' => 'changed_mail', 'rsvp.promoted' => 'promoted_mail');
 	foreach ($listeners as $event => $method) event::bind($event)->to('rsvp', $method);
 	try {
 		return $fn($theme);
@@ -6167,6 +6183,8 @@ function rsvp_site($fn) {
 		cms_store::forget();
 		@unlink("$theme/events_item.html");
 		@unlink("$theme/zzrsvp.html");
+		@unlink("$theme/rsvp.html");
+		foreach ($emails as $email) @unlink("$theme/_email/$email.html");
 		controller::forget_models();
 		cms_records::forget();
 		if (class_exists('rsvp', false)) {
@@ -6174,6 +6192,7 @@ function rsvp_site($fn) {
 			rsvp::$posting = null;
 			rsvp::$freed = array();
 			rsvp::$changed = array();
+			rsvp::$links = array();
 		}
 	}
 }
@@ -6694,6 +6713,376 @@ test('a site rsvp model or type keeps the name', function () {
 			controller::forget_models();
 			cms_records::forget();
 		}
+	});
+});
+
+// ## Bundled rsvp: the guest's link
+
+// the guest's manage page as a request in this process, as booking_manage()
+// asks booking's: the rows and the alerts raised
+function rsvp_manage($get, $post = null) {
+	$saved = array($_GET, $_POST, isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : 'GET');
+	$_GET = $get;
+	$_POST = $post === null ? array() : $post + array('raster_form' => 'rsvp.manage');
+	$_SERVER['REQUEST_METHOD'] = $post === null ? 'GET' : 'POST';
+	$template = template::instance();
+	$call = $template->current_call;
+	$template->current_call = 'rsvp.manage';
+	$raised = new ReflectionProperty('validation', 'raised');
+	$raised->setAccessible(true);
+	$raised->setValue(validation::get(), array());
+	rsvp::forget();
+	try {
+		$rows = (new rsvp())->manage();
+		return array($rows, array_keys($raised->getValue(validation::get())));
+	} finally {
+		list($_GET, $_POST, $_SERVER['REQUEST_METHOD']) = $saved;
+		$template->current_call = $call;
+		$raised->setValue(validation::get(), array());
+	}
+}
+// a reply staff add in the page, and the raw token of the guest's email:
+// array(id, token, mails)
+function rsvp_linked($values) {
+	$mails = booking_mails(function () use ($values, &$id) { $id = (int)rsvp_reply($values, 'editor')['id']; });
+	return array($id, $mails ? booking_token($mails[0]) : null, $mails);
+}
+// the place in the queue an email says
+function rsvp_position($mail) {
+	return preg_match('/Position: (\d*)\./', $mail['text'], $m) ? $m[1] : null;
+}
+
+test('rsvp: every guest email carries a fresh link; only its hash is kept', function () {
+	rsvp_site(function () {
+		$event = rsvp_event(array('title' => 'Jazz night'));
+		// staff added it: no rsvp_new, even with an address for staff
+		list($id, $raw, $mails) = with_settings(array('rsvp_staff_email' => 'staff@zz.test'), function () use ($event) {
+			return rsvp_linked(array('event' => $event['id'], 'email' => 'link@example.test', 'people' => 2));
+		});
+		same(array('rsvp_going link@example.test'), booking_sent($mails));
+		check($raw !== null, 'no link: '.$mails[0]['text']);
+		check(strpos($mails[0]['text'], "/rsvp?token=$raw") !== false && strpos($mails[0]['text'], 'Jazz night') !== false, $mails[0]['text']);
+		same('', rsvp_position($mails[0]), 'a going reply has no place in the queue:');
+		$r = cms_records::get('rsvp', $id);
+		same(array(hash('sha256', $raw)), $r['token_hashes']);
+		check(strpos(json_encode($r), $raw) === false, 'the raw token is stored');
+		same($id, (int)rsvp::by_token($raw)['id']);
+		same(array(), rsvp::$links, 'a link outlives its email:');
+		// a phone reply without an address: nothing sent, no link
+		$mails = booking_mails(function () use ($event, &$quiet) { $quiet = rsvp_reply(array('event' => $event['id'], 'name' => 'Phone reply', 'email' => ''), 'editor')['id']; });
+		same(array(), booking_sent($mails));
+		same(array(), cms_records::get('rsvp', $quiet)['token_hashes']);
+		same(array(), rsvp::issue(cms_records::get('rsvp', $quiet)));
+	});
+});
+
+test('rsvp: a GET to the manage link changes nothing', function () use ($booking_base) {
+	rsvp_site(function () use ($booking_base) {
+		$event = rsvp_event();
+		list($id, $raw) = rsvp_linked(array('event' => $event['id'], 'email' => 'scan@example.test'));
+		$before = cms_records::get('rsvp', $id);
+		$mails = booking_mails(function () use ($booking_base, $raw) {
+			list($status, $body, $headers) = http('GET', "$booking_base/rsvp?token=$raw");
+			same(200, $status, $body);
+			check(strpos($body, '<p class="reply">') !== false && strpos($body, 'ALERT link_invalid') === false, $body);
+			same('same-origin', b_header($headers, 'Referrer-Policy'));
+			http('HEAD', "$booking_base/rsvp?token=$raw");
+			same(200, http('GET', "$booking_base/rsvp?token=$raw&do=change&answer=no")[0]);
+		});
+		same(array(), booking_sent($mails));
+		same($before, cms_records::get('rsvp', $id));
+		// another site's form
+		$mails = booking_mails(function () use ($booking_base, $raw) {
+			same(403, form_post("$booking_base/rsvp?token=$raw", array('raster_form' => 'rsvp.manage', 'do' => 'change', 'answer' => 'no'), array('Origin: https://evil.test'))[0]);
+		});
+		same(array(), booking_sent($mails));
+		same($before, cms_records::get('rsvp', $id));
+		$mails = booking_mails(function () use ($booking_base, $raw) {
+			list($status, , $headers) = form_post("$booking_base/rsvp?token=$raw", array('raster_form' => 'rsvp.manage', 'do' => 'change', 'answer' => 'no'));
+			same(303, $status);
+			same("$booking_base/rsvp?done=changed", location($headers));
+		});
+		same('no', rsvp_status($id));
+		same(array('rsvp_noted scan@example.test'), booking_sent($mails));
+		// after the change, the page that says so
+		list(, $body) = http('GET', "$booking_base/rsvp?done=changed");
+		check(strpos($body, 'ALERT changed') !== false && strpos($body, 'ALERT link_invalid') === false, $body);
+	});
+});
+
+test('rsvp: the raw token is in no event, log or cache', function () use ($booking_log) {
+	rsvp_site(function () use ($booking_log) {
+		$event = rsvp_event(array('places' => 2));
+		cms_records::ensure(cms_records::info('rsvp'), true);
+		$raws = array();
+		$seen = rsvp_events(function () use ($event, &$raws, &$going) {
+			$mails = booking_mails(function () use ($event, &$going) {
+				$going = rsvp_reply(array('event' => $event['id'], 'people' => 2), 'editor')['id'];
+				rsvp_reply(array('event' => $event['id']), 'editor');
+				rsvp::change($going, array('answer' => 'no'), 'guest');
+			});
+			same(array('rsvp_going', 'rsvp_waiting', 'rsvp_noted', 'rsvp_promoted'), array_column($mails, 'view'));
+			$raws = array_map('booking_token', $mails);
+		});
+		same(4, count(array_unique(array_filter($raws))), 'a link in each: '.json_encode($raws));
+		same(array('rsvp.replied', 'rsvp.replied', 'rsvp.changed', 'rsvp.promoted'), array_column($seen, 0));
+		foreach ($seen as $one) {
+			check(!preg_match('/[a-f0-9]{64}/', json_encode($one[1])), "a token in $one[0]: ".json_encode($one[1]));
+			check(!array_key_exists('manage_url', $one[1]), "$one[0] has the link");
+		}
+		$rows = json_encode(R::getAll('SELECT * FROM rsvpdata'));
+		foreach ($raws as $raw) check(strpos($rows, $raw) === false, 'a raw token in rsvpdata');
+		cache_empty();
+		list($prod, $prod_log) = booking_server(array('RASTER_ENV' => 'production'));
+		foreach (array(1, 2) as $n) {
+			list($status, $body, $headers) = http('GET', "$prod/rsvp?token=$raws[0]");
+			same(200, $status, $body);
+			check(strpos($body, '<p class="reply">') !== false, 'the reply: '.$body);
+			check(b_header($headers, 'X-Raster-Cache') !== 'hit', "cached the $n. time");
+			same('same-origin', b_header($headers, 'Referrer-Policy'));
+		}
+		$logs = glob(APPBASE.'data/logs/*') ?: array();
+		foreach (array_merge(cached_pages(), $logs, array($booking_log, $prod_log)) as $file) {
+			foreach ($raws as $raw) check(strpos((string)@file_get_contents($file), $raw) === false, "a token is in $file");
+		}
+		same(array(), array_values(array_filter(cached_pages(), function ($f) { return strpos(basename($f), 'version') === false; })), 'a page was cached');
+		cache_empty();
+	});
+});
+
+test('rsvp: dead links: gone, hidden, started; a no reply\'s link lives', function () {
+	rsvp_site(function () {
+		$event = rsvp_event();
+		$e = $event['id'];
+		list($id, $raw) = rsvp_linked(array('event' => $e));
+		same(array(), rsvp_manage(array('token' => $raw), array('do' => 'change', 'answer' => 'no'))[1]);
+		same('no', rsvp_status($id));
+		list($rows, $alerts) = rsvp_manage(array('token' => $raw));
+		same(array(), $alerts);
+		same('no', $rows[0]['status']);
+		check(!array_key_exists('token_hashes', $rows[0]) && !array_key_exists('link_sent_at', $rows[0]), json_encode($rows[0]));
+		same(array(), rsvp_manage(array('token' => $raw), array('do' => 'change', 'answer' => 'yes', 'people' => '2'))[1]);
+		same(array('going', 2), array(rsvp_status($id), cms_records::get('rsvp', $id)['people']));
+		$save = function ($values) use ($e) { cms_store::save_item('eventsdata', $e, $values, array_keys($values), 'editor'); };
+		$save(array('enabled' => 0));
+		same(array(array(), array('link_invalid')), rsvp_manage(array('token' => $raw)));
+		$save(array('enabled' => 1));
+		same(array(), rsvp_manage(array('token' => $raw))[1]);
+		// its start moved to an hour ago
+		$ago = time() - 3600;
+		$save(array('date' => date('Y-m-d', $ago), 'starts' => date('H:i', $ago)));
+		same(array(array(), array('link_invalid')), rsvp_manage(array('token' => $raw)));
+		same(array(array(), array('link_invalid')), rsvp_manage(array('token' => $raw), array('do' => 'change', 'answer' => 'no')));
+		same('going', rsvp_status($id));
+		same(array('link_invalid'), booking_problems(function () use ($id) { rsvp::change($id, array('answer' => 'no'), 'guest'); }));
+		same('going', rsvp_status($id));
+		$save(array('date' => date('Y-m-d', strtotime('+10 days')), 'starts' => '20:00'));
+		same(array(), rsvp_manage(array('token' => $raw))[1]);
+		cms_store::delete_item('eventsdata', $e);
+		same(array(array(), array('link_invalid')), rsvp_manage(array('token' => $raw)));
+		same(null, rsvp::by_token($raw));
+		same(array('link_invalid'), rsvp_manage(array('token' => 'xyz'))[1]);
+		same(array('link_invalid'), rsvp_manage(array('token' => str_repeat('a', 64)))[1]);
+		same(array('link_invalid'), rsvp_manage(array())[1]);
+		same(array(array(), array()), rsvp_manage(array('done' => 'changed')));
+	});
+});
+
+test('rsvp: the guest\'s change, the deadline and the waitlist', function () {
+	rsvp_site(function () {
+		with_settings(array('rsvp_max_people' => 10), function () {
+			$event = rsvp_event(array('places' => 10));
+			rsvp_reply(array('event' => $event['id'], 'people' => 5));
+			list($id, $first) = rsvp_linked(array('event' => $event['id'], 'email' => 'change@example.test', 'people' => 2));
+			// 2 to 3 fits: rsvp_going again, with a new link
+			$mails = booking_mails(function () use ($first, &$alerts) { $alerts = rsvp_manage(array('token' => $first), array('do' => 'change', 'answer' => 'yes', 'people' => '3'))[1]; });
+			same(array(), $alerts);
+			same(array('rsvp_going change@example.test'), booking_sent($mails));
+			$second = booking_token($mails[0]);
+			check($second !== null && $second !== $first, 'a fresh link');
+			same(array(hash('sha256', $first), hash('sha256', $second)), cms_records::get('rsvp', $id)['token_hashes']);
+			foreach (array($first, $second) as $token) same($id, (int)rsvp::by_token($token)['id']);
+			// 3 to 9 doesn't fit: the guest keeps the 3 places they have
+			$mails = booking_mails(function () use ($second, &$result) { $result = rsvp_manage(array('token' => $second), array('do' => 'change', 'answer' => 'yes', 'people' => '9')); });
+			same(array('full_for_more'), $result[1]);
+			same('3', (string)$result[0][0]['people']);
+			same(array(), booking_sent($mails));
+			same(array('going', 3), array(rsvp_status($id), cms_records::get('rsvp', $id)['people']));
+			// past the deadline: places given back, none taken
+			cms_store::save_item('eventsdata', $event['id'], array('rsvp_until' => date('Y-m-d H:i', time() - 60)), array('rsvp_until'), 'editor');
+			same(array(), rsvp_manage(array('token' => $second), array('do' => 'change', 'answer' => 'yes', 'people' => '1'))[1]);
+			same(1, cms_records::get('rsvp', $id)['people']);
+			same(array('closed'), rsvp_manage(array('token' => $second), array('do' => 'change', 'answer' => 'yes', 'people' => '2'))[1]);
+			same(1, cms_records::get('rsvp', $id)['people']);
+			// the same answer and people again: nothing written or sent
+			$before = cms_records::get('rsvp', $id);
+			$mails = booking_mails(function () use ($second, &$alerts) { $alerts = rsvp_manage(array('token' => $second), array('do' => 'change', 'answer' => 'yes', 'people' => '1'))[1]; });
+			same(array(), $alerts);
+			same(array(), booking_sent($mails));
+			same($before, cms_records::get('rsvp', $id));
+		});
+		// a going guest's no moves a waiting one in, in the same change
+		with_settings(array('rsvp_staff_email' => 'staff@zz.test'), function () {
+			$event = rsvp_event(array('places' => 2));
+			list($id, $raw) = rsvp_linked(array('event' => $event['id'], 'email' => 'leaving@example.test', 'people' => 2));
+			$waiting = rsvp_reply(array('event' => $event['id'], 'email' => 'next@example.test'), 'editor')['id'];
+			same('waiting', rsvp_status($waiting));
+			$mails = booking_mails(function () use ($raw) { rsvp_manage(array('token' => $raw), array('do' => 'change', 'answer' => 'no')); });
+			same(array('rsvp_noted leaving@example.test', 'rsvp_new staff@zz.test', 'rsvp_promoted next@example.test'), booking_sent($mails));
+			check(booking_token($mails[0]) !== null && booking_token($mails[2]) !== null, 'the guests get a link');
+			check(strpos($mails[1]['text'], 'token=') === false, 'staff got a link: '.$mails[1]['text']);
+			same(array('no', 'going'), array(rsvp_status($id), rsvp_status($waiting)));
+		});
+	});
+});
+
+test('rsvp_waiting carries the position', function () {
+	rsvp_site(function () {
+		$event = rsvp_event(array('places' => 2));
+		rsvp_reply(array('event' => $event['id'], 'people' => 2), 'editor');
+		$ids = array();
+		$positions = array();
+		foreach (array(1, 2, 3) as $n) {
+			$mails = booking_mails(function () use ($event, &$ids) { $ids[] = rsvp_reply(array('event' => $event['id']), 'editor')['id']; });
+			same(array('rsvp_waiting'), array_column($mails, 'view'));
+			$positions[] = rsvp_position($mails[0]);
+		}
+		same(array('1', '2', '3'), $positions);
+		$mails = booking_mails(function () use ($ids) { rsvp::change($ids[0], array('answer' => 'no'), 'guest'); });
+		same(array('rsvp_noted'), array_column($mails, 'view'));
+		same('', rsvp_position($mails[0]));
+		$mails = booking_mails(function () use ($ids) { rsvp::change($ids[2], array('people' => 2), 'guest'); });
+		same(array('rsvp_waiting'), array_column($mails, 'view'));
+		same('2', rsvp_position($mails[0]));
+	});
+});
+
+test('rsvp: a logged in guest manages their own reply', function () use ($booking_base) {
+	rsvp_site(function () use ($booking_base) {
+		$event = rsvp_event();
+		$member = function ($email) use ($booking_base) {
+			list(, , $headers) = form_post("$booking_base/register", array('raster_form' => 'authentication.register', 'name' => 'Member', 'email' => $email, 'password' => 'correct horse 1', 'password_again' => 'correct horse 1'));
+			return preg_replace('/^Set-Cookie:\s*([^;]+).*$/i', '$1', current(preg_grep('/^Set-Cookie/i', $headers)));
+		};
+		$email = 'zzrsvp-owner-'.getmypid().'@example.test';
+		$mine = $member($email);
+		$other = $member('zzrsvp-other-'.getmypid().'@example.test');
+		try {
+			$owner = (int)R::getCell('SELECT id FROM user WHERE email = ?', array($email));
+			check($owner > 0, 'no account');
+			$id = cms_records::create('rsvp', array('name' => 'Owner', 'email' => 'owner@example.test', 'event' => $event['id'], 'owner' => $owner))['id'];
+			$page = http('GET', "$booking_base/rsvp?reply=$id", null, array("Cookie: $mine"))[1];
+			check(strpos($page, '<p class="reply">Owner') !== false && strpos($page, 'ALERT link_invalid') === false, $page);
+			$page = http('GET', "$booking_base/rsvp?reply=$id", null, array("Cookie: $other"))[1];
+			check(strpos($page, '<p class="reply">') === false && strpos($page, 'ALERT link_invalid') !== false, $page);
+			check(strpos(http('GET', "$booking_base/rsvp?reply=$id")[1], 'ALERT link_invalid') !== false, 'logged out');
+			$page = http('GET', "$booking_base/rsvp?reply=$id", null, array("Cookie: $mine"))[1];
+			check(preg_match('/name="csrf" value="([a-f0-9]+)"/', $page, $m) === 1, 'no csrf: '.$page);
+			$mails = booking_mails(function () use ($booking_base, $id, $m, $mine) {
+				list($status, , $headers) = form_post("$booking_base/rsvp?reply=$id", array('raster_form' => 'rsvp.manage', 'csrf' => $m[1], 'do' => 'change', 'answer' => 'maybe'), array("Cookie: $mine"));
+				same(303, $status);
+				same("$booking_base/rsvp?reply=$id&done=changed", location($headers));
+			});
+			same('maybe', rsvp_status($id));
+			same(array('rsvp_noted owner@example.test'), booking_sent($mails));
+		} finally {
+			R::exec("DELETE FROM user WHERE email LIKE 'zzrsvp-%'");
+		}
+	});
+});
+
+test('every rsvp email is sent once per change', function () {
+	rsvp_site(function () {
+		$event = rsvp_event(array('title' => 'Jazz night'));
+		list($id) = rsvp_linked(array('event' => $event['id'], 'email' => 'once@example.test'));
+		$mails = booking_mails(function () use ($id) { cms_store::save_item('rsvpdata', $id, array('notes' => 'by the window', 'phone' => '0721'), array('notes', 'phone'), 'editor'); });
+		same(array(), booking_sent($mails), 'a note:');
+		$mails = booking_mails(function () use ($event) { cms_store::save_item('eventsdata', $event['id'], array('title' => 'Jazz night, late'), array('title'), 'editor'); });
+		same(array(), booking_sent($mails), 'the event:');
+		$mails = booking_mails(function () use ($id) { cms_store::save_item('rsvpdata', $id, array('answer' => 'no'), array('answer'), 'editor'); });
+		same(array('rsvp_noted once@example.test'), booking_sent($mails), 'staff\'s no:');
+		check(booking_token($mails[0]) !== null, 'no link');
+		// a guest's change, without rsvp_staff_email: nothing for staff
+		$mails = booking_mails(function () use ($id) { rsvp::change($id, array('answer' => 'yes'), 'guest'); });
+		same(array('rsvp_going once@example.test'), booking_sent($mails), 'the guest\'s yes:');
+		// the model's change inside a transaction of the site's code: once
+		$mails = booking_mails(function () use ($id) {
+			cms_records::transaction(function () use ($id) { rsvp::change($id, array('answer' => 'maybe'), 'staff'); });
+		});
+		same(array('rsvp_noted once@example.test'), booking_sent($mails), 'in a transaction:');
+		$mails = booking_mails(function () use ($id) { rsvp::change($id, array('answer' => 'no'), 'guest'); });
+		same(array('rsvp_noted once@example.test'), booking_sent($mails), 'maybe to no:');
+		// a no with another party: nothing changed for them
+		$mails = booking_mails(function () use ($id) { rsvp::change($id, array('people' => 3), 'guest'); });
+		same(array(), booking_sent($mails), 'a no\'s party:');
+		same(3, cms_records::get('rsvp', $id)['people']);
+	});
+});
+
+test('a site can unbind an rsvp email', function () {
+	rsvp_site(function () {
+		$event = rsvp_event(array('places' => 1));
+		rsvp_reply(array('event' => $event['id']), 'editor');
+		$waiting = rsvp_reply(array('event' => $event['id'], 'email' => 'unbound@example.test'), 'editor')['id'];
+		event::unbind('rsvp.promoted')->from('rsvp', 'promoted_mail');
+		try {
+			$mails = booking_mails(function () use ($event) { cms_store::save_item('eventsdata', $event['id'], array('places' => 2), array('places'), 'editor'); });
+		} finally {
+			event::bind('rsvp.promoted')->to('rsvp', 'promoted_mail');
+		}
+		same(array(), booking_sent($mails));
+		same('going', rsvp_status($waiting));
+		$other = rsvp_reply(array('event' => $event['id'], 'email' => 'bound@example.test'), 'editor')['id'];
+		$mails = booking_mails(function () use ($event) { cms_store::save_item('eventsdata', $event['id'], array('places' => 3), array('places'), 'editor'); });
+		same(array('rsvp_promoted bound@example.test'), booking_sent($mails));
+		same('going', rsvp_status($other));
+	});
+});
+
+test('rsvp: a mail that fails is logged without the address', function () {
+	rsvp_site(function () {
+		$event = rsvp_event();
+		$was = getenv('RASTER_MAIL');
+		putenv('RASTER_MAIL=zz://nowhere');
+		try {
+			list($reply, $log) = spam_logged(function () use ($event) { return rsvp_reply(array('event' => $event['id'], 'email' => 'ana@example.test'), 'editor'); });
+		} finally {
+			putenv("RASTER_MAIL=$was");
+		}
+		same('going', rsvp_status($reply['id']), 'the reply is kept:');
+		$lines = array_values(preg_grep('/rsvp: /', explode("\n", $log)));
+		check($lines !== array(), 'nothing logged: '.$log);
+		foreach ($lines as $line) check(strpos($line, '@') === false && !preg_match('/[a-f0-9]{64}/', $line), 'logged: '.$line);
+	});
+});
+
+test('rsvp requires(): emails, pages, settings', function () {
+	rsvp_site(function ($theme) {
+		$messages = function ($view) {
+			return array_map(function ($p) { return $p['severity'].': '.$p['message']; }, (new raster_inspector())->lint_file($view));
+		};
+		$noted = "$theme/_email/rsvp_noted.html";
+		$html = file_get_contents($noted);
+		unlink($noted);
+		try {
+			check(preg_grep('/^error: render\.rsvp\.manage sends an email written in .*rsvp_noted\.html/', $messages('rsvp.html')) !== array(), json_encode($messages('rsvp.html')));
+		} finally {
+			file_put_contents($noted, $html);
+		}
+		same(array(), array_values(preg_grep('/^error/', $messages('rsvp.html'))));
+		check(in_array('rsvp', controller::required('pages'), true), 'pages: '.json_encode(controller::required('pages')));
+		$urls = array_column((new feed())->pages(), 'url');
+		check(!preg_grep('#/rsvp$#', $urls) && preg_grep('#/zzrsvp$#', $urls), 'sitemap: '.json_encode($urls));
+		with_settings(array('rsvp_manage_page' => 'my-reply'), function () {
+			same(array('my-reply'), array_values(array_intersect(array('rsvp', 'my-reply'), controller::required('pages'))));
+		});
+		require_once BASE.'tools/describe.php';
+		$settings = with_settings(array('rsvp_staff_email' => 'staff@zz.test'), function () { return raster_describe::site(array('settings'))['settings']; });
+		same('staff@zz.test', $settings['rsvp_staff_email']);
+		check(!preg_grep('/protected/', $messages('rsvp.html')), json_encode($messages('rsvp.html')));
+		with_settings(array('protected' => array('account' => 'member', 'rsvp' => 'editor')), function () use ($messages) {
+			check(preg_grep('/^warning: .*render\.rsvp\.manage.*protected/', $messages('rsvp.html')) !== array(), json_encode($messages('rsvp.html')));
+		});
 	});
 });
 
