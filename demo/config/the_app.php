@@ -8,10 +8,11 @@ config::set('domain_language')->to(array('ro.localhost' => 'ro'));
 config::set('language_cookie')->to('cafe_lang');
 
 // accounts: members see /members, staff (editors) see /staff and the pages
-// under it (/staff/setup, /staff/bookings) and a booking's own page. Never
-// 'booking': that prefix would also lock the guest's /booking page (lint
-// warns about it).
-config::set('protected')->to(array('members' => 'member', 'staff' => 'editor', 'account' => 'member', 'booking_item' => 'editor', 'contactmessage_item' => 'editor'));
+// under it (/staff/setup, /staff/bookings, /staff/events) and a booking's,
+// a message's and a reply's own page. Never 'booking' or 'rsvp': those
+// prefixes would also lock the guest's /booking and /rsvp pages (lint warns
+// about it).
+config::set('protected')->to(array('members' => 'member', 'staff' => 'editor', 'account' => 'member', 'booking_item' => 'editor', 'contactmessage_item' => 'editor', 'rsvp_item' => 'editor'));
 config::set('after_login')->to('members');
 config::set('password_min_length')->to(10);
 config::set('reset_page')->to('password/new');
@@ -51,6 +52,11 @@ config::set('contact_staff_email')->to('staff@cafe.test');
 config::set('booking_page')->to('visit');
 config::set('booking_staff_email')->to('staff@cafe.test');
 config::set('booking_max_people')->to(8);
+
+// replies to the events (the bundled rsvp model; the two evenings come from
+// php demo/seed.php): guests reply on each event's page and change it on
+// /rsvp, and staff get an email for each guest's reply
+config::set('rsvp_staff_email')->to('staff@cafe.test');
 
 // the contact form on /visit and the reset form keep the older validation regions on purpose, so
 // the suite still covers them (D14). doctor counts them apart instead of warning.

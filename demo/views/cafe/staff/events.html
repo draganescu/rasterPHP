@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <!-- dry._layout.head /-->
+  <title>Event replies</title>
+</head>
+<body>
+  <!-- dry._layout.header /-->
+  <main class="">
+    <h1>Event replies</h1>
+    <p><!-- print.rsvp.count('status=waiting') -->3<!-- /print.rsvp.count('status=waiting') --> replies waiting (past events too), <!-- print.rsvp.count('attention') -->0<!-- /print.rsvp.count('attention') --> that need attention.</p>
+    <p>Replies come from the bundled rsvp model: guests reply on each evening's page (<a href="events.html">/events</a>), and a yes is in while there are places, else on the waitlist. When places free up, the waitlist moves in by itself, oldest first, until replies close. Edit a reply in the page; Promote moves a waiting one in now, out of turn and after replies close too, when its party fits. The places, the date and when replies close are the evening's own fields: edit them on its page. <a href="staff.html">Back to staff</a></p>
+    <h3>Needs attention</h3>
+    <p>Replies an edit of their evening left out of place: phone them, then save the reply (a note) to clear it. Nobody is moved out or emailed for these.</p>
+    <table class="list"><tbody>
+      <!-- render.rsvp.attention -->
+      <tr class="reply"><td><!-- print.name -->Ana<!-- /print.name --></td><td><!-- print.event_title -->Jazz night<!-- /print.event_title -->, <!-- print.event_date -->2026-11-20<!-- /print.event_date --> <!-- print.event_starts -->20:00<!-- /print.event_starts --></td><td><!-- print.people -->2<!-- /print.people --> people</td><td><!-- print.phone -->+40 721 000 000<!-- /print.phone --></td><td class="status"><!-- print.status -->going<!-- /print.status --></td><td class="attention"><!-- print.attention -->moved<!-- /print.attention --></td><td><!-- print.@href.raster_detail_link --><a href="rsvp/rsvp_item/1">Open</a><!-- /print.@href.raster_detail_link --></td></tr>
+      <!-- /render.rsvp.attention -->
+    </tbody></table>
+    <h2>Evenings to come</h2>
+    <!-- render.rsvp.events('from=today') -->
+    <section class="day">
+      <h3><!-- print.event_title -->Jazz night<!-- /print.event_title -->, <!-- print.event_date -->2026-11-20<!-- /print.event_date --> at <!-- print.event_starts -->20:00<!-- /print.event_starts --></h3>
+      <p><!-- print.going -->28<!-- /print.going --> going, <!-- print.left -->12<!-- /print.left --> of <!-- print.places -->40<!-- /print.places --> places left; <!-- print.waiting -->0<!-- /print.waiting --> waiting, <!-- print.maybe -->2<!-- /print.maybe --> maybe, <!-- print.no -->1<!-- /print.no --> no.</p>
+      <table class="list"><tbody>
+        <!-- print.replies --><tr class="reply"><td><!-- print.name -->Ana<!-- /print.name --></td><td><!-- print.answer -->yes<!-- /print.answer -->, <!-- print.people -->2<!-- /print.people --> people</td><td><!-- print.email -->ana@example.com<!-- /print.email --> <!-- print.phone -->+40 721 000 000<!-- /print.phone --></td><td class="status"><!-- print.status -->going<!-- /print.status --> <!-- print.position --><!-- /print.position --></td><td class="attention"><!-- print.attention --><!-- /print.attention --></td><td><!-- print.notes -->Window seat<!-- /print.notes --></td><td><!-- print.@href.raster_detail_link --><a href="rsvp/rsvp_item/1">Open</a><!-- /print.@href.raster_detail_link --></td></tr><!-- /print.replies -->
+      </tbody></table>
+    </section>
+    <!-- /render.rsvp.events('from=today') -->
+    <h2>One evening</h2>
+    <p>Pick an evening for its replies alone. A reply taken over the phone is added with the card at the end of the list, which starts with that evening; it needs no email, and it waits like anyone's when the evening is full.</p>
+    <form method="get" class="filters">
+      <label>Evening <select name="event">
+        <option value="">All events</option>
+        <!-- render.rsvp.events('from=today') --><!-- print.@value.event --><option value="0"><!-- print.event_title -->Jazz night<!-- /print.event_title -->, <!-- print.event_date -->2026-11-20<!-- /print.event_date --></option><!-- /print.@value.event --><!-- /render.rsvp.events('from=today') -->
+      </select></label>
+      <button>Show</button>
+    </form>
+    <table class="list"><tbody>
+      <!-- render.cms.rsvp('event=?event&order=status,waiting_since') -->
+      <tr class="reply"><td><!-- print.name -->Ana<!-- /print.name --></td><td><!-- print.answer -->yes<!-- /print.answer -->, <!-- print.people -->2<!-- /print.people --> people</td><td><!-- print.phone -->+40 721 000 000<!-- /print.phone --></td><td class="status"><!-- print.status -->going<!-- /print.status --></td><td>evening <!-- print.event -->1<!-- /print.event --></td><td><!-- print.notes -->Phoned in<!-- /print.notes --></td><td><!-- print.@href.raster_detail_link --><a href="rsvp/rsvp_item/1">Open</a><!-- /print.@href.raster_detail_link --></td></tr>
+      <!-- /render.cms.rsvp('event=?event&order=status,waiting_since') -->
+    </tbody></table>
+  </main>
+  <!-- dry._layout.footer /-->
+</body>
+</html>

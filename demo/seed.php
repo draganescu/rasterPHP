@@ -1,6 +1,7 @@
 <?php
-// What the café takes bookings for, so a fresh demo can take them:
-// php demo/seed.php (after schema --apply in production)
+// What the café takes bookings for, and two evenings that take replies,
+// so a fresh demo has them: php demo/seed.php (after schema --apply in
+// production)
 //
 // The Dining room seats 20 at two sittings, Tuesday to Sunday (no row for
 // Monday, so Mondays have none), and is closed on 25 December. The salon
@@ -8,6 +9,12 @@
 // two services. These are booking setup records: staff change them on
 // /staff/setup. This goes through cms_records like the page editor does,
 // so booking::check() looks at every one; running it again adds nothing.
+//
+// The evenings are items of the events collection (the rsvp model's): a
+// jazz night with 40 places in two weeks, and a poetry evening with 4 in
+// ten days, whose replies close the day before, so the waitlist is easy to
+// see. An evening counts as there while one with its title is still to
+// come; the mock-up's own Jazz night is long past.
 if (PHP_SAPI !== 'cli') exit;
 putenv('RASTER_APP=demo');
 require_once dirname(__DIR__).'/system/boot.php';
@@ -45,4 +52,25 @@ foreach ($setup as $type => $records) {
 		cms_records::create($type, $record);
 		echo "added $type ".reset($record)."\n";
 	}
+}
+
+// the events table's columns, typed as schema --apply makes them (places an
+// int), also when nobody has opened /events yet
+require_once BASE.'tools/inspector.php';
+$model = (new raster_inspector())->content_model();
+$types = array_intersect_key(cms_types::$system, array_flip(array('slug', 'enabled', 'published_at', 'updated_at')));
+foreach ($model['collections']['events']['fields'] as $name => $field) $types[$name] = $field['type'];
+cms_store::connect();
+cms_types::ensure('eventsdata', $types);
+
+$evenings = array(
+	array('title' => 'Jazz night', 'date' => date('Y-m-d', strtotime('+14 days')), 'starts' => '20:00', 'places' => 40,
+		'summary' => '<p>The house trio, from eight.</p>', 'body' => '<p>Two sets of standards and a few of our own. Tell us you are coming, and how many.</p>'),
+	array('title' => 'Poetry evening', 'date' => date('Y-m-d', strtotime('+10 days')), 'starts' => '19:00', 'places' => 4, 'rsvp_until' => date('Y-m-d', strtotime('+9 days')).' 18:00',
+		'summary' => '<p>Four chairs by the window.</p>', 'body' => '<p>Bring a poem, or just listen. There are four chairs; when they are taken, join the waitlist.</p>'),
+);
+foreach ($evenings as $evening) {
+	if (R::findOne('eventsdata', ' title = ? AND date >= ? ', array($evening['title'], date('Y-m-d')))) continue;
+	cms_store::save_item('eventsdata', 0, $evening, array_keys($evening));
+	echo "added event {$evening['title']}\n";
 }

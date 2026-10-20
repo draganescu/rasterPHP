@@ -32,6 +32,13 @@
     <!-- render.pagination.links('cms.booking', 'owner=me') -->
     <nav class="pager"><!-- print.@href.prev_url --><a class="prev" href="#">Newer</a><!-- /print.@href.prev_url --> page <!-- print.current -->1<!-- /print.current --> of <!-- print.total -->1<!-- /print.total --> <!-- print.@href.next_url --><a class="next" href="#">Older</a><!-- /print.@href.next_url --></nav>
     <!-- /render.pagination.links('cms.booking', 'owner=me') -->
+    <h2>Your replies</h2>
+    <p>Your replies to our evenings, made while logged in.</p>
+    <ul class="bookings">
+      <!-- render.cms.rsvp('owner=me&order=-created_at') -->
+      <li><!-- print.answer -->yes<!-- /print.answer -->, <!-- print.people -->2<!-- /print.people --> people: <!-- print.status -->going<!-- /print.status --> <form method="get" action="rsvp.html" class="inline"><!-- print.@value.id --><button class="secondary" name="reply" value="1">Change my reply</button><!-- /print.@value.id --></form></li>
+      <!-- /render.cms.rsvp('owner=me&order=-created_at') -->
+    </ul>
     <!-- render.authentication.logout -->
     <form method="post"><button class="secondary">Log out</button></form>
     <!-- /render.authentication.logout -->

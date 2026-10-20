@@ -1502,7 +1502,8 @@ Nothing in `the_app.php` is required when the collection is called
 add replies in the page (`render.cms.rsvp`), over MCP or by model code,
 and the guest gets an email with their link at each step. Staff see
 every event's counts and replies, and what needs attention, on their own
-page.
+page. The demo café's events (`demo/`) take replies, its two evenings
+from `php demo/seed.php`, and are the worked example of all of it.
 - **The event is an item** of `rsvp_collection` (`events`), read with
   `cms_store::get_item()`, never written. Four of its fields, written in
   its item view like any other (`<!-- print.places -->40<!-- /print.places -->`),
@@ -1756,8 +1757,10 @@ page.
     still to come (a deleted event's, one moved into the past).
   - `print.rsvp.count('status=waiting')`: how many replies match (options
     as `cms_records::find` takes them, values only:
-    `count('status=going&event=7')`), or `count('attention')`: for the
-    staff page's heading (`''` for anyone else).
+    `count('status=going&event=7')`, never `?event`), or
+    `count('attention')`: for the staff page's heading (`''` for anyone
+    else). It counts every reply that matches, past events' too: one
+    event's numbers are in its `render.rsvp.events` row.
   - **Needs attention.** Staff edit events in the page all the time (a
     typo, a date), so nothing they do to an event is refused, nobody
     going is moved out, and nobody is emailed. Instead an active reply
@@ -1773,8 +1776,13 @@ page.
   - One event's replies: `render.cms.rsvp('event=?event&order=status,waiting_since')`
     on the staff page, opened with `?event=<id>`: a GET form whose
     `<select name="event">` lists the events with `render.rsvp.events`
-    (`<!-- print.@value.event --><option value="">…</option><!-- /print.@value.event -->`).
-    The card for a new reply at the end of that list starts with that
+    (`<!-- print.@value.event --><option value="0">…</option><!-- /print.@value.event -->`),
+    after an `<option value="">All events</option>`. Give the mock-up
+    option a value no event has (`0`): a GET form is filled from the URL
+    before the rows are made, so a mock-up that matched would mark every
+    row chosen. Not a link: `print.+href` adds a space before what it
+    appends, so it can't finish `?event=`. Without `?event` (All events)
+    the list has every reply. The card for a new reply at the end of that list starts with that
     `event`, so a phone reply is added in the page with no id to type.
     A phone reply needs no email; it is checked like any staff reply
     (never over `places`: it waits when it doesn't fit).
@@ -1796,6 +1804,84 @@ page.
   `rsvp::by_token($raw)` gives the reply a link is for (or null),
   `rsvp::position($reply)` its place in the queue. Model code that writes
   replies with `cms_records::create/update` is trusted like staff.
+- Taking replies, step by step:
+  1. The event's fields, written in the collection's views like any other
+     (`events.html`, the list, and `events_item.html`, the item): `date`,
+     `starts` and `places`, and `rsvp_until` where replies close before
+     the start. The list's own view types the fields, so give `places` its
+     mock-up (`40`) there too. A field only staff need to see goes in
+     `print.if.is_editor` (the café's `rsvp_until`).
+  2. The item view: `render.rsvp.event` for the places left, then
+     `render.rsvp.form` with an alert for each problem the form can raise
+     and for `going`, `waiting` and `noted`, all inside `print.if.live`,
+     and what a static export says instead in `print.if.static` (a phone
+     number). One sentence per `state`, with no JavaScript: put each in
+     the region's block and let `print.+class.state` and the theme's CSS
+     show the one that applies:
+
+     ```html
+     <!-- render.rsvp.event -->
+     <!-- print.+class.state --><div class="rsvp-state">
+       <p class="if-open"><!-- print.left -->12<!-- /print.left --> of <!-- print.places -->40<!-- /print.places --> places left</p>
+       <p class="if-full">Full: join the waitlist</p> <p class="if-closed">Replies closed</p> <p class="if-over">It has started</p>
+     </div><!-- /print.+class.state -->
+     <!-- /render.rsvp.event -->
+     ```
+
+     ```css
+     .rsvp-state > p { display: none; }
+     .rsvp-state.open .if-open, .rsvp-state.full .if-full, .rsvp-state.closed .if-closed, .rsvp-state.over .if-over { display: block; }
+     ```
+
+  3. The manage page (`rsvp`): `render.rsvp.manage` with its change form,
+     and alerts for `link_invalid`, `changed`, `closed`, `full_for_more`,
+     `too_many` and `people_invalid`.
+  4. The `_email/rsvp_*.html` views: `rsvp_going`, `rsvp_waiting`,
+     `rsvp_promoted`, `rsvp_noted` and `rsvp_link`, and `rsvp_new` with
+     `rsvp_staff_email` (`lint` names a missing one). A `<title>` may
+     print the event: `<title>You're in: <!-- print.self.event_title -->Jazz night<!-- /print.self.event_title --></title>`.
+  5. The staff page, from the Records recipe, protected for editors by
+     its own names (never `rsvp`, the guests' page):
+
+     ```php
+     config::set('protected')->to(array('staff' => 'editor', 'rsvp_item' => 'editor'));
+     ```
+
+     ```html
+     <!-- staff/events.html -->
+     <p><!-- print.rsvp.count('status=waiting') -->3<!-- /print.rsvp.count('status=waiting') --> replies waiting (past events too),
+        <!-- print.rsvp.count('attention') -->0<!-- /print.rsvp.count('attention') --> that need attention</p>
+     <h3>Needs attention</h3>
+     <!-- render.rsvp.attention --><p><!-- print.name -->Ana<!-- /print.name -->, <!-- print.event_title -->Jazz night<!-- /print.event_title -->: <!-- print.attention -->moved<!-- /print.attention --></p><!-- /render.rsvp.attention -->
+     <!-- render.rsvp.events('from=today') -->
+     <h3><!-- print.event_title -->Jazz night<!-- /print.event_title -->, <!-- print.event_date -->2026-11-20<!-- /print.event_date --></h3>
+     <p><!-- print.going -->28<!-- /print.going --> going, <!-- print.left -->12<!-- /print.left --> of <!-- print.places -->40<!-- /print.places --> left, <!-- print.waiting -->0<!-- /print.waiting --> waiting</p>
+     <ul><!-- print.replies --><li><!-- print.name -->Ana<!-- /print.name --> <!-- print.people -->2<!-- /print.people --> <!-- print.status -->going<!-- /print.status --> <!-- print.position --><!-- /print.position --></li><!-- /print.replies --></ul>
+     <!-- /render.rsvp.events('from=today') -->
+     <h3>One evening</h3>
+     <form method="get"><select name="event"><option value="">All events</option>
+       <!-- render.rsvp.events('from=today') --><!-- print.@value.event --><option value="0"><!-- print.event_title -->Jazz night<!-- /print.event_title --></option><!-- /print.@value.event --><!-- /render.rsvp.events('from=today') -->
+     </select> <button>Show</button></form>
+     <!-- render.cms.rsvp('event=?event&order=status,waiting_since') --><p><!-- print.name -->Ana<!-- /print.name --> <!-- print.status -->going<!-- /print.status --></p><!-- /render.cms.rsvp('event=?event&order=status,waiting_since') -->
+     ```
+
+     Staff edit a reply in place, move a waiting one in with its Promote
+     button, and add a phone reply with the card at the end of the one
+     evening's list (pick the evening first: the card starts with it). The
+     places, the date and the deadline are the event's own fields, edited
+     on its page; raising `places` there moves the waitlist in.
+     `rsvp_item.html` rendering `render.cms.rsvp` is a reply's own page
+     (`/rsvp/rsvp_item/<slug>`, where `raster_detail_link` goes). The
+     counts take values only, so a count for the chosen event is the
+     event's row, not `count('…&event=?event')`.
+  6. On `/account`, `render.cms.rsvp('owner=me&order=-created_at')` lists a
+     logged in guest's own replies; a GET form to `rsvp.html` with
+     `<button name="reply" value="…">` opens one, without a token.
+  7. The events themselves: staff write them in the page. A seed script
+     can add some with `cms_store::save_item('eventsdata', 0, $values,
+     array_keys($values))`, after `cms_types::ensure()` makes the table's
+     columns with the types of the inspector's content model
+     (`demo/seed.php`), so `places` is an int before anyone opens the list.
 
 **mail**: emails are views. `mail::send_view('_email/welcome', $to,
 array('name' => 'Ada'))` uses the view's `<title>` as the subject.
