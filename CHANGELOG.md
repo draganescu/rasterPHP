@@ -5,6 +5,8 @@ file changes for you; `php bin/raster doctor` shows what is left.
 
 ## 2.2.35
 
+Nothing for sites to do. The demo café's jazz night and poetry evening take replies (`php demo/seed.php` adds them), with the guest's page on `/rsvp` and the staff page on `/staff/events`. AGENTS.md has the steps, and a new wiki page, Event replies (RSVP), covers the model. #168 Phase 2's RSVP is done.
+
 **A GET form keeps an option a model lists chosen.** A `<form method="get">` was filled from the URL before the page's render blocks ran, so an option they listed (`render.rsvp.events`, `render.booking.resources`) was never chosen, and one whose mock-up value matched the URL marked every row it was copied into. The form is now filled once the page is rendered: `/staff/events?event=7` keeps that evening chosen.
 
 ## 2.2.34

@@ -2,7 +2,7 @@
 
 Most of what a site stores is **content**: pages, menu items, news. You declare it by writing a template, editors write it, and visitors read it. Some things aren't like that. A catering request, an order or a job application is sent by a visitor, belongs to them, has rules (no catering for two, no selling what's out of stock), and only staff should see it. Raster calls these **records**.
 
-> **Taking bookings?** Table bookings and appointments are records too, and Raster ships them ready: the bundled booking model has the type, the slots, the capacity rules, the guest's emails and link, and a staff page made of the lists below. See [Bookings](Bookings). The example on this page is a catering request, a type of your own.
+> **Taking bookings?** Table bookings and appointments are records too, and Raster ships them ready: the bundled booking model has the type, the slots, the capacity rules, the guest's emails and link, and a staff page made of the lists below. See [Bookings](Bookings). Replies to your events (yes, maybe, no, with places and a waitlist) are ready too: see [Event replies (RSVP)](RSVP). The example on this page is a catering request, a type of your own.
 
 A model declares a type of record: what it holds and what makes it valid. The CMS does the rest. It stores records, lists them wherever a template renders them, and lets editors and agents work with them in the same [in-page editor](The-In-Page-Editor) and [MCP tools](Working-with-AI-Agents) as any other item.
 
