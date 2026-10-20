@@ -24,6 +24,7 @@
 - [Records](Records)
 - [Bookings](Bookings)
 - [Contact forms](Contact-Forms)
+- [Event replies (RSVP)](RSVP)
 - [Accounts and roles](Accounts-and-Roles)
 - [Sending email](Sending-Email)
 - [Newsletter](Newsletter)

@@ -1,5 +1,5 @@
 <?php
-// The in-page editor's booking words in Romanian (see ../en/raster_editor.php).
+// The in-page editor's words in Romanian (see ../en/raster_editor.php).
 return array(
 	'action_confirm' => 'Confirmă rezervarea', 'action_decline' => 'Refuză', 'action_cancel' => 'Anulează rezervarea',
 	'problem_closed' => 'Suntem închiși în ziua aceea: mută rezervarea sau anuleaz-o',
@@ -11,4 +11,8 @@ return array(
 	'problem_already_confirmed' => 'E deja confirmată', 'problem_already_declined' => 'E deja refuzată', 'problem_already_cancelled' => 'E deja anulată',
 	'problem_resource_in_use' => 'Rezervări viitoare îl folosesc: păstrează-i slugul sau mută-le întâi',
 	'problem_service_in_use' => 'Rezervări viitoare îl folosesc: păstrează-i slugul sau mută-le întâi',
+	'action_promote' => 'Primește-i',
+	'problem_not_waiting' => 'Doar un răspuns de pe lista de așteptare poate fi primit',
+	'problem_not_enough_places' => 'Nu sunt destule locuri: mărește întâi numărul de locuri în pagina serii',
+	'problem_full_for_more' => 'Nu sunt destule locuri pentru mai mulți',
 );

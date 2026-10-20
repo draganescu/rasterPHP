@@ -5,7 +5,7 @@ real job. `tests/demo.php` drives it over HTTP, the command line, MCP and a
 fake SMTP server, and fails if any feature below has no passing test.
 
 ```sh
-php demo/seed.php                         # what the café takes bookings for
+php demo/seed.php                         # what the café takes bookings for, and two evenings
 RASTER_APP=demo php bin/raster serve      # http://localhost:8000
 RASTER_APP=demo php bin/raster user you@example.com --role=editor
 php tests/demo.php                        # the whole matrix
@@ -19,6 +19,12 @@ December) and the salon's two stylists with their hours and two services. Run
 it once after `raster schema --apply` (in production) or on a fresh database;
 running it again adds nothing. Until then the booking forms say `not_open`.
 
+Replies to the events come from the bundled rsvp model
+(`system/models/rsvp/`); the café writes only its pages, its emails and the
+words. The seed also adds two evenings: a Jazz night with 40 places in two
+weeks, and a Poetry evening with 4 places in ten days, whose replies close the
+day before, so the waitlist is easy to see.
+
 | Where | What it shows |
 |---|---|
 | `/` | page fields, featured dishes (a filtered, limited collection), upcoming events |
@@ -28,7 +34,10 @@ running it again adds nothing. Until then the booking forms say `not_open`.
 | `/salon` | appointments: pick a stylist and a service, then a day and a time |
 | `/booking` | the guest's page, by the link in their emails (`?token=`) or from /account: cancel, or move to another time |
 | `/staff`, `/staff/setup`, `/staff/bookings`, `/booking/booking_item/<slug>` | the staff page from the Records recipe (counts, needs attention, requests, the agenda with the places left, the past, and the contact messages: new, spam, done), the booking setup, every booking, one booking; `/contactmessage/contactmessage_item/<slug>` is one message |
-| `/members`, `/account`, `/login`, `/register`, `/forgot`, `/password/new` | accounts, roles and protected pages; members see their bookings on /account |
+| `/events/events_item/<slug>` | an evening's page: the places left, and the reply form (yes with a party, maybe, no), with the waitlist when it is full |
+| `/rsvp` | the guest's reply, by the link in their emails (`?token=`) or from /account: change the answer or the party |
+| `/staff/events`, `/rsvp/rsvp_item/<slug>` | the replies' staff page: counts, needs attention, every evening to come with its replies and the waitlist's Promote button, and one evening's replies with the card for a phone reply; one reply |
+| `/members`, `/account`, `/login`, `/register`, `/forgot`, `/password/new` | accounts, roles and protected pages; members see their bookings and replies on /account |
 | `/lab` | the engine's edge cases, one section each |
 | `/journal.rss`, `/journal.atom`, `/feed.json`, `/sitemap.xml`, `/hours.txt` | formats |
 | `?lang=ro` | the Romanian translation |
@@ -345,3 +354,15 @@ running it again adds nothing. Until then the booking forms say `not_open`.
 | Q3 | the café's contact form is the bundled contact model: `?done=sent`, one email to staff with `Reply-To` the guest, the message listed on `/staff` for editors only |
 | Q4 | the café's `no_links` rule (D13) turns plain web addresses back before the model sees them; links it doesn't catch (bbcode `[url=…]`) make the model keep the message aside as spam (the visitor is thanked, nobody is emailed). It shows in the Spam list, and `not_spam` moves it to the new ones without a mail |
 | Q5 | the staff page lists the messages (new, spam, done) with the in-page editor and the actions |
+
+### S. Event replies: the bundled rsvp model
+
+| ID | Feature |
+|---|---|
+| S1 | the café's evenings take replies (`demo/seed.php` adds two): the item page says how many places are left, a yes gets `rsvp_going` with the guest's link and staff `rsvp_new`, a party over `rsvp_max_people` is for a phone call; no JavaScript |
+| S2 | a full evening has a waitlist: a yes that doesn't fit waits (`rsvp_waiting`, with its place), a smaller party that fits goes in ahead, and places given back move the waiting in (`rsvp_promoted`) |
+| S3 | the reply link: a GET or HEAD changes nothing, a post from another site is refused, a POST changes the reply and comes back without the token; a maybe's link still works; never cached, left out of the sitemap and the export, where the evening says to call |
+| S4 | the deadline (`rsvp_until`, set over MCP): a new yes is `closed`, a no goes through and moves nobody in, more people is refused; saving the evening with a later deadline moves the waitlist in |
+| S5 | replying twice with one address (in any letter case) stores nothing and emails the link to the reply's own address, once every five minutes; a post without a stamp mails nothing |
+| S6 | the staff page (`/staff/events`): the counts, the evenings with their replies, a GET select that keeps the chosen evening, a phone reply from the card that waits when full, `promote` refused without places and given after the deadline, `places` lowered in the page flagging `over_places` and moving nobody |
+| S7 | a logged in guest sees their replies on /account and changes one by `?reply=`, without a token; nobody else can |

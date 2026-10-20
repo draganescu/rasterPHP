@@ -962,11 +962,12 @@ test(array('E30'), 'the editor lists the admin pages protected lets this person 
 	$config = editor_config(http('GET', "$base/about", null, array("Cookie: $staff"))[1]);
 	same(array(
 		array('url' => "$base/staff/setup", 'title' => 'Booking setup', 'current' => false),
+		array('url' => "$base/staff/events", 'title' => 'Event replies', 'current' => false),
 		array('url' => "$base/staff/bookings", 'title' => 'Every booking', 'current' => false),
 		array('url' => "$base/staff", 'title' => 'Staff', 'current' => false),
-	), $config['admin'], 'by title; a booking\'s own page (booking_item) is no admin page');
+	), $config['admin'], 'by title; a booking\'s own page (booking_item) is no admin page, nor a reply\'s (rsvp_item)');
 	$config = editor_config(http('GET', "$base/staff", null, array("Cookie: $staff"))[1]);
-	same(array(false, false, true), array_column($config['admin'], 'current'));
+	same(array(false, false, false, true), array_column($config['admin'], 'current'));
 	$titles = function ($base, $cookie) {
 		return array_column(editor_config(http('GET', "$base/about", null, array("Cookie: $cookie"))[1])['admin'], 'title');
 	};
@@ -974,15 +975,16 @@ test(array('E30'), 'the editor lists the admin pages protected lets this person 
 	@mkdir("$views/staff");
 	try {
 		with_file("$views/staff/rota.html", '<!doctype html><html><head><title><!-- print.cms.rota_title -->Rota<!-- /print.cms.rota_title --> &amp; shifts</title></head><body><p>Rota</p></body></html>', function () use ($base, $db, $maildir, $staff, $titles) {
-			same(array('Booking setup', 'Every booking', 'Rota & shifts', 'Staff'), $titles($base, $staff));
+			same(array('Booking setup', 'Event replies', 'Every booking', 'Rota & shifts', 'Staff'), $titles($base, $staff));
 			// a stricter pattern keeps it to admins
 			raster(array('user', 'boss@cafe.test', '--role=admin', '--password=boss password'));
 			$strict = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'CAFE_ADMIN_PAGE' => 'staff/rota'));
-			same(array('Booking setup', 'Every booking', 'Staff'), $titles($strict, login($strict, 'staff@cafe.test', 'staff password')), 'editors do not see admin pages');
-			same(array('Booking setup', 'Every booking', 'Rota & shifts', 'Staff'), $titles($strict, login($strict, 'boss@cafe.test', 'boss password')));
+			same(array('Booking setup', 'Event replies', 'Every booking', 'Staff'), $titles($strict, login($strict, 'staff@cafe.test', 'staff password')), 'editors do not see admin pages');
+			same(array('Booking setup', 'Event replies', 'Every booking', 'Rota & shifts', 'Staff'), $titles($strict, login($strict, 'boss@cafe.test', 'boss password')));
 			list($code, $out) = raster(array('describe', '--json', '--sections=admin_pages'), array('RASTER_DB' => $db, 'CAFE_ADMIN_PAGE' => 'staff/rota'));
 			same(array('admin_pages' => array(
 				array('url' => '/staff/setup', 'view' => 'staff/setup', 'title' => 'Booking setup', 'role' => 'editor'),
+				array('url' => '/staff/events', 'view' => 'staff/events', 'title' => 'Event replies', 'role' => 'editor'),
 				array('url' => '/staff/bookings', 'view' => 'staff/bookings', 'title' => 'Every booking', 'role' => 'editor'),
 				array('url' => '/staff/rota', 'view' => 'staff/rota', 'title' => 'Rota & shifts', 'role' => 'admin'),
 				array('url' => '/staff', 'view' => 'staff', 'title' => 'Staff', 'role' => 'editor'),
@@ -1266,7 +1268,7 @@ test('M4', 'every MCP tool', function () use ($base) {
 	$urls = array_map(function ($p) { return $p['url']; }, $overview['pages']);
 	foreach (array('site', '/', '/about', '/menu', '/docs/setup') as $url) check(in_array($url, $urls), "overview lacks $url");
 	$collections = array_map(function ($c) { return $c['name']; }, $overview['collections']);
-	same(array('booking', 'bookingclosed', 'bookinghours', 'bookingresource', 'bookingservice', 'contactmessage', 'events', 'faq', 'journal', 'menu'), $collections);
+	same(array('booking', 'bookingclosed', 'bookinghours', 'bookingresource', 'bookingservice', 'contactmessage', 'events', 'faq', 'journal', 'menu', 'rsvp'), $collections);
 	same('About us', mcp($base, 'get_page', array('page' => '/about'))['fields']['heading']);
 	$item = mcp($base, 'create_item', array('collection' => 'journal', 'fields' => array('title' => 'MCP post', 'author' => 'Agent')));
 	same('Agent', mcp($base, 'get_item', array('collection' => 'journal', 'id' => $item['id']))['author']);
@@ -1303,7 +1305,7 @@ test('M10', 'describe: the site in one call', function () use ($base) {
 	same('cafe', $all['site']['theme']);
 	check(in_array('/menu', array_map(function ($p) { return $p['url']; }, $all['pages'])), 'the pages are there');
 	$names = array_map(function ($c) { return $c['name']; }, $all['collections']);
-	same(array('booking', 'bookingclosed', 'bookinghours', 'bookingresource', 'bookingservice', 'contactmessage', 'events', 'faq', 'journal', 'menu'), $names);
+	same(array('booking', 'bookingclosed', 'bookinghours', 'bookingresource', 'bookingservice', 'contactmessage', 'events', 'faq', 'journal', 'menu', 'rsvp'), $names);
 	same(4, $all['collections'][array_search('menu', $names)]['page_size'], 'menu_page_size');
 	same(50, $all['collections'][array_search('booking', $names)]['page_size'], 'booking_page_size');
 	same(0, $all['lint']['errors']);
@@ -2874,6 +2876,11 @@ test(array('R12', 'R13'), 'schema --apply creates record tables in production; m
 	same(0, $code, $out);
 	has($out, 'added bookingresource Dining room');
 	same(3, (int)$pdo->query('SELECT COUNT(*) FROM bookingresourcedata')->fetchColumn());
+	// and its two evenings take replies, beside the mock-up's past one
+	has($out, "added event Jazz night\nadded event Poetry evening");
+	$coming = $pdo->prepare('SELECT title, places FROM eventsdata WHERE date >= ? ORDER BY date');
+	$coming->execute(array(date('Y-m-d')));
+	same(array('Poetry evening' => '4', 'Jazz night' => '40'), array_map('strval', $coming->fetchAll(PDO::FETCH_KEY_PAIR)));
 	same(array(0, ''), raster_php_env("$root/demo/seed.php", $env));
 	// a catering request form, as a type
 	$views = "$root/demo/views/cafe";
@@ -2995,7 +3002,7 @@ test('T1', 'a template field is of its mock-up\'s type, a record field of its de
 	$overview = mcp($base, 'site_overview');
 	foreach ($overview['collections'] as $c) $listed[$c['name']] = isset($c['types']) ? $c['types'] : array();
 	same(array('price' => 'number', 'featured' => 'int'), $listed['menu'], 'only the fields that aren\'t text');
-	same(array('date' => 'date', 'starts' => 'time'), $listed['events']);
+	same(array('date' => 'date', 'starts' => 'time', 'places' => 'int', 'rsvp_until' => 'datetime'), $listed['events']);
 	$described = json_decode(raster(array('describe', '--json', '--sections=collections'))[1], true);
 	foreach ($described['collections'] as $c) if ($c['name'] === 'booking') same(array('date' => 'date', 'time' => 'time', 'ends' => 'time', 'people' => 'int', 'token_expires' => 'datetime', 'changed_at' => 'datetime', 'newsletter' => 'bool'), $c['types'] + array());
 });
@@ -4629,6 +4636,276 @@ test('Q5', 'the staff page lists messages with the in-page editor', function () 
 	// a message is a record the editor marks, with their buttons
 	has($out, '"collection":"contactmessage"', 'the messages are editable in the page');
 	has($out, '"actions":["done","spam","not_spam"]', 'with their actions');
+});
+
+// ## S. Event replies: the bundled rsvp model, as the café's evenings use it
+
+// one of the evenings demo/seed.php adds, as the model reads it (read fresh)
+function cafe_event($title) {
+	database::instance('cms');
+	$id = (int)R::getCell('SELECT id FROM eventsdata WHERE title = ? AND date >= ? ORDER BY id', array($title, date('Y-m-d')));
+	check($id > 0, "the seeded $title (demo/seed.php)");
+	cms_store::forget();
+	rsvp::forget();
+	return rsvp::item($id);
+}
+function event_page($base, $event) {
+	return "$base/events/events_item/{$event['slug']}";
+}
+// posts the reply form on the event's page
+function reply($base, $event, $fields, $headers = array()) {
+	$fields += array('raster_form' => 'rsvp.form', 'name' => 'Guest', 'answer' => 'yes', 'people' => '1');
+	return http('POST', event_page($base, $event), $fields, $headers);
+}
+// the guest's link in an rsvp email (the raw token)
+function rsvp_token($mail) {
+	return $mail && preg_match('#/rsvp\?token=([a-f0-9]{64})#', $mail['html'], $m) ? $m[1] : null;
+}
+function reply_row($email) {
+	database::instance('cms');
+	return R::getRow('SELECT * FROM rsvpdata WHERE email = ?', array($email)) ?: null;
+}
+// run with RASTER_TEST_ONLY=S, not alone: S2, S4 and S6 build on each other's replies
+test('S1', 'the café\'s events take replies, with the places left', function () use ($base) {
+	$jazz = cafe_event('Jazz night');
+	same(array(40, '20:00', date('Y-m-d', strtotime('+14 days'))), array($jazz['places'], $jazz['starts'], $jazz['date']), 'demo/seed.php:');
+	$page = http('GET', event_page($base, $jazz))[1];
+	has($page, '40 of 40 places left');
+	has($page, 'Replies close '.date('Y-m-d H:i', $jazz['deadline']).'.', 'no rsvp_until: when it starts');
+	has($page, 'value="rsvp.form"', 'the form');
+	$form = substr($page, strpos($page, 'value="rsvp.form"'));
+	$form = substr($form, 0, strpos($form, '</form>'));
+	lacks($form, '<script', 'no JavaScript to reply');
+	has($form, 'name="answer" value="maybe"');
+	lacks(http('GET', "$base/events")[1], 'value="rsvp.form"', 'the list takes no replies');
+	$before = count(mails());
+	list($status, , $headers) = reply($base, $jazz, array('name' => 'Ana', 'email' => 'ana.rsvp@example.com', 'people' => '2'));
+	same(303, $status);
+	same(event_page($base, $jazz).'?done=going', header_value($headers, 'Location'));
+	$after = http('GET', header_value($headers, 'Location'))[1];
+	has($after, "You're in.");
+	has($after, '38 of 40 places left');
+	same(array('ana.rsvp@example.com', 'staff@cafe.test'), array_column(array_slice(mails(), $before), 'to'), 'rsvp_going to the guest, rsvp_new to staff');
+	same("You're in: Jazz night", mail_to('ana.rsvp@example.com')['subject']);
+	check(rsvp_token(mail_to('ana.rsvp@example.com')) !== null, 'with the link');
+	same('New reply: Jazz night', mail_to('staff@cafe.test')['subject']);
+	lacks(mail_to('staff@cafe.test')['html'], '/rsvp?token=', 'staff get no link');
+	same(array('going', '2'), array(reply_row('ana.rsvp@example.com')['status'], (string)reply_row('ana.rsvp@example.com')['people']));
+	// a party over rsvp_max_people (6) is for a phone call
+	list($status, $body) = reply($base, $jazz, array('name' => 'Big', 'email' => 'big.rsvp@example.com', 'people' => '7'));
+	same(200, $status);
+	has($body, 'For more than 6, call us');
+	same(null, reply_row('big.rsvp@example.com'), 'nothing stored');
+});
+test('S2', 'a full evening has a waitlist that moves', function () use ($base) {
+	$poetry = cafe_event('Poetry evening');
+	same(array(4, '19:00'), array($poetry['places'], $poetry['starts']), 'demo/seed.php:');
+	same(date('Y-m-d', strtotime('+9 days')).' 18:00', date('Y-m-d H:i', $poetry['deadline']), 'replies close the day before');
+	same(303, reply($base, $poetry, array('name' => 'Petra', 'email' => 'petra.rsvp@example.com', 'people' => '3'))[0]);
+	list($status, , $headers) = reply($base, $poetry, array('name' => 'Radu', 'email' => 'radu.rsvp@example.com', 'people' => '2'));
+	same(303, $status);
+	same(event_page($base, $poetry).'?done=waiting', header_value($headers, 'Location'), '3 and 2 is more than 4');
+	has(http('GET', header_value($headers, 'Location'))[1], "you're on the waitlist");
+	same('You are on the waitlist: Poetry evening', mail_to('radu.rsvp@example.com')['subject']);
+	has(mail_to('radu.rsvp@example.com')['html'], 'number 1 on the waitlist');
+	// a party that fits goes in ahead of one that doesn't
+	same(303, reply($base, $poetry, array('name' => 'Ilie', 'email' => 'ilie.rsvp@example.com', 'people' => '1'))[0]);
+	same(array('going', 'waiting', 'going'), array(reply_row('petra.rsvp@example.com')['status'], reply_row('radu.rsvp@example.com')['status'], reply_row('ilie.rsvp@example.com')['status']));
+	has(http('GET', event_page($base, $poetry))[1], 'rsvp-state full', 'the page says it is full');
+	// Petra comes with one, by her link: two places free, and Radu's two move in
+	$raw = rsvp_token(mail_to('petra.rsvp@example.com'));
+	$before = count(mails());
+	list($status, , $headers) = http('POST', "$base/rsvp?token=$raw", array('raster_form' => 'rsvp.manage', 'do' => 'change', 'answer' => 'yes', 'people' => '1'));
+	same(303, $status);
+	same("$base/rsvp?done=changed", header_value($headers, 'Location'));
+	same(array('going', '1'), array(reply_row('petra.rsvp@example.com')['status'], (string)reply_row('petra.rsvp@example.com')['people']));
+	same('going', reply_row('radu.rsvp@example.com')['status'], 'promoted');
+	$sent = array_slice(mails(), $before);
+	same(array('petra.rsvp@example.com', 'staff@cafe.test', 'radu.rsvp@example.com'), array_column($sent, 'to'));
+	same('A place is yours: Poetry evening', $sent[2]['subject']);
+	check(rsvp_token($sent[2]) !== null, 'with a link of their own');
+});
+test(array('S3', 'O1'), 'the reply link: a GET changes nothing, a POST changes the reply; never cached, never in the sitemap or an export', function () use ($base, $db, $maildir, $tmp) {
+	$jazz = cafe_event('Jazz night');
+	same(303, reply($base, $jazz, array('name' => 'Lena', 'email' => 'lena.rsvp@example.com', 'people' => '2'))[0]);
+	$raw = rsvp_token(mail_to('lena.rsvp@example.com'));
+	check($raw !== null, 'the email has the link');
+	$before = count(mails());
+	list($status, $body, $headers) = http('GET', "$base/rsvp?token=$raw");
+	same(200, $status);
+	has($body, '<dd>Lena</dd>');
+	has($body, '<dd>Jazz night, '.$jazz['date'].' at 20:00</dd>');
+	same('same-origin', header_value($headers, 'Referrer-Policy'));
+	http('GET', "$base/rsvp?token=$raw&do=change&answer=no");
+	http('HEAD', "$base/rsvp?token=$raw");
+	same('going', reply_row('lena.rsvp@example.com')['status'], 'a GET changes nothing');
+	same($before, count(mails()), 'and sends nothing');
+	same(403, http('POST', "$base/rsvp?token=$raw", array('raster_form' => 'rsvp.manage', 'do' => 'change', 'answer' => 'no'), array('Origin: https://evil.example'))[0], 'a post from another site');
+	same('going', reply_row('lena.rsvp@example.com')['status']);
+	list($status, , $headers) = http('POST', "$base/rsvp?token=$raw", array('raster_form' => 'rsvp.manage', 'do' => 'change', 'answer' => 'maybe'));
+	same(303, $status);
+	same("$base/rsvp?done=changed", header_value($headers, 'Location'), 'without the token');
+	same('maybe', reply_row('lena.rsvp@example.com')['status']);
+	same(array('lena.rsvp@example.com', 'staff@cafe.test'), array_column(array_slice(mails(), $before), 'to'), 'rsvp_noted to the guest, rsvp_new to staff');
+	same('We have your answer: Jazz night', mail_to('lena.rsvp@example.com')['subject']);
+	$done = http('GET', "$base/rsvp?done=changed")[1];
+	has($done, 'Done: we have emailed you your reply.');
+	lacks($done, 'This link no longer works');
+	has(http('GET', "$base/rsvp?token=$raw")[1], '<dd class="status">maybe</dd>', 'a maybe reply\'s link still works');
+	has(http('GET', "$base/rsvp?token=nope")[1], 'This link no longer works');
+	// never cached, never listed
+	$cached = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'CAFE_PAGE_CACHE' => 'on'));
+	foreach (array(1, 2) as $n) check(header_value(http('GET', "$cached/rsvp?token=$raw")[2], 'X-Raster-Cache') !== 'hit', 'never a cache hit');
+	foreach (array(1, 2) as $n) check(header_value(http('GET', event_page($cached, $jazz))[2], 'X-Raster-Cache') !== 'hit', 'nor the places left');
+	lacks(http('GET', "$base/sitemap.xml")[1], '/rsvp<', 'not in the sitemap');
+	$out = "$tmp/static-rsvp";
+	list($code, $output) = raster(array('export', $out, '--url=https://cafe.example/'));
+	same(0, $code, $output);
+	check(!file_exists("$out/rsvp/index.html") && !file_exists("$out/staff/events/index.html"), 'nor in the export');
+	$exported = file_get_contents("$out/events/events_item/{$jazz['slug']}/index.html");
+	has($exported, 'Call us to reply');
+	lacks($exported, 'places left', 'a static page can\'t count');
+});
+// run with RASTER_TEST_ONLY=S, not alone
+test('S4', 'the deadline: places given back, none taken', function () use ($base) {
+	$poetry = cafe_event('Poetry evening');
+	// full (S2): a yes of one waits
+	same(303, reply($base, $poetry, array('name' => 'Sorin', 'email' => 'sorin.rsvp@example.com'))[0]);
+	same('waiting', reply_row('sorin.rsvp@example.com')['status']);
+	$until = $poetry['rsvp_until'];
+	mcp($base, 'update_item', array('collection' => 'events', 'id' => $poetry['id'], 'fields' => array('rsvp_until' => date('Y-m-d H:i', time() - 3600))));
+	try {
+		$page = http('GET', event_page($base, $poetry))[1];
+		has($page, 'rsvp-state closed');
+		has($page, 'Replies are closed', 'the form says so first');
+		list($status, $body) = reply($base, $poetry, array('name' => 'Tudor', 'email' => 'tudor.rsvp@example.com'));
+		same(200, $status);
+		has($body, 'Replies are closed');
+		same(null, reply_row('tudor.rsvp@example.com'), 'a new yes is refused');
+		// Petra can't come after all: her place is given back, and nobody moves in
+		$before = count(mails());
+		$raw = rsvp_token(mail_to('petra.rsvp@example.com'));
+		list($status) = http('POST', "$base/rsvp?token=$raw", array('raster_form' => 'rsvp.manage', 'do' => 'change', 'answer' => 'no'));
+		same(303, $status);
+		same('no', reply_row('petra.rsvp@example.com')['status']);
+		same('waiting', reply_row('sorin.rsvp@example.com')['status'], 'freed places are staff\'s to give from the deadline');
+		same(array('petra.rsvp@example.com', 'staff@cafe.test'), array_column(array_slice(mails(), $before), 'to'));
+		// and asking for more is refused
+		$raw = rsvp_token(mail_to('ilie.rsvp@example.com'));
+		has(http('POST', "$base/rsvp?token=$raw", array('raster_form' => 'rsvp.manage', 'do' => 'change', 'people' => '2'))[1], 'Replies are closed: you can still tell us you can');
+		same('1', (string)reply_row('ilie.rsvp@example.com')['people']);
+	} finally {
+		mcp($base, 'update_item', array('collection' => 'events', 'id' => $poetry['id'], 'fields' => array('rsvp_until' => $until)));
+	}
+	same('going', reply_row('sorin.rsvp@example.com')['status'], 'the deadline moved back: saving the event moves the waitlist in');
+	same('A place is yours: Poetry evening', mail_to('sorin.rsvp@example.com')['subject']);
+});
+test('S5', 'replying twice emails the link to the address that replied', function () use ($base, $spam_base) {
+	$jazz = cafe_event('Jazz night');
+	same(303, reply($base, $jazz, array('name' => 'Mara', 'email' => 'Mara.Rsvp@Example.com'))[0]);
+	$before = count(mails());
+	list($status, $body) = reply($base, $jazz, array('name' => 'Not Mara', 'email' => 'mara.rsvp@example.com', 'people' => '4'));
+	same(200, $status);
+	has($body, "You've replied already: we've emailed you a link to change your reply.");
+	database::instance('cms');
+	same(1, (int)R::getCell('SELECT COUNT(*) FROM rsvpdata WHERE LOWER(email) = ?', array('mara.rsvp@example.com')), 'nothing stored');
+	$sent = array_slice(mails(), $before);
+	same(array('Mara.Rsvp@Example.com'), array_column($sent, 'to'), 'to the reply\'s own address');
+	same('Your reply: Jazz night', $sent[0]['subject']);
+	$raw = rsvp_token($sent[0]);
+	has(http('GET', "$base/rsvp?token=$raw")[1], '<dd>Mara</dd>', 'the link opens Mara\'s reply');
+	has(reply($base, $jazz, array('name' => 'Not Mara', 'email' => 'mara.rsvp@example.com'))[1], "You've replied already");
+	same($before + 1, count(mails()), 'once every five minutes');
+	// without a stamp, nothing is looked up or mailed
+	list($status, $body) = reply($spam_base, $jazz, array('name' => 'Bot', 'email' => 'mara.rsvp@example.com', 'raster_ts' => ''));
+	same(200, $status);
+	has($body, 'That went by a bit quickly');
+	lacks($body, "You've replied already");
+	same($before + 1, count(mails()));
+});
+// run with RASTER_TEST_ONLY=S, not alone
+test('S6', 'the staff page: counts, waitlist, attention, a phone reply', function () use ($base) {
+	same(303, http('GET', "$base/staff/events")[0], 'visitors get the login page');
+	raster(array('user', 'staff@cafe.test', '--role=editor', '--password=staff password'));
+	$staff = login($base, 'staff@cafe.test', 'staff password');
+	$h = array("Cookie: $staff");
+	$jazz = cafe_event('Jazz night');
+	$poetry = cafe_event('Poetry evening');
+	database::instance('cms');
+	$waiting = (int)R::getCell("SELECT COUNT(*) FROM rsvpdata WHERE status = 'waiting'");
+	$page = http('GET', "$base/staff/events", null, $h)[1];
+	has($page, "<p>$waiting replies waiting (past events too), 0 that need attention.</p>", 'the counts for the heading');
+	has($page, '<h3>Jazz night, '.$jazz['date'].' at 20:00</h3>');
+	$going = (int)R::getCell("SELECT SUM(people) FROM rsvpdata WHERE event = ? AND status = 'going'", array($jazz['id']));
+	has($page, "$going going, ".(40 - $going).' of 40 places left', 'the jazz night\'s counts');
+	has($page, '<h3>Poetry evening, '.$poetry['date'].' at 19:00</h3>');
+	has($page, '<option value="">All events</option>');
+	foreach (array($jazz, $poetry) as $event) has($page, '<option value="'.$event['id'].'">'.$event['title'].', '.$event['date'].'</option>', 'the select lists the evenings');
+	list($code, $out) = raster(array('render', "/staff/events?event={$poetry['id']}", '--as=editor'));
+	same(0, $code, $out);
+	has($out, "rsvp('event=?event&order=status,waiting_since') + new", 'the replies are editable, with a card for a phone reply');
+	has($out, '"actions":["promote"]');
+	// a phone reply from the card: full, so it waits, and promote can't make room
+	$token = token_in($page);
+	$before = count(mails());
+	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'rsvp', 'id' => 0, 'fields' => array('name' => 'Phoned in', 'event' => (string)$poetry['id'], 'answer' => 'yes', 'people' => '1'), 'csrf' => $token), $h);
+	same(200, $status, $body);
+	$phoned = json_decode($body, true);
+	same('waiting', $phoned['status'], 'staff never go over places');
+	list($status, $body) = http('POST', "$base/api/cms/editor_action", array('collection' => 'rsvp', 'id' => $phoned['id'], 'action' => 'promote', 'csrf' => $token), $h);
+	same(422, $status, $body);
+	same(array('not_enough_places'), json_decode($body, true)['problems']);
+	has(file_get_contents(dirname(__DIR__).'/demo/i18n/en/raster_editor.php'), "'problem_not_enough_places'", 'in the café\'s words');
+	$until = $poetry['rsvp_until'];
+	$save = function ($fields) use ($base, $h, $token, $poetry) {
+		list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'events', 'id' => $poetry['id'], 'fields' => $fields, 'csrf' => $token), $h);
+		same(200, $status, $body);
+	};
+	try {
+		// past the deadline a place raised in the page moves nobody in: staff give it
+		$save(array('rsvp_until' => date('Y-m-d H:i', time() - 3600)));
+		$save(array('places' => '5'));
+		same('waiting', reply_row_by_id($phoned['id'])['status']);
+		list($status, $body) = http('POST', "$base/api/cms/editor_action", array('collection' => 'rsvp', 'id' => $phoned['id'], 'action' => 'promote', 'csrf' => $token), $h);
+		same(200, $status, $body);
+		same('going', json_decode($body, true)['status'], 'promoted out of turn');
+		// places lowered under the people going: nobody moved, nobody emailed, all flagged
+		$save(array('places' => '4'));
+		same('going', reply_row_by_id($phoned['id'])['status']);
+		same($before, count(mails()), 'a phone reply with no email, and an edit of the event, mail nobody');
+		$page = http('GET', "$base/staff/events", null, $h)[1];
+		$attention = staff_section($page, 'Needs attention');
+		same((int)R::getCell("SELECT COUNT(*) FROM rsvpdata WHERE event = ? AND status = 'going'", array($poetry['id'])), substr_count($attention, 'over_places'), 'every going reply of it: '.$attention);
+		check((bool)preg_match('#<p>\d+ replies waiting \(past events too\), [1-9]\d* that need attention\.</p>#', $page), 'counted for the heading');
+	} finally {
+		mcp($base, 'delete_item', array('collection' => 'rsvp', 'id' => $phoned['id']));
+		$save(array('places' => '4', 'rsvp_until' => $until));
+	}
+});
+function reply_row_by_id($id) {
+	database::instance('cms');
+	return R::getRow('SELECT * FROM rsvpdata WHERE id = ?', array($id));
+}
+test('S7', 'a member sees their replies on /account and changes one without a token', function () use ($base) {
+	raster(array('user', 'rsvp.member@example.com', '--role=member', '--password=member password'));
+	$member = login($base, 'rsvp.member@example.com', 'member password');
+	$h = array("Cookie: $member");
+	$jazz = cafe_event('Jazz night');
+	$token = token_in(http('GET', event_page($base, $jazz), null, $h)[1]);
+	same(303, reply($base, $jazz, array('name' => 'Member', 'email' => 'rsvp.member@example.com', 'people' => '2', 'csrf' => $token), $h)[0]);
+	$id = (int)reply_row('rsvp.member@example.com')['id'];
+	$account = http('GET', "$base/account", null, $h)[1];
+	has($account, '<form method="get" action="'.$base.'/rsvp" class="inline"><button class="secondary" name="reply" value="'.$id.'">Change my reply</button></form>');
+	$page = http('GET', "$base/rsvp?reply=$id", null, $h)[1];
+	has($page, '<dd>Member</dd>');
+	lacks(http('GET', "$base/rsvp?reply=$id")[1], '<dd>Member</dd>', 'not for visitors');
+	raster(array('user', 'staff@cafe.test', '--role=editor', '--password=staff password'));
+	has(http('GET', "$base/rsvp?reply=$id", null, array('Cookie: '.login($base, 'staff@cafe.test', 'staff password')))[1], 'This link no longer works', 'nor for another account: it is the owner\'s');
+	list($status, , $headers) = http('POST', "$base/rsvp?reply=$id", array('raster_form' => 'rsvp.manage', 'do' => 'change', 'answer' => 'no', 'csrf' => token_in($page)), $h);
+	same(303, $status);
+	same("$base/rsvp?reply=$id&done=changed", header_value($headers, 'Location'));
+	same('no', reply_row('rsvp.member@example.com')['status']);
+	has(http('GET', "$base/account", null, $h)[1], 'no, 2 people: no');
 });
 
 // ## No PHP warnings, notices or deprecations on any request
