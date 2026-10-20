@@ -3,6 +3,10 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.30
+
+Nothing for sites to do. **Replies to events.** A new bundled model, `rsvp`, keeps replies (yes, no, maybe, a party size) to the items of the site's `events` collection (`rsvp_collection`) as private `rsvp` records. An item's `places` and `rsvp_until` fields, written in its view, set the limit and the deadline. A yes that doesn't fit waits; when places free up the model moves in, oldest first, every waiting party that fits. Staff add and edit replies in the page; `render.rsvp.event` shows the places left. Events: `rsvp.replied`, `rsvp.changed`, `rsvp.promoted`. Settings: `rsvp_collection`, `rsvp_max_people`, `rsvp_closes`, `rsvp_waitlist`. Guests' emails and the form come in the next releases.
+
 ## 2.2.29
 
 Nothing you must do; a site's own form model keeps holding over `spam_per_ip` until it passes the reasons through `validation_spam::holds()` (below). **Real visitors are no longer turned away when many of them share one address** (#208). Before, on shared hosting or behind a proxy every post could come from one address, and after five posts of a form in an hour everyone was held with `slow_down`, or kept as spam on the contact form, without the owner knowing.

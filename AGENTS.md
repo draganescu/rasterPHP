@@ -375,6 +375,9 @@ alike:
 | `booking.rescheduled` | the same, after a move of an active booking (its `date`, `time`, `resource` or `service`; a guest's goes back to `requested`) |
 | `contact.received` | a contact message that isn't spam was stored: its fields but `title`, and `who` (`visitor`; `staff` when staff marked one not spam). After the commit, as is the one below |
 | `contact.flagged` | a message kept as spam: the same, with `spam` (the reasons) |
+| `rsvp.replied` | a reply to an event was made (by staff in the page, over MCP or in model code): its fields but `token_hashes` and `link_sent_at`, `who` (`guest`, `staff` or `waitlist`), `event_title`, `event_date`, `event_starts`. After the commit, as are the two below |
+| `rsvp.changed` | the same, after its `answer`, `people` or `event` changed, with `was` and `was_people` (the status and party before) |
+| `rsvp.promoted` | the same, after a waiting reply was moved in (`who` `waitlist`; `staff` by the `promote` action) |
 | `cms.item_saved` | `collection`, `created` (true for new items), `item` |
 | `cms.item_deleted` | `collection`, `item` |
 | `cms.page_saved` | `type`, `slug`, `changed` (field names), `fields` |
@@ -1485,6 +1488,132 @@ and hides the bundled one completely, and `lint` says so.
      `contactmessage_item.html` rendering `render.cms.contactmessage` is a
      message's own page (where `raster_detail_link` goes).
 
+**rsvp**: replies to the site's events: yes (with a party size), no or
+maybe, with places and a waitlist that moves. The events stay content,
+the items of a markup collection that editors write in the page; the
+model owns the replies, the place arithmetic, the waitlist and the events.
+Nothing in `the_app.php` is required when the collection is called
+`events`. It counts only on a site whose views use `render.rsvp.*` or
+`print.rsvp.*`; a site's own `rsvp` model or type keeps the name, and
+`lint` warns. The reply form, the guest's link and its emails, and the
+staff regions come in the next releases; until then replies are made by
+staff in the page (`render.cms.rsvp`), over MCP or by model code.
+- **The event is an item** of `rsvp_collection` (`events`), read with
+  `cms_store::get_item()`, never written. Four of its fields, written in
+  its item view like any other (`<!-- print.places -->40<!-- /print.places -->`),
+  are read by name:
+
+  | Field | Type (from its mock-up) | Meaning |
+  |---|---|---|
+  | `date` | date | required: an item without one takes no replies |
+  | `starts` (or `time`) | time | when it starts; without one, 00:00 of its date |
+  | `places` | int | the most people with a yes; empty or 0 is no limit (and no waitlist) |
+  | `rsvp_until` | datetime | when replies close; empty is `rsvp_closes` minutes before the start, and never later than the start |
+
+  An event visitors can't see (a draft, or scheduled) takes no replies
+  from guests. Times are the site's clock (`timezone`), in real seconds.
+- Replies are the `rsvp` type: `name`, `email`, `phone`, `event` (the
+  item's id), `answer` (`yes`, `no`, `maybe`), `people` (1 by default),
+  `notes`, and what the model works out (readonly): `status`,
+  `waiting_since` (the reply's place in the queue), `changed_at` (its
+  status or people last changed) and `event_at` (the start the guest was
+  told, so a moved event shows). `token_hashes` and `link_sent_at` are
+  hidden. Guests make them (`create` visitor), staff add them in the page
+  (`staff_add`), with `owner` a guest who was logged in reads their own,
+  and they are private. The slug comes from the name, never the email. A
+  visitor never chooses the event: a visitor's write gets the page's
+  (`rsvp::$posting`), whatever the post names.
+- `status`, on every write (`fill()`): `no` and `maybe` take no places; a
+  new `yes` (or one from no or maybe, or moved to another event) is
+  `going` when the people already going plus its party fit `places`, else
+  `waiting` with `waiting_since` now. A going or waiting yes keeps its
+  status, and a waiting one its place in the queue, whatever its party
+  becomes. The people going are summed in one query (`sql/going.sql`)
+  inside the write's lock, the reply being written left out, so two yeses
+  for the last place at once leave one `going` and one `waiting`.
+- The rules run when a reply is made and when its `answer`, `people`,
+  `event` or `email` change, in this order: `not_open` (no event, no
+  `date`, or hidden, for guests), `name_invalid` (empty, a control
+  character, over 200 characters), `email_invalid` (a guest's empty;
+  anyone's not an address, a control character, over 254),
+  `answer_invalid`, `people_invalid` (a yes below 1), `too_many` (a yes
+  over `places` for anyone, over `rsvp_max_people` for guests), `closed`
+  (guests: from the deadline a new yes, a no or maybe becoming yes, or
+  more people; from the start, any change), `full` (it would wait while
+  `rsvp_waitlist` is false), `already_replied` (another reply to this
+  event with this email, in any case). Any other edit (a phone number, a
+  note) goes through, so a reply whose event changed never gets stuck.
+  Whatever changed, a reply made going, or a going party made bigger, must
+  fit: `full_for_more` (a going guest asking for more than is left keeps
+  the places they have), `not_enough_places` otherwise. Staff (the in-page
+  editor, MCP, or model code) skip `closed`, the guests' `too_many` and the
+  missing email, and may reply for a draft, but never go over `places`: a
+  staff yes that doesn't fit waits like anyone's.
+- **The waitlist.** When places may have freed up (a going reply says no
+  or maybe, gets smaller, moves to another event or is deleted; a waiting
+  one gets smaller; the event is saved, `places` raised or emptied) the
+  model moves in, oldest `waiting_since` first, every waiting reply whose
+  party fits: a party of 4 that doesn't fit doesn't keep two places from a
+  couple behind it. Each one becomes `going` and sends `rsvp.promoted`
+  (`who` `waitlist`). It reads the queue and the places again inside the
+  write's lock, so running it twice moves nobody twice. A write the model
+  makes itself promotes in the same transaction; one staff make in the
+  page or over MCP, or a save of the event, promotes after the commit,
+  from the model's `cms.item_saved` and `cms.item_deleted` listeners, in a
+  transaction of its own. Nothing is moved in from the deadline, nor for
+  an event visitors can't see: freed places are staff's to give then.
+  Nobody `going` is ever moved out: staff may lower `places` under the
+  people going, move the date, hide or delete the event, and every reply
+  keeps its status. Saying no or maybe leaves the queue; a yes again joins
+  at the end.
+- `promote`, an action for editors: this waiting reply goes in now, out of
+  turn and after the deadline too, when its party fits
+  (`not_enough_places` otherwise: raise `places` first, which moves the
+  queue in order; `not_waiting` on one that isn't waiting). It sends
+  `rsvp.promoted` with `who` `staff`.
+- `render.rsvp.event`: one row for the page's event, on its item page
+  (`/events/events_item/<slug or id>`, found as `render.cms.events` finds
+  it) or on any page by `?event=<id>`: `event` (its id), `places` and
+  `left` (`''` for no limit), `going` (people), `waiting` (replies),
+  `state` (`open`; `full`, a yes goes on the waitlist; `closed`, past the
+  deadline; `over`, it has started) and `deadline` (`2026-11-20 18:00`).
+  Nothing for an event visitors can't see (editors get it). Never
+  page-cached.
+
+  ```html
+  <!-- events_item.html -->
+  <!-- render.cms.events -->
+  <h1><!-- print.title -->Jazz night<!-- /print.title --></h1>
+  <p><!-- print.date -->2026-11-20<!-- /print.date --> at <!-- print.starts -->20:00<!-- /print.starts -->,
+     <!-- print.places -->40<!-- /print.places --> places, replies until <!-- print.rsvp_until -->2026-11-20 18:00<!-- /print.rsvp_until --></p>
+  <!-- /render.cms.events -->
+  <!-- render.rsvp.event --><!-- print.+class.state --><p class="places"><!-- print.left -->12<!-- /print.left --> of <!-- print.places -->40<!-- /print.places --> places left</p><!-- /print.+class.state --><!-- /render.rsvp.event -->
+  ```
+
+- Events, after the commit: `rsvp.replied` (a reply was made), `rsvp.changed`
+  (its `answer`, `people` or `event` changed, with `was` and `was_people`,
+  its status and party before) and `rsvp.promoted`. Each has the reply's
+  fields but the hidden ones, `who` (`guest`, `staff` or `waitlist`), and
+  `event_title` (the event's title, headline or name), `event_date` and
+  `event_starts`. A reply staff add or change in the page, over MCP or in
+  model code gets its event through the model's `cms.item_saved` listener
+  (`rsvp.saved`), with `who` `staff`; editing a note or the event sends
+  none. The listeners are framework bindings (`system/config/events.php`),
+  bound only for the bundled model and only where a view uses it; a site
+  without rsvp loads none of its files.
+- Settings: `rsvp_collection` (`events`), `rsvp_max_people` (6 in a
+  guest's reply), `rsvp_closes` (0 minutes before the start, for an event
+  without `rsvp_until`), `rsvp_waitlist` (true; false refuses a yes that
+  doesn't fit with `full`).
+- From code: `rsvp::item($id)` is the event as the model reads it (`id`,
+  `title`, `slug`, `date`, `starts`, `places`, `rsvp_until`, `visible`,
+  `starts_at`, `deadline`, `url`), or null; `rsvp::page_event()` the
+  page's; `rsvp::deadline($event)` when its replies close;
+  `rsvp::going($event, $id)` the people going, reply `$id` left out;
+  `rsvp::promote_waiting($event)` moves its queue in now and gives the
+  replies moved. Model code that writes replies with
+  `cms_records::create/update` is trusted like staff.
+
 **mail**: emails are views. `mail::send_view('_email/welcome', $to,
 array('name' => 'Ada'))` uses the view's `<title>` as the subject.
 - Transport, set with `RASTER_MAIL`:
@@ -1887,6 +2016,10 @@ Set in `config/the_app.php` with `config::set('name')->to(value)`.
 | `contact_staff_page` | `staff` | the page with the messages, for `staff_url` in that email |
 | `contact_max_length` | 5000 | characters in a contact message |
 | `contact_spam_days` | 30 | days a message kept as spam stays; false keeps it |
+| `rsvp_collection` | `events` | the markup collection whose items take replies |
+| `rsvp_max_people` | 6 | people in one reply, for guests; staff may add more |
+| `rsvp_closes` | 0 | minutes before the start replies close, for an event without `rsvp_until` |
+| `rsvp_waitlist` | true | false refuses a yes that doesn't fit (`full`) instead of putting it on the waitlist |
 | `newsletter_double_opt_in` | true | false subscribes without a confirmation |
 | `newsletter_confirm_page`, `newsletter_unsubscribe_page` | `newsletter-confirm`, `newsletter-unsubscribe` | |
 | `mail`, `mail_from` | see `RASTER_MAIL` | transport and sender |
