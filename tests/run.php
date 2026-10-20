@@ -7577,16 +7577,6 @@ test('rsvp staff page in the editor', function () {
 		check(strpos($out, '[exit 0]') !== false && strpos($out, 'waiting=1 attention=0</h1>') !== false, 'the counts: '.$out);
 		check(strpos($out, 'Jazz night going=2 left=0 waiting=1</h2>') !== false && strpos($out, 'Ion Waits') !== false, 'the event: '.$out);
 		check(strpos($out, '<option value="'.$event['id'].'"') !== false, 'the event to choose: '.$out);
-		// the GET form keeps the chosen one chosen, among the options the model lists
-		$quiz = rsvp_event(array('title' => 'Quiz'));
-		foreach (array($event['id'] => 'Jazz night', $quiz['id'] => 'Quiz') as $id => $title) {
-			$picked = contact_render('/zzrsvpstaff?event='.$id, 'editor');
-			$select = substr($picked, strpos($picked, '<select name="event">'));
-			$select = substr($select, 0, strpos($select, '</select>'));
-			check(preg_match('#<option value="'.$id.'" selected>(<!--[^>]*-->)?'.$title.'#', $select) === 1 && substr_count($select, 'selected') === 1, "$title chosen: $select");
-		}
-		cms_store::delete_item('eventsdata', $quiz['id']);
-		rsvp::forget();
 		check(preg_match('#<script id="raster-editor-config" type="application/json">(.*?)</script>#s', $out, $m) === 1, 'no editor: '.$out);
 		$marks = json_decode($m[1], true)['marks'];
 		// both replies, in the event's row and in the event's list

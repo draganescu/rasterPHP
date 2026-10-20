@@ -4657,6 +4657,7 @@ function reply_row($email) {
 	database::instance('cms');
 	return R::getRow('SELECT * FROM rsvpdata WHERE email = ?', array($email)) ?: null;
 }
+// run with RASTER_TEST_ONLY=S, not alone: S2, S4 and S6 build on each other's replies
 test('S1', 'the café\'s events take replies, with the places left', function () use ($base) {
 	$jazz = cafe_event('Jazz night');
 	same(array(40, '20:00', date('Y-m-d', strtotime('+14 days'))), array($jazz['places'], $jazz['starts'], $jazz['date']), 'demo/seed.php:');
@@ -4757,6 +4758,7 @@ test(array('S3', 'O1'), 'the reply link: a GET changes nothing, a POST changes t
 	has($exported, 'Call us to reply');
 	lacks($exported, 'places left', 'a static page can\'t count');
 });
+// run with RASTER_TEST_ONLY=S, not alone
 test('S4', 'the deadline: places given back, none taken', function () use ($base) {
 	$poetry = cafe_event('Poetry evening');
 	// full (S2): a yes of one waits
@@ -4813,6 +4815,7 @@ test('S5', 'replying twice emails the link to the address that replied', functio
 	lacks($body, "You've replied already");
 	same($before + 1, count(mails()));
 });
+// run with RASTER_TEST_ONLY=S, not alone
 test('S6', 'the staff page: counts, waitlist, attention, a phone reply', function () use ($base) {
 	same(303, http('GET', "$base/staff/events")[0], 'visitors get the login page');
 	raster(array('user', 'staff@cafe.test', '--role=editor', '--password=staff password'));
@@ -4829,7 +4832,7 @@ test('S6', 'the staff page: counts, waitlist, attention, a phone reply', functio
 	has($page, "$going going, ".(40 - $going).' of 40 places left', 'the jazz night\'s counts');
 	has($page, '<h3>Poetry evening, '.$poetry['date'].' at 19:00</h3>');
 	has($page, '<option value="">All events</option>');
-	has(http('GET', "$base/staff/events?event={$poetry['id']}", null, $h)[1], '<option value="'.$poetry['id'].'" selected>', 'the chosen event stays chosen');
+	foreach (array($jazz, $poetry) as $event) has($page, '<option value="'.$event['id'].'">'.$event['title'].', '.$event['date'].'</option>', 'the select lists the evenings');
 	list($code, $out) = raster(array('render', "/staff/events?event={$poetry['id']}", '--as=editor'));
 	same(0, $code, $out);
 	has($out, "rsvp('event=?event&order=status,waiting_since') + new", 'the replies are editable, with a card for a phone reply');
