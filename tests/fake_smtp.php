@@ -5,7 +5,9 @@
 // from the first byte; silent takes connections and never says a word, as a
 // hung mail server does (it notes each one as "CONNECTED"). It accepts AUTH LOGIN and appends every session
 // (commands and message) to the transcript file. Addresses listed in
-// <transcript-file>.refuse, one a line, are answered 450 greylisted.
+// <transcript-file>.refuse, one a line, are answered 450 greylisted. It
+// stops by itself once the test run that started it is gone, even one
+// killed before it could stop it.
 if ($argc < 3) exit("usage: fake_smtp.php <port> <file> [mode] [cert]\n");
 $mode = isset($argv[3]) ? $argv[3] : 'plain';
 $cert = isset($argv[4]) && $argv[4] !== '' ? $argv[4] : null;
@@ -14,15 +16,23 @@ $context = stream_context_create(array('ssl' => array('local_cert' => $cert, 've
 $server = stream_socket_server('tcp://'.$host.':'.(int)$argv[1], $errno, $errstr, STREAM_SERVER_BIND | STREAM_SERVER_LISTEN, $context);
 if (!$server) exit("cannot listen: $errstr\n");
 $log = $argv[2];
+$parent = function_exists('posix_getppid') ? posix_getppid() : 0;
+$accept = function () use ($server, $parent) {
+	// a dead parent leaves this process to another one
+	while (!$parent || posix_getppid() === $parent) {
+		if ($client = @stream_socket_accept($server, 1)) return $client;
+	}
+	return false;
+};
 if ($mode === 'silent') {
 	$held = array();
-	while ($client = @stream_socket_accept($server, -1)) {
+	while ($client = $accept()) {
 		$held[] = $client;
 		file_put_contents($log, "CONNECTED\n", FILE_APPEND);
 	}
 	exit;
 }
-while ($client = @stream_socket_accept($server, -1)) {
+while ($client = $accept()) {
 	$session = "MODE: $mode\n";
 	if ($mode === 'smtps' && !@stream_socket_enable_crypto($client, true, STREAM_CRYPTO_METHOD_TLS_SERVER)) {
 		file_put_contents($log, $session."TLS FAILED\n---\n", FILE_APPEND);
