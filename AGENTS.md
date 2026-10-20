@@ -634,7 +634,10 @@ of your own. Staff read the feedback on a page that renders
     `try_again`.
 - **Forms that ask with the URL** (`<form method="get">`, a filter or a
   search) show what the URL asked: `/bookings?stylist=Ana` keeps Ana chosen,
-  and `?stylist=` chooses only the option whose value is empty.
+  and `?stylist=` chooses only the option whose value is empty. They are
+  filled once the page is rendered, so an option a render block lists is
+  chosen too (a `<select>` of `render.booking.resources`), and a mock-up
+  option's value never marks every row.
   Nothing else happens to them; see `field=?name` in the CMS options.
 
 ## The CMS: the markup is the schema

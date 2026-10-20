@@ -104,7 +104,7 @@ A filter on a field that doesn't exist yet **adds that field**. So `render.cms.p
 <!-- render.cms.products('category=?category&order=name') --> … <!-- /render.cms.products('category=?category&order=name') -->
 ```
 
-`/shop?category=Mugs` shows the mugs, and the form shows Mugs chosen: forms with `method="get"` keep what the URL asked. A new item an editor adds to the filtered list starts as a mug. Pages with a query string are never cached.
+`/shop?category=Mugs` shows the mugs, and the form shows Mugs chosen: forms with `method="get"` keep what the URL asked. That holds for options a render block lists too. A new item an editor adds to the filtered list starts as a mug. Pages with a query string are never cached.
 
 Remember: the closing tag repeats the options exactly, `<!-- /render.cms.news('order=newest&limit=3') -->`.
 

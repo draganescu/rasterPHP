@@ -3,6 +3,10 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.35
+
+**A GET form keeps an option a model lists chosen.** A `<form method="get">` was filled from the URL before the page's render blocks ran, so an option they listed (`render.rsvp.events`, `render.booking.resources`) was never chosen, and one whose mock-up value matched the URL marked every row it was copied into. The form is now filled once the page is rendered: `/staff/events?event=7` keeps that evening chosen.
+
 ## 2.2.34
 
 Nothing for sites to do. To give staff a page for the replies, add one protected for editors (`lint` warns while it isn't). **The staff page.** `render.rsvp.events('from=today')` lists the events to come, drafts included, with their places, people going, places left, and the replies waiting, maybe and no, and each event's replies, editable in place with the `promote` button, each with its place in the queue. `render.rsvp.attention` lists the replies an edit of their event left out of place: `event_gone` (deleted), `event_hidden` (a draft or scheduled again), `over_places` (places lowered under the people going) and `moved` (the date or start changed since the guest replied). Nobody is moved out or emailed for these; an editor's save of the reply clears `moved`. `print.rsvp.count('status=waiting')` counts replies, or `count('attention')`. `render.cms.rsvp('event=?event&order=status,waiting_since')` lists one event's replies, and its card for a new reply starts with that event, so staff add a phone reply in the page.

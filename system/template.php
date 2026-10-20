@@ -385,17 +385,6 @@ class template {
   	$html = $this->output;
   	if (stripos($html, '<form') === false) return;
 
-  	// a form that asks with the URL (a filter: <form method="get">) shows
-  	// what was asked, so /bookings?stylist=ana keeps Ana chosen
-  	if ($_GET && !$this->is_email && preg_match_all('/<form\b[^>]*>/i', $html, $opens, PREG_OFFSET_CAPTURE)) {
-  		foreach (array_reverse($opens[0]) as $open) {
-  			if (preg_match('/\bmethod\s*=\s*["\']?post/i', $open[0])) continue;
-  			$close = stripos($html, '</form>', $open[1]);
-  			$end = $close === false ? strlen($html) : $close;
-  			$html = substr($html, 0, $open[1]).$this->fill_form(substr($html, $open[1], $end - $open[1]), $_GET).substr($html, $end);
-  		}
-  	}
-
   	// render blocks with their ranges
   	preg_match_all('/<!-- (\/?)render\.([a-z0-9_\-]+\.[^ ]*(?:\([^)]*\))?) -->/', $html, $tags, PREG_OFFSET_CAPTURE | PREG_SET_ORDER);
   	$blocks = array(); $stack = array();
@@ -604,6 +593,22 @@ class template {
 	// the inputs, selects and textareas of $block with the values in $data;
 	// with $keep_rest, values no field took become hidden inputs. $posted
 	// says $data is what the form sent: a box it doesn't name was unticked.
+	// A form that asks with the URL (a filter: <form method="get">) shows
+	// what was asked, so /bookings?stylist=ana keeps Ana chosen. Once the
+	// render blocks have run, so an option a model lists is chosen too, and
+	// a mock-up option that matches isn't copied into every row.
+	function fill_get_forms() {
+		$html = $this->output;
+		if (!$_GET || $this->is_email || stripos($html, '<form') === false || !preg_match_all('/<form\b[^>]*>/i', $html, $opens, PREG_OFFSET_CAPTURE)) return;
+		foreach (array_reverse($opens[0]) as $open) {
+			if (preg_match('/\bmethod\s*=\s*["\']?post/i', $open[0])) continue;
+			$close = stripos($html, '</form>', $open[1]);
+			$end = $close === false ? strlen($html) : $close;
+			$html = substr($html, 0, $open[1]).$this->fill_form(substr($html, $open[1], $end - $open[1]), $_GET).substr($html, $end);
+		}
+		$this->output = $html;
+	}
+
 	function fill_form($block, $data, $keep_rest = false, $posted = false)
 	{
 		$data = (array)$data;
