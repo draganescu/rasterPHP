@@ -6168,6 +6168,8 @@ function rsvp_site($fn) {
 		.'<!-- render.rsvp.events --><section class="event"><h2><!-- print.event_title -->Jazz night<!-- /print.event_title --> going=<!-- print.going -->4<!-- /print.going -->'
 		.' left=<!-- print.left -->6<!-- /print.left --> waiting=<!-- print.waiting -->0<!-- /print.waiting --></h2><ul><!-- print.replies --><li class="reply"><!-- print.name -->Ana<!-- /print.name -->'
 		.' <!-- print.status -->going<!-- /print.status --> <!-- print.position -->1<!-- /print.position --></li><!-- /print.replies --></ul></section><!-- /render.rsvp.events -->'
+		.'<form method="get"><select name="event"><!-- render.rsvp.events --><!-- print.@value.event --><option value="">'
+		.'<!-- print.event_title -->Jazz night<!-- /print.event_title --></option><!-- /print.@value.event --><!-- /render.rsvp.events --></select><button>Show</button></form>'
 		."<!-- $list --><p class=\"phone\"><!-- print.name -->Ana<!-- /print.name --> <!-- print.people -->2<!-- /print.people --></p><!-- /$list --></body></html>");
 	$emails =array('rsvp_going', 'rsvp_waiting', 'rsvp_promoted', 'rsvp_noted', 'rsvp_link', 'rsvp_new');
 	foreach ($emails as $email) {
@@ -7529,6 +7531,7 @@ test('rsvp staff page in the editor', function () {
 		$out = contact_render('/zzrsvpstaff?event='.$event['id'], 'editor');
 		check(strpos($out, '[exit 0]') !== false && strpos($out, 'waiting=1 attention=0</h1>') !== false, 'the counts: '.$out);
 		check(strpos($out, 'Jazz night going=2 left=0 waiting=1</h2>') !== false && strpos($out, 'Ion Waits') !== false, 'the event: '.$out);
+		check(strpos($out, '<option value="'.$event['id'].'"') !== false, 'the event to choose: '.$out);
 		check(preg_match('#<script id="raster-editor-config" type="application/json">(.*?)</script>#s', $out, $m) === 1, 'no editor: '.$out);
 		$marks = json_decode($m[1], true)['marks'];
 		// both replies, in the event's row and in the event's list

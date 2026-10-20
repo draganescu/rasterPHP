@@ -1499,8 +1499,9 @@ Nothing in `the_app.php` is required when the collection is called
 `print.rsvp.*`; a site's own `rsvp` model or type keeps the name, and
 `lint` warns. Guests reply on the site's form (`render.rsvp.form`), staff
 add replies in the page (`render.cms.rsvp`), over MCP or by model code,
-and the guest gets an email with their link at each step. The staff
-regions come in the next release.
+and the guest gets an email with their link at each step. Staff see
+every event's counts and replies, and what needs attention, on their own
+page.
 - **The event is an item** of `rsvp_collection` (`events`), read with
   `cms_store::get_item()`, never written. Four of its fields, written in
   its item view like any other (`<!-- print.places -->40<!-- /print.places -->`),
@@ -1735,6 +1736,51 @@ regions come in the next release.
   without `rsvp_until`), `rsvp_waitlist` (true; false refuses a yes that
   doesn't fit with `full`), `rsvp_manage_page` (`rsvp`, the guest's page
   their links open), `rsvp_staff_email` (empty: staff get no emails).
+- For staff (editors; anyone else gets nothing, wherever the page puts
+  them; none is page-cached):
+  - `render.rsvp.events('from=today')`: a row per event dated from that
+    day (`from=2026-10-01`, `from=?from`), by date and start, drafts and
+    scheduled ones included: `event` (its id), `event_title`,
+    `event_date`, `event_starts`, `places` and `left` (`''` for no
+    limit), `going` (people), `waiting`, `maybe` and `no` (replies), and
+    `replies`: the event's replies through `cms_records::listed`, the
+    queue first, editable in place with the `promote` button, each with
+    `attention` (the reason, or empty), `position` (`''` unless waiting),
+    `event_title`, `event_date` and `event_starts`. It reads the events
+    in one query and the replies in another, however many events there
+    are.
+  - `render.rsvp.attention`: the active replies (`going`, `waiting`) that
+    need attention, with the same added fields, by their event's start:
+    those to events to come, and those whose start the guest was told is
+    still to come (a deleted event's, one moved into the past).
+  - `print.rsvp.count('status=waiting')`: how many replies match (options
+    as `cms_records::find` takes them, values only:
+    `count('status=going&event=7')`), or `count('attention')`: for the
+    staff page's heading (`''` for anyone else).
+  - **Needs attention.** Staff edit events in the page all the time (a
+    typo, a date), so nothing they do to an event is refused, nobody
+    going is moved out, and nobody is emailed. Instead an active reply
+    shows why it no longer fits, the first of: `event_gone` (the item was
+    deleted, or its `date` emptied), `event_hidden` (a draft, or scheduled
+    again), `over_places` (`places` lowered under the people going: every
+    going reply of the event), `moved` (its date or start isn't the one
+    the guest was told, `event_at`). It is worked out as replies are
+    listed, never stored. Staff phone the guest and save the reply (a
+    note, "phoned them"): an editor's save of a reply sets `event_at` to
+    the start now, which clears `moved`. `rsvp::reason($reply, $event,
+    $going)` says the same from code.
+  - One event's replies: `render.cms.rsvp('event=?event&order=status,waiting_since')`
+    on the staff page, opened with `?event=<id>`: a GET form whose
+    `<select name="event">` lists the events with `render.rsvp.events`
+    (`<!-- print.@value.event --><option value="">…</option><!-- /print.@value.event -->`).
+    The card for a new reply at the end of that list starts with that
+    `event`, so a phone reply is added in the page with no id to type.
+    A phone reply needs no email; it is checked like any staff reply
+    (never over `places`: it waits when it doesn't fit).
+  - `lint` warns on a view with `render.rsvp.events` or
+    `render.rsvp.attention` that isn't protected for editors, and counts a
+    view with `render.rsvp.events` as the `rsvp` type's staff page.
+    Protect it by its own name (`staff`), never `rsvp`, the guests' page.
 - From code: `rsvp::item($id)` is the event as the model reads it (`id`,
   `title`, `slug`, `date`, `starts`, `places`, `rsvp_until`, `visible`,
   `starts_at`, `deadline`, `url`), or null; `rsvp::page_event()` the
