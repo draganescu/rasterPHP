@@ -3096,7 +3096,7 @@ test('T6', 'schema --apply converts a column whose type changed when every value
 		list(, $out) = raster(array('schema', '--apply'));
 		has($out, 'kept zzretypedata.n as text: "lots" can\'t be int; change them and run --apply again');
 		cms_store::forget();
-		same('TEXT', strtoupper(cms_store::columns('zzretypedata')['n']));
+		same(on_mysql() ? 'LONGTEXT' : 'TEXT', strtoupper(cms_store::columns('zzretypedata')['n']));
 	});
 	raster(array('schema', '--drop=zzretypedata', '--force'));
 });
