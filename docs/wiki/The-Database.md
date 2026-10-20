@@ -174,7 +174,7 @@ class visits {
 }
 ```
 
-The values are examples of the kind of data: `''` for text, `0` for whole numbers, `0.0` for decimals, `false` for yes/no. Each column is declared as that type (text, INT and so on), so on MySQL a long message or a large number fits: text is LONGTEXT there, which has no practical size limit, as SQLite's TEXT has none. A MySQL site made with Raster 2.2.29 or earlier has TEXT columns, which stop at 64 KB; `php bin/raster schema --apply` widens them, in page and collection tables too. The bundled models declare their tables the same way.
+The values are examples of the kind of data: `''` for text, `0` for whole numbers, `0.0` for decimals, `false` for yes/no. Each column is declared as that type (text, INT and so on), so on MySQL a long message or a large number fits: text is LONGTEXT there, which has no practical size limit, as SQLite's TEXT has none. A MySQL site made with Raster 2.2.30 or earlier has TEXT columns, which stop at 64 KB; `php bin/raster schema --apply` widens them, in page and collection tables too. The bundled models declare their tables the same way.
 
 ## Tables Raster uses
 

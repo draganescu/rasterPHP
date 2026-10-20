@@ -115,7 +115,7 @@ class cms_types {
 
 	// Columns of a table that MySQL sized by the values of the first row
 	// stored in fluid mode (varchar(191) for text, tinyint for a number), or
-	// that Raster 2.2.29 and earlier declared TEXT, and that a frozen database
+	// that Raster 2.2.30 and earlier declared TEXT, and that a frozen database
 	// never grows: field => the type ($types) they should be. SQLite's
 	// columns take any length.
 	static function narrow($table, $types) {

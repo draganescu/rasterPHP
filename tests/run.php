@@ -801,7 +801,7 @@ test('schema --apply declares model tables by their types, and a long text or bi
 	same(array($long, '300'), array_map('strval', $pdo->query("SELECT name, failed_count FROM user WHERE email = 'long@example.com'")->fetch(PDO::FETCH_NUM)));
 	same($long, $pdo->query("SELECT name FROM subscriber WHERE email = 'long@example.com'")->fetchColumn());
 });
-test('a page field holds text longer than 64 KB in production, and schema --apply widens the TEXT columns 2.2.29 made', function () use ($root) {
+test('a page field holds text longer than 64 KB in production, and schema --apply widens the TEXT columns 2.2.30 made', function () use ($root) {
 	$db = test_db(sys_get_temp_dir().'/raster-long-text-'.getmypid().'.sqlite');
 	$raster = 'RASTER_ENV=production RASTER_DB='.escapeshellarg($db).' '.escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster");
 	exec("$raster schema --apply 2>&1", $out, $code);
@@ -817,7 +817,7 @@ test('a page field holds text longer than 64 KB in production, and schema --appl
 	$pdo = test_pdo($db);
 	if (on_mysql()) {
 		same('longtext', strtolower($pdo->query("SHOW COLUMNS FROM `$table` LIKE '$field'")->fetch(PDO::FETCH_ASSOC)['Type']));
-		// the way 2.2.29 declared it
+		// the way 2.2.30 declared it
 		$pdo->exec("ALTER TABLE `$table` MODIFY `$field` TEXT");
 		$out = array();
 		exec("$raster schema --check 2>&1", $out, $code);
@@ -6120,6 +6120,571 @@ test('lint reports a theme with render.contact.form and no _email/contact_receiv
 		check(has_problem((new raster_inspector())->lint_path("$theme/zzcontact.html"), '_email/contact_received'), 'the email is missing');
 		// a suspect post is thanked with sent, so try_again and slow_down never show there
 		check(!has_problem(lint_html('<!-- render.contact.form --><form method="post"><input name="email"></form><!-- /render.contact.form -->'), 'can turn a post away as spam'), 'lint asks contact for try_again');
+	});
+});
+
+// ## Bundled rsvp: places and the waitlist
+
+// The site's events collection with the two fields rsvp reads (places,
+// rsvp_until) and render.rsvp.event on the item's page (events_item.html),
+// and a page that shows an event by ?event= (zzrsvp.html), so the bundled
+// rsvp model counts. eventsdata is made with the mock-up's types. $fn runs
+// with the theme's folder; the views, the tables and the listeners are gone
+// after.
+function rsvp_site($fn) {
+	$theme = APPBASE.config::get('views_path', 'views').'/'.config::get('theme', 'default');
+	$region = '<!-- render.rsvp.event --><p class="rsvp">event=<!-- print.event -->1<!-- /print.event --> places=<!-- print.places -->40<!-- /print.places -->'
+		.' going=<!-- print.going -->0<!-- /print.going --> left=<!-- print.left -->40<!-- /print.left --> waiting=<!-- print.waiting -->0<!-- /print.waiting -->'
+		.' state=<!-- print.state -->open<!-- /print.state --> deadline=<!-- print.deadline -->2026-11-20 18:00<!-- /print.deadline --></p><!-- /render.rsvp.event -->';
+	file_put_contents("$theme/events_item.html", '<html><head><title>Event</title></head><body><!-- render.cms.events --><h1><!-- print.title -->Jazz night<!-- /print.title --></h1>'
+		.'<p><!-- print.date -->2026-11-20<!-- /print.date --> at <!-- print.starts -->20:00<!-- /print.starts -->, <!-- print.places -->40<!-- /print.places --> places,'
+		.' replies until <!-- print.rsvp_until -->2026-11-20 18:00<!-- /print.rsvp_until --></p><!-- /render.cms.events -->'.$region.'</body></html>');
+	file_put_contents("$theme/zzrsvp.html", '<html><head><title>Reply</title></head><body>'.$region.'</body></html>');
+	controller::forget_models();
+	cms_records::forget();
+	cms_store::connect();
+	cms_types::ensure('eventsdata', array('title' => 'text', 'date' => 'date', 'starts' => 'time', 'places' => 'int', 'rsvp_until' => 'datetime',
+		'slug' => 'text', 'enabled' => 'bool', 'published_at' => 'datetime', 'updated_at' => 'datetime'));
+	if (class_exists('rsvp', false)) rsvp::forget();
+	// this process booted without a view that uses rsvp, so it binds the
+	// listeners system/config/events.php binds for a site that has one
+	$listeners = array('cms.item_saved' => 'saved', 'cms.item_deleted' => 'deleted');
+	foreach ($listeners as $event => $method) event::bind($event)->to('rsvp', $method);
+	try {
+		return $fn($theme);
+	} finally {
+		foreach ($listeners as $event => $method) event::unbind($event)->from('rsvp', $method);
+		foreach (array('rsvpdata', 'eventsdata') as $table) R::getDatabaseAdapter()->exec("DROP TABLE IF EXISTS $table");
+		cms_store::forget();
+		@unlink("$theme/events_item.html");
+		@unlink("$theme/zzrsvp.html");
+		controller::forget_models();
+		cms_records::forget();
+		if (class_exists('rsvp', false)) {
+			rsvp::forget();
+			rsvp::$posting = null;
+			rsvp::$freed = array();
+			rsvp::$changed = array();
+		}
+	}
+}
+// an event as an editor saves it in the page: ten days ahead at 20:00,
+// 10 places, unless $values say otherwise
+function rsvp_event($values = array()) {
+	static $n = 0;
+	$n++;
+	$values = array_merge(array('title' => "Night $n", 'date' => date('Y-m-d', strtotime('+10 days')), 'starts' => '20:00', 'places' => 10), $values);
+	return cms_store::save_item('eventsdata', 0, $values, array_keys($values), 'editor');
+}
+// A reply, each guest with an address of their own: as model code writes
+// it ('model'), as staff in the page or over MCP ('editor'), or as the form
+// stores it ('visitor', for the page's event: rsvp::$posting, else the
+// event the values name)
+function rsvp_reply($values, $who = 'model') {
+	static $n = 0;
+	$n++;
+	$values = array_merge(array('name' => "Guest $n", 'email' => "guest$n@example.test"), $values);
+	if ($who === 'model') return cms_records::create('rsvp', $values);
+	$posting = rsvp::$posting;
+	if ($who === 'visitor' && $posting === null && isset($values['event'])) rsvp::$posting = (int)$values['event'];
+	try {
+		return cms_store::save_item('rsvpdata', 0, $values, cms_records::writable(cms_records::info('rsvp')), $who);
+	} finally {
+		rsvp::$posting = $posting;
+	}
+}
+// a change as the guest's own link makes it (the model's write, for a guest)
+function rsvp_as_guest($fn) {
+	$acting = rsvp::$acting;
+	rsvp::$acting = 'guest';
+	try {
+		return $fn();
+	} finally {
+		rsvp::$acting = $acting;
+	}
+}
+function rsvp_status($id) {
+	$reply = cms_records::get('rsvp', $id);
+	return $reply ? $reply['status'] : null;
+}
+// the rsvp events this process sent while $fn ran, as array(event, payload)
+function rsvp_events($fn) {
+	global $booking_seen;
+	$booking_seen = array();
+	$names = array('rsvp.replied', 'rsvp.changed', 'rsvp.promoted');
+	foreach ($names as $name) event::bind($name)->to(null, 'test_booking_seen');
+	try {
+		$fn();
+	} finally {
+		foreach ($names as $name) event::unbind($name)->from(null, 'test_booking_seen');
+	}
+	return $booking_seen;
+}
+// the files a page's render includes, from a process of its own
+function rsvp_loads($url, $env) {
+	global $root;
+	$dir = sys_get_temp_dir().'/raster-rsvp-loads-'.getmypid();
+	@mkdir($dir);
+	file_put_contents("$dir/prepend.php", '<?php register_shutdown_function(function () { file_put_contents('.var_export("$dir/out.json", true).', json_encode(get_included_files())); });');
+	shell_exec("$env ".escapeshellarg(PHP_BINARY).' -d auto_prepend_file='.escapeshellarg("$dir/prepend.php").' '.escapeshellarg("$root/bin/raster").' render '.escapeshellarg($url).' 2>&1');
+	$included = json_decode((string)@file_get_contents("$dir/out.json"), true);
+	@unlink("$dir/out.json");
+	@unlink("$dir/prepend.php");
+	@unlink("$dir/db.sqlite");
+	@rmdir($dir);
+	check(is_array($included), "no report from the render of $url");
+	return $included;
+}
+// render.rsvp.event's line on a page, as a request renders it
+function rsvp_line($url) {
+	$page = booking_render($url);
+	check(strpos($page, '[exit 0]') !== false, "$url: $page");
+	return preg_match('#<p class="rsvp">(.*?)</p>#', $page, $m) ? $m[1] : null;
+}
+
+test('rsvp types count only where views use the model', function () use ($db) {
+	controller::forget_models();
+	cms_records::forget();
+	check(cms_records::info('rsvp') === null, 'rsvp is declared without a view that uses rsvp');
+	$dir = sys_get_temp_dir().'/raster-rsvp-loads-'.getmypid();
+	@mkdir($dir);
+	$included = rsvp_loads('/about', 'RASTER_ENV=production RASTER_DB='.escapeshellarg(test_db("$dir/db.sqlite")));
+	same(array(), array_values(preg_grep('~/system/models/rsvp/~', $included)), 'rsvp files loaded:');
+	rsvp_site(function () use ($db) {
+		$info = cms_records::info('rsvp');
+		same('rsvp', $info['model']);
+		same(array('name', 'email', 'phone', 'event', 'answer', 'people', 'notes', 'status', 'waiting_since', 'changed_at', 'event_at', 'token_hashes', 'link_sent_at'), array_keys($info['fields']));
+		same(array('visitor', false, true, true, true), array($info['create'], $info['public'], $info['owner'], $info['staff_add'], $info['spam']));
+		same(array('status', 'waiting_since', 'changed_at', 'event_at'), $info['readonly']);
+		same(array('token_hashes', 'link_sent_at'), $info['hidden']);
+		same(array('promote' => 'editor'), $info['actions']);
+		same(array('datetime', 'datetime', 'datetime', 'int', 'int'), array($info['types']['waiting_since'], $info['types']['event_at'], $info['types']['link_sent_at'], $info['types']['event'], $info['types']['people']));
+		same(true, rsvp::ready());
+		$event = rsvp_event(array('title' => 'Jazz night'));
+		// in production: in development the page's template check reads what
+		// every bundled model requires
+		$included = rsvp_loads('/events/events_item/'.$event['slug'], 'RASTER_ENV=production RASTER_DB='.escapeshellarg($db));
+		check(preg_grep('~/system/models/rsvp/rsvp\.php$~', $included), 'rsvp was not used: '.json_encode($included));
+		same(array(), array_values(preg_grep('~/system/models/booking/~', $included)), 'booking files loaded:');
+	});
+});
+
+test('a site without rsvp binds no rsvp listener and loads no rsvp file when it saves a record', function () {
+	$code = 'cms_store::save_item("zzthing", 0, array("title" => "x"), array("title"), "editor");'
+		.' echo json_encode(array("bound" => array_values(preg_grep("/^rsvp\\./", call_user_func_array("array_merge", array_values(event::bindings())))),'
+		.' "loaded" => array_values(preg_grep("~/models/rsvp/~", get_included_files()))));';
+	$out = json_decode(race_php($code, 1)[0], true);
+	check(is_array($out), 'no report from the save');
+	same(array(), $out['bound'], 'rsvp listeners bound:');
+	same(array(), $out['loaded'], 'rsvp files loaded:');
+	R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS zzthing');
+});
+
+test('rsvp: a yes takes places, no and maybe take none', function () {
+	rsvp_site(function () {
+		$event = rsvp_event(array('places' => 10));
+		$yes = rsvp_reply(array('event' => $event['id'], 'answer' => 'yes', 'people' => 4));
+		same('going', $yes['status']);
+		$no = rsvp_reply(array('event' => $event['id'], 'answer' => 'no', 'people' => 3));
+		$maybe = rsvp_reply(array('event' => $event['id'], 'answer' => 'maybe', 'people' => 2));
+		same(array('no', ''), array($no['status'], (string)$no['waiting_since']));
+		same(array('maybe', ''), array($maybe['status'], (string)$maybe['waiting_since']));
+		// the reply being written is left out
+		same(4, rsvp::going($event['id'], 0));
+		same(0, rsvp::going($event['id'], $yes['id']));
+		check((string)$yes['changed_at'] !== '', 'changed_at');
+		same(date('Y-m-d H:i:s', strtotime($event['date'].' 20:00')), (string)$yes['event_at']);
+		// empty and 0 are no limit
+		foreach (array('', 0) as $places) {
+			$open = rsvp_event(array('places' => $places));
+			same('going', rsvp_reply(array('event' => $open['id'], 'answer' => 'yes', 'people' => 50), 'editor')['status'], "places '$places':");
+		}
+	});
+});
+
+test('rsvp: a yes that doesn\'t fit waits, or is full', function () {
+	rsvp_site(function () {
+		$event = rsvp_event(array('places' => 4));
+		rsvp_reply(array('event' => $event['id'], 'people' => 3));
+		$waiting = rsvp_reply(array('event' => $event['id'], 'people' => 2), 'visitor');
+		same('waiting', $waiting['status']);
+		check((string)$waiting['waiting_since'] !== '', 'waiting_since');
+		with_settings(array('rsvp_waitlist' => false), function () use ($event) {
+			same(array('full'), booking_problems(function () use ($event) { rsvp_reply(array('event' => $event['id'], 'people' => 2), 'visitor'); }));
+			same(array('full'), booking_problems(function () use ($event) { rsvp_reply(array('event' => $event['id'], 'people' => 2), 'editor'); }));
+		});
+		// a party that could never fit, whoever writes it
+		same(array('too_many'), booking_problems(function () use ($event) { rsvp_reply(array('event' => $event['id'], 'people' => 5), 'visitor'); }));
+		same(array('too_many'), booking_problems(function () use ($event) { rsvp_reply(array('event' => $event['id'], 'people' => 5), 'editor'); }));
+		// rsvp_max_people (6) is for guests only
+		$open = rsvp_event(array('places' => 0));
+		same(array('too_many'), booking_problems(function () use ($open) { rsvp_reply(array('event' => $open['id'], 'people' => 7), 'visitor'); }));
+		same('going', rsvp_reply(array('event' => $open['id'], 'people' => 7), 'editor')['status']);
+	});
+});
+
+test('rsvp: the rules, for guests and staff', function () {
+	rsvp_site(function () {
+		$event = rsvp_event();
+		$guest = function ($values) { return booking_problems(function () use ($values) { rsvp_reply($values, 'visitor'); }); };
+		same(array('not_open'), $guest(array('answer' => 'yes')));
+		$draft = rsvp_event(array('enabled' => 0));
+		$scheduled = rsvp_event(array('published_at' => date('Y-m-d H:i', strtotime('+1 day'))));
+		$undated = rsvp_event(array('date' => ''));
+		foreach (array($draft, $scheduled, $undated) as $closed) same(array('not_open'), $guest(array('event' => $closed['id'])), $closed['title']);
+		same(array('not_open'), booking_problems(function () use ($undated) { rsvp_reply(array('event' => $undated['id']), 'editor'); }), 'staff, no date:');
+		same(array('name_invalid'), $guest(array('event' => $event['id'], 'name' => '')));
+		same(array('name_invalid'), $guest(array('event' => $event['id'], 'name' => "Ana\nBcc: x@evil.test")));
+		same(array('email_invalid'), $guest(array('event' => $event['id'], 'email' => '')));
+		same(array('email_invalid'), $guest(array('event' => $event['id'], 'email' => 'not an address')));
+		same('', (string)rsvp_reply(array('event' => $event['id'], 'name' => 'Phone reply', 'email' => ''), 'editor')['email']);
+		same(array('email_invalid'), booking_problems(function () use ($event) { rsvp_reply(array('event' => $event['id'], 'email' => 'nope'), 'editor'); }));
+		same(array('answer_invalid'), $guest(array('event' => $event['id'], 'answer' => 'perhaps')));
+		same(array('people_invalid'), $guest(array('event' => $event['id'], 'answer' => 'yes', 'people' => 0)));
+		same(array(), $guest(array('event' => $event['id'], 'answer' => 'no', 'people' => 0)), 'people on a no:');
+		rsvp_reply(array('event' => $event['id'], 'email' => 'ana@example.com'), 'visitor');
+		same(array('already_replied'), $guest(array('event' => $event['id'], 'email' => 'ANA@example.com')));
+		same(array('already_replied'), booking_problems(function () use ($event) { rsvp_reply(array('event' => $event['id'], 'email' => 'Ana@Example.com'), 'editor'); }));
+		// the same address for another event is another reply
+		same(array(), $guest(array('event' => rsvp_event()['id'], 'email' => 'ana@example.com')));
+		// a visitor never chooses the event: the page's is written
+		$other = rsvp_event();
+		rsvp::$posting = $event['id'];
+		$reply = rsvp_reply(array('event' => $other['id'], 'email' => 'mihai@example.com'), 'visitor');
+		rsvp::$posting = null;
+		same($event['id'], $reply['event']);
+	});
+});
+
+test('rsvp: the deadline takes no places but takes them back', function () {
+	rsvp_site(function () {
+		$tomorrow = date('Y-m-d', strtotime('+1 day'));
+		$event = rsvp_event(array('date' => $tomorrow, 'starts' => '20:00', 'rsvp_until' => date('Y-m-d H:i', time() - 3600)));
+		same(array('closed'), booking_problems(function () use ($event) { rsvp_reply(array('event' => $event['id']), 'visitor'); }));
+		$id = rsvp_reply(array('event' => $event['id'], 'people' => 3))['id'];
+		rsvp_as_guest(function () use ($id) {
+			same(2, cms_records::update('rsvp', $id, array('people' => 2))['people']);
+			same(array('closed'), booking_problems(function () use ($id) { cms_records::update('rsvp', $id, array('people' => 3)); }));
+			same('no', cms_records::update('rsvp', $id, array('answer' => 'no'))['status']);
+			same(array('closed'), booking_problems(function () use ($id) { cms_records::update('rsvp', $id, array('answer' => 'yes')); }));
+		});
+		same('going', rsvp_reply(array('event' => $event['id']), 'editor')['status'], 'staff after the deadline:');
+		// rsvp_closes minutes before the start, for an event without rsvp_until
+		with_settings(array('rsvp_closes' => 120), function () {
+			$soon = time() + 90 * 60;
+			$event = rsvp_event(array('date' => date('Y-m-d', $soon), 'starts' => date('H:i', $soon)));
+			same(array('closed'), booking_problems(function () use ($event) { rsvp_reply(array('event' => $event['id']), 'visitor'); }));
+			same(strtotime(date('Y-m-d H:i', $soon)) - 7200, rsvp::item($event['id'])['deadline']);
+		});
+		// no start time: 00:00 of its date; a deadline after the start is the start
+		$day = date('Y-m-d', strtotime('+3 days'));
+		$event = rsvp::item(rsvp_event(array('date' => $day, 'starts' => ''))['id']);
+		same(array('00:00', strtotime("$day 00:00"), strtotime("$day 00:00")), array($event['starts'], $event['starts_at'], $event['deadline']));
+		$event = rsvp::item(rsvp_event(array('date' => $day, 'starts' => '20:00', 'rsvp_until' => "$day 21:00"))['id']);
+		same(strtotime("$day 20:00"), $event['deadline']);
+		$event = rsvp::item(rsvp_event(array('date' => $day, 'starts' => '20:00', 'rsvp_until' => "$day 18:00"))['id']);
+		same(strtotime("$day 18:00"), $event['deadline']);
+		// once it has started a guest changes nothing
+		$started = rsvp_event(array('date' => date('Y-m-d', time() - 3600), 'starts' => date('H:i', time() - 3600)));
+		$id = rsvp_reply(array('event' => $started['id'], 'people' => 2))['id'];
+		rsvp_as_guest(function () use ($id) {
+			same(array('closed'), booking_problems(function () use ($id) { cms_records::update('rsvp', $id, array('answer' => 'no')); }));
+		});
+	});
+});
+
+test('rsvp: two yeses for the last place at once', function () {
+	rsvp_site(function () {
+		$event = rsvp_event(array('places' => 10));
+		// the table is made before the race: on MySQL a new table commits
+		rsvp_reply(array('event' => $event['id'], 'people' => 9));
+		$out = race_php('rsvp::$posting = '.(int)$event['id'].'; try { $r = cms_store::save_item("rsvpdata", 0, array("name" => "Racer $n", "email" => "racer$n@example.test", "answer" => "yes", "people" => 1),'
+			.' cms_records::writable(cms_records::info("rsvp")), "visitor"); echo $r["status"]; } catch (cms_refused $e) { echo implode(",", $e->problems); }', 6);
+		same(1, count(array_keys($out, 'going')), 'going: '.json_encode($out));
+		same(5, count(array_keys($out, 'waiting')), 'waiting: '.json_encode($out));
+		reconnect();
+		same(10, rsvp::going($event['id'], 0));
+	});
+});
+
+test('rsvp: promotion moves every party that fits, oldest first, once', function () {
+	rsvp_site(function () {
+		$event = rsvp_event(array('places' => 10));
+		$e = $event['id'];
+		$going = array();
+		foreach (array(3, 3, 4) as $people) $going[] = rsvp_reply(array('event' => $e, 'people' => $people))['id'];
+		$waiting = array();
+		foreach (array(4, 2, 1) as $people) $waiting[$people] = rsvp_reply(array('event' => $e, 'people' => $people))['id'];
+		same(array('waiting', 'waiting', 'waiting'), array_map('rsvp_status', array_values($waiting)));
+		// a going party of 3 says no, as staff code writes it: with 3 free the
+		// 4 is skipped, and the 2 and the 1 move in
+		$seen = rsvp_events(function () use ($going) {
+			cms_records::update('rsvp', $going[0], array('answer' => 'no'));
+		});
+		same(array('going', 'going', 'waiting'), array(rsvp_status($waiting[2]), rsvp_status($waiting[1]), rsvp_status($waiting[4])));
+		same(array('rsvp.changed', 'rsvp.promoted', 'rsvp.promoted'), array_column($seen, 0));
+		same(array($waiting[2], $waiting[1]), array($seen[1][1]['id'], $seen[2][1]['id']));
+		same(array('waitlist', 'waitlist'), array($seen[1][1]['who'], $seen[2][1]['who']));
+		same(10, rsvp::going($e, 0));
+		same(array($waiting[4]), array_map('intval', array_column(database::instance('rsvp')->queue($e), 'id')));
+		// again: nobody moves, nothing is sent
+		$seen = rsvp_events(function () use ($e, &$moved) { $moved = rsvp::promote_waiting($e); });
+		same(array(), $moved);
+		same(array(), $seen);
+	});
+});
+
+test('rsvp: places freed by a no, a smaller party, a delete, a move', function () {
+	rsvp_site(function () {
+		// places 4, a going party of 4, and a waiting couple that fits only
+		// once two places are free
+		$setup = function () {
+			$event = rsvp_event(array('places' => 4));
+			$going = rsvp_reply(array('event' => $event['id'], 'people' => 4))['id'];
+			$waiting = rsvp_reply(array('event' => $event['id'], 'people' => 2))['id'];
+			same('waiting', rsvp_status($waiting));
+			return array($event['id'], $going, $waiting);
+		};
+		list($e, $going, $waiting) = $setup();
+		cms_records::update('rsvp', $going, array('answer' => 'no'));
+		same('going', rsvp_status($waiting), 'after a no:');
+		list($e, $going, $waiting) = $setup();
+		cms_records::update('rsvp', $going, array('people' => 3));
+		same('waiting', rsvp_status($waiting), 'one place free:');
+		cms_store::save_item('rsvpdata', $going, array('people' => 2), array('people'), 'editor');
+		same('going', rsvp_status($waiting), 'after a smaller party:');
+		list($e, $going, $waiting) = $setup();
+		cms_records::delete('rsvp', $going);
+		same('going', rsvp_status($waiting), 'after a delete:');
+		list($e, $going, $waiting) = $setup();
+		cms_store::save_item('rsvpdata', $going, array('event' => rsvp_event()['id']), array('event'), 'editor');
+		same('going', rsvp_status($waiting), 'after a move:');
+		// a waiting party that shrinks keeps its place in the queue, and moves
+		// in once it fits
+		$event = rsvp_event(array('places' => 4));
+		rsvp_reply(array('event' => $event['id'], 'people' => 3));
+		$waiting = rsvp_reply(array('event' => $event['id'], 'people' => 4))['id'];
+		R::exec('UPDATE rsvpdata SET waiting_since = ? WHERE id = ?', array(date('Y-m-d H:i:s', time() - 600), $waiting));
+		$since = (string)cms_records::get('rsvp', $waiting)['waiting_since'];
+		$reply = cms_records::update('rsvp', $waiting, array('people' => 2));
+		same(array('waiting', $since), array($reply['status'], (string)$reply['waiting_since']));
+		cms_records::update('rsvp', $waiting, array('people' => 1));
+		same('going', rsvp_status($waiting), 'a party that shrank to fit:');
+		// a no, then a yes again, joins at the end
+		$event = rsvp_event(array('places' => 2));
+		rsvp_reply(array('event' => $event['id'], 'people' => 2));
+		$first = rsvp_reply(array('event' => $event['id']))['id'];
+		$second = rsvp_reply(array('event' => $event['id']))['id'];
+		R::exec('UPDATE rsvpdata SET waiting_since = ? WHERE id = ?', array(date('Y-m-d H:i:s', time() - 600), $first));
+		R::exec('UPDATE rsvpdata SET waiting_since = ? WHERE id = ?', array(date('Y-m-d H:i:s', time() - 300), $second));
+		$reply = cms_records::update('rsvp', $first, array('answer' => 'no'));
+		same(array('no', ''), array($reply['status'], (string)$reply['waiting_since']));
+		same('waiting', cms_records::update('rsvp', $first, array('answer' => 'yes'))['status']);
+		same(array($second, $first), array_map('intval', array_column(database::instance('rsvp')->queue($event['id']), 'id')));
+	});
+});
+
+test('rsvp: places raised in the page promotes; lowered moves nobody', function () {
+	rsvp_site(function () {
+		$event = rsvp_event(array('places' => 10));
+		rsvp_reply(array('event' => $event['id'], 'people' => 10));
+		$waiting = array(rsvp_reply(array('event' => $event['id'], 'people' => 1))['id'], rsvp_reply(array('event' => $event['id'], 'people' => 1))['id']);
+		$seen = rsvp_events(function () use ($event) {
+			cms_store::save_item('eventsdata', $event['id'], array('places' => 12), array('places'), 'editor');
+		});
+		same(array('going', 'going'), array_map('rsvp_status', $waiting));
+		same(array('rsvp.promoted', 'rsvp.promoted'), array_column($seen, 0));
+		// under the people going: nobody moves, nothing is sent
+		$seen = rsvp_events(function () use ($event) {
+			cms_store::save_item('eventsdata', $event['id'], array('places' => 2), array('places'), 'editor');
+		});
+		same(array(), $seen);
+		same(array('going'), array_values(array_unique(array_column(cms_records::find('rsvp', array('event' => $event['id'])), 'status'))));
+		same(12, rsvp::going($event['id'], 0));
+	});
+});
+
+test('rsvp: nothing promotes from the deadline; promote goes out of turn', function () {
+	rsvp_site(function () {
+		$event = rsvp_event(array('date' => date('Y-m-d', strtotime('+1 day')), 'places' => 2, 'rsvp_until' => date('Y-m-d H:i', time() - 3600)));
+		$going = rsvp_reply(array('event' => $event['id'], 'people' => 2))['id'];
+		$waiting = rsvp_reply(array('event' => $event['id'], 'people' => 1))['id'];
+		$big = rsvp_reply(array('event' => $event['id'], 'people' => 2))['id'];
+		cms_records::update('rsvp', $going, array('answer' => 'no'));
+		same(array('waiting', 'waiting'), array(rsvp_status($waiting), rsvp_status($big)));
+		same(array(), rsvp::promote_waiting($event['id']));
+		// staff move one in themselves, out of turn and after the deadline
+		$seen = rsvp_events(function () use ($waiting) {
+			same('going', cms_records::act('rsvp', $waiting, 'promote', array(), true)['status']);
+		});
+		same(array('rsvp.promoted'), array_column($seen, 0));
+		same('staff', $seen[0][1]['who']);
+		same(array('not_enough_places'), booking_problems(function () use ($big) { cms_records::act('rsvp', $big, 'promote', array(), true); }));
+		same('waiting', rsvp_status($big));
+		same(array('not_waiting'), booking_problems(function () use ($waiting) { cms_records::act('rsvp', $waiting, 'promote', array(), true); }));
+	});
+});
+
+test('rsvp: a going guest is never moved out', function () {
+	rsvp_site(function () {
+		$event = rsvp_event(array('places' => 4));
+		rsvp_reply(array('event' => $event['id'], 'people' => 1));
+		$id = rsvp_reply(array('event' => $event['id'], 'people' => 2), 'visitor')['id'];
+		// 1 + 4 doesn't fit: the guest keeps the 2 places they have
+		rsvp_as_guest(function () use ($id) {
+			same(array('full_for_more'), booking_problems(function () use ($id) { cms_records::update('rsvp', $id, array('people' => 4)); }));
+		});
+		same(array('full_for_more'), booking_problems(function () use ($id) { cms_store::save_item('rsvpdata', $id, array('people' => 4), array('people'), 'editor'); }), 'staff:');
+		$reply = cms_records::get('rsvp', $id);
+		same(array('going', 2), array($reply['status'], $reply['people']));
+		cms_store::save_item('eventsdata', $event['id'], array('places' => 2), array('places'), 'editor');
+		same('going', rsvp_status($id));
+	});
+});
+
+test('rsvp: a party already in may shrink or change its email under lowered places', function () {
+	rsvp_site(function () {
+		$event = rsvp_event(array('places' => 6));
+		$id = rsvp_reply(array('event' => $event['id'], 'people' => 4), 'visitor')['id'];
+		cms_store::save_item('eventsdata', $event['id'], array('places' => 2), array('places'), 'editor');
+		rsvp_as_guest(function () use ($id) {
+			same(array('going', 3), array(cms_records::update('rsvp', $id, array('people' => 3))['status'], cms_records::get('rsvp', $id)['people']));
+		});
+		same('fixed@example.test', cms_store::save_item('rsvpdata', $id, array('email' => 'fixed@example.test'), array('email'), 'editor')['email']);
+		// staff's party over rsvp_max_people, and a guest's link shrinking it
+		$open = rsvp_event(array('places' => 0));
+		$big = rsvp_reply(array('event' => $open['id'], 'people' => 9), 'editor')['id'];
+		rsvp_as_guest(function () use ($big) {
+			same(8, cms_records::update('rsvp', $big, array('people' => 8))['people']);
+			same(array('too_many'), booking_problems(function () use ($big) { cms_records::update('rsvp', $big, array('people' => 9)); }));
+		});
+	});
+});
+
+test('rsvp: a refused write frees no places', function () {
+	rsvp_site(function () {
+		$event = rsvp_event(array('places' => 4));
+		$id = rsvp_reply(array('event' => $event['id'], 'people' => 4))['id'];
+		// a smaller party with a bad email: refused, and nothing is noted
+		same(array('email_invalid'), booking_problems(function () use ($id) { cms_records::update('rsvp', $id, array('people' => 2, 'email' => 'nope')); }));
+		same(array(), rsvp::$freed);
+		same(array(4, 'going'), array(cms_records::get('rsvp', $id)['people'], rsvp_status($id)));
+	});
+});
+
+test('rsvp: other edits always go through', function () {
+	rsvp_site(function () {
+		$event = rsvp_event(array('places' => 4));
+		$id = rsvp_reply(array('event' => $event['id'], 'people' => 4))['id'];
+		cms_store::save_item('eventsdata', $event['id'], array('places' => 2, 'enabled' => 0), array('places', 'enabled'), 'editor');
+		$reply = cms_store::save_item('rsvpdata', $id, array('phone' => '0721 000 000', 'notes' => 'phoned them'), array('phone', 'notes'), 'editor');
+		same(array('0721 000 000', 'phoned them', 'going', 4), array($reply['phone'], $reply['notes'], $reply['status'], $reply['people']));
+		// and when the event is gone
+		cms_store::delete_item('eventsdata', $event['id']);
+		same('call back', cms_store::save_item('rsvpdata', $id, array('notes' => 'call back'), array('notes'), 'editor')['notes']);
+	});
+});
+
+test('rsvp events wait for the commit, with no hidden fields', function () {
+	rsvp_site(function () {
+		$event = rsvp_event(array('title' => 'Jazz night', 'places' => 2));
+		// the table is made before the transaction: on MySQL a new table
+		// commits, so the reply it was made for could not be rolled back
+		cms_records::ensure(cms_records::info('rsvp'));
+		$seen = rsvp_events(function () use ($event) {
+			try {
+				cms_records::transaction(function () use ($event) {
+					rsvp_reply(array('event' => $event['id']), 'editor');
+					cms_records::refuse('zz_stop');
+				});
+			} catch (cms_refused $e) {
+			}
+		});
+		same(array(), $seen, 'a rolled back reply:');
+		same(0, count(cms_records::find('rsvp')));
+		$seen = rsvp_events(function () use ($event, &$id, &$waiting) {
+			$id = rsvp_reply(array('event' => $event['id'], 'people' => 2), 'editor')['id'];
+			$waiting = rsvp_reply(array('event' => $event['id'], 'people' => 1), 'editor')['id'];
+			cms_store::save_item('rsvpdata', $id, array('people' => 1), array('people'), 'editor');
+			// a note changes nothing the events are about
+			cms_store::save_item('rsvpdata', $id, array('notes' => 'by the window'), array('notes'), 'editor');
+		});
+		same(array('rsvp.replied', 'rsvp.replied', 'rsvp.changed', 'rsvp.promoted'), array_column($seen, 0));
+		foreach ($seen as $one) {
+			check(!array_key_exists('token_hashes', $one[1]) && !array_key_exists('link_sent_at', $one[1]), $one[0].' has hidden fields: '.json_encode($one[1]));
+			same(array('Jazz night', $event['date'], '20:00'), array($one[1]['event_title'], $one[1]['event_date'], $one[1]['event_starts']), $one[0]);
+		}
+		same(array('staff', 'staff', 'waitlist'), array($seen[0][1]['who'], $seen[2][1]['who'], $seen[3][1]['who']));
+		same(array('going', 2, 1), array($seen[2][1]['was'], $seen[2][1]['was_people'], $seen[2][1]['people']));
+		same($waiting, $seen[3][1]['id']);
+	});
+});
+
+test('render.rsvp.event: places, going, left, state', function () use ($db) {
+	rsvp_site(function () use ($db) {
+		$event = rsvp_event(array('title' => 'Jazz night', 'places' => 10, 'rsvp_until' => date('Y-m-d', strtotime('+10 days')).' 18:00'));
+		rsvp_reply(array('event' => $event['id'], 'people' => 4));
+		rsvp_reply(array('event' => $event['id'], 'answer' => 'maybe', 'people' => 3));
+		$line = 'event='.$event['id'].' places=10 going=4 left=6 waiting=0 state=open deadline='.$event['date'].' 18:00';
+		same($line, rsvp_line('/events/events_item/'.$event['slug']));
+		same($line, rsvp_line('/zzrsvp?event='.$event['id']));
+		$full = rsvp_event(array('places' => 2));
+		rsvp_reply(array('event' => $full['id'], 'people' => 2));
+		rsvp_reply(array('event' => $full['id'], 'people' => 1));
+		same('event='.$full['id'].' places=2 going=2 left=0 waiting=1 state=full deadline='.$full['date'].' 20:00', rsvp_line('/zzrsvp?event='.$full['id']));
+		$closed = rsvp_event(array('date' => date('Y-m-d', strtotime('+1 day')), 'rsvp_until' => date('Y-m-d H:i', time() - 60)));
+		check(strpos(rsvp_line('/zzrsvp?event='.$closed['id']), 'state=closed') !== false, 'closed');
+		$over = rsvp_event(array('date' => date('Y-m-d', time() - 3600), 'starts' => date('H:i', time() - 3600)));
+		check(strpos(rsvp_line('/zzrsvp?event='.$over['id']), 'state=over') !== false, 'over');
+		$open = rsvp_event(array('places' => ''));
+		same('event='.$open['id'].' places= going=0 left= waiting=0 state=open deadline='.$open['date'].' 20:00', rsvp_line('/zzrsvp?event='.$open['id']));
+		// no event, or one visitors can't see: no row
+		$draft = rsvp_event(array('enabled' => 0));
+		foreach (array('/zzrsvp', '/zzrsvp?event=999999', '/zzrsvp?event='.$draft['id'], '/zzrsvp?event=x') as $url) same(null, rsvp_line($url), $url);
+		// never page-cached
+		cache_empty();
+		cache_server($db, function ($get) use ($event) {
+			foreach (array(1, 2) as $time) {
+				list($status, $body) = $get('/events/events_item/'.$event['slug']);
+				same('200 not cached', $status);
+				check(strpos($body, 'left=6') !== false, $body);
+			}
+		});
+	});
+});
+
+test('a site rsvp model or type keeps the name', function () {
+	$app = APPBASE.config::get('models_path', 'models');
+	rsvp_site(function () use ($app) {
+		// the site's own rsvp model, in a process of its own: this one has
+		// the bundled class already
+		temp_model("$app/rsvp", array('rsvp.php' => "<?php\nclass rsvp\n{\n\tstatic function types() {\n\t\treturn array('rsvp' => array('fields' => array('name' => '')));\n\t}\n}\n"));
+		try {
+			$out = race_php('$b = event::bindings(); echo json_encode(array(controller::model("rsvp")["bundled"], array_keys(cms_records::info("rsvp")["fields"]),'
+				.' array_merge(isset($b["cms.item_saved"]) ? $b["cms.item_saved"] : array(), isset($b["cms.item_deleted"]) ? $b["cms.item_deleted"] : array())));', 1);
+		} finally {
+			remove_dir("$app/rsvp");
+			controller::forget_models();
+		}
+		$out = json_decode($out[0], true);
+		check(is_array($out), 'the process said: '.json_encode($out));
+		same(false, $out[0], 'bundled:');
+		same(array('name'), $out[1]);
+		same(array(), array_values(preg_grep('/^rsvp\./', $out[2])), 'rsvp listeners bound:');
+		// a type named rsvp in another model
+		temp_model("$app/zzparty", array('zzparty.php' => "<?php\nclass zzparty\n{\n\tstatic function types() {\n\t\treturn array('rsvp' => array('fields' => array('name' => '', 'guests' => 0)));\n\t}\n}\n"));
+		try {
+			controller::forget_models();
+			cms_records::forget();
+			same('zzparty', cms_records::info('rsvp')['model']);
+			same(false, rsvp::ready());
+			check(has_problem((new raster_inspector())->lint_models(), "zzparty declares a type 'rsvp'"), 'lint warns about the type');
+			same(array(), (new rsvp())->event());
+		} finally {
+			remove_dir("$app/zzparty");
+			controller::forget_models();
+			cms_records::forget();
+		}
 	});
 });
 
