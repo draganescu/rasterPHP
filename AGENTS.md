@@ -2267,6 +2267,8 @@ php tests/shop.php                # the example shop in shop/: records, checkout
 node tests/editor-browser.js      # the in-page editor in Chromium (needs Playwright)
 ```
 
+The suites start their PHP children (servers, `bin/raster`, MCP sessions) with opcache's file cache (`php_flags()` in `tests/db.php`), so each one reads compiled code instead of compiling the framework again; `RASTER_TEST_OPCACHE=off` turns it off. A suite also removes, at its start, the untracked fixtures a killed run left behind (`test_sweep()`).
+
 Run, demo and shop also run on MySQL: `RASTER_DB=mysql://root@127.0.0.1:3306/raster
 php tests/demo.php`. Each run makes new, empty databases beside the one named
 and drops them at the end. Tests that only mean something on SQLite say why

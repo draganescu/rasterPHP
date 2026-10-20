@@ -11,6 +11,8 @@ if (PHP_SAPI !== 'cli') exit;
 
 $root = dirname(__DIR__);
 require __DIR__.'/db.php';
+// what a killed run left in the checkout (see test_sweep() in db.php)
+test_sweep($root, array('zz*', '_zz*'), array('application/views/default', 'application/views/default/_email', 'application/views', 'application/models', 'system/models'));
 $db = test_db(sys_get_temp_dir().'/raster-test-'.getmypid().'.sqlite');
 $maildir = sys_get_temp_dir().'/raster-mail-'.getmypid();
 putenv("RASTER_DB=$db");
@@ -226,7 +228,7 @@ test('a page request loads no command line tools and looks up no core overrides'
 	file_put_contents("$dir/prepend.php", '<?php $GLOBALS["looked_up"] = array(); spl_autoload_register(function ($c) { $GLOBALS["looked_up"][] = $c; }, true, true);'
 		.' register_shutdown_function(function () { file_put_contents('.var_export("$dir/out.json", true).', json_encode(array("looked_up" => array_values(array_unique($GLOBALS["looked_up"])), "included" => get_included_files()))); });');
 	$env = 'RASTER_ENV=production RASTER_DB='.escapeshellarg(test_db("$dir/db.sqlite"));
-	shell_exec("$env ".escapeshellarg(PHP_BINARY).' -d auto_prepend_file='.escapeshellarg("$dir/prepend.php").' '.escapeshellarg("$root/bin/raster").' render /about 2>&1');
+	shell_exec("$env ".php_cmd().' -d auto_prepend_file='.escapeshellarg("$dir/prepend.php").' '.escapeshellarg("$root/bin/raster").' render /about 2>&1');
 	$out = json_decode((string)@file_get_contents("$dir/out.json"), true);
 	array_map('unlink', glob("$dir/*") ?: array());
 	@rmdir($dir);
@@ -239,6 +241,7 @@ test('a page request loads no command line tools and looks up no core overrides'
 
 // a model's files, written for one test and removed after it
 function temp_model($dir, $files) {
+	test_fixture($dir);
 	@mkdir($dir, 0775, true);
 	foreach ($files as $name => $source) file_put_contents("$dir/$name", $source);
 }
@@ -353,7 +356,7 @@ test('warm requests load no model that only listens', function () use ($root) {
 	$env = 'RASTER_ENV=production RASTER_DB='.escapeshellarg(test_db("$dir/db.sqlite"));
 	$render = function () use ($env, $dir, $root) {
 		@unlink("$dir/out.json");
-		$page = shell_exec("$env ".escapeshellarg(PHP_BINARY).' -d auto_prepend_file='.escapeshellarg("$dir/prepend.php").' '.escapeshellarg("$root/bin/raster").' render /about 2>&1');
+		$page = shell_exec("$env ".php_cmd().' -d auto_prepend_file='.escapeshellarg("$dir/prepend.php").' '.escapeshellarg("$root/bin/raster").' render /about 2>&1');
 		$included = json_decode((string)@file_get_contents("$dir/out.json"), true);
 		check(is_array($included), 'no report from the render: '.$page);
 		return $included;
@@ -388,7 +391,7 @@ test('a broken, stale or unwritable models.json never stops a page', function ()
 	$env = 'RASTER_ENV=production RASTER_DB='.escapeshellarg(test_db("$dir/db.sqlite"));
 	$render = function () use ($env, $root) {
 		// the form stamps differ by the second they were made in
-		return preg_replace('/(name="raster_ts" value=")[^"]*/', '$1', (string)shell_exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' render /about 2>&1'));
+		return preg_replace('/(name="raster_ts" value=")[^"]*/', '$1', (string)shell_exec("$env ".php_cmd().' '.escapeshellarg("$root/bin/raster").' render /about 2>&1'));
 	};
 	$data = function () {
 		$all = array();
@@ -429,6 +432,7 @@ test('bundled types count only where views use them', function () {
 		controller::forget_models();
 		cms_records::forget();
 		check(!isset(cms_records::types()['zzbook']), 'zzbook counts without a view');
+		test_fixture($view);
 		file_put_contents($view, "<!-- render.zzbook.form -->\n<p>x</p>\n<!-- /render.zzbook.form -->\n");
 		controller::forget_models();
 		cms_records::forget();
@@ -478,7 +482,7 @@ test('a site model named like a bundled one wins and lint says so', function () 
 	$app = APPBASE.config::get('models_path', 'models');
 	temp_model("$app/newsletter", array('newsletter.php' => "<?php\nclass newsletter\n{\n}\n"));
 	try {
-		$out = (string)shell_exec('RASTER_ENV=development RASTER_DB='.escapeshellarg($db).' '.escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' lint 2>&1');
+		$out = (string)shell_exec('RASTER_ENV=development RASTER_DB='.escapeshellarg($db).' '.php_cmd().' '.escapeshellarg("$root/bin/raster").' lint 2>&1');
 		check(strpos($out, 'models/newsletter shadows the bundled newsletter') !== false, 'lint said: '.$out);
 	} finally {
 		remove_dir("$app/newsletter");
@@ -525,9 +529,9 @@ test('required emails come from the model', function () {
 
 $port = free_port();
 $base = "http://127.0.0.1:$port";
-$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_MCP_TOKEN' => 'test-token', 'RASTER_MAIL' => "log://$maildir", 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
+$server = proc_open(php_argv('-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_MCP_TOKEN' => 'test-token', 'RASTER_MAIL' => "log://$maildir", 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
 register_shutdown_function(function () use ($server, $db, $maildir) {
-	proc_terminate($server);
+	proc_terminate($server); proc_close($server);
 	array_map('unlink', glob("$db*") ?: array());
 	array_map('unlink', glob("$maildir/*") ?: array());
 	@rmdir($maildir);
@@ -630,6 +634,7 @@ test('collection urls only for views that render the collection', function () us
 	same(200, http('GET', "$base/news/news_page/1")[0]);
 	// a view in a _ folder that renders a collection is still a partial
 	$view = "$root/application/views/default/_email/zz_digest.html";
+	test_fixture($view);
 	file_put_contents($view, "<h1>zz digest</h1><!-- render.cms.news --><p><!-- print.headline -->x<!-- /print.headline --></p><!-- /render.cms.news -->");
 	try {
 		foreach (array('/_email/zz_digest', '/_email/zz_digest/news_page/1', '/_email/zz_digest/news_items/headline/x', '/_email/zz_digest/news_page/1.rss') as $url) {
@@ -696,6 +701,7 @@ test('editor login and csrf', function () use ($base) {
 });
 test('staff /api methods refuse cross-site requests on every verb (#122)', function () use ($base, $root) {
 	$dir = "$root/application/models/zzstaff";
+	test_fixture($dir);
 	@mkdir($dir);
 	file_put_contents("$dir/zzstaff.php", "<?php\nclass zzstaff {\n\tstatic function api() { return array('close_day' => 'editor', 'hours' => 'visitor'); }\n\tfunction close_day() { return 'closed'; }\n\tfunction hours() { return 'open'; }\n}\n");
 	cms_store::connect();
@@ -768,26 +774,28 @@ test('mcp lint and schema tools', function () {
 test('frozen database falls back to template defaults', function () use ($root, $db) {
 	$view = "$root/application/views/default/about.html";
 	$original = file_get_contents($view);
+	test_fixture($view);
 	file_put_contents($view, str_replace('</main>', '<p><!-- print.cms.frozen_test -->Fallback<!-- /print.cms.frozen_test --></p></main>', $original));
 	try {
 		$env = 'RASTER_ENV=production RASTER_DB='.escapeshellarg($db);
-		$html = shell_exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' render /about');
+		$html = shell_exec("$env ".php_cmd().' '.escapeshellarg("$root/bin/raster").' render /about');
 		check(strpos($html, '<p>Fallback</p>') !== false, 'frozen render failed');
-		exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' schema --check', $out, $code);
+		exec("$env ".php_cmd().' '.escapeshellarg("$root/bin/raster").' schema --check', $out, $code);
 		same(1, $code, 'schema --check should report drift');
 		$out = array();
-		exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' schema --apply 2>&1', $out, $code);
+		exec("$env ".php_cmd().' '.escapeshellarg("$root/bin/raster").' schema --apply 2>&1', $out, $code);
 		same(0, $code, 'schema --apply: '.implode("\n", $out));
-		exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' schema --check', $out, $code);
+		exec("$env ".php_cmd().' '.escapeshellarg("$root/bin/raster").' schema --check', $out, $code);
 		same(0, $code, 'schema --apply did not fix drift');
 	} finally {
+		test_fixture($view);
 		file_put_contents($view, $original);
-		exec('RASTER_DB='.escapeshellarg($db).' '.escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' schema --drop=aboutpage.frozen_test');
+		exec('RASTER_DB='.escapeshellarg($db).' '.php_cmd().' '.escapeshellarg("$root/bin/raster").' schema --drop=aboutpage.frozen_test');
 	}
 });
 test('schema --apply declares model tables by their types, and a long text or big number fits in production', function () use ($root) {
 	$db = test_db(sys_get_temp_dir().'/raster-model-tables-'.getmypid().'.sqlite');
-	$raster = 'RASTER_ENV=production RASTER_DB='.escapeshellarg($db).' '.escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster");
+	$raster = 'RASTER_ENV=production RASTER_DB='.escapeshellarg($db).' '.php_cmd().' '.escapeshellarg("$root/bin/raster");
 	exec("$raster schema --apply 2>&1", $out, $code);
 	same(0, $code, 'schema --apply: '.implode("\n", $out));
 	$pdo = test_pdo($db);
@@ -796,14 +804,14 @@ test('schema --apply declares model tables by their types, and a long text or bi
 	$code = 'require '.var_export("$root/system/boot.php", true).'; boot::$appname = "application"; boot::cli(); authentication::connect();'
 		.' $u = R::dispense("user"); $u->email = "long@example.com"; $u->name = '.var_export($long, true).'; $u->failed_count = 300; R::store($u);'
 		.' $s = R::dispense("subscriber"); $s->email = "long@example.com"; $s->name = '.var_export($long, true).'; R::store($s);';
-	$output = shell_exec('RASTER_ENV=production RASTER_DB='.escapeshellarg($db).' '.escapeshellarg(PHP_BINARY).' -r '.escapeshellarg($code).' 2>&1');
+	$output = shell_exec('RASTER_ENV=production RASTER_DB='.escapeshellarg($db).' '.php_cmd().' -r '.escapeshellarg($code).' 2>&1');
 	same('', trim((string)$output), 'storing in production');
 	same(array($long, '300'), array_map('strval', $pdo->query("SELECT name, failed_count FROM user WHERE email = 'long@example.com'")->fetch(PDO::FETCH_NUM)));
 	same($long, $pdo->query("SELECT name FROM subscriber WHERE email = 'long@example.com'")->fetchColumn());
 });
 test('a page field holds text longer than 64 KB in production, and schema --apply widens the TEXT columns 2.2.30 made', function () use ($root) {
 	$db = test_db(sys_get_temp_dir().'/raster-long-text-'.getmypid().'.sqlite');
-	$raster = 'RASTER_ENV=production RASTER_DB='.escapeshellarg($db).' '.escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster");
+	$raster = 'RASTER_ENV=production RASTER_DB='.escapeshellarg($db).' '.php_cmd().' '.escapeshellarg("$root/bin/raster");
 	exec("$raster schema --apply 2>&1", $out, $code);
 	same(0, $code, 'schema --apply: '.implode("\n", $out));
 	// a page table and one of its text fields
@@ -835,7 +843,7 @@ test('a page field holds text longer than 64 KB in production, and schema --appl
 	$long = str_repeat('A long page. ', 8000); // 104 KB
 	$code = 'require '.var_export("$root/system/boot.php", true).'; boot::$appname = "application"; boot::cli(); cms_store::connect();'
 		.' $b = R::findOne('.var_export($table, true).') ?: R::dispense('.var_export($table, true).'); $b->'.$field.' = '.var_export($long, true).'; R::store($b);';
-	$output = shell_exec('RASTER_ENV=production RASTER_DB='.escapeshellarg($db).' '.escapeshellarg(PHP_BINARY).' -r '.escapeshellarg($code).' 2>&1');
+	$output = shell_exec('RASTER_ENV=production RASTER_DB='.escapeshellarg($db).' '.php_cmd().' -r '.escapeshellarg($code).' 2>&1');
 	same('', trim((string)$output), 'storing in production');
 	same($long, $pdo->query("SELECT `$field` FROM `$table`")->fetchColumn());
 });
@@ -845,10 +853,10 @@ test('schema --apply widens the small MySQL columns that 2.1.8 made for model ta
 	// the way 2.1.8 made them: a row of the defaults, stored and deleted
 	$code = 'require '.var_export("$root/system/boot.php", true).'; boot::$appname = "application"; boot::cli(); authentication::connect();'
 		.' foreach (authentication::schema() as $t => $fields) { $b = R::dispense($t); foreach ($fields as $f => $v) $b->$f = $v; R::store($b); R::trash($b); }';
-	same('', trim((string)shell_exec('RASTER_DB='.escapeshellarg($db).' '.escapeshellarg(PHP_BINARY).' -r '.escapeshellarg($code).' 2>&1')), 'making the old tables');
+	same('', trim((string)shell_exec('RASTER_DB='.escapeshellarg($db).' '.php_cmd().' -r '.escapeshellarg($code).' 2>&1')), 'making the old tables');
 	$pdo = test_pdo($db);
 	check(stripos($pdo->query("SHOW COLUMNS FROM user LIKE 'name'")->fetch(PDO::FETCH_ASSOC)['Type'], 'varchar') === 0, 'the old name column is a varchar');
-	$raster = 'RASTER_ENV=production RASTER_DB='.escapeshellarg($db).' '.escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster");
+	$raster = 'RASTER_ENV=production RASTER_DB='.escapeshellarg($db).' '.php_cmd().' '.escapeshellarg("$root/bin/raster");
 	exec("$raster schema --check 2>&1", $out, $code);
 	same(1, $code, 'schema --check reports the small columns');
 	$out = array();
@@ -866,7 +874,7 @@ test('sending on a frozen database widens the small newsletterissue columns 2.2.
 	$boot = 'require '.var_export("$root/system/boot.php", true).'; boot::$appname = "application"; boot::cli(); newsletter::connect();';
 	// the way 2.2.0 stored an issue sent to one reader: fluid, sized by its values
 	$old = ' $i = R::dispense("newsletterissue"); $i->url = "/old"; $i->subject = "Hi"; $i->recipients = 1; $i->sent_at = R::isoDateTime(); R::store($i);';
-	same('', trim((string)shell_exec('RASTER_DB='.escapeshellarg($db).' '.escapeshellarg(PHP_BINARY).' -r '.escapeshellarg($boot.$old).' 2>&1')), 'making the old table');
+	same('', trim((string)shell_exec('RASTER_DB='.escapeshellarg($db).' '.php_cmd().' -r '.escapeshellarg($boot.$old).' 2>&1')), 'making the old table');
 	$pdo = test_pdo($db);
 	if (on_mysql()) {
 		check(stripos($pdo->query("SHOW COLUMNS FROM newsletterissue LIKE 'recipients'")->fetch(PDO::FETCH_ASSOC)['Type'], 'tinyint') === 0, 'the old recipients column is a tinyint');
@@ -879,7 +887,7 @@ test('sending on a frozen database widens the small newsletterissue columns 2.2.
 		.' $issue->incomplete = 1; R::store($issue);'
 		.' $issue = newsletter::send_issue("/new", "<html></html>", '.var_export($long, true).');'
 		.' echo $issue->recipients, " ", $issue->incomplete;';
-	same('300 0', trim((string)shell_exec('RASTER_ENV=production RASTER_DB='.escapeshellarg($db).' '.escapeshellarg(PHP_BINARY).' -r '.escapeshellarg($boot.$send).' 2>&1')));
+	same('300 0', trim((string)shell_exec('RASTER_ENV=production RASTER_DB='.escapeshellarg($db).' '.php_cmd().' -r '.escapeshellarg($boot.$send).' 2>&1')));
 	same(array($long, '300'), array_map('strval', $pdo->query("SELECT subject, recipients FROM newsletterissue WHERE url = '/new'")->fetch(PDO::FETCH_NUM)));
 	if (on_mysql()) {
 		same('int', strtolower($pdo->query("SHOW COLUMNS FROM newsletterissue LIKE 'recipients'")->fetch(PDO::FETCH_ASSOC)['Type']));
@@ -888,7 +896,7 @@ test('sending on a frozen database widens the small newsletterissue columns 2.2.
 });
 test('mcp over stdio', function () use ($root, $db) {
 	$input = json_encode(array('jsonrpc' => '2.0', 'id' => 7, 'method' => 'tools/call', 'params' => array('name' => 'get_page', 'arguments' => array('page' => '/about'))))."\n";
-	$process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
+	$process = proc_open(php_argv("$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
 	fwrite($pipes[0], $input);
 	fclose($pipes[0]);
 	$response = json_decode(stream_get_contents($pipes[1]), true);
@@ -907,7 +915,7 @@ test('a malformed MCP message is answered and the stdio server goes on (#134)', 
 		'{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"no_such_tool"}}',
 		'{"jsonrpc":"2.0","id":6,"method":"initialize","params":{}}',
 	);
-	$process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
+	$process = proc_open(php_argv("$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
 	fwrite($pipes[0], implode("\n", $lines)."\n");
 	fclose($pipes[0]);
 	$out = array_values(array_filter(explode("\n", stream_get_contents($pipes[1]))));
@@ -973,11 +981,12 @@ test('render_url keeps the environment and reads a page that logs a lot (#107)',
 	$app = APPBASE.config::get('models_path', 'models');
 	$views = APPBASE.config::get('views_path', 'views').'/'.config::get('theme');
 	temp_model("$app/zzloud", array('zzloud.php' => "<?php\nclass zzloud\n{\n\tfunction env() { return (string)getenv('ZZ_SITE_SETTING'); }\n\tfunction noise() { for (\$i = 0; \$i < 3000; \$i++) error_log(str_repeat('x', 60).\" \$i\"); return 'done'; }\n}\n"));
+	test_fixture("$views/zz-loud.html");
 	file_put_contents("$views/zz-loud.html", "<p>env=<!-- print.zzloud.env /--> <!-- print.zzloud.noise /--></p>\n");
 	putenv('ZZ_SITE_SETTING=from-the-environment');
 	// a server of its own, given up on after a while: a hang fails the test
 	// instead of stopping the run
-	$process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, getenv());
+	$process = proc_open(php_argv("$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, getenv());
 	try {
 		fwrite($pipes[0], json_encode(array('jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => array('name' => 'render_url', 'arguments' => array('url' => '/zz-loud'))))."\n");
 		fclose($pipes[0]);
@@ -1089,16 +1098,16 @@ test('newsletter: double opt-in, send, one-click unsubscribe', function () use (
 	check($mail && preg_match('/token=([a-f0-9]{40})/', $mail['text'], $t), 'confirmation email');
 	check(strpos(http('GET', "$base/newsletter-confirm?token={$t[1]}")[1], 'You are subscribed') !== false, 'confirm');
 	$env = 'RASTER_DB='.escapeshellarg($db).' RASTER_MAIL='.escapeshellarg("log://$maildir").' RASTER_URL='.escapeshellarg("$base/");
-	$out = shell_exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' send /about --dry-run 2>&1');
+	$out = shell_exec("$env ".php_cmd().' '.escapeshellarg("$root/bin/raster").' send /about --dry-run 2>&1');
 	check(strpos($out, 'to 1 subscriber') !== false, "dry run: $out");
-	$out = shell_exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' send /about 2>&1');
+	$out = shell_exec("$env ".php_cmd().' '.escapeshellarg("$root/bin/raster").' send /about 2>&1');
 	check(strpos($out, 'Sent "About" to 1 subscriber') !== false, "send: $out");
 	$mail = last_mail();
 	check(preg_match('/List-Unsubscribe: <([^>]+)>/', $mail['raw'], $u), 'List-Unsubscribe');
 	check(strpos($mail['raw'], 'List-Unsubscribe-Post: List-Unsubscribe=One-Click') !== false);
 	$html = base64_decode(preg_replace('/.*Content-Type: text\/html; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n(.*?)\r\n--.*/s', '$1', $mail['raw']));
 	check(strpos($html, '<form') === false && strpos($html, '<script') === false && strpos($html, '<base') === false, 'issue cleaned up');
-	$again = shell_exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' send /about 2>&1');
+	$again = shell_exec("$env ".php_cmd().' '.escapeshellarg("$root/bin/raster").' send /about 2>&1');
 	check(strpos($again, 'already sent') !== false, 'double send guard');
 	check(strpos(http('POST', $u[1], 'List-Unsubscribe=One-Click', array('Content-Type: application/x-www-form-urlencoded'))[1], 'You are unsubscribed') !== false, 'one-click');
 });
@@ -1161,9 +1170,9 @@ test('i18n picks languages', function () {
 });
 test('page cache in production', function () use ($root, $db) {
 	$env = 'RASTER_ENV=production RASTER_DB='.escapeshellarg($db);
-	shell_exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' schema --apply');
+	shell_exec("$env ".php_cmd().' '.escapeshellarg("$root/bin/raster").' schema --apply');
 	$port = free_port();
-	$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_ENV' => 'production', 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
+	$server = proc_open(php_argv('-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_ENV' => 'production', 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
 	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
 	try {
 		$cache = function () use ($port) { return current(preg_grep('/^X-Raster-Cache/i', http('GET', "http://127.0.0.1:$port/about")[2])); };
@@ -1172,7 +1181,7 @@ test('page cache in production', function () use ($root, $db) {
 		util::content_changed();
 		same('X-Raster-Cache: miss', $cache());
 	} finally {
-		proc_terminate($server);
+		proc_terminate($server); proc_close($server);
 		foreach (glob(APPBASE.'data/cache/*') ?: array() as $f) unlink($f);
 	}
 });
@@ -1185,9 +1194,9 @@ test('a production page reads the schema and each page row once, and counts noth
 	file_put_contents("$dir/prepend.php", '<?php spl_autoload_register(function ($c) { if ($c === "cms_editor" && class_exists("R", false)) R::startLogging(); }, true, true);'
 		.' register_shutdown_function(function () { file_put_contents('.var_export("$dir/out.json", true).', json_encode(class_exists("R", false) ? R::getLogs() : array())); });');
 	$env = 'RASTER_ENV=production RASTER_DB='.escapeshellarg($db);
-	shell_exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' schema --apply');
+	shell_exec("$env ".php_cmd().' '.escapeshellarg("$root/bin/raster").' schema --apply');
 	foreach (glob(APPBASE.'data/cache/*') ?: array() as $f) unlink($f);
-	$html = shell_exec("$env ".escapeshellarg(PHP_BINARY).' -d auto_prepend_file='.escapeshellarg("$dir/prepend.php").' '.escapeshellarg("$root/bin/raster").' render /');
+	$html = shell_exec("$env ".php_cmd().' -d auto_prepend_file='.escapeshellarg("$dir/prepend.php").' '.escapeshellarg("$root/bin/raster").' render /');
 	$logs = json_decode((string)@file_get_contents("$dir/out.json"), true);
 	array_map('unlink', glob("$dir/*") ?: array());
 	@rmdir($dir);
@@ -1203,7 +1212,7 @@ test('a production page reads the schema and each page row once, and counts noth
 });
 test('a site under a path: RASTER_URL with a folder', function () use ($root, $db) {
 	$port = free_port();
-	$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_URL' => "http://127.0.0.1:$port/preview/abc/", 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
+	$server = proc_open(php_argv('-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_URL' => "http://127.0.0.1:$port/preview/abc/", 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
 	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
 	try {
 		$base = "http://127.0.0.1:$port/preview/abc";
@@ -1228,7 +1237,7 @@ test('a site under a path: RASTER_URL with a folder', function () use ($root, $d
 		same(403, http('GET', "$base/application/config/the_app.php")[0], 'private paths still refused');
 		same(403, http('GET', "$base/system/boot.php")[0]);
 	} finally {
-		proc_terminate($server);
+		proc_terminate($server); proc_close($server);
 	}
 });
 
@@ -1238,7 +1247,7 @@ test('raster serve passes site_url with a folder to the router', function () use
 	$original = file_get_contents($config);
 	file_put_contents($config, $original."\nconfig::set('site_url')->to('http://127.0.0.1:$port/shop/');\n");
 	$env = array('RASTER_DB' => $db, 'PATH' => getenv('PATH'));
-	$server = proc_open(array(PHP_BINARY, "$root/bin/raster", 'serve', "--host=127.0.0.1", "--port=$port"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, $env);
+	$server = proc_open(php_argv("$root/bin/raster", 'serve', "--host=127.0.0.1", "--port=$port"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, $env);
 	try {
 		for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
 		same(200, http('GET', "http://127.0.0.1:$port/shop/about")[0], 'page under the folder');
@@ -1247,7 +1256,7 @@ test('raster serve passes site_url with a folder to the router', function () use
 		file_put_contents($config, $original);
 		// serve starts php -S through a shell, so the server is found by its
 		// address ([-] keeps the pattern from matching pkill's own shell)
-		proc_terminate($server);
+		proc_terminate($server); proc_close($server);
 		exec('pkill -f '.escapeshellarg("[-]S 127.0.0.1:$port"));
 	}
 });
@@ -1281,7 +1290,7 @@ test('a password reset ends other sessions', function () use ($base, $maildir) {
 	same(303, http('GET', "$base/account", null, array("Cookie: $cookie"))[0], 'old session still logged in');
 });
 test('accounts: login links from the command line', function () use ($base, $root, $db) {
-	$raster = 'RASTER_DB='.escapeshellarg($db).' RASTER_URL='.escapeshellarg("$base/").' '.escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster");
+	$raster = 'RASTER_DB='.escapeshellarg($db).' RASTER_URL='.escapeshellarg("$base/").' '.php_cmd().' '.escapeshellarg("$root/bin/raster");
 	exec("$raster user link@example.test --role=member --password=link-pass-1 2>&1", $out, $code);
 	same(0, $code, implode("\n", $out));
 	$link = function ($args) use ($raster) { return trim((string)shell_exec("$raster login-link $args 2>/dev/null")); };
@@ -1332,6 +1341,7 @@ test('feed links, raw views and json lists', function () use ($base, $root) {
 	check(strpos(http('GET', "$base/")[1], 'href="'.$base.'/news.rss"') !== false, 'rss link rewritten');
 	same(403, http('GET', "$base/application/views/default/news.rss")[0]);
 	$view = "$root/application/views/default/zz_feed.json";
+	test_fixture($view);
 	file_put_contents($view, "[<!-- render.feed.items('news') -->{\"title\": \"<!-- print.headline -->x<!-- /print.headline -->\"}<!-- /render.feed.items('news') -->]");
 	try {
 		list($status, $body) = http('GET', "$base/zz_feed.json");
@@ -1349,13 +1359,13 @@ test('pagination follows filters', function () use ($base) {
 test('frozen database: accounts and newsletter after schema --apply', function () use ($root) {
 	$db = test_db(sys_get_temp_dir().'/raster-frozen-'.getmypid().'.sqlite');
 	$env = 'RASTER_ENV=production RASTER_DB='.escapeshellarg($db).' RASTER_URL=http://example.test/';
-	$raster = escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster");
+	$raster = php_cmd().' '.escapeshellarg("$root/bin/raster");
 	try {
 		exec("$env $raster schema --apply 2>&1", $out, $code);
 		same(0, $code, implode("\n", $out));
 		exec("$env $raster user admin@example.test --password=secret-pass 2>&1", $out, $code);
 		same(0, $code, implode("\n", $out));
-		$result = shell_exec("$env ".escapeshellarg(PHP_BINARY).' -r '.escapeshellarg('require "'.$root.'/system/boot.php"; boot::$appname = "application"; boot::cli(); authentication::connect(); echo authentication::check_login("admin@example.test", "secret-pass") ? "ok" : "fail";').' 2>&1');
+		$result = shell_exec("$env ".php_cmd().' -r '.escapeshellarg('require "'.$root.'/system/boot.php"; boot::$appname = "application"; boot::cli(); authentication::connect(); echo authentication::check_login("admin@example.test", "secret-pass") ? "ok" : "fail";').' 2>&1');
 		same('ok', trim($result));
 		exec("$env $raster schema --check 2>&1", $out, $code);
 		same(0, $code, 'drift after apply');
@@ -1377,7 +1387,7 @@ test('the comment at the top of bin/raster lists what raster help lists (#49)', 
 	foreach ($lines as $line) $header[$line[1]] = $names($line[2]);
 	$help = array();
 	$command = null;
-	foreach (explode("\n", (string)shell_exec(escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' help')) as $line) {
+	foreach (explode("\n", (string)shell_exec(php_cmd().' '.escapeshellarg("$root/bin/raster").' help')) as $line) {
 		// a command's lines are its own and the indented ones below it; the
 		// usage is what comes before the description's wide gap
 		if (preg_match('#^  php bin/raster (\S+)#', $line, $m)) $command = $m[1];
@@ -1431,6 +1441,7 @@ test('private_paths: the rules, and the apps they name', function () use ($root)
 });
 test('lint warns about a view whose address the server refuses (#98)', function () use ($root) {
 	$dir = "$root/application/views/default/docs";
+	test_fixture($dir);
 	@mkdir($dir);
 	file_put_contents("$dir/config.html", '<p>Settings</p>');
 	file_put_contents("$dir/setup.html", '<p>Setup</p>');
@@ -1522,6 +1533,7 @@ test('the engine renders only the full form', function () {
 test('allow_deprecated counts a use apart instead of warning', function () use ($root) {
 	$views = "$root/application/views/default";
 	$file = "$views/zz_deprecated.html";
+	test_fixture($file);
 	file_put_contents($file, '<!-- render.validation.not_empty(\'email\') -->x<!-- /render.validation.not_empty(\'email\') -->');
 	try {
 		$found = raster_project::deprecations($root, 'application');
@@ -1715,7 +1727,7 @@ test('RASTER_DB takes a MySQL address', function () {
 	// a site whose config reads RASTER_DB as a file is on MySQL all the same
 	// (nothing listens on port 1; on SQLite this would be a file named so)
 	$code = 'require "'.dirname(__DIR__).'/system/boot.php"; boot::$appname = "application"; boot::cli(); database::instance(); try { R::inspect(); } catch (Exception $e) { echo $e->getMessage(); }';
-	$out = (string)shell_exec('RASTER_DB=mysql://nobody@127.0.0.1:1/none '.escapeshellarg(PHP_BINARY).' -r '.escapeshellarg($code).' 2>&1');
+	$out = (string)shell_exec('RASTER_DB=mysql://nobody@127.0.0.1:1/none '.php_cmd().' -r '.escapeshellarg($code).' 2>&1');
 	same('Could not connect to database (none).', $out);
 });
 test('the ORM does not need pdo_mysql for an SQLite site', function () {
@@ -1729,7 +1741,7 @@ test('the ORM does not need pdo_mysql for an SQLite site', function () {
 // be; $code runs after it
 function cache_php($code) {
 	global $root;
-	return array(PHP_BINARY, '-r', 'require "'.$root.'/system/boot.php"; boot::$appname = "application"; boot::cli("/about"); config::set("page_cache")->to(true); raster_cache::$cacheable = true; http_response_code(200); '.$code);
+	return php_argv('-r', 'require "'.$root.'/system/boot.php"; boot::$appname = "application"; boot::cli("/about"); config::set("page_cache")->to(true); raster_cache::$cacheable = true; http_response_code(200); '.$code);
 }
 // what the page cache keeps; models.json is the model lookup's, not a page
 function cached_pages() {
@@ -1829,7 +1841,7 @@ test('tracking parameters alone still use the cache', function () {
 test('empty filter pages, pages past the last one and unknown filters are not cached', function () use ($root, $db) {
 	cache_empty();
 	$port = free_port();
-	$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_ENV' => 'production', 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
+	$server = proc_open(php_argv('-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_ENV' => 'production', 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
 	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
 	try {
 		$get = function ($path) use ($port) {
@@ -1850,7 +1862,7 @@ test('empty filter pages, pages past the last one and unknown filters are not ca
 		same('200 X-Raster-Cache: hit', $get('/news?utm_source=newsletter&fbclid=x'));
 		same('200 not cached', $get('/news?x=1'));
 	} finally {
-		proc_terminate($server);
+		proc_terminate($server); proc_close($server);
 		cache_empty();
 	}
 });
@@ -1859,7 +1871,7 @@ test('empty filter pages, pages past the last one and unknown filters are not ca
 function cache_server($db, $test) {
 	global $root;
 	$port = free_port();
-	$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_ENV' => 'production', 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
+	$server = proc_open(php_argv('-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_ENV' => 'production', 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
 	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
 	$get = function ($path) use ($port) {
 		list($status, $body, $headers) = http('GET', "http://127.0.0.1:$port$path");
@@ -1868,7 +1880,7 @@ function cache_server($db, $test) {
 	try {
 		$test($get);
 	} finally {
-		proc_terminate($server);
+		proc_terminate($server); proc_close($server);
 		cache_empty();
 	}
 }
@@ -1969,6 +1981,7 @@ test('a content change deletes temporary cache files left long ago', function ()
 	$new = $dir.str_repeat('e', 40).'.'.str_repeat('f', 12).'.tmp';
 	file_put_contents($old, 'left by a request that died');
 	touch($old, time() - 7200);
+	test_fixture($new);
 	file_put_contents($new, 'being written');
 	cache_run('util::content_changed();');
 	check(!is_file($old), 'a temporary file from two hours ago is still there');
@@ -2004,10 +2017,10 @@ function b_server($env) {
 	global $root;
 	$port = free_port();
 	$log = sys_get_temp_dir().'/raster-b-'.getmypid().'-'.$port.'.log';
-	$process = proc_open(array(PHP_BINARY, '-d', 'display_errors=1', '-d', 'log_errors=0', '-d', 'output_buffering=0', '-d', 'html_errors=0', '-d', "error_log=$log", '-S', "127.0.0.1:$port", "$root/index.php"),
+	$process = proc_open(php_argv('-d', 'display_errors=1', '-d', 'log_errors=0', '-d', 'output_buffering=0', '-d', 'html_errors=0', '-d', "error_log=$log", '-S', "127.0.0.1:$port", "$root/index.php"),
 		array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array_merge(array('PATH' => getenv('PATH'), 'RASTER_SECRET' => 'test-secret'), $env));
 	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
-	register_shutdown_function(function () use ($process, $log) { proc_terminate($process); @unlink($log); });
+	register_shutdown_function(function () use ($process, $log) { proc_terminate($process); proc_close($process); @unlink($log); });
 	return array("http://127.0.0.1:$port", $log);
 }
 function b_header($headers, $name) {
@@ -2018,6 +2031,7 @@ function b_header($headers, $name) {
 function b_with_boom($fn) {
 	global $root;
 	$dir = "$root/application/models/zzboom";
+	test_fixture($dir);
 	@mkdir($dir);
 	file_put_contents("$dir/zzboom.php", "<?php\nclass zzboom {\n"
 		."\tstatic function api() { return array('boom' => 'visitor', 'needs' => 'visitor', 'inner' => 'visitor', 'down' => 'visitor', 'echoes' => 'visitor', 'sql' => 'visitor', 'mine' => 'member'); }\n"
@@ -2034,7 +2048,7 @@ function b_with_boom($fn) {
 	try { $fn(); } finally { @unlink("$dir/zzboom.php"); @rmdir($dir); }
 }
 $b_db = test_db(sys_get_temp_dir().'/raster-b-'.getmypid().'.sqlite');
-shell_exec('RASTER_ENV=production RASTER_DB='.escapeshellarg($b_db).' '.escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' schema --apply 2>&1');
+shell_exec('RASTER_ENV=production RASTER_DB='.escapeshellarg($b_db).' '.php_cmd().' '.escapeshellarg("$root/bin/raster").' schema --apply 2>&1');
 register_shutdown_function(function () use ($b_db) { array_map('unlink', glob("$b_db*") ?: array()); });
 
 test('cms answers /api only for what its api() lists (#32)', function () use ($base, $root) {
@@ -2048,6 +2062,7 @@ test('cms answers /api only for what its api() lists (#32)', function () use ($b
 	same(array('editor_save_field' => 'visitor', 'style' => 'visitor', 'logout' => 'visitor'), array_intersect_key(api::offered('cms'), array('editor_save_field' => 1, 'style' => 1, 'logout' => 1)));
 	// a public method an override adds is not offered unless listed
 	$dir = "$root/application/models/the_cms";
+	test_fixture($dir);
 	@mkdir($dir);
 	file_put_contents("$dir/the_cms.php", "<?php\nclass the_cms extends cms {\n\tfunction secret_report() { return 'secret'; }\n}\n");
 	try {
@@ -2132,12 +2147,12 @@ test('the fallback 404 prints after the session starts (#74)', function () use (
 
 test('doctor warns when PHP shows errors in production; the command line keeps them (#74)', function () use ($root) {
 	$doctor = function ($display) use ($root) {
-		return shell_exec('RASTER_ENV=production '.escapeshellarg(PHP_BINARY).' -d display_errors='.$display.' '.escapeshellarg("$root/bin/raster").' doctor 2>&1');
+		return shell_exec('RASTER_ENV=production '.php_cmd().' -d display_errors='.$display.' '.escapeshellarg("$root/bin/raster").' doctor 2>&1');
 	};
 	check(strpos($doctor('1'), 'display_errors') !== false, 'on');
 	check(strpos($doctor('0'), 'display_errors') === false, 'off');
 	$code = 'require "system/boot.php"; boot::$appname = "application"; boot::cli(); echo ini_get("display_errors");';
-	same('1', shell_exec('cd '.escapeshellarg($root).' && RASTER_ENV=production '.escapeshellarg(PHP_BINARY).' -d display_errors=1 -r '.escapeshellarg($code)));
+	same('1', shell_exec('cd '.escapeshellarg($root).' && RASTER_ENV=production '.php_cmd().' -d display_errors=1 -r '.escapeshellarg($code)));
 });
 
 test('a database that can\'t be reached answers 503 outside development, logged, never cached (#65)', function () use ($b_db, $root) {
@@ -2260,6 +2275,7 @@ test('the editor\'s endpoints refuse a list where they take one value, and chang
 	same('Array saved', $saved('editor_save_item', 'collection=news&id='.$second.'&fields[headline]=Array+saved')['headline']);
 	// a record type's list field takes a list; its actions take input[...]
 	$dir = "$root/application/models/zzlist";
+	test_fixture($dir);
 	@mkdir($dir);
 	file_put_contents("$dir/zzlist.php", "<?php\nclass zzlist {\n"
 		."\tstatic function types() { return array('zzlist' => array('fields' => array('name' => '', 'lines' => array()), 'actions' => array('mark' => 'editor'))); }\n"
@@ -2280,7 +2296,7 @@ test('the editor\'s endpoints refuse a list where they take one value, and chang
 	} finally {
 		@unlink("$dir/zzlist.php");
 		@rmdir($dir);
-		exec('RASTER_DB='.escapeshellarg($db).' '.escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' schema --drop=zzlistdata --force');
+		exec('RASTER_DB='.escapeshellarg($db).' '.php_cmd().' '.escapeshellarg("$root/bin/raster").' schema --drop=zzlistdata --force');
 	}
 });
 
@@ -2322,6 +2338,7 @@ test('fields named like SQL words sort, filter, rename and drop', function () {
 // accounts' columns (#109)
 test('schema --drop leaves the tables and columns models declare alone', function () use ($root) {
 	$dir = "$root/application/models/zzweather";
+	test_fixture($dir);
 	@mkdir($dir);
 	file_put_contents("$dir/zzweather.php", '<?php class zzweather { static function schema() { return array("zzweatherdata" => array("city" => "", "degrees" => 0)); }'
 		.' static function types() { return array("zzreading" => array("fields" => array("city" => "", "rain" => 0))); } }');
@@ -2359,6 +2376,7 @@ test('schema --drop leaves the tables and columns models declare alone', functio
 
 test('cms_records::find filters and sorts by fields named like SQL words', function () use ($root) {
 	$dir = "$root/application/models/zzwords";
+	test_fixture($dir);
 	@mkdir($dir);
 	file_put_contents("$dir/zzwords.php", '<?php class zzwords { static function types() { return array("zzword" => array("fields" => array("title" => "", "when" => "", "from" => "", "group" => 0), "types" => array("when" => "date"))); } }');
 	cms_records::forget();
@@ -2438,14 +2456,14 @@ test('raster user keeps the role and password it is not given (#71)', function (
 	$db = test_db(sys_get_temp_dir().'/raster-user-'.getmypid().'.sqlite');
 	$env = 'RASTER_ENV=development RASTER_DB='.escapeshellarg($db);
 	$raster = function ($args) use ($env, $root) {
-		exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' '.$args.' 2>&1', $out, $code);
+		exec("$env ".php_cmd().' '.escapeshellarg("$root/bin/raster").' '.$args.' 2>&1', $out, $code);
 		same(0, $code, implode("\n", $out));
 		return implode("\n", $out);
 	};
 	$account = function ($login, $password) use ($env, $root) {
 		$code = 'require "'.$root.'/system/boot.php"; boot::$appname = "application"; boot::cli(); authentication::connect();'
 			.' $u = authentication::find('.var_export($login, true).'); echo $u->role, " ", authentication::check_login('.var_export($login, true).', '.var_export($password, true).') ? "ok" : "fail";';
-		return trim(shell_exec("$env ".escapeshellarg(PHP_BINARY).' -r '.escapeshellarg($code).' 2>&1'));
+		return trim(shell_exec("$env ".php_cmd().' -r '.escapeshellarg($code).' 2>&1'));
 	};
 	try {
 		$raster('user reader@example.test --role=member --password=first-password');
@@ -2607,7 +2625,7 @@ test('arrays and bad bytes fail required; a field named tags[] takes a list (#70
 // MCP view tools take a theme only as a folder directly under views/ (#72)
 function mcp_stdio_calls($calls) {
 	global $root, $db;
-	$process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
+	$process = proc_open(php_argv("$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
 	foreach ($calls as $i => $call) {
 		fwrite($pipes[0], json_encode(array('jsonrpc' => '2.0', 'id' => 100 + $i, 'method' => 'tools/call', 'params' => array('name' => $call[0], 'arguments' => $call[1])))."\n");
 	}
@@ -2628,6 +2646,7 @@ test('mcp view tools refuse a theme outside the views folder', function () use (
 	file_put_contents("$outside/secret.json", '{"secret":"sk-live-123"}');
 	file_put_contents("$outside/index.html", '<p>sk-live-123</p>');
 	$link = "$root/application/views/zzlink";
+	test_fixture($link);
 	symlink($outside, $link);
 	try {
 		// over HTTP with the content token: nothing read or listed outside views/
@@ -2916,7 +2935,7 @@ function race_php($code, $count = 4, $env = array()) {
 	for ($n = 0; $n < $count; $n++) {
 		$script = 'require "'.$root.'/system/boot.php"; boot::$appname = "application"; boot::cli(); cms_store::connect(); $n = '.$n.';'
 			.' while (microtime(true) < '.$start.') usleep(100); '.$code;
-		$process = proc_open(array(PHP_BINARY, '-r', $script), array(1 => array('pipe', 'w'), 2 => array('redirect', 1)), $pipes, $root, $env);
+		$process = proc_open(php_argv('-r', $script), array(1 => array('pipe', 'w'), 2 => array('redirect', 1)), $pipes, $root, $env);
 		$processes[$n] = array($process, $pipes[1]);
 	}
 	$out = array();
@@ -3083,9 +3102,11 @@ test('the site time zone sets today and published_at (#84)', function () use ($r
 	$there = new DateTime('now', new DateTimeZone($zone));
 	check($there->format('Y-m-d') !== gmdate('Y-m-d'), "$zone and UTC have different dates now");
 	$dir = "$root/application/models/zztz";
+	test_fixture($dir);
 	@mkdir($dir);
 	file_put_contents("$dir/zztz.php", '<?php class zztz { static function types() { return array("zztzday" => array("fields" => array("title" => "", "day" => ""), "types" => array("day" => "date"), "public" => true)); } }');
 	$view = "$root/application/views/default/zz-tz.html";
+	test_fixture($view);
 	file_put_contents($view, "<html><body><ul><!-- render.cms.zztzday('day>=today&day<=today') --><li><!-- print.title -->x<!-- /print.title --></li><!-- /render.cms.zztzday('day>=today&day<=today') --></ul>"
 		."<ol><!-- render.cms.news('limit=100') --><li><!-- print.headline -->x<!-- /print.headline --></li><!-- /render.cms.news('limit=100') --></ol></body></html>");
 	$config = "$root/application/config/the_app.php";
@@ -3093,7 +3114,7 @@ test('the site time zone sets today and published_at (#84)', function () use ($r
 	// the page as a request on a UTC server renders it
 	$render = function () use ($root, $db) {
 		$env = 'RASTER_DB='.escapeshellarg($db).' RASTER_ENV=development';
-		return (string)shell_exec("$env ".escapeshellarg(PHP_BINARY).' -d date.timezone=UTC '.escapeshellarg("$root/bin/raster").' render /zz-tz 2>&1');
+		return (string)shell_exec("$env ".php_cmd().' -d date.timezone=UTC '.escapeshellarg("$root/bin/raster").' render /zz-tz 2>&1');
 	};
 	cms_records::forget();
 	try {
@@ -3294,6 +3315,7 @@ function booking_site($fn) {
 	$slots = "render.booking.slots('date=?date&resource=?resource&service=?service&people=?people')";
 	$days = "render.booking.days('resource=?resource&service=?service')";
 	$services = "render.booking.services('resource=?resource')";
+	test_fixture($view);
 	file_put_contents($view, "<html><head><title>Book</title></head><body>"
 		."<ul><!-- $slots --><li class=\"slot\"><!-- print.time -->19:00<!-- /print.time -->-<!-- print.ends -->21:00<!-- /print.ends --></li><!-- /$slots --></ul>"
 		."<ol><!-- $days --><li class=\"day\"><!-- print.date -->2026-10-20<!-- /print.date --></li><!-- /$days --></ol>"
@@ -3310,6 +3332,7 @@ function booking_site($fn) {
 		$alerts .= "<!-- print.validation.alert('$alert') --><p>ALERT $alert</p><!-- /print.validation.alert('$alert') -->";
 	}
 	$manage = "render.booking.slots('date=?date&for=manage')";
+	test_fixture("$theme/booking.html");
 	file_put_contents("$theme/booking.html", "<html><head><title>Your booking</title></head><body>$alerts"
 		."<!-- render.booking.manage --><p class=\"booking\"><!-- print.name -->Ana<!-- /print.name --> <!-- print.email -->ana@example.test<!-- /print.email -->"
 		." <!-- print.date -->2026-10-20<!-- /print.date --> <!-- print.time -->19:00<!-- /print.time --> <!-- print.status -->requested<!-- /print.status --></p>"
@@ -3319,6 +3342,7 @@ function booking_site($fn) {
 		."</body></html>");
 	$emails = array('booking_requested', 'booking_new', 'booking_confirmed', 'booking_declined', 'booking_cancelled', 'booking_changed');
 	foreach ($emails as $email) {
+		test_fixture("$theme/_email/$email.html");
 		file_put_contents("$theme/_email/$email.html", "<html><head><title>$email</title></head><body><p><!-- print.self.name -->Ana<!-- /print.self.name -->,"
 			." <!-- print.self.date -->2026-10-20<!-- /print.self.date --> <!-- print.self.time -->19:00<!-- /print.self.time --> <!-- print.self.resource_name -->room<!-- /print.self.resource_name -->"
 			." <!-- print.self.status -->requested<!-- /print.self.status --> by <!-- print.self.who -->guest<!-- /print.self.who --></p>"
@@ -3354,7 +3378,7 @@ function booking_site($fn) {
 function booking_render($url) {
 	global $root, $db;
 	$env = 'RASTER_DB='.escapeshellarg($db).' RASTER_ENV=development';
-	return (string)shell_exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' render '.escapeshellarg($url).' 2>&1; echo "[exit $?]"');
+	return (string)shell_exec("$env ".php_cmd().' '.escapeshellarg("$root/bin/raster").' render '.escapeshellarg($url).' 2>&1; echo "[exit $?]"');
 }
 // what a setup write was refused for, or array() when it was stored
 function booking_refused($type, $values, $id = 0) {
@@ -3374,7 +3398,7 @@ test('booking types count only where views use the model', function () use ($roo
 	@mkdir($dir);
 	file_put_contents("$dir/prepend.php", '<?php register_shutdown_function(function () { file_put_contents('.var_export("$dir/out.json", true).', json_encode(get_included_files())); });');
 	$env = 'RASTER_ENV=production RASTER_DB='.escapeshellarg(test_db("$dir/db.sqlite"));
-	shell_exec("$env ".escapeshellarg(PHP_BINARY).' -d auto_prepend_file='.escapeshellarg("$dir/prepend.php").' '.escapeshellarg("$root/bin/raster").' render /about 2>&1');
+	shell_exec("$env ".php_cmd().' -d auto_prepend_file='.escapeshellarg("$dir/prepend.php").' '.escapeshellarg("$root/bin/raster").' render /about 2>&1');
 	$included = json_decode((string)@file_get_contents("$dir/out.json"), true);
 	array_map('unlink', glob("$dir/*") ?: array());
 	@rmdir($dir);
@@ -4141,6 +4165,7 @@ test('booking: agenda and attention rows are records', function () {
 		$tue = booking_cafe();
 		booking_guest(array('date' => $tue, 'time' => '19:00', 'people' => 2, 'name' => 'Ana Popescu', 'phone' => '0721 123 456'));
 		$agenda = "render.booking.agenda('from=today&days=10')";
+		test_fixture($view);
 		file_put_contents($view, "<html><head><title>Staff</title></head><body><h1>Requests: <!-- print.booking.count('status=requested') -->3<!-- /print.booking.count('status=requested') --></h1>"
 			."<!-- $agenda --><h2><!-- print.date -->2026-10-20<!-- /print.date --></h2><ul><!-- print.bookings --><li class=\"booking\"><!-- print.name -->Ana<!-- /print.name --> <!-- print.time -->19:00<!-- /print.time --></li><!-- /print.bookings --></ul><!-- /$agenda -->"
 			."</body></html>");
@@ -4155,7 +4180,7 @@ test('booking: agenda and attention rows are records', function () {
 				}
 			});
 			global $root, $db;
-			$out = (string)shell_exec('RASTER_DB='.escapeshellarg($db).' RASTER_ENV=development '.escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' render /zzstaff --as=editor 2>&1');
+			$out = (string)shell_exec('RASTER_DB='.escapeshellarg($db).' RASTER_ENV=development '.php_cmd().' '.escapeshellarg("$root/bin/raster").' render /zzstaff --as=editor 2>&1');
 			check(strpos($out, 'Requests: 1</h1>') !== false, 'the count: '.$out);
 			check(strpos($out, '<li class="booking"') !== false && strpos($out, 'Ana Popescu') !== false, 'the agenda: '.$out);
 			check(preg_match('#<script id="raster-editor-config" type="application/json">(.*?)</script>#s', $out, $m) === 1, 'no editor: '.$out);
@@ -4179,6 +4204,7 @@ test('booking: the_booking adds a field', function () use ($base) {
 		temp_model("$app/the_booking", array('the_booking.php' => "<?php\nclass the_booking extends booking\n{\n\tstatic function types() {\n\t\t\$types = parent::types();\n\t\t\$types['booking']['fields']['dietary'] = '';\n\t\treturn \$types;\n\t}\n}\n"));
 		$view = APPBASE.config::get('views_path', 'views').'/'.config::get('theme', 'default').'/zzbook.html';
 		$html = file_get_contents($view);
+		test_fixture($view);
 		file_put_contents($view, str_replace('<textarea name="notes">', '<input name="dietary"><textarea name="notes">', $html));
 		try {
 			controller::forget_models();
@@ -4192,6 +4218,7 @@ test('booking: the_booking adds a field', function () use ($base) {
 			same('vegan', $stored[0]['dietary']);
 			same('21:00', $stored[0]['ends']);
 		} finally {
+			test_fixture($view);
 			file_put_contents($view, $html);
 			remove_dir("$app/the_booking");
 			controller::forget_models();
@@ -4279,10 +4306,10 @@ function booking_server($env = array()) {
 	$log = sys_get_temp_dir().'/raster-booking-'.getmypid().'-'.$port.'.log';
 	$env = array_merge(array('PATH' => getenv('PATH'), 'RASTER_SECRET' => 'test-secret', 'RASTER_DB' => $db, 'RASTER_ENV' => 'development', 'RASTER_MAIL' => "log://$maildir-booking",
 		'RASTER_MAIL_FROM' => 'staff@zz.test', 'RASTER_URL' => "http://127.0.0.1:$port/"), $env);
-	$process = proc_open(array(PHP_BINARY, '-d', 'log_errors=1', '-d', "error_log=$log", '-S', "127.0.0.1:$port", "$root/index.php"),
+	$process = proc_open(php_argv('-d', 'log_errors=1', '-d', "error_log=$log", '-S', "127.0.0.1:$port", "$root/index.php"),
 		array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, $env);
 	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
-	register_shutdown_function(function () use ($process, $log) { proc_terminate($process); @unlink($log); });
+	register_shutdown_function(function () use ($process, $log) { proc_terminate($process); proc_close($process); @unlink($log); });
 	return array("http://127.0.0.1:$port", $log);
 }
 // The mails $fn sent, from this process and from booking_server()'s, in
@@ -4729,6 +4756,7 @@ test('booking: requires(): emails, pages, settings and records', function () {
 			check(preg_grep('/^error: render\.booking\.form sends an email written in .*booking_new\.html/', $messages('zzbook.html')) !== array(), json_encode($messages('zzbook.html')));
 			check(preg_grep('/^error: render\.booking\.manage sends an email written in .*booking_new\.html/', $messages('booking.html')) !== array(), json_encode($messages('booking.html')));
 		} finally {
+			test_fixture($new);
 			file_put_contents($new, $html);
 		}
 		same(array(), array_values(preg_grep('/^error/', $messages('zzbook.html'))));
@@ -4776,6 +4804,7 @@ test('lint counts try_again and slow_down alerts in the fragments a view include
 	$views = sys_get_temp_dir().'/raster-lint-theme-'.getmypid();
 	mkdir($views.'/zz', 0777, true);
 	$alerts = "<!-- print.validation.alert('try_again') --><p>Again.</p><!-- /print.validation.alert('try_again') -->\n<!-- print.validation.alert('slow_down') --><p>Slow.</p><!-- /print.validation.alert('slow_down') -->\n";
+	test_fixture("$views/zz/_layout.html");
 	file_put_contents("$views/zz/_layout.html", "<!-- res.header -->\n$alerts<!-- /res.header -->\n<!-- res.bare -->\n<p>Nothing.</p>\n<!-- /res.bare -->\n");
 	try {
 		$form = "<!-- render.newsletter.signup -->\n<form method=\"post\"><input type=\"email\" name=\"email\" required></form>\n<!-- /render.newsletter.signup -->\n";
@@ -4818,6 +4847,7 @@ test('the pager counts what the list shows (#88)', function () {
 		$links = "render.pagination.links('cms.zzmine'".($filter === '' ? '' : ", '$filter'").")";
 		return "<!-- $links --><nav class=\"$class\"><!-- print.current -->1<!-- /print.current --> of <!-- print.total -->1<!-- /print.total --></nav><!-- /$links -->";
 	};
+	test_fixture($view);
 	file_put_contents($view, "<html><head><title>Pager</title></head><body>"
 		."<!-- render.cms.zzmine('owner=me&order=title') --><p class=\"mine\"><!-- print.title -->x<!-- /print.title --></p><!-- /render.cms.zzmine('owner=me&order=title') -->"
 		.$pager('owner=me', 'mine').$pager('', 'all').$pager('limit=3', 'top')
@@ -4835,7 +4865,7 @@ test('the pager counts what the list shows (#88)', function () {
 		R::exec("UPDATE zzminedata SET enabled = 0 WHERE title IN ('Theirs 8', 'Theirs 9')");
 		$render = function ($url, $as = null) use ($root, $db) {
 			$env = 'RASTER_DB='.escapeshellarg($db).' RASTER_ENV=development';
-			$cmd = "$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' render '.escapeshellarg($url).($as ? ' '.escapeshellarg("--as=$as") : '').' 2>&1';
+			$cmd = "$env ".php_cmd().' '.escapeshellarg("$root/bin/raster").' render '.escapeshellarg($url).($as ? ' '.escapeshellarg("--as=$as") : '').' 2>&1';
 			return (string)shell_exec($cmd);
 		};
 		$nav = function ($html, $class) {
@@ -4951,7 +4981,7 @@ test('the key: RASTER_SECRET, else data/secret made once, by the site', function
 		// a web request (here php -S, as PHP-FPM would) makes the file, as
 		// the web server's user
 		$port = free_port();
-		$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'PATH' => getenv('PATH')));
+		$server = proc_open(php_argv('-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'PATH' => getenv('PATH')));
 		for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
 		list($status, $body) = http('GET', "http://127.0.0.1:$port/login");
 		same(200, $status);
@@ -4996,7 +5026,7 @@ test('a command makes no key file, and still stamps', function () use ($root, $d
 		same($key, util::secret(), 'one key for the whole process');
 		same(30, validation_spam::stamp_age(validation_spam::stamp(time() - 30)));
 		// raster render, as someone other than the web server may run it
-		$out = (string)shell_exec('RASTER_DB='.escapeshellarg($db).' RASTER_ENV=development '.escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' render /login 2>&1');
+		$out = (string)shell_exec('RASTER_DB='.escapeshellarg($db).' RASTER_ENV=development '.php_cmd().' '.escapeshellarg("$root/bin/raster").' render /login 2>&1');
 		check((bool)preg_match('/name="raster_ts" value="\d+\.[0-9a-f]{64}"/', $out), $out);
 		check(!file_exists($file), 'raster render made data/secret');
 		// the next command gets another key: nothing is kept between them
@@ -5059,15 +5089,16 @@ test('emails and exports carry no stamp', function () {
 });
 test('a cached page with two forms serves fresh stamps to both', function () use ($root, $db) {
 	$view = APPBASE.config::get('views_path', 'views').'/'.config::get('theme', 'default').'/zzstamps.html';
+	test_fixture($view);
 	file_put_contents($view, '<html><head><title>Two forms</title></head><body>'
 		.'<!-- render.newsletter.signup --><form method="post"><input type="email" name="email"><button>Join</button></form><!-- /render.newsletter.signup -->'
 		.'<!-- render.authentication.register --><form method="post"><input name="name"><input type="email" name="email"><input type="password" name="password"><button>Sign up</button></form><!-- /render.authentication.register -->'
 		.'</body></html>');
 	$env = 'RASTER_ENV=production RASTER_SECRET=test-secret RASTER_DB='.escapeshellarg($db);
-	shell_exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' schema --apply');
+	shell_exec("$env ".php_cmd().' '.escapeshellarg("$root/bin/raster").' schema --apply');
 	foreach (glob(APPBASE.'data/cache/*') ?: array() as $f) unlink($f);
 	$port = free_port();
-	$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_ENV' => 'production', 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
+	$server = proc_open(php_argv('-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_ENV' => 'production', 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
 	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
 	try {
 		$stamps = function ($body) { preg_match_all('/name="raster_ts" value="([^"]*)"/', $body, $m); return $m[1]; };
@@ -5087,7 +5118,7 @@ test('a cached page with two forms serves fresh stamps to both', function () use
 		same(2, substr_count($copy, '{{raster:ts}}'));
 		check(!preg_match('/raster_ts" value="\d/', $copy), 'no stamp kept on disk');
 	} finally {
-		proc_terminate($server);
+		proc_terminate($server); proc_close($server);
 		unlink($view);
 		foreach (glob(APPBASE.'data/cache/*') ?: array() as $f) unlink($f);
 	}
@@ -5647,9 +5678,11 @@ function contact_site($fn) {
 	foreach (array('sent', 'name_invalid', 'email_invalid', 'phone_invalid', 'subject_invalid', 'message_invalid') as $alert) {
 		$alerts .= "<!-- print.validation.alert('$alert') --><p>ALERT $alert</p><!-- /print.validation.alert('$alert') -->";
 	}
+	test_fixture("$theme/zzcontact.html");
 	file_put_contents("$theme/zzcontact.html", "<html><head><title>Write to us</title></head><body>$alerts"
 		."<!-- render.contact.form --><form method=\"post\"><input name=\"name\"><input type=\"email\" name=\"email\" required><input name=\"phone\"><input name=\"subject\">"
 		."<textarea name=\"message\" required></textarea><button>Send</button></form><!-- /render.contact.form --></body></html>");
+	test_fixture("$theme/_email/contact_received.html");
 	file_put_contents("$theme/_email/contact_received.html", "<html><head><title>Message: <!-- print.self.subject -->none<!-- /print.self.subject --></title></head><body>"
 		."<p>From <!-- print.self.name -->Ana<!-- /print.self.name --> on <!-- print.self.page_url -->page<!-- /print.self.page_url --></p>"
 		."<p><!-- print.self.message -->Hi<!-- /print.self.message --></p><p>All of them: <!-- print.self.staff_url -->staff<!-- /print.self.staff_url --></p></body></html>");
@@ -5725,7 +5758,7 @@ function contact_refused($fn) {
 function contact_render($url, $as = null) {
 	global $root, $db;
 	$env = 'RASTER_DB='.escapeshellarg($db).' RASTER_ENV=development';
-	return (string)shell_exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' render '.escapeshellarg($url).($as ? ' --as='.escapeshellarg($as) : '').' 2>&1; echo "[exit $?]"');
+	return (string)shell_exec("$env ".php_cmd().' '.escapeshellarg("$root/bin/raster").' render '.escapeshellarg($url).($as ? ' --as='.escapeshellarg($as) : '').' 2>&1; echo "[exit $?]"');
 }
 
 test('contact types count only where views use the model', function () use ($root) {
@@ -5736,7 +5769,7 @@ test('contact types count only where views use the model', function () use ($roo
 	@mkdir($dir);
 	file_put_contents("$dir/prepend.php", '<?php register_shutdown_function(function () { file_put_contents('.var_export("$dir/out.json", true).', json_encode(get_included_files())); });');
 	$env = 'RASTER_ENV=production RASTER_DB='.escapeshellarg(test_db("$dir/db.sqlite"));
-	shell_exec("$env ".escapeshellarg(PHP_BINARY).' -d auto_prepend_file='.escapeshellarg("$dir/prepend.php").' '.escapeshellarg("$root/bin/raster").' render /about 2>&1');
+	shell_exec("$env ".php_cmd().' -d auto_prepend_file='.escapeshellarg("$dir/prepend.php").' '.escapeshellarg("$root/bin/raster").' render /about 2>&1');
 	$included = json_decode((string)@file_get_contents("$dir/out.json"), true);
 	array_map('unlink', glob("$dir/*") ?: array());
 	@rmdir($dir);
@@ -5758,6 +5791,7 @@ test('a site contact model still answers and the bundled one loads nothing', fun
 	// a site's own, as AGENTS.md and the wiki taught: in processes of their
 	// own, since this one may have the bundled class already
 	temp_model("$app/contact", array('contact.php' => "<?php\nclass contact\n{\n\tfunction send() {\n\t\treturn array(array('x' => 'own'));\n\t}\n}\n"));
+	test_fixture($view);
 	file_put_contents($view, '<html><head><title>Own</title></head><body><!-- render.contact.send --><p class="own"><!-- print.x -->mock<!-- /print.x --></p><!-- /render.contact.send --></body></html>');
 	try {
 		controller::forget_models();
@@ -6075,6 +6109,7 @@ test('contact: messages and count are for staff only', function () {
 		cms_records::ensure(cms_records::info('contactmessage'), true);
 		cms_records::create('contactmessage', array('name' => 'Ana', 'email' => 'ana@zz.test', 'message' => 'A table for two?'));
 		cms_records::create('contactmessage', array('email' => 'bot@zz.test', 'message' => 'Buy now', 'status' => 'spam', 'spam' => 'no_stamp'));
+		test_fixture("$theme/zzstaff.html");
 		file_put_contents("$theme/zzstaff.html", '<html><head><title>Messages</title></head><body><h1>New: <!-- print.contact.count -->3<!-- /print.contact.count --></h1>'
 			.'<ul><!-- render.contact.messages --><li class="message"><!-- print.@href.raster_detail_link --><a href="#"><!-- print.email -->a@b<!-- /print.email --></a><!-- /print.@href.raster_detail_link --></li><!-- /render.contact.messages --></ul></body></html>');
 		try {
@@ -6099,6 +6134,7 @@ test('contact: messages and count are for staff only', function () {
 test('lint: contact staff page not protected', function () {
 	contact_site(function ($theme) {
 		check(has_problem((new raster_inspector())->lint_types(), "Visitors make 'contactmessage' records"), 'no staff page yet');
+		test_fixture("$theme/zzstaff.html");
 		file_put_contents("$theme/zzstaff.html", '<html><head><title>Messages</title></head><body><ul><!-- render.contact.messages(\'status=spam\') --><li><!-- print.email -->a@b<!-- /print.email --></li><!-- /render.contact.messages(\'status=spam\') --></ul></body></html>');
 		try {
 			check(has_problem((new raster_inspector())->lint_path("$theme/zzstaff.html"), "lists contact messages but isn't protected for editors"), 'unprotected');
@@ -6144,15 +6180,18 @@ function rsvp_site($fn) {
 	$region .= '<!-- render.rsvp.form --><form method="post"><input name="name" required><input type="email" name="email" required><input name="phone">'
 		.'<input type="radio" name="answer" value="yes"><input type="radio" name="answer" value="no"><input type="radio" name="answer" value="maybe">'
 		.'<input type="number" name="people" min="1"><textarea name="notes"></textarea><button>Reply</button></form><!-- /render.rsvp.form -->';
+	test_fixture("$theme/events_item.html");
 	file_put_contents("$theme/events_item.html", '<html><head><title>Event</title></head><body><!-- render.cms.events --><h1><!-- print.title -->Jazz night<!-- /print.title --></h1>'
 		.'<p><!-- print.date -->2026-11-20<!-- /print.date --> at <!-- print.starts -->20:00<!-- /print.starts -->, <!-- print.places -->40<!-- /print.places --> places,'
 		.' replies until <!-- print.rsvp_until -->2026-11-20 18:00<!-- /print.rsvp_until --></p><!-- /render.cms.events -->'.$region.'</body></html>');
+	test_fixture("$theme/zzrsvp.html");
 	file_put_contents("$theme/zzrsvp.html", '<html><head><title>Reply</title></head><body>'.$region.'</body></html>');
 	// the guest's manage page, and the emails, each with its name as the subject
 	$alerts = '';
 	foreach (array('link_invalid', 'closed', 'full_for_more', 'changed') as $alert) {
 		$alerts .= "<!-- print.validation.alert('$alert') --><p>ALERT $alert</p><!-- /print.validation.alert('$alert') -->";
 	}
+	test_fixture("$theme/rsvp.html");
 	file_put_contents("$theme/rsvp.html", "<html><head><title>Your reply</title></head><body>$alerts"
 		.'<!-- render.rsvp.manage --><p class="reply"><!-- print.name -->Ana<!-- /print.name --> <!-- print.answer -->yes<!-- /print.answer --> <!-- print.people -->2<!-- /print.people -->'
 		.' <!-- print.status -->going<!-- /print.status --> <!-- print.event_title -->Jazz night<!-- /print.event_title --> <!-- print.position -->1<!-- /print.position --></p>'
@@ -6160,6 +6199,7 @@ function rsvp_site($fn) {
 		.'<input type="radio" name="answer" value="maybe"><input type="number" name="people"><button>Change</button></form><!-- /render.rsvp.manage --></body></html>');
 	$emails = array('rsvp_going', 'rsvp_waiting', 'rsvp_promoted', 'rsvp_noted', 'rsvp_link', 'rsvp_new');
 	foreach ($emails as $email) {
+		test_fixture("$theme/_email/$email.html");
 		file_put_contents("$theme/_email/$email.html", "<html><head><title>$email</title></head><body><p><!-- print.self.name -->Ana<!-- /print.self.name -->:"
 			.' <!-- print.self.event_title -->Jazz night<!-- /print.self.event_title --> <!-- print.self.status -->going<!-- /print.self.status --> by <!-- print.self.who -->guest<!-- /print.self.who --></p>'
 			.'<p>Position: <!-- print.self.position -->1<!-- /print.self.position -->.</p><p>Manage: <!-- print.self.manage_url -->none<!-- /print.self.manage_url --></p></body></html>');
@@ -6254,7 +6294,7 @@ function rsvp_loads($url, $env) {
 	$dir = sys_get_temp_dir().'/raster-rsvp-loads-'.getmypid();
 	@mkdir($dir);
 	file_put_contents("$dir/prepend.php", '<?php register_shutdown_function(function () { file_put_contents('.var_export("$dir/out.json", true).', json_encode(get_included_files())); });');
-	shell_exec("$env ".escapeshellarg(PHP_BINARY).' -d auto_prepend_file='.escapeshellarg("$dir/prepend.php").' '.escapeshellarg("$root/bin/raster").' render '.escapeshellarg($url).' 2>&1');
+	shell_exec("$env ".php_cmd().' -d auto_prepend_file='.escapeshellarg("$dir/prepend.php").' '.escapeshellarg("$root/bin/raster").' render '.escapeshellarg($url).' 2>&1');
 	$included = json_decode((string)@file_get_contents("$dir/out.json"), true);
 	@unlink("$dir/out.json");
 	@unlink("$dir/prepend.php");
@@ -7067,6 +7107,7 @@ test('rsvp requires(): emails, pages, settings', function () {
 		try {
 			check(preg_grep('/^error: render\.rsvp\.manage sends an email written in .*rsvp_noted\.html/', $messages('rsvp.html')) !== array(), json_encode($messages('rsvp.html')));
 		} finally {
+			test_fixture($noted);
 			file_put_contents($noted, $html);
 		}
 		same(array(), array_values(preg_grep('/^error/', $messages('rsvp.html'))));
