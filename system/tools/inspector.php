@@ -971,6 +971,18 @@ class raster_inspector {
 		if ($at !== false && $this->admin_view($this->linting)) {
 			$problems[] = self::problem_at('warning', $html, $at, "render.rsvp.manage is the guests' page, but config 'protected' keeps this view for staff: protect staff pages by their own names (staff, rsvp_item), never rsvp");
 		}
+		// the reply form reads each event's date and places from the fields
+		// of its collection (rsvp_collection), as the views declare them
+		$at = strpos($html, '<!-- render.rsvp.form -->');
+		if ($at !== false) {
+			$collection = (string)config::get('rsvp_collection', 'events');
+			$fields = $this->collection_fields($collection, $theme);
+			if (!isset($fields['date'])) {
+				$problems[] = self::problem_at('error', $html, $at, "render.rsvp.form takes replies to the items of '$collection', whose views have no date field, so no item takes replies: write <!-- print.date -->2026-11-20<!-- /print.date --> in its item view (config rsvp_collection names the collection)");
+			} elseif (!isset($fields['places'])) {
+				$problems[] = self::problem_at('warning', $html, $at, "render.rsvp.form: the items of '$collection' have no places field, so no event has a limit, and so no waitlist: write <!-- print.places -->40<!-- /print.places --> in its item view");
+			}
+		}
 		// the contact messages are for staff: the region shows visitors
 		// nothing, but the page belongs in the Admin menu, behind the login
 		if (preg_match('/<!-- render\.contact\.messages[ (]/', $html, $m, PREG_OFFSET_CAPTURE) && !$this->admin_view($this->linting)) {
@@ -1432,6 +1444,17 @@ class raster_inspector {
 			array_unshift($pages, array('view' => '*', 'url' => 'site', 'slug' => 'site', 'type' => 'sitepage', 'fields' => $site));
 		}
 		return array('pages' => $pages, 'collections' => $collections);
+	}
+
+	// the fields a markup collection has in a theme's views, from the
+	// content model, read once per theme
+	protected $models = array();
+
+	function collection_fields($name, $theme = null) {
+		$theme = $theme ?: $this->theme;
+		if (!isset($this->models[$theme])) $this->models[$theme] = $this->content_model($theme);
+		$collections = $this->models[$theme]['collections'];
+		return isset($collections[$name]) ? $collections[$name]['fields'] : array();
 	}
 
 	// the mock-up item of a collection, taken from its own view (news.html,

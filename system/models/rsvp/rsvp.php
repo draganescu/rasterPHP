@@ -21,14 +21,21 @@
 * a smaller party, a reply deleted or moved, places raised) the model moves
 * in, oldest first, every waiting party that fits; nobody going is ever
 * moved out. From the deadline a guest may only give places back, and
-* nothing is moved in; from the start a guest changes nothing. Staff add
-* and edit replies in the page (render.cms.rsvp('event=?event')).
+* nothing is moved in; from the start a guest changes nothing. Guests reply
+* on the form; staff add and edit replies in the page
+* (render.cms.rsvp('event=?event')).
 *
 * Regions:
 *   <!-- render.rsvp.event -->  one row for the page's event (its item page,
 *     /events/events_item/<slug>, else ?event=<id>): event, places and left
 *     ('' for no limit), going (people), waiting (replies), state (open,
 *     full, closed, over) and deadline. Never page-cached.
+*   <!-- render.rsvp.form -->  the reply form for the page's event, found
+*     the same way (never one the post names): name, email, phone, answer,
+*     people, notes. Redirects with ?done=going, waiting or noted. Shown
+*     first it says not_open or closed. An address that replied gets
+*     already_replied and its link again (rsvp_link). The spam checks of
+*     the booking form: try_again, slow_down.
 *   <!-- render.rsvp.manage -->  the guest's page, by the link in their
 *     emails (?token=) or, logged in, ?reply=<id>: the reply, with
 *     event_title, event_date, event_starts, event_url, deadline and
@@ -41,14 +48,16 @@
 *
 * Alerts: not_open, name_invalid, email_invalid, answer_invalid,
 * people_invalid, too_many, closed, full, already_replied, full_for_more,
-* not_enough_places; for the action not_waiting. On the manage page:
-* link_invalid, and changed after the change.
+* not_enough_places; for the action not_waiting. On the form: try_again
+* and slow_down, and going, waiting or noted after a reply. On the manage
+* page: link_invalid, and changed after the change.
 *
 * Emails, views the site writes: _email/rsvp_going (the reply became
 * going, or its party changed), rsvp_waiting (with position), rsvp_promoted
 * and rsvp_noted (no or maybe) to the guest, each with print.self.manage_url,
-* their new link; rsvp_new to rsvp_staff_email when a guest replied or
-* changed their reply, only when that is set.
+* their new link; rsvp_link, the link again to an address that replied
+* before, at most once every five minutes; rsvp_new to rsvp_staff_email
+* when a guest replied or changed their reply, only when that is set.
 *
 * Events, after the commit: rsvp.replied, rsvp.changed (with was and
 * was_people, the status and party before), rsvp.promoted. Each has the
@@ -87,6 +96,10 @@ class rsvp
 	static $page = false;
 	// the reply the manage page is about, by its ?token= or ?reply=
 	static $managed = array();
+	// the replies the model made itself, id => true, whose events it sends:
+	// inside a site's own transaction their cms.item_saved comes after the
+	// commit, when the model's write is over, and saved() must leave it
+	static $made = array();
 
 	static function types() {
 		return array(
@@ -273,10 +286,11 @@ class rsvp
 		return database::instance('rsvp')->queue((int)$event);
 	}
 
-	// another reply to this event with this address
+	// the id of another reply to this event with this address, or 0
 	protected static function replied($event, $email, $id) {
-		if (!cms_store::table_exists('rsvpdata')) return false;
-		return (bool)database::instance('rsvp')->replied((int)$event, strtolower($email), (int)$id);
+		if (!cms_store::table_exists('rsvpdata')) return 0;
+		$rows = database::instance('rsvp')->replied((int)$event, strtolower(trim((string)$email)), (int)$id);
+		return $rows ? (int)$rows[0]['id'] : 0;
 	}
 
 	// ##The waitlist
@@ -329,6 +343,7 @@ class rsvp
 		$acting = self::$acting;
 		$writing = self::$writing;
 		$links = self::$links;
+		$made = self::$made;
 		self::$acting = in_array($who, array('guest', 'waitlist'), true) ? $who : 'staff';
 		self::$writing = true;
 		try {
@@ -343,6 +358,7 @@ class rsvp
 			});
 		} catch (Throwable $e) {
 			self::$links = $links;
+			self::$made = $made;
 			self::$freed = array();
 			throw $e;
 		} finally {
@@ -550,8 +566,15 @@ class rsvp
 			self::promote_waiting((int)$saved['item']['id']);
 			return null;
 		}
-		if ($saved['collection'] !== 'rsvp' || self::$writing) return null;
+		if ($saved['collection'] !== 'rsvp') return null;
 		$id = (int)$saved['item']['id'];
+		// a reply the form made sent rsvp.replied itself, also when a site's
+		// transaction around it held this back until its own commit
+		if ($saved['created'] && isset(self::$made[$id])) {
+			unset(self::$made[$id]);
+			return null;
+		}
+		if (self::$writing) return null;
 		$changed = isset(self::$changed[$id]) && self::$changed[$id]['answered'] ? self::$changed[$id] : null;
 		unset(self::$changed[$id]);
 		// a note, or the model's own write after its commit: nothing to do
@@ -678,7 +701,8 @@ class rsvp
 		$emails = array('_email/rsvp_going', '_email/rsvp_waiting', '_email/rsvp_promoted', '_email/rsvp_noted');
 		if (trim((string)config::get('rsvp_staff_email', '')) !== '') $emails[] = '_email/rsvp_new';
 		return array(
-			'emails' => array('render.rsvp.manage' => $emails),
+			// the form also mails a guest who replied before their link again
+			'emails' => array('render.rsvp.form' => array_merge($emails, array('_email/rsvp_link')), 'render.rsvp.manage' => $emails),
 			'pages' => array(config::get('rsvp_manage_page', 'rsvp')),
 			'settings' => array('rsvp_collection', 'rsvp_manage_page', 'rsvp_staff_email', 'rsvp_max_people', 'rsvp_closes', 'rsvp_waitlist'),
 		);
@@ -772,6 +796,76 @@ class rsvp
 			'position' => (string)self::position($reply),
 		);
 		return array(cms_records::for_template(cms_records::info('rsvp'), $row));
+	}
+
+	// The reply form, for the page's event (never one the post names):
+	// name, email, phone, answer, people and notes. Shown first, it says
+	// not_open when the page has no event visitors can see, and closed
+	// from the deadline. A stored reply redirects with ?done=going, waiting
+	// or noted, keeping ?event= when the event came from it. An address
+	// that replied gets already_replied, and its link again by email.
+	function form() {
+		// the places left change with every reply
+		raster_cache::skip();
+		if (!self::ready()) return false;
+		$v = validation::get();
+		$event = self::page_event();
+		if (!$v->submitted()) {
+			if (!$event) $v->raise('not_open');
+			elseif (time() >= $event['deadline']) $v->raise('closed');
+			return false;
+		}
+		if (!$v->valid()) return template::instance()->form_state();
+		// before the lookup below, so a script can't have links mailed
+		// without a stamp, and the per-email limit stops a loop of them
+		if ($reasons = validation_spam::holds($v->suspect(array()))) return $v->hold($reasons);
+		$email = trim((string)util::post('email'));
+		$replied = $event && $email !== '' ? self::replied($event['id'], $email, 0) : 0;
+		if ($replied) {
+			$v->raise('already_replied');
+			self::link_again(cms_records::get('rsvp', $replied));
+			return template::instance()->form_state();
+		}
+		$posting = self::$posting;
+		self::$posting = $event ? $event['id'] : null;
+		try {
+			// the reply, its link and rsvp.replied go together
+			$reply = self::writing('guest', 0, function () {
+				$item = cms_records::submit('rsvp', false);
+				if (!is_array($item)) return $item;
+				self::$made[(int)$item['id']] = true;
+				$reply = self::with_link(cms_records::get('rsvp', $item['id']), '', $item['people']);
+				cms_records::dispatch('rsvp.replied', self::payload($reply, 'guest'));
+				return $reply;
+			});
+		} finally {
+			self::$posting = $posting;
+		}
+		if (!is_array($reply)) return $reply;
+		// back to the page it was sent from, with the event when the URL named it
+		$back = config::get('link_uri').ltrim(strtok((string)config::get('uri_string'), '?'), '/');
+		if ((string)util::get('event') === (string)$event['id']) $back .= '?event='.$event['id'];
+		if ($reply['status'] === 'going') util::done('going', $back);
+		elseif ($reply['status'] === 'waiting') util::done('waiting', $back);
+		else util::done('noted', $back);
+		return false;
+	}
+
+	// The reply's link again, by email to the reply's own address, so
+	// nobody gets someone else's reply by typing their address; at most
+	// once every mail::RESEND_AFTER, read inside the lock so two posts at
+	// once send one. Nothing for a reply its guest can't reach any more.
+	protected static function link_again($reply) {
+		if (!$reply || !self::is_live($reply)) return;
+		$mail = controller::model_class('mail');
+		$saved = self::writing('guest', $reply['id'], function () use ($reply, $mail) {
+			$reply = cms_records::get('rsvp', $reply['id']);
+			if (!$reply || $mail::sent_lately($reply['link_sent_at'])) return null;
+			$values = self::issue($reply);
+			if (!$values) return null;
+			return cms_records::update('rsvp', $reply['id'], $values + array('link_sent_at' => date('Y-m-d H:i:s')));
+		});
+		if ($saved) self::mail(self::payload($saved, 'guest'), 'rsvp_link', false);
 	}
 
 	// util::done exits in a request; on the command line the page shows

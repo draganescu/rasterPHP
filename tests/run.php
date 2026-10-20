@@ -6192,6 +6192,7 @@ function rsvp_site($fn) {
 			rsvp::$freed = array();
 			rsvp::$changed = array();
 			rsvp::$links = array();
+			rsvp::$made = array();
 		}
 	}
 }
