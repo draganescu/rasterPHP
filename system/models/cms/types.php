@@ -22,15 +22,16 @@ class cms_types {
 	static $types = array('text', 'int', 'number', 'bool', 'date', 'datetime', 'time');
 
 	// what each type is declared as, in SQLite and in MySQL. RedBean knows
-	// none of these names but TEXT (and MySQL's DOUBLE, which only ever holds
-	// numbers), so it never widens them; SQLite gives them the affinity they
-	// need.
+	// none of these names but LONGTEXT (and MySQL's DOUBLE, which only ever
+	// holds numbers), so it never widens them; SQLite gives them the affinity
+	// they need. Text is LONGTEXT in MySQL: TEXT stops at 64 KB, and an SQLite
+	// text has no limit, so a long page would fit one and not the other.
 	static $sql = array(
 		'text' => 'TEXT', 'int' => 'INT', 'number' => 'REAL', 'bool' => 'BOOLEAN',
 		'date' => 'DATE', 'datetime' => 'DATETIME', 'time' => 'TIME',
 	);
 	static $mysql = array(
-		'text' => 'TEXT', 'int' => 'INT', 'number' => 'DOUBLE', 'bool' => 'TINYINT(1)',
+		'text' => 'LONGTEXT', 'int' => 'INT', 'number' => 'DOUBLE', 'bool' => 'TINYINT(1)',
 		'date' => 'DATE', 'datetime' => 'DATETIME', 'time' => 'TIME',
 	);
 
@@ -113,9 +114,10 @@ class cms_types {
 	}
 
 	// Columns of a table that MySQL sized by the values of the first row
-	// stored in fluid mode (varchar(191) for text, tinyint for a number), and
-	// that a frozen database never grows: field => the type ($types) they
-	// should be. SQLite's columns take any length.
+	// stored in fluid mode (varchar(191) for text, tinyint for a number), or
+	// that Raster 2.2.30 and earlier declared TEXT, and that a frozen database
+	// never grows: field => the type ($types) they should be. SQLite's
+	// columns take any length.
 	static function narrow($table, $types) {
 		if (R::getDatabaseAdapter()->getDatabase()->getDatabaseType() !== 'mysql' || !cms_store::table_exists($table)) return array();
 		$columns = cms_store::columns($table);
@@ -123,14 +125,14 @@ class cms_types {
 		foreach ($types as $field => $type) {
 			if (!isset($columns[$field])) continue;
 			$declared = strtolower((string)$columns[$field]);
-			if ($type === 'text' && preg_match('/^(varchar|char|tinytext)\b/', $declared)) $narrow[$field] = 'text';
+			if ($type === 'text' && preg_match('/^(varchar|char|tinytext|text|mediumtext)\b/', $declared)) $narrow[$field] = 'text';
 			if ($type === 'int' && preg_match('/^(tinyint|smallint|mediumint)\b/', $declared)) $narrow[$field] = 'int';
 		}
 		return $narrow;
 	}
 
 	// Declares the narrow columns (see narrow) as their type; returns them.
-	// Every value fits: TEXT and INT hold more than what they were.
+	// Every value fits: LONGTEXT and INT hold more than what they were.
 	static function widen($table, $types) {
 		$narrow = self::narrow($table, $types);
 		foreach ($narrow as $field => $type) {

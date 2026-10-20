@@ -801,6 +801,44 @@ test('schema --apply declares model tables by their types, and a long text or bi
 	same(array($long, '300'), array_map('strval', $pdo->query("SELECT name, failed_count FROM user WHERE email = 'long@example.com'")->fetch(PDO::FETCH_NUM)));
 	same($long, $pdo->query("SELECT name FROM subscriber WHERE email = 'long@example.com'")->fetchColumn());
 });
+test('a page field holds text longer than 64 KB in production, and schema --apply widens the TEXT columns 2.2.30 made', function () use ($root) {
+	$db = test_db(sys_get_temp_dir().'/raster-long-text-'.getmypid().'.sqlite');
+	$raster = 'RASTER_ENV=production RASTER_DB='.escapeshellarg($db).' '.escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster");
+	exec("$raster schema --apply 2>&1", $out, $code);
+	same(0, $code, 'schema --apply: '.implode("\n", $out));
+	// a page table and one of its text fields
+	$status = json_decode(shell_exec("$raster schema --json 2>/dev/null"), true);
+	$table = $field = null;
+	foreach ($status['tables'] as $t) {
+		if ($t['kind'] !== 'page' || !$t['exists']) continue;
+		foreach ($t['fields'] as $name => $f) if ($f['type'] === 'text' && $name !== 'slug') { $table = $t['table']; $field = $name; break 2; }
+	}
+	check($table, 'a page with a text field');
+	$pdo = test_pdo($db);
+	if (on_mysql()) {
+		same('longtext', strtolower($pdo->query("SHOW COLUMNS FROM `$table` LIKE '$field'")->fetch(PDO::FETCH_ASSOC)['Type']));
+		// the way 2.2.30 declared it
+		$pdo->exec("ALTER TABLE `$table` MODIFY `$field` TEXT");
+		$out = array();
+		exec("$raster schema --check 2>&1", $out, $code);
+		same(1, $code, 'schema --check reports the TEXT column');
+		check(strpos(implode("\n", $out), "$field (a MySQL column too small for long text; run --apply)") !== false, implode("\n", $out));
+		$out = array();
+		exec("$raster schema --apply 2>&1", $out, $code);
+		same(0, $code, 'schema --apply: '.implode("\n", $out));
+		check(strpos(implode("\n", $out), "widened $table.$field to LONGTEXT") !== false, implode("\n", $out));
+		same('longtext', strtolower($pdo->query("SHOW COLUMNS FROM `$table` LIKE '$field'")->fetch(PDO::FETCH_ASSOC)['Type']));
+		$out = array();
+		exec("$raster schema --check 2>&1", $out, $code);
+		same(0, $code, 'no drift after --apply: '.implode("\n", $out));
+	}
+	$long = str_repeat('A long page. ', 8000); // 104 KB
+	$code = 'require '.var_export("$root/system/boot.php", true).'; boot::$appname = "application"; boot::cli(); cms_store::connect();'
+		.' $b = R::findOne('.var_export($table, true).') ?: R::dispense('.var_export($table, true).'); $b->'.$field.' = '.var_export($long, true).'; R::store($b);';
+	$output = shell_exec('RASTER_ENV=production RASTER_DB='.escapeshellarg($db).' '.escapeshellarg(PHP_BINARY).' -r '.escapeshellarg($code).' 2>&1');
+	same('', trim((string)$output), 'storing in production');
+	same($long, $pdo->query("SELECT `$field` FROM `$table`")->fetchColumn());
+});
 test('schema --apply widens the small MySQL columns that 2.1.8 made for model tables', function () use ($root) {
 	if (!on_mysql()) throw new test_skipped('MySQL only: SQLite columns take any length');
 	$db = test_db(sys_get_temp_dir().'/raster-narrow-tables-'.getmypid().'.sqlite');
@@ -816,8 +854,8 @@ test('schema --apply widens the small MySQL columns that 2.1.8 made for model ta
 	$out = array();
 	exec("$raster schema --apply 2>&1", $out, $code);
 	same(0, $code, 'schema --apply: '.implode("\n", $out));
-	check(strpos(implode("\n", $out), 'widened user.name to TEXT') !== false, implode("\n", $out));
-	same('text', strtolower($pdo->query("SHOW COLUMNS FROM user LIKE 'name'")->fetch(PDO::FETCH_ASSOC)['Type']));
+	check(strpos(implode("\n", $out), 'widened user.name to LONGTEXT') !== false, implode("\n", $out));
+	same('longtext', strtolower($pdo->query("SHOW COLUMNS FROM user LIKE 'name'")->fetch(PDO::FETCH_ASSOC)['Type']));
 	same('int', strtolower($pdo->query("SHOW COLUMNS FROM user LIKE 'failed_count'")->fetch(PDO::FETCH_ASSOC)['Type']));
 	$out = array();
 	exec("$raster schema --check 2>&1", $out, $code);
@@ -845,7 +883,7 @@ test('sending on a frozen database widens the small newsletterissue columns 2.2.
 	same(array($long, '300'), array_map('strval', $pdo->query("SELECT subject, recipients FROM newsletterissue WHERE url = '/new'")->fetch(PDO::FETCH_NUM)));
 	if (on_mysql()) {
 		same('int', strtolower($pdo->query("SHOW COLUMNS FROM newsletterissue LIKE 'recipients'")->fetch(PDO::FETCH_ASSOC)['Type']));
-		same('text', strtolower($pdo->query("SHOW COLUMNS FROM newsletterissue LIKE 'subject'")->fetch(PDO::FETCH_ASSOC)['Type']));
+		same('longtext', strtolower($pdo->query("SHOW COLUMNS FROM newsletterissue LIKE 'subject'")->fetch(PDO::FETCH_ASSOC)['Type']));
 	}
 });
 test('mcp over stdio', function () use ($root, $db) {

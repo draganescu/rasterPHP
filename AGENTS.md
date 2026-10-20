@@ -220,7 +220,8 @@ static function schema() {
 }
 ```
 
-Each column is declared as the type of its example: `''` is TEXT, `0` an
+Each column is declared as the type of its example: `''` is text (TEXT
+on SQLite, LONGTEXT on MySQL, so neither has a size limit), `0` an
 integer, `0.0` a number, `false` a bool, on SQLite and MySQL alike.
 
 ### What a model declares
@@ -1093,7 +1094,7 @@ bundled model declares none of its types, and `lint` warns.
     (email => error) say what this run did. It makes its two tables, with
     the types `schema --apply` gives them, also on a frozen database, and
     on MySQL widens the small columns an older Raster made for them
-    (`recipients` as TINYINT, `subject` as VARCHAR(191)), as `--apply`
+    (`recipients` as TINYINT, `subject` as VARCHAR(191) or TEXT), as `--apply`
     does, so sites need no step for it.
 
 **booking**: bookings for a café's sittings or a salon's appointments
