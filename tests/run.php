@@ -16,6 +16,7 @@ $maildir = sys_get_temp_dir().'/raster-mail-'.getmypid();
 putenv("RASTER_DB=$db");
 putenv("RASTER_MAIL=log://$maildir");
 putenv('RASTER_ENV=development');
+putenv('RASTER_SECRET=test-secret');
 
 require_once $root.'/system/boot.php';
 boot::$appname = 'application';
@@ -280,6 +281,52 @@ test('one lookup: app beats bundled, the_ overrides bundled', function () {
 	}
 });
 
+test('listeners run in order: the framework\'s, the_events.php, the site\'s listens(), core (#27)', function () {
+	// this process: the framework's bindings, a site's, then core
+	event::bind('done')->to('site', 'zz_done');
+	event::bind('route_set')->to('site', 'zz_set');
+	try {
+		$bindings = event::bindings();
+		same(array('cms.setup', 'authentication.setup', 'site.zz_set'), $bindings['route_set'], 'route_set:');
+		same(array('site.zz_done', 'controller.output', 'log.output'), $bindings['done'], 'done:');
+	} finally {
+		event::unbind('done')->from('site', 'zz_done');
+		event::unbind('route_set')->from('site', 'zz_set');
+	}
+	// a bundled model's listens() goes with the framework's bindings, before
+	// the site's, so a site listener sees what the bundled one did
+	$app = APPBASE.config::get('models_path', 'models');
+	$events = APPBASE.'config/the_events.php';
+	$kept = file_get_contents($events);
+	// the starter site's is empty: a binding needs the <?php
+	$php = strpos($kept, '<?php') === 0 ? $kept : "<?php\n";
+	temp_model(BASE.'models/zzpay', array('zzpay.php' => "<?php\nclass zzpay\n{\n\tstatic function listens() {\n\t\treturn array('zz.paid' => 'mark');\n\t}\n\tfunction mark() { echo 'bundled '; }\n}\n"));
+	temp_model("$app/zzshop", array('zzshop.php' => "<?php\nclass zzshop\n{\n\tstatic function listens() {\n\t\treturn array('zz.paid' => 'see');\n\t}\n\tfunction see() { echo 'listens '; }\n\tfunction bound() { echo 'the_events '; }\n}\n"));
+	$paid = 'echo json_encode(event::bindings()["zz.paid"])."\n"; event::dispatch("zz.paid");';
+	try {
+		file_put_contents($events, $php."\nevent::bind('zz.paid')->to('zzshop', 'bound');\n");
+		$out = explode("\n", race_php($paid, 1)[0]);
+		same(array('zzpay.mark', 'zzshop.bound', 'zzshop.see'), json_decode($out[0], true), 'zz.paid listeners:');
+		same('bundled the_events listens ', $out[1], 'zz.paid ran:');
+		// an override's listens() counts for the bundled model, in its place
+		temp_model("$app/the_zzpay", array('the_zzpay.php' => "<?php\nclass the_zzpay extends zzpay\n{\n}\n"));
+		$out = explode("\n", race_php($paid, 1)[0]);
+		same('bundled the_events listens ', $out[1], 'zz.paid ran, with the_zzpay:');
+		remove_dir("$app/the_zzpay");
+		// and the site can unbind it in the_events.php
+		file_put_contents($events, $php."\nevent::unbind('zz.paid')->from('zzpay', 'mark');\n");
+		$out = explode("\n", race_php($paid, 1)[0]);
+		same(array('zzshop.see'), json_decode($out[0], true), 'zz.paid listeners, zzpay.mark unbound:');
+		same('listens ', $out[1], 'zz.paid ran, zzpay.mark unbound:');
+	} finally {
+		file_put_contents($events, $kept);
+		remove_dir(BASE.'models/zzpay');
+		remove_dir("$app/the_zzpay");
+		remove_dir("$app/zzshop");
+		controller::forget_models();
+	}
+});
+
 test('the_mail reaches mail sent by newsletter', function () use ($maildir) {
 	$app = APPBASE.config::get('models_path', 'models');
 	temp_model("$app/the_mail", array('the_mail.php' => "<?php\nclass the_mail extends mail\n{\n\tstatic function send(\$to, \$subject, \$html, \$text = null, \$headers = array()) {\n\t\treturn parent::send(\$to, '[T] '.\$subject, \$html, \$text, \$headers);\n\t}\n}\n"));
@@ -340,7 +387,8 @@ test('a broken, stale or unwritable models.json never stops a page', function ()
 	@mkdir($dir);
 	$env = 'RASTER_ENV=production RASTER_DB='.escapeshellarg(test_db("$dir/db.sqlite"));
 	$render = function () use ($env, $root) {
-		return (string)shell_exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' render /about 2>&1');
+		// the form stamps differ by the second they were made in
+		return preg_replace('/(name="raster_ts" value=")[^"]*/', '$1', (string)shell_exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' render /about 2>&1'));
 	};
 	$data = function () {
 		$all = array();
@@ -477,7 +525,7 @@ test('required emails come from the model', function () {
 
 $port = free_port();
 $base = "http://127.0.0.1:$port";
-$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_MCP_TOKEN' => 'test-token', 'RASTER_MAIL' => "log://$maildir", 'PATH' => getenv('PATH')));
+$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_MCP_TOKEN' => 'test-token', 'RASTER_MAIL' => "log://$maildir", 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
 register_shutdown_function(function () use ($server, $db, $maildir) {
 	proc_terminate($server);
 	array_map('unlink', glob("$db*") ?: array());
@@ -487,6 +535,8 @@ register_shutdown_function(function () use ($server, $db, $maildir) {
 for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
 
 function http($method, $url, $body = null, $headers = array()) {
+	// as a browser posts: the form's own stamp, shown a minute ago
+	if (is_string($body) && strpos($body, 'raster_form=') !== false && strpos($body, 'raster_ts=') === false) $body .= '&raster_ts='.stamp_for_tests(60);
 	$context = stream_context_create(array('http' => array(
 		'method' => $method, 'ignore_errors' => true, 'follow_location' => 0,
 		'header' => implode("\r\n", $headers), 'content' => $body,
@@ -510,12 +560,64 @@ test('pages render', function () use ($base) {
 		check(strpos($body, '<!-- print.') === false && strpos($body, '<!-- render.') === false, "$url leaks annotations");
 	}
 });
+test('theme assets carry a version, pages and files say how long to keep them', function () use ($base, $root) {
+	list(, $body, $headers) = http('GET', "$base/about");
+	check((bool)preg_grep('#^Cache-Control: no-cache$#i', $headers), 'pages are checked each time');
+	check((bool)preg_match('#href="style\.css\?v=([0-9a-f]{8})"#', $body, $m), 'the stylesheet has a version');
+	$version = $m[1];
+	list($status, , $headers) = http('GET', "$base/application/views/default/style.css?v=$version");
+	same(200, $status);
+	check((bool)preg_grep('#^Cache-Control: public, max-age=31536000, immutable$#i', $headers), 'a versioned file is kept');
+	list(, , $headers) = http('GET', "$base/application/views/default/style.css");
+	check((bool)preg_grep('#^Cache-Control: no-cache$#i', $headers), 'a file without a version is checked each time');
+	same(403, http('GET', "$base/application/views/default/about.html?v=1")[0], 'raw views are still refused');
+	// a changed file gets a new version
+	$css = "$root/application/views/default/style.css";
+	$time = filemtime($css);
+	touch($css, $time + 10);
+	try {
+		list(, $body) = http('GET', "$base/about");
+		check(strpos($body, 'href="style.css?v=') !== false && strpos($body, "style.css?v=$version") === false, 'a new version after a change');
+	} finally {
+		touch($css, $time);
+	}
+});
+test('version_assets: only relative URLs to real theme files', function () {
+	$html = '<link href="style.css"><img src="nope.png"><a href="https://x.example/style.css"></a><img src="/style.css">'
+		.'<img src="style.css?x=1"><a href="#top"></a><img src="data:image/png;base64,AA"><a href="about.html"></a><a href="../../config/the_app.php"></a>'
+		.'<img srcset="style.css 1x, nope.png 2x, style.css 3x"><video poster=\'style.css\'></video>';
+	$out = controller::version_assets($html);
+	preg_match('#style\.css\?v=[0-9a-f]{8}#', $out, $m);
+	$v = $m[0];
+	same('<link href="'.$v.'"><img src="nope.png"><a href="https://x.example/style.css"></a><img src="/style.css">'
+		.'<img src="style.css?x=1"><a href="#top"></a><img src="data:image/png;base64,AA"><a href="about.html"></a><a href="../../config/the_app.php"></a>'
+		.'<img srcset="'.$v.' 1x, nope.png 2x, '.$v.' 3x"><video poster=\''.$v.'\'></video>', $out);
+	same($out, controller::version_assets($out), 'a second pass changes nothing');
+});
 test('template defaults become content', function () use ($base) {
 	list(, $body) = http('GET', "$base/");
 	check(strpos($body, '<h1>Write HTML. Get a CMS.</h1>') !== false);
 	check(strpos($body, 'Placeholder') === false, 'remove block leaked');
 	check(strpos($body, 'href="'.$base.'/news/news_item/raster-runs-on-php-8"') !== false, 'detail link');
 	check(strpos($body, 'href="'.$base.'/news"') !== false, '.html links rewritten');
+});
+test('an extension on a routed or missing URL is never HTML labelled as another type (#120)', function () use ($base) {
+	$type = function ($headers) { return (string)current(preg_grep('/^Content-Type:/i', $headers)); };
+	// a missing page is the 404 page, as HTML
+	list($status, $body, $headers) = http('GET', "$base/nothing-here.json");
+	same(404, $status);
+	check(stripos($type($headers), 'text/html') !== false, $type($headers));
+	// a routed URL renders the routed view in that format: news.rss
+	list($status, $body, $headers) = http('GET', "$base/news/news_page/2.rss");
+	same(200, $status);
+	check(stripos($type($headers), 'application/rss+xml') !== false && strpos($body, '<rss') !== false, $type($headers));
+	// and is a 404 when the view has no file in it
+	list($status, , $headers) = http('GET', "$base/news/news_page/2.json");
+	same(404, $status);
+	check(stripos($type($headers), 'text/html') !== false, $type($headers));
+	// real format views are unchanged
+	same(200, http('GET', "$base/news.rss")[0]);
+	same(200, http('GET', "$base/sitemap.xml")[0]);
 });
 test('missing pages and items are 404', function () use ($base) {
 	same(404, http('GET', "$base/nothing-here")[0]);
@@ -748,13 +850,116 @@ test('sending on a frozen database widens the small newsletterissue columns 2.2.
 });
 test('mcp over stdio', function () use ($root, $db) {
 	$input = json_encode(array('jsonrpc' => '2.0', 'id' => 7, 'method' => 'tools/call', 'params' => array('name' => 'get_page', 'arguments' => array('page' => '/about'))))."\n";
-	$process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'PATH' => getenv('PATH')));
+	$process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
 	fwrite($pipes[0], $input);
 	fclose($pipes[0]);
 	$response = json_decode(stream_get_contents($pipes[1]), true);
 	proc_close($process);
 	same(7, $response['id']);
 	same('/about', $response['result']['structuredContent']['url']);
+});
+test('a malformed MCP message is answered and the stdio server goes on (#134)', function () use ($root, $db) {
+	$lines = array(
+		'{"jsonrpc":"2.0","id":1,"method":["x"]}',
+		'{"jsonrpc":"2.0","id":2,"method":"ping"}',
+		'[{"jsonrpc":"2.0","id":3,"method":"ping"},{"jsonrpc":"2.0","id":4,"method":"nope"}]',
+		'[1,2]',
+		'[]',
+		'"just a string"',
+		'{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"no_such_tool"}}',
+		'{"jsonrpc":"2.0","id":6,"method":"initialize","params":{}}',
+	);
+	$process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
+	fwrite($pipes[0], implode("\n", $lines)."\n");
+	fclose($pipes[0]);
+	$out = array_values(array_filter(explode("\n", stream_get_contents($pipes[1]))));
+	$errors = stream_get_contents($pipes[2]);
+	same(0, proc_close($process), $errors);
+	same(count($lines), count($out), 'one answer a line: '.implode("\n", $out).$errors);
+	$answers = array_map(function ($line) { return json_decode($line, true); }, $out);
+	same(-32600, $answers[0]['error']['code'], 'a method that is not a string');
+	same(1, $answers[0]['id']);
+	same(2, $answers[1]['id'], 'the next ping is answered');
+	same(array(3, 4), array_column($answers[2], 'id'), 'a batch gets a list back');
+	same(-32601, $answers[2][1]['error']['code']);
+	same(array(-32600, -32600), array_map(function ($a) { return $a['error']['code']; }, $answers[3]), 'a batch of non-messages');
+	same(-32600, $answers[4]['error']['code'], 'an empty batch');
+	same(-32600, $answers[5]['error']['code'], 'a message that is not an object');
+	same(-32602, $answers[6]['error']['code'], 'an unknown tool is a JSON-RPC error');
+	check(strpos((string)$answers[6]['error']['message'], 'no_such_tool') !== false, 'missing '.'no_such_tool');
+	same(trim(file_get_contents($root.'/system/VERSION')), $answers[7]['result']['serverInfo']['version']);
+});
+test('a malformed MCP message over HTTP gets JSON-RPC errors (#134)', function () use ($base) {
+	list($status, $body) = http('POST', "$base/mcp", '[1,2]', array('Authorization: Bearer test-token', 'Content-Type: application/json'));
+	same(200, $status, $body);
+	same(array(-32600, -32600), array_map(function ($a) { return $a['error']['code']; }, json_decode($body, true)));
+	list($status, $body) = http('POST', "$base/mcp", '{"jsonrpc":"2.0","id":1,"method":{"a":1}}', array('Authorization: Bearer test-token'));
+	same(-32600, json_decode($body, true)['error']['code'], $body);
+});
+test('MCP over HTTP finds the token where Apache and PHP-FPM put it (#106)', function () {
+	// mod_php and php -S: the header
+	same('right', mcp::bearer(array('HTTP_AUTHORIZATION' => 'Bearer right')));
+	// PHP-FPM behind Apache with the shipped .htaccess: the rewrite sets it,
+	// and the rewrite to index.php renames it; the header's own name is empty
+	same('right', mcp::bearer(array('REDIRECT_HTTP_AUTHORIZATION' => 'Bearer right')));
+	same('right', mcp::bearer(array('HTTP_AUTHORIZATION' => '', 'REDIRECT_HTTP_AUTHORIZATION' => 'Bearer right')));
+	same('right', mcp::bearer(array('HTTP_AUTHORIZATION' => 'bearer   right ')));
+	same('', mcp::bearer(array('HTTP_AUTHORIZATION' => 'Basic cmlnaHQ=')));
+	same('', mcp::bearer(array()));
+	// the Apache config passes the header on, and doctor misses the line
+	$apache = private_paths::config('apache');
+	check(strpos((string)$apache, private_paths::APACHE_AUTHORIZATION) !== false, 'missing '.private_paths::APACHE_AUTHORIZATION);
+	$dir = sys_get_temp_dir().'/raster-htaccess-'.getmypid();
+	@mkdir($dir);
+	try {
+		file_put_contents("$dir/.htaccess", $apache);
+		same(array(), raster_project::htaccess_gaps($dir));
+		file_put_contents("$dir/.htaccess", str_replace(private_paths::APACHE_AUTHORIZATION, '', $apache));
+		same(array('authorization'), raster_project::htaccess_gaps($dir));
+	} finally {
+		@unlink("$dir/.htaccess");
+		@rmdir($dir);
+	}
+});
+test('render_url runs PHP itself under PHP-FPM (#107)', function () use ($root) {
+	// under PHP-FPM, PHP_BINARY is php-fpm, which can't run bin/raster
+	foreach (array('fpm-fcgi', 'cgi-fcgi', 'apache2handler') as $sapi) {
+		$php = mcp::php_binary($sapi);
+		check(is_file($php) && is_executable($php), "$sapi: no PHP to run: $php");
+		check(strpos(basename($php), 'fpm') === false, "$sapi: $php");
+		same('cli', shell_exec(escapeshellarg($php).' -r '.escapeshellarg('echo PHP_SAPI;')), $php);
+	}
+	same(PHP_BINARY, mcp::php_binary('cli'));
+});
+test('render_url keeps the environment and reads a page that logs a lot (#107)', function () use ($root) {
+	$app = APPBASE.config::get('models_path', 'models');
+	$views = APPBASE.config::get('views_path', 'views').'/'.config::get('theme');
+	temp_model("$app/zzloud", array('zzloud.php' => "<?php\nclass zzloud\n{\n\tfunction env() { return (string)getenv('ZZ_SITE_SETTING'); }\n\tfunction noise() { for (\$i = 0; \$i < 3000; \$i++) error_log(str_repeat('x', 60).\" \$i\"); return 'done'; }\n}\n"));
+	file_put_contents("$views/zz-loud.html", "<p>env=<!-- print.zzloud.env /--> <!-- print.zzloud.noise /--></p>\n");
+	putenv('ZZ_SITE_SETTING=from-the-environment');
+	// a server of its own, given up on after a while: a hang fails the test
+	// instead of stopping the run
+	$process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, getenv());
+	try {
+		fwrite($pipes[0], json_encode(array('jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => array('name' => 'render_url', 'arguments' => array('url' => '/zz-loud'))))."\n");
+		fclose($pipes[0]);
+		$read = array($pipes[1]); $none = null;
+		check(stream_select($read, $none, $none, 30) === 1, 'render_url gave no answer in 30 s');
+		$answer = json_decode(stream_get_contents($pipes[1]), true)['result'];
+		check(empty($answer['isError']), json_encode($answer));
+		$page = $answer['structuredContent'];
+		same(true, $page['ok'], json_encode($page));
+		check(strpos((string)$page['html'], 'env=from-the-environment') !== false, 'missing '.'env=from-the-environment');
+		check(strpos((string)$page['html'], 'done') !== false, 'missing '.'done');
+		check(strpos((string)$page['errors'], 'x 2999') !== false, 'missing '.'x 2999');
+	} finally {
+		if (proc_get_status($process)['running']) proc_terminate($process, 9);
+		proc_close($process);
+		putenv('ZZ_SITE_SETTING');
+		@unlink("$views/zz-loud.html");
+		remove_dir("$app/zzloud");
+		controller::forget_models();
+	}
 });
 
 
@@ -778,6 +983,18 @@ function location($headers) {
 	return null;
 }
 
+test('one page has one address: a trailing slash and index.php/ redirect (#131)', function () use ($base) {
+	foreach (array('/about/' => '/about', '/index.php/about' => '/about', '/index.php/about/' => '/about', '/news/news_page/2/' => '/news/news_page/2',
+		'/about/?x=1&y=a%20b' => '/about?x=1&y=a%20b', '/news/news_items/headline/Filler%201/' => '/news/news_items/headline/Filler%201') as $asked => $address) {
+		list($status, , $headers) = http('GET', $base.$asked);
+		same(301, $status, $asked);
+		same($base.$address, location($headers), $asked);
+	}
+	same(200, http('GET', "$base/")[0]);
+	same(200, http('GET', "$base/about")[0]);
+	// a form sent to the slashed address is not lost in a redirect
+	same(200, http('POST', "$base/about/", 'x=1', array('Content-Type: application/x-www-form-urlencoded'))[0]);
+});
 test('lint: form conventions', function () {
 	check(has_problem(lint_html('<form method="post"><input name="a"></form>'), 'not inside a render block'));
 	check(has_problem(lint_html("<!-- render.site.nav --><form method=\"post\"><input name=\"a\" required><!-- render.validation.field('b') -->x<!-- /render.validation.field('b') --></form><!-- /render.site.nav -->"), "no input named b"));
@@ -856,7 +1073,26 @@ test('collections: slugs, drafts, scheduling, order', function () use ($base) {
 	list(, $body) = http('GET', "$base/news");
 	check(strpos($body, 'Secret draft') === false && strpos($body, 'From the future') === false, 'hidden items shown');
 	same(404, http('GET', "$base/news/news_item/secret-draft")[0]);
+	// a slug ending like one of SQLite's side files is a page (#98)
+	$journal = mcp_call('create_item', array('collection' => 'news', 'fields' => array('headline' => 'My travel journal')))['structuredContent'];
+	same('my-travel-journal', $journal['slug']);
+	same(200, http('GET', "$base/news/news_item/my-travel-journal")[0]);
+	mcp_call('delete_item', array('collection' => 'news', 'id' => $journal['id']));
 	check(strpos($body, 'Ünïcode') < strpos($body, 'Raster runs on PHP 8'), 'order=newest');
+});
+test('an item titled only with digits opens at its own slug (#90)', function () use ($base) {
+	http('GET', "$base/news");
+	$year = mcp_call('create_item', array('collection' => 'news', 'fields' => array('headline' => '1984')))['structuredContent'];
+	$one = mcp_call('create_item', array('collection' => 'news', 'fields' => array('headline' => '1')))['structuredContent'];
+	same('1984', $year['slug']);
+	same('1', $one['slug']);
+	check(strpos(http('GET', "$base/news/news_item/1984")[1], '<h1>1984</h1>') !== false, 'the item titled 1984');
+	// item 1 is the mock-up; the link /news/news_item/1 is the item titled 1
+	check(strpos(http('GET', "$base/news/news_item/1")[1], '<h1>1</h1>') !== false, 'the item titled 1, not item id 1');
+	// an id no slug shadows still opens its item
+	check(strpos(http('GET', "$base/news/news_item/{$year['id']}")[1], '<h1>1984</h1>') !== false, 'by id');
+	mcp_call('delete_item', array('collection' => 'news', 'id' => $year['id']));
+	mcp_call('delete_item', array('collection' => 'news', 'id' => $one['id']));
 });
 test('feeds are well-formed and escaped', function () use ($base) {
 	list($status, $body, $headers) = http('GET', "$base/news.rss");
@@ -889,7 +1125,7 @@ test('page cache in production', function () use ($root, $db) {
 	$env = 'RASTER_ENV=production RASTER_DB='.escapeshellarg($db);
 	shell_exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' schema --apply');
 	$port = free_port();
-	$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_ENV' => 'production', 'PATH' => getenv('PATH')));
+	$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_ENV' => 'production', 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
 	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
 	try {
 		$cache = function () use ($port) { return current(preg_grep('/^X-Raster-Cache/i', http('GET', "http://127.0.0.1:$port/about")[2])); };
@@ -929,7 +1165,7 @@ test('a production page reads the schema and each page row once, and counts noth
 });
 test('a site under a path: RASTER_URL with a folder', function () use ($root, $db) {
 	$port = free_port();
-	$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_URL' => "http://127.0.0.1:$port/preview/abc/", 'PATH' => getenv('PATH')));
+	$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_URL' => "http://127.0.0.1:$port/preview/abc/", 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
 	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
 	try {
 		$base = "http://127.0.0.1:$port/preview/abc";
@@ -1089,6 +1325,38 @@ test('frozen database: accounts and newsletter after schema --apply', function (
 		array_map('unlink', glob("$db*") ?: array());
 	}
 });
+test('the comment at the top of bin/raster lists what raster help lists (#49)', function () use ($root) {
+	// per command: the options and the <placeholders> it names
+	$names = function ($text) {
+		preg_match_all('/--([a-z\-]+)/', $text, $options);
+		preg_match_all('/<[^>]+>/', $text, $placeholders);
+		$names = array_values(array_unique(array_merge($options[1], $placeholders[0])));
+		sort($names);
+		return $names;
+	};
+	$header = array();
+	preg_match_all('#^//   php bin/raster (\S+)(.*)$#m', file_get_contents("$root/bin/raster"), $lines, PREG_SET_ORDER);
+	foreach ($lines as $line) $header[$line[1]] = $names($line[2]);
+	$help = array();
+	$command = null;
+	foreach (explode("\n", (string)shell_exec(escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' help')) as $line) {
+		// a command's lines are its own and the indented ones below it; the
+		// usage is what comes before the description's wide gap
+		if (preg_match('#^  php bin/raster (\S+)#', $line, $m)) $command = $m[1];
+		elseif (!preg_match('#^ {8}#', $line)) $command = null;
+		if ($command === null) continue;
+		$parts = preg_split('/\s{2,}/', trim($line));
+		$usage = preg_match('#^(php bin/raster|--)#', $parts[0]) ? $parts[0] : '';
+		// options named only in a description are taken too, as bin/raster does
+		preg_match_all('/--[a-z\-]+/', $line, $options);
+		$help[$command] = array_merge(isset($help[$command]) ? $help[$command] : array(), array($usage), $options[0]);
+	}
+	foreach ($help as $command => $texts) $help[$command] = $names(implode(' ', $texts));
+	ksort($header);
+	ksort($help);
+	same(array_keys($help), array_keys($header), 'the same commands');
+	foreach ($help as $command => $expected) same($expected, $header[$command], "$command:");
+});
 
 // ## What is never served: one list, three servers
 
@@ -1119,6 +1387,22 @@ test('private_paths: the rules, and the apps they name', function () use ($root)
 	check(private_paths::blocked('/.well-known/.env'), 'but not a dotfile inside it');
 	check(private_paths::blocked('/.well-known/x.php'), 'nor code');
 	check(private_paths::blocked('/.well-knownx/y'), 'nor a folder that only starts like it');
+	// SQLite's side files, not every URL that ends like one (#98)
+	foreach (array('/raster.sqlite-journal', '/x/raster.sqlite-wal', '/raster.SQLITE-SHM') as $path) check(private_paths::blocked($path), "$path must be private");
+	foreach (array('/news/news_item/my-travel-journal', '/reading-journal', '/data-wal') as $path) check(!private_paths::blocked($path), "$path must be served");
+});
+test('lint warns about a view whose address the server refuses (#98)', function () use ($root) {
+	$dir = "$root/application/views/default/docs";
+	@mkdir($dir);
+	file_put_contents("$dir/config.html", '<p>Settings</p>');
+	file_put_contents("$dir/setup.html", '<p>Setup</p>');
+	try {
+		$problems = (new raster_inspector())->lint();
+		check(has_problem($problems, '/docs/config is refused'), 'lint said: '.json_encode($problems));
+		check(!has_problem($problems, '/docs/setup is refused'), 'an ordinary page');
+	} finally {
+		remove_dir($dir);
+	}
 });
 test('private_paths: every server config carries every rule', function () use ($root) {
 	require_once BASE.'private_paths.php';
@@ -1507,7 +1791,7 @@ test('tracking parameters alone still use the cache', function () {
 test('empty filter pages, pages past the last one and unknown filters are not cached', function () use ($root, $db) {
 	cache_empty();
 	$port = free_port();
-	$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_ENV' => 'production', 'PATH' => getenv('PATH')));
+	$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_ENV' => 'production', 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
 	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
 	try {
 		$get = function ($path) use ($port) {
@@ -1537,7 +1821,7 @@ test('empty filter pages, pages past the last one and unknown filters are not ca
 function cache_server($db, $test) {
 	global $root;
 	$port = free_port();
-	$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_ENV' => 'production', 'PATH' => getenv('PATH')));
+	$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_ENV' => 'production', 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
 	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
 	$get = function ($path) use ($port) {
 		list($status, $body, $headers) = http('GET', "http://127.0.0.1:$port$path");
@@ -1683,7 +1967,7 @@ function b_server($env) {
 	$port = free_port();
 	$log = sys_get_temp_dir().'/raster-b-'.getmypid().'-'.$port.'.log';
 	$process = proc_open(array(PHP_BINARY, '-d', 'display_errors=1', '-d', 'log_errors=0', '-d', 'output_buffering=0', '-d', 'html_errors=0', '-d', "error_log=$log", '-S', "127.0.0.1:$port", "$root/index.php"),
-		array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array_merge(array('PATH' => getenv('PATH')), $env));
+		array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array_merge(array('PATH' => getenv('PATH'), 'RASTER_SECRET' => 'test-secret'), $env));
 	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
 	register_shutdown_function(function () use ($process, $log) { proc_terminate($process); @unlink($log); });
 	return array("http://127.0.0.1:$port", $log);
@@ -2207,6 +2491,50 @@ test('the editor\'s clean() drops the same script links (#67)', function () use 
 	unlink($file);
 	same(array_values($cases), json_decode((string)$out, true), (string)$out);
 });
+test('the editor leaves Enter to the browser in a list or a table, and makes a line break in a paragraph (#114)', function () use ($root) {
+	$node = trim((string)shell_exec('command -v node 2>/dev/null'));
+	if ($node === '') return; // no node here: tests/editor-browser.js covers it in a browser
+	$js = file_get_contents("$root/system/models/cms/editor/editor.js");
+	check(preg_match('/\tfunction takesBlocks\(el\) \{.*?\n\t\}\n/s', $js, $m), 'editor.js has takesBlocks()');
+	$cases = array('DIV' => true, 'TD' => true, 'UL' => true, 'OL' => true, 'DL' => true, 'TABLE' => true, 'TBODY' => true,
+		'P' => false, 'H2' => false, 'LI' => false, 'SPAN' => false, 'A' => false,
+		// the editor's own wrapper: a <div> is judged by its parent, a <span> never takes blocks
+		'DIV in ARTICLE' => true, 'DIV in TD' => true, 'DIV in LI' => false, 'SPAN in ARTICLE' => false, 'SPAN in P' => false);
+	$file = sys_get_temp_dir().'/raster-blocks-'.getmypid().'.js';
+	file_put_contents($file, $m[0]."\nvar cases = ".json_encode(array_keys($cases)).";\n"
+		."function el(t, wrap, parent) { return { tagName: t, nodeType: 1, parentNode: parent || null, hasAttribute: function (a) { return !!wrap && a === 'data-raster-wrap'; } }; }\n"
+		."process.stdout.write(JSON.stringify(cases.map(function (c) { var p = c.split(' in '); return takesBlocks(p[1] ? el(p[0], true, el(p[1])) : el(p[0])); })));\n");
+	$out = shell_exec(escapeshellarg($node).' '.escapeshellarg($file).' 2>&1');
+	unlink($file);
+	same(array_values($cases), json_decode((string)$out, true), (string)$out);
+	// every field the editor makes knows it: those found in the page, those
+	// of an item added or copied in the page, and those of the new-item card
+	check(substr_count($js, 'inline: !holdsBlocks(node)') === 1 && strpos($js, 'field.inline = !holdsBlocks(field.el)') !== false, 'adopt() and scan() set inline');
+	check(strpos($js, 'clean(node.innerHTML, !holdsBlocks(node))') !== false, 'a new item is cleaned for where it sits');
+});
+test('a rich field that already holds paragraphs keeps them, in an <li> or an <a> card too', function () use ($root) {
+	$node = trim((string)shell_exec('command -v node 2>/dev/null'));
+	if ($node === '') return;
+	$js = file_get_contents("$root/system/models/cms/editor/editor.js");
+	$code = '';
+	foreach (array('isBlock', 'takesBlocks', 'holdsBlocks') as $name) {
+		check(preg_match('/\tfunction '.$name.'\(\w+\) \{.*?\n\t\}\n/s', $js, $m), "editor.js has $name()");
+		$code .= $m[0];
+	}
+	// "A holding P": an <a> whose children are a <p>; "DIV in LI": the editor's wrapper
+	$cases = array('LI holding P P' => true, 'A holding P P' => true, 'DT holding UL' => true, 'DIV in LI holding P P' => true,
+		'LI' => false, 'LI holding EM' => false, 'A holding SPAN' => false, 'DIV in LI' => false, 'SPAN in LI holding EM' => false,
+		'P' => false, 'H2 holding EM' => false, 'ARTICLE' => true, 'DIV in TD' => true);
+	$file = sys_get_temp_dir().'/raster-holds-'.getmypid().'.js';
+	file_put_contents($file, $code."\nvar cases = ".json_encode(array_keys($cases)).";\n"
+		."function el(t, wrap, parent, kids) { return { tagName: t, nodeType: 1, parentNode: parent || null, childNodes: (kids || []).map(function (k) { return el(k); }), hasAttribute: function (a) { return !!wrap && a === 'data-raster-wrap'; } }; }\n"
+		."process.stdout.write(JSON.stringify(cases.map(function (c) { var h = c.split(' holding '), kids = h[1] ? h[1].split(' ') : [], p = h[0].split(' in '); return holdsBlocks(p[1] ? el(p[0], true, el(p[1]), kids) : el(p[0], false, null, kids)); })));\n");
+	$out = shell_exec(escapeshellarg($node).' '.escapeshellarg($file).' 2>&1');
+	unlink($file);
+	same(array_values($cases), json_decode((string)$out, true), (string)$out);
+	// Enter in the new-item card follows the same rule
+	check(strpos($js, "!holdsBlocks(fresh)") !== false, 'the new-item card asks holdsBlocks()');
+});
 test('arrays and bad bytes fail required; a field named tags[] takes a list (#70)', function () use ($base) {
 	$v = validation::get();
 	$r = new ReflectionMethod($v, 'check_field');
@@ -2241,7 +2569,7 @@ test('arrays and bad bytes fail required; a field named tags[] takes a list (#70
 // MCP view tools take a theme only as a folder directly under views/ (#72)
 function mcp_stdio_calls($calls) {
 	global $root, $db;
-	$process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'PATH' => getenv('PATH')));
+	$process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
 	foreach ($calls as $i => $call) {
 		fwrite($pipes[0], json_encode(array('jsonrpc' => '2.0', 'id' => 100 + $i, 'method' => 'tools/call', 'params' => array('name' => $call[0], 'arguments' => $call[1])))."\n");
 	}
@@ -2733,17 +3061,20 @@ test('the site time zone sets today and published_at (#84)', function () use ($r
 	try {
 		cms_records::create('zztzday', array('title' => 'UTC today', 'day' => gmdate('Y-m-d')));
 		cms_records::create('zztzday', array('title' => 'Site today', 'day' => $there->format('Y-m-d')));
-		// a minute ago on the site's clock: hours away on UTC's
-		$minute_ago = (clone $there)->modify('-1 minute')->format('Y-m-d H:i:s');
-		cms_store::save_item('newsdata', 0, array('headline' => 'Zone news', 'published_at' => $minute_ago), array('headline', 'published_at'));
+		// a minute off on the site's clock is hours off on UTC's: ahead of
+		// UTC a minute ago is still to come by UTC; behind it a minute from
+		// now has long passed by UTC
+		$ahead = $there->getOffset() > 0;
+		$stamp_at = (clone $there)->modify($ahead ? '-1 minute' : '+1 minute')->format('Y-m-d H:i:s');
+		cms_store::save_item('newsdata', 0, array('headline' => 'Zone news', 'published_at' => $stamp_at), array('headline', 'published_at'));
 		$utc = $render();
 		check(strpos($utc, '<li>UTC today</li>') !== false && strpos($utc, 'Site today') === false, "without a time zone today is UTC's: $utc");
-		check(strpos($utc, 'Zone news') === false, 'and the news is still scheduled');
+		check((strpos($utc, 'Zone news') !== false) === !$ahead, $ahead ? 'and the news is still scheduled' : 'and the news is already live');
 		file_put_contents($config, $settings."\nconfig::set('timezone')->to('$zone');\n");
 		$zoned = $render();
 		check(strpos($zoned, '<li>Site today</li>') !== false, "today is the site's date: $zoned");
 		check(strpos($zoned, 'UTC today') === false, "an item dated today in UTC is not today on the site: $zoned");
-		check(strpos($zoned, '<li>Zone news</li>') !== false, 'published a minute ago on the site clock is live');
+		check((strpos($zoned, '<li>Zone news</li>') !== false) === $ahead, $ahead ? 'published a minute ago on the site clock is live' : 'published a minute from now on the site clock is scheduled');
 		// stamps follow it too
 		$stamp = with_timezone($zone, function () {
 			$item = cms_records::create('zztzday', array('title' => 'Stamped', 'day' => ''));
@@ -3908,7 +4239,7 @@ function booking_server($env = array()) {
 	global $root, $db, $maildir;
 	$port = free_port();
 	$log = sys_get_temp_dir().'/raster-booking-'.getmypid().'-'.$port.'.log';
-	$env = array_merge(array('PATH' => getenv('PATH'), 'RASTER_DB' => $db, 'RASTER_ENV' => 'development', 'RASTER_MAIL' => "log://$maildir-booking",
+	$env = array_merge(array('PATH' => getenv('PATH'), 'RASTER_SECRET' => 'test-secret', 'RASTER_DB' => $db, 'RASTER_ENV' => 'development', 'RASTER_MAIL' => "log://$maildir-booking",
 		'RASTER_MAIL_FROM' => 'staff@zz.test', 'RASTER_URL' => "http://127.0.0.1:$port/"), $env);
 	$process = proc_open(array(PHP_BINARY, '-d', 'log_errors=1', '-d', "error_log=$log", '-S', "127.0.0.1:$port", "$root/index.php"),
 		array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, $env);
@@ -4388,6 +4719,1369 @@ test('booking: requires(): emails, pages, settings and records', function () {
 		} finally {
 			config::set('protected')->to($protected);
 		}
+	});
+});
+
+test('lint warns when a checked form has no try_again alert', function () {
+	$form = "<!-- render.newsletter.signup -->\n<form method=\"post\"><input type=\"email\" name=\"email\" required></form>\n<!-- /render.newsletter.signup -->\n";
+	$try = "<!-- print.validation.alert('try_again') --><p>Again.</p><!-- /print.validation.alert('try_again') -->\n";
+	$slow = "<!-- print.validation.alert('slow_down') --><p>Slow.</p><!-- /print.validation.alert('slow_down') -->\n";
+	$problems = lint_html($form);
+	check(has_problem($problems, "render.newsletter.signup can turn a post away as spam; add print.validation.alert('try_again')"), 'warns with neither alert');
+	check(has_problem(lint_html($try.$form), 'can turn a post away as spam'), 'warns with only try_again');
+	check(has_problem(lint_html($slow.$form), 'can turn a post away as spam'), 'warns with only slow_down');
+	check(!has_problem(lint_html($try.$slow.$form), 'can turn a post away as spam'), 'quiet with both');
+	check(!has_problem(lint_html("<p>No form here.</p>"), 'can turn a post away as spam'), 'quiet without the region');
+});
+
+test('lint counts try_again and slow_down alerts in the fragments a view includes', function () {
+	$views = sys_get_temp_dir().'/raster-lint-theme-'.getmypid();
+	mkdir($views.'/zz', 0777, true);
+	$alerts = "<!-- print.validation.alert('try_again') --><p>Again.</p><!-- /print.validation.alert('try_again') -->\n<!-- print.validation.alert('slow_down') --><p>Slow.</p><!-- /print.validation.alert('slow_down') -->\n";
+	file_put_contents("$views/zz/_layout.html", "<!-- res.header -->\n$alerts<!-- /res.header -->\n<!-- res.bare -->\n<p>Nothing.</p>\n<!-- /res.bare -->\n");
+	try {
+		$form = "<!-- render.newsletter.signup -->\n<form method=\"post\"><input type=\"email\" name=\"email\" required></form>\n<!-- /render.newsletter.signup -->\n";
+		$inspector = new raster_inspector($views, 'zz');
+		check(!has_problem($inspector->lint_source("<!-- dry._layout.header /-->\n$form"), 'can turn a post away as spam'), 'quiet when the header fragment has both alerts');
+		check(has_problem($inspector->lint_source("<!-- dry._layout.bare /-->\n$form"), 'can turn a post away as spam'), 'still warns when the fragment has neither');
+	} finally {
+		unlink("$views/zz/_layout.html");
+		rmdir("$views/zz");
+		rmdir($views);
+	}
+});
+
+test('lint warns about raw find() rows on any page (#125)', function () {
+	$app = APPBASE.config::get('models_path', 'models');
+	temp_model("$app/zzraw", array('zzraw.php' => "<?php\nclass zzraw\n{\n\tstatic function types() {\n\t\treturn array('zzraw' => array('fields' => array('name' => '', 'newsletter' => false)));\n\t}\n\tfunction rows() {\n\t\treturn cms_records::find('zzraw');\n\t}\n\tfunction text() {\n\t\treturn array_map(function (\$r) { return cms_records::for_template(cms_records::info('zzraw'), \$r); }, cms_records::find('zzraw'));\n\t}\n\tfunction escaped() {\n\t\t\$rows = array();\n\t\tforeach (cms_records::find('zzraw') as \$r) \$rows[] = array('name' => util::e(\$r['name']), 'newsletter' => \$r['newsletter'] ? '1' : '0');\n\t\treturn \$rows;\n\t}\n\tfunction listed() {\n\t\treturn cms_records::listed('zzraw', cms_records::find('zzraw'));\n\t}\n}\n"));
+	try {
+		controller::forget_models();
+		cms_records::forget();
+		$lint = function ($method) {
+			return lint_html("<!-- render.zzraw.$method --><p><!-- print.name -->x<!-- /print.name --> <!-- print.newsletter -->1<!-- /print.newsletter --></p><!-- /render.zzraw.$method -->");
+		};
+		check(has_problem($lint('rows'), 'so a false bool prints the mock-up and what visitors typed prints as HTML'), 'a page for visitors: '.json_encode($lint('rows')));
+		same(array(), $lint('listed'), 'listed() rows');
+		same(array(), $lint('text'), 'rows made text with for_template(), as the booking manage page does');
+		same(array(), $lint('escaped'), 'rows a model builds and escapes itself (the shop\'s receipt)');
+	} finally {
+		remove_dir("$app/zzraw");
+		controller::forget_models();
+		cms_records::forget();
+	}
+});
+
+test('the pager counts what the list shows (#88)', function () {
+	global $root, $db;
+	$app = APPBASE.config::get('models_path', 'models');
+	$view = APPBASE.config::get('views_path', 'views').'/'.config::get('theme', 'default').'/zzpager.html';
+	temp_model("$app/zzmine", array('zzmine.php' => "<?php\nclass zzmine\n{\n\tstatic function types() {\n\t\treturn array('zzmine' => array('fields' => array('title' => ''), 'owner' => true));\n\t}\n}\n"));
+	$pager = function ($filter, $class) {
+		$links = "render.pagination.links('cms.zzmine'".($filter === '' ? '' : ", '$filter'").")";
+		return "<!-- $links --><nav class=\"$class\"><!-- print.current -->1<!-- /print.current --> of <!-- print.total -->1<!-- /print.total --></nav><!-- /$links -->";
+	};
+	file_put_contents($view, "<html><head><title>Pager</title></head><body>"
+		."<!-- render.cms.zzmine('owner=me&order=title') --><p class=\"mine\"><!-- print.title -->x<!-- /print.title --></p><!-- /render.cms.zzmine('owner=me&order=title') -->"
+		.$pager('owner=me', 'mine').$pager('', 'all').$pager('limit=3', 'top')
+		."<!-- render.cms.zzmine('order=title&limit=3') --><i class=\"top\"><!-- print.title -->x<!-- /print.title --></i><!-- /render.cms.zzmine('order=title&limit=3') -->"
+		."</body></html>");
+	try {
+		controller::forget_models();
+		cms_records::forget();
+		reconnect();
+		$member = authentication::create_user('zzpager-member@example.test', 'a long password', 'member', 'Member');
+		$other = authentication::create_user('zzpager-other@example.test', 'a long password', 'member', 'Other');
+		for ($i = 1; $i <= 12; $i++) cms_records::create('zzmine', array('title' => sprintf('Mine %02d', $i), 'owner' => $member));
+		for ($i = 1; $i <= 9; $i++) cms_records::create('zzmine', array('title' => "Theirs $i", 'owner' => $other));
+		// two of theirs are drafts: only editors see and count them
+		R::exec("UPDATE zzminedata SET enabled = 0 WHERE title IN ('Theirs 8', 'Theirs 9')");
+		$render = function ($url, $as = null) use ($root, $db) {
+			$env = 'RASTER_DB='.escapeshellarg($db).' RASTER_ENV=development';
+			$cmd = "$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' render '.escapeshellarg($url).($as ? ' '.escapeshellarg("--as=$as") : '').' 2>&1';
+			return (string)shell_exec($cmd);
+		};
+		$nav = function ($html, $class) {
+			return preg_match('#<nav class="'.$class.'">(\d+) of (\d+)</nav>#', $html, $m) ? "$m[1] of $m[2]" : '';
+		};
+		$page = $render('/zzpager', 'zzpager-member@example.test');
+		// ten to a page (raster_page_size)
+		same(10, substr_count($page, '<p class="mine"'), $page);
+		same('1 of 2', $nav($page, 'mine'), 'owner=me counts the member\'s 12');
+		same('1 of 2', $nav($page, 'all'), 'the member reads their own 12 only');
+		same('', $nav($page, 'top'), 'a limit list is one page');
+		$visitor = $render('/zzpager');
+		same('', $nav($visitor, 'all'), 'a visitor gets no pager over private records');
+		same('', $nav($visitor, 'mine'));
+		$staff = $render('/zzpager', 'editor');
+		same('1 of 3', $nav($staff, 'all'), 'editors count all 21, drafts included');
+		same('2 of 3', $nav($render('/zzpager/zzmine_page/2', 'editor'), 'all'));
+		preg_match_all('#<i class="top">([^<]*)</i>#', $page, $top);
+		$second = $render('/zzpager/zzmine_page/2', 'zzpager-member@example.test');
+		preg_match_all('#<i class="top">([^<]*)</i>#', $second, $top2);
+		same(array('Mine 01', 'Mine 02', 'Mine 03'), $top[1]);
+		same($top[1], $top2[1], 'a limit list doesn\'t take the page offset');
+		preg_match_all('#<p class="mine">([^<]*)</p>#', $second, $last);
+		same(array('Mine 11', 'Mine 12'), $last[1], 'the last page of my bookings');
+	} finally {
+		R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS zzminedata');
+		R::exec("DELETE FROM user WHERE email LIKE 'zzpager-%'");
+		@unlink($view);
+		remove_dir("$app/zzmine");
+		controller::forget_models();
+		cms_records::forget();
+	}
+});
+
+test('editor: marks settle in one pass over the page, however long (#53)', function () {
+	$template = template::instance();
+	$saved = $template->marks;
+	try {
+		$template->marks = array();
+		for ($i = 1; $i <= 12; $i++) $template->mark(array('kind' => 'field'));
+		$m = function ($id) { return '<!--raster:s '.$id.'-->x<!--raster:e '.$id.'-->'; };
+		$html = '<html><head><title>'.$m(1).'</title></head><BODY class="a">'.$m(2)
+			.'<a title="'.$m(3).'">'.$m(4).'</a><script>var a = "'.$m(5).'";</script>'.$m(6)
+			.'<TEXTAREA>'.$m(7).'</textarea><select><option>'.$m(8).'</option></select><p>'.$m(9)
+			.'<style>'.$m(10).'</STYLE><!--raster:a 11--><img src="a.jpg"><img alt="<!--raster:a 12-->"></p></body></html>';
+		$out = cms_editor::settle($html);
+		$hidden = array();
+		foreach ($template->marks as $id => $mark) if (!empty($mark['hidden'])) $hidden[] = $id;
+		same(array(1, 3, 5, 7, 8, 10, 12), $hidden);
+		foreach (array(2, 4, 6, 9) as $id) check(strpos($out, $m($id)) !== false, "mark $id kept: $out");
+		check(strpos($out, '<!--raster:a 11--><img') !== false && strpos($out, 'raster:s 1-->') === false, $out);
+		// a long list: one forward pass, not a copy of the page per mark
+		$template->marks = array();
+		$rows = '';
+		for ($i = 0; $i < 2000; $i++) {
+			$item = $template->mark(array('kind' => 'item'));
+			$title = $template->mark(array('kind' => 'item_field'));
+			$photo = $template->mark(array('kind' => 'item_attr'));
+			$rows .= '<!--raster:s '.$item.'--><li class="dish"><h3>'.$m($title).'</h3><!--raster:a '.$photo.'--><img src="d.jpg" alt="Dish"></li><!--raster:e '.$item.'-->';
+		}
+		$start = microtime(true);
+		$out = cms_editor::settle('<html><head><title>Menu</title></head><body><ul>'.$rows.'</ul></body></html>');
+		$took = microtime(true) - $start;
+		same(0, count(array_filter($template->marks, function ($mark) { return !empty($mark['hidden']); })));
+		check($took < 0.25, 'settle took '.round($took * 1000).' ms for 6,000 marks');
+	} finally {
+		$template->marks = $saved;
+	}
+});
+
+// ## Spam checks: the stamp
+
+class test_stampform {
+	function form() { return false; }
+}
+// the forms of $html as a page shows them (not as an email): with their hidden fields
+function stamped($html) {
+	$previous = template::swap(null);
+	try {
+		$template = template::instance();
+		$template->output = $html;
+		$template->index_forms();
+		return $template->output;
+	} finally {
+		template::swap($previous);
+	}
+}
+test('every post form gets a signed stamp', function () {
+	$out = stamped('<!-- render.test_stampform.form --><form method="post"><input name="a"></form><!-- /render.test_stampform.form -->'
+		.'<!-- render.test_stampform.form --><form method="get"><input name="q"></form><!-- /render.test_stampform.form -->');
+	same(1, substr_count($out, 'name="raster_ts"'), $out);
+	check(preg_match('/name="raster_ts" value="(\d{10}\.[0-9a-f]{64})"/', $out, $m) === 1, $out);
+	$age = validation_spam::stamp_age($m[1]);
+	check(is_int($age) && $age >= 0 && $age <= 2, var_export($age, true));
+	// the get form is the second one, and has none
+	check(strpos(substr($out, strpos($out, 'method="get"')), 'raster_ts') === false, $out);
+});
+test('a stamp is checked by its signature', function () {
+	same(false, validation_spam::stamp_age('123.abc'));
+	same(false, validation_spam::stamp_age(time().'.'.str_repeat('0', 64)));
+	same(false, validation_spam::stamp_age(array('x')));
+	same(null, validation_spam::stamp_age(''));
+	same(null, validation_spam::stamp_age(null));
+	same(30, validation_spam::stamp_age(validation_spam::stamp(time() - 30)));
+});
+test('the key: RASTER_SECRET, else data/secret made once, by the site', function () use ($root, $db) {
+	$file = APPBASE.'data/secret';
+	$kept = is_file($file) ? file_get_contents($file) : null;
+	@unlink($file);
+	$was = getenv('RASTER_SECRET');
+	$server = null;
+	try {
+		// a web request (here php -S, as PHP-FPM would) makes the file, as
+		// the web server's user
+		$port = free_port();
+		$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'PATH' => getenv('PATH')));
+		for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
+		list($status, $body) = http('GET', "http://127.0.0.1:$port/login");
+		same(200, $status);
+		check((bool)preg_match('/name="raster_ts" value="([^"]+)"/', $body, $stamp), $body);
+		check(is_file($file), 'the site made data/secret');
+		$made = (string)file_get_contents($file);
+		check((bool)preg_match('/^[0-9a-f]{64}$/', $made), "key: $made");
+		if (DIRECTORY_SEPARATOR === '/') same('0600', substr(sprintf('%o', fileperms($file)), -4));
+		http('GET', "http://127.0.0.1:$port/login");
+		same($made, (string)file_get_contents($file), 'a second request keeps the key');
+		// a command reads the key the site made, and the page's stamp is
+		// signed with it
+		putenv('RASTER_SECRET');
+		util::$secret = null;
+		same($made, util::secret());
+		$age = validation_spam::stamp_age($stamp[1]);
+		check(is_int($age) && $age >= 0 && $age <= 5, var_export($age, true));
+		putenv('RASTER_SECRET=from-the-environment');
+		util::$secret = null;
+		same('from-the-environment', util::secret());
+	} finally {
+		if ($server) {
+			proc_terminate($server);
+			proc_close($server);
+		}
+		putenv($was === false ? 'RASTER_SECRET' : "RASTER_SECRET=$was");
+		util::$secret = null;
+		if ($kept === null) @unlink($file); else file_put_contents($file, $kept);
+	}
+});
+test('a command makes no key file, and still stamps', function () use ($root, $db) {
+	$file = APPBASE.'data/secret';
+	$kept = is_file($file) ? file_get_contents($file) : null;
+	@unlink($file);
+	$was = getenv('RASTER_SECRET');
+	try {
+		putenv('RASTER_SECRET');
+		util::$secret = null;
+		$key = util::secret();
+		check((bool)preg_match('/^[0-9a-f]{64}$/', $key), "key: $key");
+		check(!file_exists($file), 'the command line made data/secret');
+		same($key, util::secret(), 'one key for the whole process');
+		same(30, validation_spam::stamp_age(validation_spam::stamp(time() - 30)));
+		// raster render, as someone other than the web server may run it
+		$out = (string)shell_exec('RASTER_DB='.escapeshellarg($db).' RASTER_ENV=development '.escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' render /login 2>&1');
+		check((bool)preg_match('/name="raster_ts" value="\d+\.[0-9a-f]{64}"/', $out), $out);
+		check(!file_exists($file), 'raster render made data/secret');
+		// the next command gets another key: nothing is kept between them
+		util::$secret = null;
+		check(util::secret() !== $key, 'a key kept between commands');
+	} finally {
+		putenv($was === false ? 'RASTER_SECRET' : "RASTER_SECRET=$was");
+		util::$secret = null;
+		if ($kept === null) @unlink($file); else file_put_contents($file, $kept);
+	}
+});
+test('a key file that is empty or partial is not trusted', function () {
+	$file = APPBASE.'data/secret';
+	$kept = is_file($file) ? file_get_contents($file) : null;
+	$was = getenv('RASTER_SECRET');
+	$errors = ini_get('error_log');
+	$logged = sys_get_temp_dir().'/raster-secret-log-'.getmypid().'.txt';
+	ini_set('error_log', $logged);
+	try {
+		putenv('RASTER_SECRET');
+		foreach (array('', 'abc123', str_repeat('g', 64)) as $bad) {
+			file_put_contents($file, $bad);
+			util::$secret = null;
+			same('', util::secret(), 'contents: '.var_export($bad, true));
+			same('', validation_spam::stamp());
+		}
+	} finally {
+		ini_set('error_log', (string)$errors);
+		putenv($was === false ? 'RASTER_SECRET' : "RASTER_SECRET=$was");
+		util::$secret = null;
+		if ($kept === null) @unlink($file); else file_put_contents($file, $kept);
+	}
+	same(3, substr_count((string)@file_get_contents($logged), 'Raster warning: data/secret is not a valid key'), 'each bad file is logged');
+	@unlink($logged);
+});
+test('the stamp is not a field', function () {
+	same(array(), template::instance()->constraints('<input name="raster_ts">'));
+	$filled = template::instance()->fill_form('<input type="hidden" name="raster_ts" value="">', array('raster_ts' => 'x'));
+	check(strpos($filled, 'value="x"') === false, $filled);
+});
+test('emails and exports carry no stamp', function () {
+	$file = sys_get_temp_dir().'/raster-stamp-'.getmypid().'.html';
+	file_put_contents($file, '<!-- render.test_stampform.form --><form method="post"><input name="a"></form><!-- /render.test_stampform.form -->');
+	controller::instance()->objects['test_stampform'] = new test_stampform();
+	$html = '<!-- render.test_stampform.form --><form method="post"><input name="a"></form><!-- /render.test_stampform.form -->';
+	try {
+		$email = controller::render_view($file);
+		check(strpos($email, 'raster_form') !== false && strpos($email, 'raster_ts') === false, $email);
+		putenv('RASTER_EXPORT=1');
+		check(strpos(stamped($html), 'raster_ts') === false, 'export');
+		putenv('RASTER_EXPORT');
+		check(strpos(stamped($html), 'raster_ts') !== false, 'page');
+		// a form nothing owns is read by nobody
+		check(strpos(stamped('<form method="post"><input name="a"></form>'), 'raster_ts') === false, 'no owner');
+	} finally {
+		putenv('RASTER_EXPORT');
+		unset(controller::instance()->objects['test_stampform']);
+		unlink($file);
+	}
+});
+test('a cached page with two forms serves fresh stamps to both', function () use ($root, $db) {
+	$view = APPBASE.config::get('views_path', 'views').'/'.config::get('theme', 'default').'/zzstamps.html';
+	file_put_contents($view, '<html><head><title>Two forms</title></head><body>'
+		.'<!-- render.newsletter.signup --><form method="post"><input type="email" name="email"><button>Join</button></form><!-- /render.newsletter.signup -->'
+		.'<!-- render.authentication.register --><form method="post"><input name="name"><input type="email" name="email"><input type="password" name="password"><button>Sign up</button></form><!-- /render.authentication.register -->'
+		.'</body></html>');
+	$env = 'RASTER_ENV=production RASTER_SECRET=test-secret RASTER_DB='.escapeshellarg($db);
+	shell_exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' schema --apply');
+	foreach (glob(APPBASE.'data/cache/*') ?: array() as $f) unlink($f);
+	$port = free_port();
+	$server = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_ENV' => 'production', 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
+	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
+	try {
+		$stamps = function ($body) { preg_match_all('/name="raster_ts" value="([^"]*)"/', $body, $m); return $m[1]; };
+		list(, $first) = http('GET', "http://127.0.0.1:$port/zzstamps");
+		sleep(1);
+		list(, $second, $headers) = http('GET', "http://127.0.0.1:$port/zzstamps");
+		check((bool)preg_grep('/^X-Raster-Cache: hit/i', $headers), 'the second answer is the cache: '.implode(' | ', $headers));
+		$made = $stamps($second);
+		same(2, count($made), 'two forms');
+		same($made[0], $made[1], 'one stamp for the whole page');
+		$age = validation_spam::stamp_age($made[0]);
+		check(is_int($age) && $age >= 0 && $age <= 1, var_export($age, true));
+		check($made[0] !== $stamps($first)[0], 'not the first answer\'s stamp');
+		$files = array_filter(glob(APPBASE.'data/cache/*') ?: array(), function ($f) { return basename($f) !== 'next' && is_file($f) && strpos(file_get_contents($f), 'Two forms') !== false; });
+		same(1, count($files), 'the cached copy');
+		$copy = file_get_contents(current($files));
+		same(2, substr_count($copy, '{{raster:ts}}'));
+		check(!preg_match('/raster_ts" value="\d/', $copy), 'no stamp kept on disk');
+	} finally {
+		proc_terminate($server);
+		unlink($view);
+		foreach (glob(APPBASE.'data/cache/*') ?: array() as $f) unlink($f);
+	}
+});
+
+// ## Spam checks: suspect()
+
+// What suspect() says of a post to the form $owner, sent as a browser sends
+// it: with a stamp made 60 s ago unless $fields has raster_ts (null: none),
+// from $server's REMOTE_ADDR (each post its own address unless given) and
+// headers. A fresh validation object, as a new request has.
+function spam_post($fields, $server = array(), $checked = null, $owner = 'zz.form') {
+	static $n = 0;
+	$n++;
+	$template = template::instance();
+	$kept = array($_SERVER, $_POST, $template->current_call, $template->forms);
+	$validation = isset(controller::instance()->objects['validation']) ? controller::instance()->objects['validation'] : null;
+	try {
+		$_SERVER = $server + array('REMOTE_ADDR' => '192.0.2.'.($n % 250 + 1)) + $_SERVER;
+		$_SERVER['REQUEST_METHOD'] = 'POST';
+		if (!array_key_exists('raster_ts', $fields)) $fields['raster_ts'] = stamp_for_tests(60);
+		if ($fields['raster_ts'] === null) unset($fields['raster_ts']);
+		$_POST = array('raster_form' => $owner) + $fields;
+		$template->current_call = $owner;
+		$template->forms[$owner] = array_fill_keys(array_diff(array_keys($fields), template::$internal_fields), array());
+		unset(controller::instance()->objects['validation']);
+		return validation::get()->suspect($checked);
+	} finally {
+		list($_SERVER, $_POST, $template->current_call, $template->forms) = $kept;
+		if ($validation) controller::instance()->objects['validation'] = $validation;
+		else unset(controller::instance()->objects['validation']);
+	}
+}
+// settings for $fn, put back after
+function with_settings($settings, $fn) {
+	$kept = array();
+	foreach ($settings as $name => $value) {
+		$kept[$name] = config::get($name);
+		config::set($name)->to($value);
+	}
+	try {
+		return $fn();
+	} finally {
+		foreach ($kept as $name => $value) config::set($name)->to($value);
+	}
+}
+// what PHP's error log gets while $fn runs: array(result, log)
+function spam_logged($fn) {
+	$errors = ini_get('error_log');
+	$logged = sys_get_temp_dir().'/raster-spam-log-'.getmypid().'.txt';
+	@unlink($logged);
+	ini_set('error_log', $logged);
+	validation_spam::$warned = array();
+	try {
+		$result = $fn();
+	} finally {
+		ini_set('error_log', (string)$errors);
+	}
+	$log = (string)@file_get_contents($logged);
+	@unlink($logged);
+	return array($result, $log);
+}
+// an empty formhit that is there: a missing table would also count 0
+function spam_clear() {
+	cms_store::connect();
+	validation_spam::$ready = false;
+	check(validation_spam::salt() !== null, 'the spam tables are made');
+	R::exec('DELETE FROM formhit');
+	check(in_array('formhit', R::inspect()), 'formhit is there');
+}
+function spam_hits() {
+	return (int)R::getCell('SELECT COUNT(*) FROM formhit');
+}
+
+test('suspect: the stamp', function () {
+	same(array('no_stamp'), spam_post(array('message' => 'Hi', 'raster_ts' => null)));
+	same(array('stamp_invalid'), spam_post(array('message' => 'Hi', 'raster_ts' => time().'.'.str_repeat('a', 64))));
+	same(array('stamp_invalid'), spam_post(array('message' => 'Hi', 'raster_ts' => 'nonsense')));
+	same(array('too_fast'), spam_post(array('message' => 'Hi', 'raster_ts' => stamp_for_tests(1))));
+	same(array('stamp_old'), spam_post(array('message' => 'Hi', 'raster_ts' => stamp_for_tests(90000))));
+	same(array(), spam_post(array('message' => 'Hi', 'raster_ts' => stamp_for_tests(60))));
+	with_settings(array('spam_min_seconds' => false), function () {
+		same(array(), spam_post(array('message' => 'Hi', 'raster_ts' => null)), 'spam_min_seconds false');
+		same(array(), spam_post(array('message' => 'Hi', 'raster_ts' => stamp_for_tests(90000))), 'spam_min_seconds false');
+	});
+	with_settings(array('spam_max_age' => false), function () {
+		same(array(), spam_post(array('message' => 'Hi', 'raster_ts' => stamp_for_tests(90000))), 'spam_max_age false');
+		same(array('too_fast'), spam_post(array('message' => 'Hi', 'raster_ts' => stamp_for_tests(1))), 'the rest still checked');
+	});
+	with_settings(array('spam_min_seconds' => 10), function () {
+		same(array('too_fast'), spam_post(array('message' => 'Hi', 'raster_ts' => stamp_for_tests(5))));
+	});
+	// a form that wasn't sent, and a GET, have nothing to suspect
+	$template = template::instance();
+	$kept = array($_SERVER, $_POST, $template->current_call);
+	try {
+		$_SERVER['REQUEST_METHOD'] = 'POST';
+		$_POST = array('raster_form' => 'zz.other', 'message' => 'Hi');
+		$template->current_call = 'zz.form';
+		unset(controller::instance()->objects['validation']);
+		same(array(), validation::get()->suspect(), 'another form was sent');
+		$_SERVER['REQUEST_METHOD'] = 'GET';
+		unset(controller::instance()->objects['validation']);
+		same(array(), validation::get()->suspect(), 'a GET');
+	} finally {
+		list($_SERVER, $_POST, $template->current_call) = $kept;
+		unset(controller::instance()->objects['validation']);
+	}
+});
+
+test('suspect: limits per IP and per address, per form', function () {
+	spam_clear();
+	for ($i = 1; $i <= 5; $i++) same(array(), spam_post(array('email' => "guest$i@example.com"), array('REMOTE_ADDR' => '203.0.113.7')), "post $i");
+	same(array('too_many_from_ip'), spam_post(array('email' => 'guest6@example.com'), array('REMOTE_ADDR' => '203.0.113.7')), 'the 6th');
+	same(array(), spam_post(array('email' => 'guest7@example.com'), array('REMOTE_ADDR' => '203.0.113.7'), null, 'zz.other'), 'another form counts apart');
+	same(21, spam_hits(), 'for each post a row for the IP, one for the address, and one for the two together');
+	spam_clear();
+	for ($i = 1; $i <= 3; $i++) same(array(), spam_post(array('email' => 'ana@example.com')), "address post $i");
+	same(array('too_many_from_email'), spam_post(array('email' => 'ANA@example.com ')), 'the 4th, written another way');
+	with_settings(array('spam_per_email' => false), function () {
+		same(array(), spam_post(array('email' => 'ana@example.com')), 'spam_per_email false');
+	});
+	with_settings(array('spam_per_ip' => false), function () {
+		spam_clear();
+		for ($i = 1; $i <= 7; $i++) same(array(), spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => '203.0.113.8')), "spam_per_ip false, post $i");
+		same(0, spam_hits(), 'nothing is counted that nothing checks');
+	});
+	with_settings(array('spam_per_ip' => 1), function () {
+		spam_clear();
+		same(array(), spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => '203.0.113.9')));
+		same(array('too_many_from_ip'), spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => '203.0.113.9')));
+	});
+	// a post that fails valid() is never counted: the model asks only after it
+	spam_clear();
+	$template = template::instance();
+	$kept = array($_SERVER, $_POST, $template->current_call, $template->forms);
+	try {
+		$_SERVER['REQUEST_METHOD'] = 'POST';
+		$_SERVER['REMOTE_ADDR'] = '203.0.113.10';
+		$template->current_call = 'zz.form';
+		$template->forms['zz.form'] = array('email' => array('required' => true, 'type' => 'email'));
+		$asked = 0;
+		foreach (array('', 'not an address', 'ana@example.com', '', 'bo@example.com') as $email) {
+			$_POST = array('raster_form' => 'zz.form', 'raster_ts' => stamp_for_tests(60), 'email' => $email);
+			unset(controller::instance()->objects['validation']);
+			$v = validation::get();
+			if (!$v->valid()) continue;
+			$v->suspect();
+			same(array(), $v->suspect(), 'asked twice, counted once');
+			$asked++;
+		}
+		same(2, $asked);
+		same(3 * $asked, spam_hits(), 'an IP, an address and a pair row for each post that was asked about');
+	} finally {
+		list($_SERVER, $_POST, $template->current_call, $template->forms) = $kept;
+		unset(controller::instance()->objects['validation']);
+	}
+});
+
+test('suspect: IPv6 counts by /64', function () {
+	spam_clear();
+	for ($i = 1; $i <= 5; $i++) same(array(), spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => "2001:db8:1:2::$i")), "post $i");
+	same(array('too_many_from_ip'), spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => '2001:db8:1:2::6')), 'the 6th of the /64');
+	same(array(), spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => '2001:db8:1:3::1')), 'the next /64');
+	// IPv4 written as IPv6 is IPv4: two of them count apart
+	spam_clear();
+	for ($i = 1; $i <= 5; $i++) spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => '::ffff:203.0.113.7'));
+	same(array('too_many_from_ip'), spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => '::ffff:203.0.113.7')), 'the 6th from one mapped address');
+	same(array(), spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => '::ffff:203.0.113.8')), 'another mapped address');
+	same(array('too_many_from_ip'), spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => '203.0.113.7')), 'the same address written as IPv4');
+});
+
+test('a trusted proxy\'s header is read, an untrusted one ignored', function () {
+	$kept = $_SERVER;
+	try {
+		$_SERVER['REMOTE_ADDR'] = '10.0.0.2';
+		$_SERVER['HTTP_X_FORWARDED_FOR'] = '198.51.100.1, 10.0.0.9';
+		$_SERVER['HTTP_FLY_CLIENT_IP'] = '198.51.100.44';
+		same('198.51.100.1', validation_spam::client_ip(), 'no trusted_proxies: a private address is a proxy');
+		with_settings(array('trusted_proxies' => array('10.0.0.0/8')), function () {
+			same('198.51.100.1', validation_spam::client_ip(), 'the last entry that is not a proxy');
+			$_SERVER['HTTP_X_FORWARDED_FOR'] = 'nonsense';
+			same('10.0.0.2', validation_spam::client_ip(), 'a header that is not an IP');
+			unset($_SERVER['HTTP_X_FORWARDED_FOR']);
+			same('10.0.0.2', validation_spam::client_ip(), 'no header');
+			with_settings(array('client_ip_header' => 'Fly-Client-IP'), function () {
+				same('198.51.100.44', validation_spam::client_ip(), 'a single-value header');
+			});
+		});
+		with_settings(array('trusted_proxies' => array('10.0.0.3')), function () {
+			$_SERVER['HTTP_X_FORWARDED_FOR'] = '198.51.100.1';
+			same('10.0.0.2', validation_spam::client_ip(), 'a proxy that is not trusted');
+		});
+		with_settings(array('trusted_proxies' => array('10.0.0.0/8')), function () {
+			$_SERVER['REMOTE_ADDR'] = '::ffff:10.0.0.2';
+			$_SERVER['HTTP_X_FORWARDED_FOR'] = '::ffff:198.51.100.1, ::ffff:10.0.0.9';
+			same('198.51.100.1', validation_spam::client_ip(), 'a mapped proxy is in its IPv4 range, and its header is unmapped');
+		});
+		unset($_SERVER['HTTP_X_FORWARDED_FOR']);
+		$_SERVER['REMOTE_ADDR'] = '::ffff:10.0.0.2';
+		same('10.0.0.2', validation_spam::client_ip(), 'a mapped REMOTE_ADDR');
+		with_settings(array('trusted_proxies' => array('fd00::/8')), function () {
+			$_SERVER['REMOTE_ADDR'] = 'fd12::1';
+			$_SERVER['HTTP_X_FORWARDED_FOR'] = '2001:db8::7';
+			same('2001:db8::7', validation_spam::client_ip(), 'IPv6');
+			// a port, or brackets, as some proxies write them
+			$_SERVER['HTTP_X_FORWARDED_FOR'] = '[2001:db8::1]';
+			same('2001:db8::1', validation_spam::client_ip(), 'IPv6 in brackets');
+			$_SERVER['HTTP_X_FORWARDED_FOR'] = '[2001:db8::1]:443';
+			same('2001:db8::1', validation_spam::client_ip(), 'IPv6 in brackets, with a port');
+			$_SERVER['HTTP_X_FORWARDED_FOR'] = '198.51.100.1:5678, [fd12::9]:80';
+			same('198.51.100.1', validation_spam::client_ip(), 'IPv4 with a port, behind a proxy with one');
+			$_SERVER['HTTP_X_FORWARDED_FOR'] = '[nonsense]:80';
+			same('fd12::1', validation_spam::client_ip(), 'brackets around what is not an IP');
+		});
+		with_settings(array('trusted_proxies' => array('10.0.0.0/8')), function () {
+			$_SERVER['REMOTE_ADDR'] = '10.0.0.2';
+			$_SERVER['HTTP_X_FORWARDED_FOR'] = '1.2.3.4:5678';
+			same('1.2.3.4', validation_spam::client_ip(), 'IPv4 with a port');
+		});
+	} finally {
+		$_SERVER = $kept;
+	}
+	check(validation_spam::in_range('10.1.2.3', '10.0.0.0/8'));
+	check(!validation_spam::in_range('11.1.2.3', '10.0.0.0/8'));
+	check(validation_spam::in_range('192.168.1.130', '192.168.1.128/25'));
+	check(!validation_spam::in_range('192.168.1.127', '192.168.1.128/25'));
+	check(validation_spam::in_range('10.0.0.2', '10.0.0.2'));
+	check(validation_spam::in_range('2001:db8::1', '2001:db8::/32'));
+	check(!validation_spam::in_range('2001:db9::1', '2001:db8::/32'));
+	check(!validation_spam::in_range('10.0.0.2', '::/0'), 'IPv4 is never in an IPv6 range');
+	check(!validation_spam::in_range('10.0.0.2', 'nonsense/8'));
+	check(!validation_spam::in_range('', '10.0.0.0/8'));
+});
+
+test('with no trusted_proxies, a private address is a proxy and a public one is not', function () {
+	$kept = $_SERVER;
+	try {
+		$_SERVER['HTTP_X_FORWARDED_FOR'] = '203.0.113.9';
+		foreach (array('10.1.2.3', '172.16.0.1', '172.31.255.254', '192.168.1.1', '127.0.0.1', '169.254.1.1', '::1', 'fdaa::1', 'fc00::5', 'fe80::1', '::ffff:10.0.0.2') as $remote) {
+			$_SERVER['REMOTE_ADDR'] = $remote;
+			same('203.0.113.9', validation_spam::client_ip(), "the header, from $remote");
+		}
+		foreach (array('198.51.100.7', '172.32.0.1', '2001:db8::1', 'fec0::1') as $remote) {
+			$_SERVER['REMOTE_ADDR'] = $remote;
+			same($remote, validation_spam::client_ip(), "a public $remote: the header is ignored");
+		}
+		// the visitor wrote the first entry, the proxy the last
+		$_SERVER['REMOTE_ADDR'] = 'fdaa::1';
+		$_SERVER['HTTP_X_FORWARDED_FOR'] = '6.6.6.6, 203.0.113.9';
+		same('203.0.113.9', validation_spam::client_ip(), 'the last entry the proxy wrote');
+		$_SERVER['HTTP_X_FORWARDED_FOR'] = '203.0.113.9, 10.0.0.9';
+		same('203.0.113.9', validation_spam::client_ip(), 'past a second private hop');
+		with_settings(array('trusted_proxies' => array()), function () {
+			same('fdaa::1', validation_spam::client_ip(), 'array(): trust nobody');
+		});
+		with_settings(array('trusted_proxies' => array('10.0.0.0/8')), function () {
+			same('fdaa::1', validation_spam::client_ip(), 'a list replaces the default');
+			$_SERVER['REMOTE_ADDR'] = '10.0.0.2';
+			same('203.0.113.9', validation_spam::client_ip(), 'and trusts what it names');
+		});
+	} finally {
+		$_SERVER = $kept;
+	}
+});
+
+test('no raw IP is stored, logged or kept past the day', function () {
+	spam_clear();
+	$log = log::instance();
+	log::enable();
+	try {
+		list(, $logged) = spam_logged(function () {
+			for ($i = 0; $i < 3; $i++) spam_post(array('email' => 'ip@example.com'), array('REMOTE_ADDR' => '203.0.113.7'));
+		});
+		$console = $log->javascript_console();
+	} finally {
+		log::disable();
+	}
+	$stored = json_encode(array(R::getAll('SELECT * FROM formhit'), R::getAll('SELECT * FROM formsalt')));
+	check(strpos($stored, '203.0.113.7') === false && strpos($stored, 'ip@example.com') === false, $stored);
+	check(strpos($stored, '203.0.113') === false, 'not even part of it');
+	check(strpos($console.$logged, '203.0.113.7') === false, $console.$logged);
+	same(9, spam_hits());
+	same(1, (int)R::getCell('SELECT COUNT(*) FROM formsalt'), 'one salt');
+	$salt = R::getCell('SELECT salt FROM formsalt');
+	R::exec('UPDATE formsalt SET day = ?', array(date('Y-m-d', strtotime('-1 day'))));
+	same(array(), spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => '203.0.113.7')));
+	same(1, (int)R::getCell('SELECT COUNT(*) FROM formsalt'), 'the old salt is gone');
+	check(R::getCell('SELECT salt FROM formsalt') !== $salt, 'a new salt');
+	same(date('Y-m-d'), R::getCell('SELECT day FROM formsalt'));
+	same(1, spam_hits(), "only the new post's row is left");
+	// never backwards: a request that started before midnight keeps the new salt
+	$tomorrow = date('Y-m-d', strtotime('+1 day'));
+	R::exec('UPDATE formsalt SET day = ?', array($tomorrow));
+	$salt = R::getCell('SELECT salt FROM formsalt');
+	same($salt, validation_spam::salt(), 'a stored day after today is kept');
+	same($tomorrow, R::getCell('SELECT day FROM formsalt'));
+	R::exec('UPDATE formsalt SET day = ?', array(date('Y-m-d')));
+});
+
+test('suspect: links and the blocklist', function () {
+	same(array('too_many_links'), spam_post(array('message' => 'http://a.example https://b.example and www.c.example')));
+	same(array('too_many_links'), spam_post(array('message' => '[url=x]a[/url] [URL=y]b[/URL] HTTP://c.example')), 'any case');
+	same(array(), spam_post(array('message' => 'http://a.example and https://b.example')));
+	same(array(), spam_post(array('message' => 'http://a.example https://b.example www.c.example'), array(), array()), 'array(): no text check');
+	same(array(), spam_post(array('name' => 'http://a.example https://b.example www.c.example', 'message' => 'Hi'), array(), array('message')), 'only the fields named');
+	same(array('too_many_links'), spam_post(array('name' => 'http://a.example https://b.example', 'message' => 'www.c.example'), array(), array('name', 'message')), 'fields are counted together');
+	with_settings(array('spam_max_links' => 0), function () {
+		same(array('too_many_links'), spam_post(array('message' => 'see www.a.example')), '0 allows none');
+		same(array(), spam_post(array('message' => 'no links')));
+	});
+	with_settings(array('spam_max_links' => false), function () {
+		same(array(), spam_post(array('message' => 'http://a.example https://b.example www.c.example http://d.example')), 'false is off');
+	});
+	with_settings(array('spam_blocklist' => array('casino', 'pills.example')), function () {
+		same(array('blocked'), spam_post(array('message' => 'Casino night!')));
+		same(array(), spam_post(array('message' => 'We like casinos')), 'a word matches whole');
+		same(array('blocked'), spam_post(array('message' => 'see https://shop.pills.example/x')), 'a subdomain');
+		same(array('blocked'), spam_post(array('message' => 'see www.pills.example')));
+		same(array('blocked'), spam_post(array('email' => 'a@pills.example', 'name' => 'Ana', 'message' => 'Hi'), array(), array('name', 'subject', 'message')), "the email's domain, whatever the fields say");
+		// a hold-type form (newsletter, sign-up, booking) would answer
+		// try_again to that address forever, so array() checks no text
+		same(array(), spam_post(array('email' => 'b@pills.example', 'message' => 'Casino night!'), array(), array()), 'array(): no blocklist, the email included');
+		same(array(), spam_post(array('email' => 'a@notpills.example', 'message' => 'see https://notpills.example/x')), 'another domain');
+		same(array(), spam_post(array('message' => 'Hi')));
+		same(array('too_many_links', 'blocked'), spam_post(array('message' => 'http://casino.example https://b.example http://pills.example')), 'every check runs');
+	});
+	same(array(), spam_post(array('message' => 'Casino night!')), 'an empty blocklist checks nothing');
+	same(array('no_stamp', 'too_many_links'), spam_post(array('message' => 'http://a.example https://b.example www.c.example', 'raster_ts' => null)), 'in the order of the table');
+});
+
+test('checks that can\'t run pass and log', function () {
+	sqlite_only('drops a table under a frozen connection');
+	cms_store::connect();
+	R::exec('DROP TABLE IF EXISTS formhit');
+	cms_store::forget();
+	validation_spam::$ready = false;
+	R::freeze(true);
+	try {
+		list($reasons, $logged) = spam_logged(function () {
+			$first = spam_post(array('email' => 'frozen@example.com', 'message' => 'Hi'), array('REMOTE_ADDR' => '203.0.113.7'));
+			spam_post(array('email' => 'frozen@example.com', 'message' => 'Hi'), array('REMOTE_ADDR' => '203.0.113.7'));
+			return $first;
+		});
+		same(array(), $reasons, 'a good stamp, and limits that cannot be counted');
+		check(strpos($logged, 'Raster warning: spam: ') !== false, $logged);
+		same(1, substr_count($logged, 'Raster warning: spam: '), 'once per request: '.$logged);
+		check(strpos($logged, '203.0.113.7') === false && strpos($logged, 'frozen@example.com') === false, $logged);
+		same(array('no_stamp'), spam_post(array('message' => 'Hi', 'raster_ts' => null)), 'the stamp needs no table');
+	} finally {
+		R::freeze(false);
+		cms_store::forget();
+		validation_spam::$ready = false;
+	}
+	// no key: the file isn't one (the command line makes a key of its own
+	// when there is no file, so a broken one is the way to have none here)
+	$file = APPBASE.'data/secret';
+	$kept = is_file($file) ? file_get_contents($file) : null;
+	$was = getenv('RASTER_SECRET');
+	file_put_contents($file, 'abc');
+	try {
+		putenv('RASTER_SECRET');
+		util::$secret = null;
+		list($reasons, $logged) = spam_logged(function () {
+			return array(spam_post(array('message' => 'Hi', 'raster_ts' => null)), spam_post(array('message' => 'Hi', 'raster_ts' => stamp_for_tests(1))));
+		});
+		same(array(array(), array()), $reasons, 'no key: the stamp check passes');
+		same(1, substr_count($logged, 'Raster warning: spam: '), $logged);
+	} finally {
+		putenv($was === false ? 'RASTER_SECRET' : "RASTER_SECRET=$was");
+		util::$secret = null;
+		if ($kept === null) @unlink($file); else file_put_contents($file, $kept);
+	}
+});
+
+test('editors are never flagged or counted', function () {
+	spam_clear();
+	$reasons = booking_as_editor(function () {
+		$all = array();
+		for ($i = 0; $i < 7; $i++) $all[] = spam_post(array('email' => 'staff@example.com', 'message' => 'http://a.example https://b.example www.c.example', 'raster_ts' => null), array('REMOTE_ADDR' => '203.0.113.7'));
+		return $all;
+	});
+	same(array_fill(0, 7, array()), $reasons);
+	same(0, spam_hits());
+	spam_post(array('message' => 'Hi'), array('REMOTE_ADDR' => '203.0.113.7'));
+	same(1, spam_hits(), "a visitor's post is counted");
+});
+
+test('doctor warns when many people seem to share one address', function () use ($root) {
+	$warned = function ($environment = 'production') use ($root) {
+		foreach (raster_project::doctor($root, 'application', $environment) as $c) {
+			if ($c['status'] === 'warn' && strpos($c['title'], 'Many people seem to share one address') !== false) {
+				check(strpos($c['detail'], 'set `trusted_proxies` and `client_ip_header`') !== false, json_encode($c));
+				return true;
+			}
+		}
+		return false;
+	};
+	spam_clear();
+	R::exec('UPDATE formsalt SET proxied = 0');
+	// a private address is a proxy now: six people behind it, each with
+	// their own address in the header, are six visitors
+	for ($i = 1; $i <= 6; $i++) spam_post(array('email' => "behind$i@example.com"), array('REMOTE_ADDR' => '10.0.0.2', 'HTTP_X_FORWARDED_FOR' => "203.0.113.$i"));
+	check(!$warned(), 'six visitors behind a private proxy');
+	// and one visitor behind it with six emails is one address
+	for ($i = 1; $i <= 6; $i++) spam_post(array('email' => "one$i@example.com"), array('REMOTE_ADDR' => '10.0.0.2', 'HTTP_X_FORWARDED_FOR' => '203.0.113.99'));
+	check($warned(), 'one visitor behind a private proxy, six emails');
+	spam_clear();
+	R::exec('UPDATE formsalt SET proxied = 0');
+	// one person posting again and again is one address
+	for ($i = 1; $i <= 8; $i++) spam_post(array('email' => 'again@example.com'), array('REMOTE_ADDR' => '198.51.100.7'));
+	check(!$warned(), 'one email, many times');
+	// five people on one address is a family or an office
+	for ($i = 1; $i <= 5; $i++) spam_post(array('email' => "office$i@example.com"), array('REMOTE_ADDR' => '198.51.100.8'));
+	check(!$warned(), 'five emails');
+	// spread over two forms, each counts apart
+	spam_post(array('email' => 'office6@example.com'), array('REMOTE_ADDR' => '198.51.100.8'), null, 'zz.other');
+	check(!$warned(), 'the 6th on another form');
+	spam_post(array('email' => 'office6@example.com'), array('REMOTE_ADDR' => '198.51.100.8'));
+	check($warned(), 'six emails from one address, one form');
+	check(!$warned('development'), 'production only, as before');
+	R::exec('UPDATE formsalt SET proxied = 0');
+	with_settings(array('spam_per_ip' => false), function () {
+		for ($i = 1; $i <= 7; $i++) spam_post(array('email' => "free$i@example.com"), array('REMOTE_ADDR' => '198.51.100.9'));
+	});
+	check(!$warned(), 'nothing is noted when nothing counts by IP');
+	R::exec('DROP TABLE formsalt');
+	cms_store::forget();
+	validation_spam::$ready = false;
+	check(!$warned(), 'no table');
+});
+
+test('doctor warns about a key file the site cannot use', function () use ($root) {
+	$file = APPBASE.'data/secret';
+	$kept = is_file($file) ? file_get_contents($file) : null;
+	$was = getenv('RASTER_SECRET');
+	$warned = function () use ($root) {
+		foreach (raster_project::doctor($root, 'application', 'development') as $c) {
+			if ($c['status'] === 'warn' && strpos($c['title'], "this user can't read data/secret (or it isn't a key)") !== false) return true;
+		}
+		return false;
+	};
+	try {
+		putenv('RASTER_SECRET');
+		@unlink($file);
+		check(!$warned(), 'no file');
+		file_put_contents($file, str_repeat('ab', 32));
+		check(!$warned(), 'a key');
+		file_put_contents($file, 'abc');
+		check($warned(), 'not a key');
+		if (function_exists('posix_geteuid') && posix_geteuid() !== 0) {
+			file_put_contents($file, str_repeat('ab', 32));
+			chmod($file, 0200);
+			check($warned(), "a key this user can't read");
+			chmod($file, 0600);
+		}
+		putenv('RASTER_SECRET=from-the-environment');
+		file_put_contents($file, 'abc');
+		check(!$warned(), 'RASTER_SECRET is used instead');
+	} finally {
+		putenv($was === false ? 'RASTER_SECRET' : "RASTER_SECRET=$was");
+		util::$secret = null;
+		if (is_file($file)) chmod($file, 0600);
+		if ($kept === null) @unlink($file); else file_put_contents($file, $kept);
+	}
+});
+
+test('describe lists the spam settings that are set', function () {
+	require_once BASE.'tools/describe.php';
+	with_settings(array('spam_per_ip' => 10, 'trusted_proxies' => array('10.0.0.0/8'), 'spam_ip_blocks' => true), function () {
+		$site = raster_describe::site(array('settings'));
+		same(10, $site['settings']['spam_per_ip']);
+		same(true, $site['settings']['spam_ip_blocks']);
+		same(array('10.0.0.0/8'), $site['settings']['trusted_proxies']);
+	});
+});
+
+test('hold() asks again, or to slow down', function () {
+	$raised = new ReflectionProperty('validation', 'raised');
+	$raised->setAccessible(true);
+	$template = template::instance();
+	$kept = array($template->current_block, $_POST);
+	try {
+		$template->current_block = '<form method="post"><input name="email"></form>';
+		$_POST = array('email' => 'ana@example.com');
+		unset(controller::instance()->objects['validation']);
+		$v = validation::get();
+		$html = $v->hold(array('too_fast'));
+		check(strpos($html, 'value="ana@example.com"') !== false, $html);
+		same(array('try_again'), array_keys($raised->getValue($v)));
+		unset(controller::instance()->objects['validation']);
+		$v = validation::get();
+		$v->hold(array('no_stamp', 'too_many_from_email'));
+		same(array('slow_down'), array_keys($raised->getValue($v)));
+	} finally {
+		list($template->current_block, $_POST) = $kept;
+		unset(controller::instance()->objects['validation']);
+	}
+});
+
+test('holds(): the per-IP count flags, it does not hold, unless spam_ip_blocks', function () {
+	same(array(), validation_spam::holds(array('too_many_from_ip')));
+	same(array('no_stamp', 'too_many_from_email'), validation_spam::holds(array('no_stamp', 'too_many_from_ip', 'too_many_from_email')), 'the rest kept, in order');
+	same(array(), validation_spam::holds(array()));
+	with_settings(array('spam_ip_blocks' => true), function () {
+		same(array('too_many_from_ip'), validation_spam::holds(array('too_many_from_ip')), 'spam_ip_blocks true');
+	});
+});
+
+test('six posts from one address with six emails are all taken, and asks still mail', function () use ($base, $maildir) {
+	spam_clear();
+	$from = function ($ip) { return array('X-Forwarded-For: '.$ip); };
+	// the test server answers 127.0.0.1, a proxy by default, so the header is the visitor
+	for ($i = 1; $i <= 6; $i++) {
+		list($status, , $headers) = form_post("$base/about", array('raster_form' => 'newsletter.signup', 'email' => "shared$i@example.com"), $from('203.0.113.50'));
+		same(303, $status, "newsletter $i");
+		check(strpos((string)location($headers), 'done=check_email') !== false, "newsletter $i: ".location($headers));
+	}
+	cms_store::connect();
+	same(6, (int)R::getCell("SELECT COUNT(*) FROM subscriber WHERE email LIKE 'shared%@example.com'"), 'six subscribers');
+	for ($i = 1; $i <= 6; $i++) {
+		list($status, , $headers) = form_post("$base/register", array('raster_form' => 'authentication.register', 'name' => "Shared $i", 'email' => "shared$i@example.com", 'password' => 'correct horse 1', 'password_again' => 'correct horse 1'), $from('203.0.113.51'));
+		same(303, $status, "register $i");
+		check(strpos((string)location($headers), 'done=registered') !== false, "register $i: ".location($headers));
+	}
+	same(6, (int)R::getCell("SELECT COUNT(*) FROM user WHERE email LIKE 'shared%@example.com'"), 'six accounts');
+	$mails = function () use ($maildir) { return count(glob("$maildir/*.eml") ?: array()); };
+	for ($i = 1; $i <= 6; $i++) {
+		$before = $mails();
+		list($status, , $headers) = form_post("$base/forgot", array('raster_form' => 'authentication.forgot', 'email' => "shared$i@example.com"), $from('203.0.113.52'));
+		same(303, $status, "forgot $i");
+		same($before + 1, $mails(), "ask $i from the shared address mails");
+	}
+	// per address it still stops: the 4th ask for one email (one asked above), from anywhere, mails nothing
+	for ($i = 2; $i <= 4; $i++) {
+		R::exec('UPDATE user SET reset_expires = ? WHERE email = ?', array(date('Y-m-d H:i:s', time() - 7200), 'shared1@example.com'));
+		$before = $mails();
+		same(303, form_post("$base/forgot", array('raster_form' => 'authentication.forgot', 'email' => 'shared1@example.com'), $from("198.51.100.$i"))[0], "ask $i for one email");
+		same($before + ($i < 4 ? 1 : 0), $mails(), $i < 4 ? "ask $i mails" : 'the 4th ask mails nothing');
+	}
+	// the counts were by the header: one row per post for 203.0.113.50 alone
+	same(6, (int)R::getCell("SELECT COUNT(*) FROM formhit WHERE form = 'newsletter.signup' AND kind = 'ip'"), 'one visitor on the newsletter');
+	same(1, (int)R::getCell("SELECT COUNT(DISTINCT hash) FROM formhit WHERE form = 'newsletter.signup' AND kind = 'ip'"));
+	// another header is another visitor: were the header ignored, both would be 127.0.0.1
+	same(303, form_post("$base/about", array('raster_form' => 'newsletter.signup', 'email' => 'shared7@example.com'), $from('203.0.113.53'))[0]);
+	same(2, (int)R::getCell("SELECT COUNT(DISTINCT hash) FROM formhit WHERE form = 'newsletter.signup' AND kind = 'ip'"), 'two headers, two visitors');
+});
+
+// ## Bundled contact
+
+// A view with the contact form (zzcontact.html, an alert for each problem)
+// and the staff email, so the bundled contact model counts. $fn runs with
+// the theme's folder; the views, the messages and the counts are gone after.
+function contact_site($fn) {
+	$theme = APPBASE.config::get('views_path', 'views').'/'.config::get('theme', 'default');
+	$alerts = '';
+	foreach (array('sent', 'name_invalid', 'email_invalid', 'phone_invalid', 'subject_invalid', 'message_invalid') as $alert) {
+		$alerts .= "<!-- print.validation.alert('$alert') --><p>ALERT $alert</p><!-- /print.validation.alert('$alert') -->";
+	}
+	file_put_contents("$theme/zzcontact.html", "<html><head><title>Write to us</title></head><body>$alerts"
+		."<!-- render.contact.form --><form method=\"post\"><input name=\"name\"><input type=\"email\" name=\"email\" required><input name=\"phone\"><input name=\"subject\">"
+		."<textarea name=\"message\" required></textarea><button>Send</button></form><!-- /render.contact.form --></body></html>");
+	file_put_contents("$theme/_email/contact_received.html", "<html><head><title>Message: <!-- print.self.subject -->none<!-- /print.self.subject --></title></head><body>"
+		."<p>From <!-- print.self.name -->Ana<!-- /print.self.name --> on <!-- print.self.page_url -->page<!-- /print.self.page_url --></p>"
+		."<p><!-- print.self.message -->Hi<!-- /print.self.message --></p><p>All of them: <!-- print.self.staff_url -->staff<!-- /print.self.staff_url --></p></body></html>");
+	controller::forget_models();
+	cms_records::forget();
+	cms_store::connect();
+	spam_clear();
+	// this process booted without a view that uses contact, so it binds the
+	// listener system/config/events.php binds for a site that has one
+	event::bind('contact.received')->to('contact', 'staff_mail');
+	try {
+		return $fn($theme);
+	} finally {
+		event::unbind('contact.received')->from('contact', 'staff_mail');
+		R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS contactmessagedata');
+		cms_store::forget();
+		@unlink("$theme/zzcontact.html");
+		@unlink("$theme/_email/contact_received.html");
+		controller::forget_models();
+		cms_records::forget();
+	}
+}
+// what the contact form at $base answers to $fields, sent as a browser
+// sends it: array(status, body, where it redirected to)
+function contact_post($base, $fields) {
+	list($status, $body, $headers) = form_post("$base/zzcontact", array('raster_form' => 'contact.form') + $fields);
+	return array($status, (string)$body, (string)location($headers));
+}
+// the contact events a request to the test server sent while $fn ran, as
+// array(event, payload): a site model of the server's listens to them
+function contact_seen($fn) {
+	$app = APPBASE.config::get('models_path', 'models');
+	$file = sys_get_temp_dir().'/raster-contact-seen-'.getmypid().'.jsonl';
+	@unlink($file);
+	$write = 'file_put_contents('.var_export($file, true).', json_encode(array(%s, $message))."\n", FILE_APPEND);';
+	temp_model("$app/zzcontactseen", array('zzcontactseen.php' => "<?php\nclass zzcontactseen\n{\n"
+		."\tstatic function listens() {\n\t\treturn array('contact.received' => 'received', 'contact.flagged' => 'flagged');\n\t}\n"
+		."\tfunction received(\$message) {\n\t\t".sprintf($write, "'contact.received'")."\n\t}\n"
+		."\tfunction flagged(\$message) {\n\t\t".sprintf($write, "'contact.flagged'")."\n\t}\n}\n"));
+	try {
+		$fn();
+	} finally {
+		remove_dir("$app/zzcontactseen");
+		controller::forget_models();
+	}
+	$seen = array();
+	foreach (array_filter(explode("\n", (string)@file_get_contents($file))) as $line) $seen[] = json_decode($line, true);
+	@unlink($file);
+	return $seen;
+}
+// the contact events this process sent while $fn ran, as array(event, payload)
+function contact_events($fn) {
+	global $booking_seen;
+	$booking_seen = array();
+	$names = array('contact.received', 'contact.flagged');
+	foreach ($names as $name) event::bind($name)->to(null, 'test_booking_seen');
+	try {
+		$fn();
+	} finally {
+		foreach ($names as $name) event::unbind($name)->from(null, 'test_booking_seen');
+	}
+	return $booking_seen;
+}
+// what a write was refused for, or array() when it went through
+function contact_refused($fn) {
+	try {
+		$fn();
+	} catch (cms_refused $e) {
+		return $e->problems;
+	}
+	return array();
+}
+function contact_render($url, $as = null) {
+	global $root, $db;
+	$env = 'RASTER_DB='.escapeshellarg($db).' RASTER_ENV=development';
+	return (string)shell_exec("$env ".escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' render '.escapeshellarg($url).($as ? ' --as='.escapeshellarg($as) : '').' 2>&1; echo "[exit $?]"');
+}
+
+test('contact types count only where views use the model', function () use ($root) {
+	controller::forget_models();
+	cms_records::forget();
+	check(cms_records::info('contactmessage') === null, 'contactmessage is declared without a view that uses contact');
+	$dir = sys_get_temp_dir().'/raster-contact-loads-'.getmypid();
+	@mkdir($dir);
+	file_put_contents("$dir/prepend.php", '<?php register_shutdown_function(function () { file_put_contents('.var_export("$dir/out.json", true).', json_encode(get_included_files())); });');
+	$env = 'RASTER_ENV=production RASTER_DB='.escapeshellarg(test_db("$dir/db.sqlite"));
+	shell_exec("$env ".escapeshellarg(PHP_BINARY).' -d auto_prepend_file='.escapeshellarg("$dir/prepend.php").' '.escapeshellarg("$root/bin/raster").' render /about 2>&1');
+	$included = json_decode((string)@file_get_contents("$dir/out.json"), true);
+	array_map('unlink', glob("$dir/*") ?: array());
+	@rmdir($dir);
+	check(is_array($included), 'no report from the render');
+	same(array(), array_values(array_filter($included, function ($f) { return strpos($f, '/system/models/contact/') !== false; })), 'contact files loaded:');
+	contact_site(function () {
+		$info = cms_records::info('contactmessage');
+		same('contact', $info['model']);
+		same(array('title', 'name', 'email', 'phone', 'subject', 'message', 'page', 'status', 'spam'), array_keys($info['fields']));
+		same(array('visitor', false, false, false, false), array($info['create'], $info['public'], $info['owner'], $info['staff_add'], $info['spam']));
+		same(array('done' => 'editor', 'spam' => 'editor', 'not_spam' => 'editor'), $info['actions']);
+		same(true, contact::ready());
+	});
+});
+
+test('a site contact model still answers and the bundled one loads nothing', function () {
+	$app = APPBASE.config::get('models_path', 'models');
+	$view = APPBASE.config::get('views_path', 'views').'/'.config::get('theme', 'default').'/zzown.html';
+	// a site's own, as AGENTS.md and the wiki taught: in processes of their
+	// own, since this one may have the bundled class already
+	temp_model("$app/contact", array('contact.php' => "<?php\nclass contact\n{\n\tfunction send() {\n\t\treturn array(array('x' => 'own'));\n\t}\n}\n"));
+	file_put_contents($view, '<html><head><title>Own</title></head><body><!-- render.contact.send --><p class="own"><!-- print.x -->mock<!-- /print.x --></p><!-- /render.contact.send --></body></html>');
+	try {
+		controller::forget_models();
+		$out = race_php('require_once BASE."tools/inspector.php"; echo json_encode(array(controller::model("contact")["bundled"], cms_records::info("contactmessage") === null, array_column((new raster_inspector())->lint_models(), "message"), array_values(preg_grep("~/system/models/contact/~", get_included_files()))));', 1);
+		$page = contact_render('/zzown');
+	} finally {
+		remove_dir("$app/contact");
+		@unlink($view);
+		controller::forget_models();
+		cms_records::forget();
+	}
+	$out = json_decode($out[0], true);
+	check(is_array($out), 'the process said: '.json_encode($out));
+	same(false, $out[0], 'bundled:');
+	same(true, $out[1], 'contactmessage is undeclared:');
+	check(has_problem(array_map(function ($m) { return array('message' => $m); }, $out[2]), 'models/contact shadows the bundled contact'), 'lint: '.json_encode($out[2]));
+	same(array(), $out[3], 'bundled contact files loaded:');
+	check(strpos($page, '<p class="own">own</p>') !== false && strpos($page, '[exit 0]') !== false, $page);
+});
+
+test('contact: a message is stored and mailed once, after the answer', function () use ($booking_base) {
+	contact_site(function () use ($booking_base) {
+		$mails = array();
+		$seen = contact_seen(function () use ($booking_base, &$mails) {
+			$mails = booking_mails(function () use ($booking_base) {
+				list($status, , $location) = contact_post($booking_base, array('name' => 'Ana', 'email' => 'ana@example.com', 'phone' => '0721 000 000', 'subject' => 'Hello', 'message' => 'Is the terrace open?'));
+				same(303, $status);
+				check(strpos($location, 'done=sent') !== false, $location);
+			});
+		});
+		$rows = cms_records::find('contactmessage');
+		same(1, count($rows));
+		$m = $rows[0];
+		same(array('Ana', 'ana@example.com', '0721 000 000', 'Hello', 'Is the terrace open?', '/zzcontact', 'new', ''), array($m['name'], $m['email'], $m['phone'], $m['subject'], $m['message'], $m['page'], $m['status'], $m['spam']));
+		// the slug is the date and time, never the email
+		check(preg_match('/^\d{4}-\d\d-\d\d \d\d:\d\d$/', $m['title']) === 1, $m['title']);
+		check(preg_match('/^\d{4}-\d\d-\d\d-\d\d-\d\d(-\d+)?$/', $m['slug']) === 1, $m['slug']);
+		same(array('Message: Hello staff@zz.test'), booking_sent($mails));
+		same(1, preg_match_all('/^Reply-To: /m', $mails[0]['raw']));
+		check(strpos($mails[0]['raw'], "\r\nReply-To: \"Ana\" <ana@example.com>\r\n") !== false, $mails[0]['raw']);
+		check(preg_match('/^From: staff@zz\.test\r$/m', $mails[0]['raw']) === 1, 'From stays the site\'s sender');
+		check(strpos($mails[0]['text'], "$booking_base/zzcontact") !== false && strpos($mails[0]['text'], "$booking_base/staff") !== false, $mails[0]['text']);
+		same(array('contact.received'), array_column($seen, 0));
+		same(array('visitor', 'new', '/zzcontact'), array($seen[0][1]['who'], $seen[0][1]['status'], $seen[0][1]['page']));
+		check(!array_key_exists('title', $seen[0][1]), 'the payload has the title');
+		check(strpos(json_encode($seen), '127.0.0.1') === false, 'an IP in the payload');
+		// contact_staff_email, else the sender
+		$payload = contact::payload($m, 'visitor');
+		$mails = booking_mails(function () use ($payload) {
+			with_settings(array('contact_staff_email' => 'desk@zz.test'), function () use ($payload) { (new contact())->staff_mail($payload); });
+		});
+		same(array('Message: Hello desk@zz.test'), booking_sent($mails));
+	});
+});
+
+test('contact: a suspected message is stored as spam and not mailed', function () use ($booking_base) {
+	contact_site(function () use ($booking_base) {
+		$mails = array();
+		$seen = contact_seen(function () use ($booking_base, &$mails) {
+			$mails = booking_mails(function () use ($booking_base) {
+				list($status, , $location) = contact_post($booking_base, array('email' => 'bot@example.com', 'message' => 'Buy now', 'raster_ts' => ''));
+				same(303, $status);
+				check(strpos($location, 'done=sent') !== false, 'a bot learns nothing: '.$location);
+			});
+		});
+		$rows = cms_records::find('contactmessage');
+		same(1, count($rows));
+		same(array('spam', 'no_stamp'), array($rows[0]['status'], $rows[0]['spam']));
+		same(array(), booking_sent($mails));
+		same(array('contact.flagged'), array_column($seen, 0));
+		same('no_stamp', $seen[0][1]['spam']);
+	});
+});
+
+test('contact: the 6th message from one address is kept as spam, too_many_from_ip', function () use ($booking_base) {
+	contact_site(function () use ($booking_base) {
+		booking_mails(function () use ($booking_base) {
+			for ($i = 1; $i <= 6; $i++) {
+				list($status, $body) = form_post("$booking_base/zzcontact", array('raster_form' => 'contact.form', 'email' => "office$i@example.com", 'message' => "Hello $i"), array('X-Forwarded-For: 203.0.113.60'));
+				same(303, $status, "message $i");
+			}
+		});
+		$rows = cms_records::find('contactmessage');
+		usort($rows, function ($a, $b) { return $a['id'] - $b['id']; });
+		same(6, count($rows));
+		same(array('new', 'new', 'new', 'new', 'new', 'spam'), array_column($rows, 'status'));
+		same('too_many_from_ip', $rows[5]['spam']);
+	});
+});
+
+test('contact: header injection is refused and Reply-To is one header', function () use ($booking_base) {
+	contact_site(function () use ($booking_base) {
+		$mails = booking_mails(function () use ($booking_base) {
+			foreach (array('name' => array("Ana\r\nBcc: x@evil.test", 'name_invalid'), 'subject' => array("Hi\nBcc: x@evil.test", 'subject_invalid'), 'phone' => array("0721\rBcc: x@evil.test", 'phone_invalid')) as $field => $case) {
+				list($status, $body) = contact_post($booking_base, array($field => $case[0], 'email' => "$field@example.com", 'message' => 'Hi'));
+				same(200, $status, $field);
+				check(strpos($body, "ALERT {$case[1]}") !== false, "$field: $body");
+			}
+			list($status) = contact_post($booking_base, array('email' => "a@b.test\nBcc: c@d.test", 'message' => 'Hi'));
+			same(200, $status, 'email');
+		});
+		same(array(), booking_sent($mails));
+		same(array(), cms_records::find('contactmessage'));
+		// from any writer
+		same(array('email_invalid'), contact_refused(function () { cms_records::create('contactmessage', array('email' => "a@b.test\nBcc: c@d.test", 'message' => 'Hi')); }));
+		same(array('email_invalid'), contact_refused(function () { cms_records::create('contactmessage', array('email' => '', 'message' => 'Hi')); }));
+		// addresses PHP's filter takes that would carry more than one
+		// address, or address syntax, into Reply-To
+		$quoted = '"x>,evil@evil.test,<y"@x.com';
+		check((bool)filter_var($quoted, FILTER_VALIDATE_EMAIL), 'the filter takes it, so the check must be on top');
+		foreach (array($quoted, '"ana"@example.com', 'ana@[192.0.2.1]', 'a b@example.com', 'a(b)@example.com', 'a,b@example.com', 'a;b@example.com', 'a:b@example.com', 'a\\b@example.com', 'a@b@example.com') as $email) {
+			same(array('email_invalid'), contact_refused(function () use ($email) { cms_records::create('contactmessage', array('email' => $email, 'message' => 'Hi')); }), $email);
+		}
+		$mails = booking_mails(function () use ($booking_base, $quoted) {
+			list($status, $body) = contact_post($booking_base, array('name' => 'Ana', 'email' => $quoted, 'message' => 'Hi quoted'));
+			same(200, $status, 'a quoted local part');
+			check(strpos($body, 'ALERT email_invalid') !== false, $body);
+		});
+		same(array(), booking_sent($mails));
+		same(array(), cms_records::find('contactmessage'));
+		same(array('name_invalid', 'message_invalid'), contact_refused(function () { cms_records::create('contactmessage', array('name' => "Ana\0", 'email' => 'a@b.test', 'message' => '')); }));
+		// quotes, brackets and commas are dropped from the name
+		$mails = booking_mails(function () use ($booking_base) {
+			same(303, contact_post($booking_base, array('name' => 'Ana "The Boss" <x>, y', 'email' => 'boss@example.com', 'message' => 'Hi there'))[0]);
+		});
+		same(1, count($mails));
+		same(1, preg_match_all('/^Reply-To: /m', $mails[0]['raw']));
+		check(strpos($mails[0]['raw'], "\r\nReply-To: \"Ana The Boss x y\" <boss@example.com>\r\n") !== false, $mails[0]['raw']);
+		check(stripos($mails[0]['raw'], "\nBcc:") === false, 'a Bcc header');
+		same('a@b.test', contact::reply_to('', 'a@b.test'));
+		// a name that isn't ASCII is encoded whole, outside the quotes
+		$mails = booking_mails(function () {
+			with_settings(array('contact_staff_email' => 'desk@zz.test'), function () {
+				(new contact())->staff_mail(array('name' => 'Ana Café', 'email' => 'ana@example.com', 'subject' => '', 'message' => 'Hi', 'page' => '/', 'who' => 'visitor'));
+			});
+		});
+		same(1, count($mails));
+		check(strpos($mails[0]['raw'], "\r\nReply-To: =?UTF-8?B?".base64_encode('Ana Café')."?= <ana@example.com>\r\n") !== false, $mails[0]['raw']);
+		// a group (Ana: x@y; …) or a trailing backslash can't add an address
+		spam_clear();
+		$mails = booking_mails(function () use ($booking_base) {
+			same(303, contact_post($booking_base, array('name' => 'Ana: bad@evil.test; Café', 'email' => 'group@example.com', 'message' => 'Hi group'))[0]);
+			same(303, contact_post($booking_base, array('name' => 'Ana\\', 'email' => 'slash@example.com', 'message' => 'Hi slash'))[0]);
+		});
+		same(2, count($mails));
+		foreach (array('group@example.com', 'slash@example.com') as $n => $email) {
+			same(1, preg_match_all('/^Reply-To: ([^\r\n]*)\r$/m', $mails[$n]['raw'], $line), $email);
+			$reply = $line[1][0];
+			check(substr($reply, -strlen("<$email>")) === "<$email>", $reply);
+			same(1, substr_count($reply, '@'), 'one address: '.$reply);
+		}
+		same('"Ana" <slash@example.com>', contact::reply_to('Ana\\', 'slash@example.com'));
+	});
+});
+
+test('mail: a name that isn\'t plain ASCII is encoded whole, an ASCII one as written', function () use ($maildir) {
+	$dir = "$maildir-names";
+	@mkdir($dir);
+	$was = array(getenv('RASTER_MAIL'), getenv('RASTER_MAIL_FROM'));
+	putenv("RASTER_MAIL=log://$dir");
+	try {
+		putenv('RASTER_MAIL_FROM=Raster Café <hello@cafe.test>');
+		check(mail::send('Ana: bad@evil.test; Pârvu <ana@example.com>', 'Hi', '<p>Hi</p>'), (string)mail::$last_error);
+		putenv('RASTER_MAIL_FROM=Raster Cafe <hello@cafe.test>');
+		check(mail::send('Ana Pop <ana@example.com>', 'Hi', '<p>Hi</p>'), (string)mail::$last_error);
+		$files = glob("$dir/*.eml");
+		sort($files);
+		same(2, count($files));
+		$first = file_get_contents($files[0]);
+		check(strpos($first, "From: =?UTF-8?B?".base64_encode('Raster Café')."?= <hello@cafe.test>\r\n") !== false, $first);
+		check(strpos($first, "\r\nTo: =?UTF-8?B?".base64_encode('Ana: bad@evil.test; Pârvu')."?= <ana@example.com>\r\n") !== false, $first);
+		$second = file_get_contents($files[1]);
+		check(strpos($second, "From: Raster Cafe <hello@cafe.test>\r\n") !== false && strpos($second, "\r\nTo: Ana Pop <ana@example.com>\r\n") !== false, $second);
+		// a long name: words of at most 75 characters, split between characters
+		$words = (new ReflectionMethod('mail', 'words'));
+		$words->setAccessible(true);
+		$long = str_repeat('Café ', 20);
+		$encoded = $words->invoke(null, $long);
+		// joined by a folding break, so no header line grows past the limit
+		foreach (explode("\r\n ", $encoded) as $word) check(strlen($word) <= 75 && preg_match('/^=\?UTF-8\?B\?[A-Za-z0-9+\/=]+\?=$/', $word), $word);
+		same($long, mb_decode_mimeheader(str_replace("\r\n ", ' ', $encoded)));
+		same(1, count(explode("\r\n ", $words->invoke(null, 'Ana Café'))), 'a short name is one word, unchanged');
+		// 200 emoji make a header far past 998 characters unless it is folded
+		putenv('RASTER_MAIL_FROM=Raster Cafe <hello@cafe.test>');
+		check(mail::send(str_repeat("\u{1F600}", 200).' <ana@example.com>', 'Hi', '<p>Hi</p>'), (string)mail::$last_error);
+		$files = glob("$dir/*.eml");
+		sort($files);
+		$folded = file_get_contents(end($files));
+		$head = substr($folded, 0, strpos($folded, "\r\n\r\n"));
+		foreach (explode("\r\n", $head) as $line) check(strlen($line) <= 998, 'header line of '.strlen($line).' characters');
+		check(strpos($head, "\r\n =?UTF-8?B?") !== false, 'the long name is folded');
+	} finally {
+		putenv($was[0] === false ? 'RASTER_MAIL' : "RASTER_MAIL={$was[0]}");
+		putenv($was[1] === false ? 'RASTER_MAIL_FROM' : "RASTER_MAIL_FROM={$was[1]}");
+		array_map('unlink', glob("$dir/*") ?: array());
+		@rmdir($dir);
+	}
+});
+
+test('contact: lengths and a double click', function () use ($booking_base) {
+	contact_site(function () use ($booking_base) {
+		list($status, $body) = contact_post($booking_base, array('email' => 'long@example.com', 'message' => str_repeat('a', 5001)));
+		same(200, $status);
+		check(strpos($body, 'ALERT message_invalid') !== false, $body);
+		list($status, $body) = contact_post($booking_base, array('email' => 'long@example.com', 'subject' => str_repeat('s', 201), 'message' => 'Hi'));
+		same(200, $status);
+		check(strpos($body, 'ALERT subject_invalid') !== false, $body);
+		same(array(), cms_records::find('contactmessage'));
+		with_settings(array('contact_max_length' => 10), function () {
+			same(array('message_invalid'), contact_refused(function () { cms_records::create('contactmessage', array('email' => 'a@b.test', 'message' => 'ăăăăăăăăăăă')); }));
+			same(array(), contact_refused(function () { cms_records::create('contactmessage', array('email' => 'a@b.test', 'message' => 'ăăăăăăăăăă')); }), 'ten characters, twenty bytes');
+		});
+		R::exec('DELETE FROM contactmessagedata');
+		spam_clear();
+		$mails = booking_mails(function () use ($booking_base) {
+			foreach (array(1, 2) as $click) {
+				list($status, , $location) = contact_post($booking_base, array('email' => 'twice@example.com', 'message' => 'Do you have oat milk?'));
+				same(303, $status, "click $click");
+				check(strpos($location, 'done=sent') !== false, $location);
+			}
+		});
+		same(1, count(cms_records::find('contactmessage')));
+		same(1, count($mails));
+	});
+});
+
+test('contact: a frozen database without the spam tables still takes messages', function () {
+	sqlite_only('drops a table under a frozen connection');
+	contact_site(function () {
+		cms_records::ensure(cms_records::info('contactmessage'), true);
+		R::exec('DROP TABLE IF EXISTS formhit');
+		cms_store::forget();
+		validation_spam::$ready = false;
+		R::freeze(true);
+		$template = template::instance();
+		$kept = array($_SERVER, $_POST, $template->current_call, $template->forms);
+		try {
+			list($done, $logged) = spam_logged(function () use ($template) {
+				$_SERVER['REQUEST_METHOD'] = 'POST';
+				$_SERVER['REMOTE_ADDR'] = '203.0.113.9';
+				$_POST = array('raster_form' => 'contact.form', 'raster_ts' => stamp_for_tests(60), 'email' => 'frozen@example.com', 'message' => 'Still open?');
+				$template->current_call = 'contact.form';
+				$template->forms['contact.form'] = array('email' => array('type' => 'email', 'required' => true), 'message' => array('required' => true));
+				unset(controller::instance()->objects['validation']);
+				return with_settings(array('contact_staff_email' => 'desk@zz.test'), function () { return (new contact())->form(); });
+			});
+		} finally {
+			list($_SERVER, $_POST, $template->current_call, $template->forms) = $kept;
+			unset(controller::instance()->objects['validation']);
+			R::freeze(false);
+			cms_store::forget();
+			validation_spam::$ready = false;
+		}
+		same(false, $done, 'the form answered sent');
+		$rows = cms_records::find('contactmessage');
+		same(1, count($rows));
+		same(array('new', ''), array($rows[0]['status'], $rows[0]['spam']));
+		check(strpos($logged, 'Raster warning: spam: ') !== false, $logged);
+		check(strpos($logged, '203.0.113.9') === false && strpos($logged, 'frozen@example.com') === false, $logged);
+	});
+});
+
+test('contact actions: done, spam, not_spam', function () {
+	contact_site(function () {
+		cms_records::ensure(cms_records::info('contactmessage'), true);
+		$m = cms_records::create('contactmessage', array('email' => 'a@b.test', 'message' => 'Hi'));
+		same(array('new', '', ''), array($m['status'], $m['page'], $m['spam']));
+		same('done', cms_records::act('contactmessage', $m['id'], 'done', array(), true)['status']);
+		$s = cms_records::act('contactmessage', $m['id'], 'spam', array(), true);
+		same(array('spam', 'staff'), array($s['status'], $s['spam']));
+		same(array('not_done_spam'), contact_refused(function () use ($m) { cms_records::act('contactmessage', $m['id'], 'done', array(), true); }));
+		$mails = array();
+		$events = contact_events(function () use ($m, &$mails) {
+			$mails = booking_mails(function () use ($m) {
+				$n = cms_records::act('contactmessage', $m['id'], 'not_spam', array(), true);
+				same(array('new', ''), array($n['status'], $n['spam']));
+			});
+		});
+		same(array(), booking_sent($mails), 'staff are looking at it:');
+		same(array('contact.received'), array_column($events, 0));
+		same('staff', $events[0][1]['who']);
+		same(array('not_spam_invalid'), contact_refused(function () use ($m) { cms_records::act('contactmessage', $m['id'], 'not_spam', array(), true); }));
+		// a message longer than a lowered contact_max_length can still be marked done
+		with_settings(array('contact_max_length' => 1), function () use ($m) { same('done', cms_records::act('contactmessage', $m['id'], 'done', array(), true)['status']); });
+		// a write from the editor or MCP keeps new and no page, whatever a
+		// form left behind
+		contact::$reasons = array('no_stamp');
+		$e = cms_store::save_item('contactmessagedata', 0, array('email' => 'staff@zz.test', 'message' => 'Called about a table'), cms_records::writable(cms_records::info('contactmessage')), 'editor');
+		contact::$reasons = array();
+		same(array('new', '', ''), array($e['status'], $e['spam'], $e['page']));
+	});
+});
+
+test('contact: spam older than contact_spam_days is deleted when a message arrives', function () use ($booking_base) {
+	contact_site(function () use ($booking_base) {
+		cms_records::ensure(cms_records::info('contactmessage'), true);
+		$old = cms_records::create('contactmessage', array('email' => 'old@zz.test', 'message' => 'old spam', 'status' => 'spam', 'spam' => 'no_stamp'));
+		$recent = cms_records::create('contactmessage', array('email' => 'recent@zz.test', 'message' => 'recent spam', 'status' => 'spam', 'spam' => 'no_stamp'));
+		$done = cms_records::create('contactmessage', array('email' => 'done@zz.test', 'message' => 'answered', 'status' => 'done'));
+		foreach (array(array($old, 31), array($recent, 29), array($done, 400)) as $aged) {
+			R::exec('UPDATE contactmessagedata SET created_at = ? WHERE id = ?', array(date('Y-m-d H:i:s', time() - $aged[1] * 86400), $aged[0]['id']));
+		}
+		booking_mails(function () use ($booking_base) {
+			same(303, contact_post($booking_base, array('email' => 'new@example.com', 'message' => 'Hello'))[0]);
+		});
+		same(null, cms_records::get('contactmessage', $old['id']));
+		check(cms_records::get('contactmessage', $recent['id']) !== null, 'spam within 30 days is kept');
+		check(cms_records::get('contactmessage', $done['id']) !== null, 'real messages stay');
+		same(3, count(cms_records::find('contactmessage')));
+	});
+});
+
+test('contact: messages and count are for staff only', function () {
+	contact_site(function ($theme) {
+		cms_records::ensure(cms_records::info('contactmessage'), true);
+		cms_records::create('contactmessage', array('name' => 'Ana', 'email' => 'ana@zz.test', 'message' => 'A table for two?'));
+		cms_records::create('contactmessage', array('email' => 'bot@zz.test', 'message' => 'Buy now', 'status' => 'spam', 'spam' => 'no_stamp'));
+		file_put_contents("$theme/zzstaff.html", '<html><head><title>Messages</title></head><body><h1>New: <!-- print.contact.count -->3<!-- /print.contact.count --></h1>'
+			.'<ul><!-- render.contact.messages --><li class="message"><!-- print.@href.raster_detail_link --><a href="#"><!-- print.email -->a@b<!-- /print.email --></a><!-- /print.@href.raster_detail_link --></li><!-- /render.contact.messages --></ul></body></html>');
+		try {
+			$out = contact_render('/zzstaff');
+			check(strpos($out, '[exit 0]') !== false && strpos($out, 'New: </h1>') !== false, 'a visitor\'s count: '.$out);
+			check(strpos($out, 'class="message"') === false && strpos($out, 'ana@zz.test') === false, 'a visitor sees messages: '.$out);
+			$out = contact_render('/zzstaff', 'editor');
+			check(strpos($out, 'New: 1</h1>') !== false, 'the count: '.$out);
+			check(strpos($out, 'ana@zz.test') !== false && strpos($out, 'bot@zz.test') === false, 'the new ones: '.$out);
+			check(preg_match('#href="[^"]*/contactmessage/contactmessage_item/\d{4}-#', $out) === 1, 'the detail link: '.$out);
+			check(preg_match('#<script id="raster-editor-config" type="application/json">(.*?)</script>#s', $out, $m) === 1, 'no editor: '.$out);
+			$items = array_values(array_filter(json_decode($m[1], true)['marks'], function ($mark) { return isset($mark['kind']) && $mark['kind'] === 'item' && $mark['collection'] === 'contactmessage'; }));
+			same(1, count($items), 'messages the editor can edit:');
+			same(array('done', 'spam', 'not_spam'), $items[0]['actions']);
+			check(in_array('status', $items[0]['readonly'], true), json_encode($items[0]));
+		} finally {
+			@unlink("$theme/zzstaff.html");
+		}
+	});
+});
+
+test('lint: contact staff page not protected', function () {
+	contact_site(function ($theme) {
+		check(has_problem((new raster_inspector())->lint_types(), "Visitors make 'contactmessage' records"), 'no staff page yet');
+		file_put_contents("$theme/zzstaff.html", '<html><head><title>Messages</title></head><body><ul><!-- render.contact.messages(\'status=spam\') --><li><!-- print.email -->a@b<!-- /print.email --></li><!-- /render.contact.messages(\'status=spam\') --></ul></body></html>');
+		try {
+			check(has_problem((new raster_inspector())->lint_path("$theme/zzstaff.html"), "lists contact messages but isn't protected for editors"), 'unprotected');
+			with_settings(array('protected' => array('account' => 'member', 'zzstaff' => 'editor')), function () use ($theme) {
+				check(!has_problem((new raster_inspector())->lint_path("$theme/zzstaff.html"), "isn't protected for editors"), 'protected');
+			});
+			// render.contact.messages lists the type, as render.cms.contactmessage does
+			check(!has_problem((new raster_inspector())->lint_types(), "Visitors make 'contactmessage' records"), 'listed by render.contact.messages');
+		} finally {
+			@unlink("$theme/zzstaff.html");
+		}
+	});
+});
+
+test('lint reports a theme with render.contact.form and no _email/contact_received', function () {
+	contact_site(function ($theme) {
+		check(!has_problem((new raster_inspector())->lint_path("$theme/zzcontact.html"), 'contact_received'), 'the email is there');
+		unlink("$theme/_email/contact_received.html");
+		check(has_problem((new raster_inspector())->lint_path("$theme/zzcontact.html"), '_email/contact_received'), 'the email is missing');
+		// a suspect post is thanked with sent, so try_again and slow_down never show there
+		check(!has_problem(lint_html('<!-- render.contact.form --><form method="post"><input name="email"></form><!-- /render.contact.form -->'), 'can turn a post away as spam'), 'lint asks contact for try_again');
 	});
 });
 

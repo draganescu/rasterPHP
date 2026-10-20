@@ -370,9 +370,12 @@ class authentication
 		return true;
 	}
 
+	// on the command line only `raster render` follows it: the page ends
+	// there with 303, and the address goes to stderr
 	protected function redirect($location) {
-		if (PHP_SAPI === 'cli') return;
+		if (PHP_SAPI === 'cli' && !defined('RASTER_RENDER')) return;
 		header('Location: '.$location, true, 303);
+		if (PHP_SAPI === 'cli') fwrite(STDERR, "Location: $location\n");
 		exit;
 	}
 
@@ -409,6 +412,7 @@ class authentication
 		$v = validation::get();
 		if (!$v->submitted()) return false;
 		if (!$v->valid()) return $this->form_again();
+		if ($reasons = validation_spam::holds($v->suspect(array()))) return $v->hold($reasons);
 		self::connect();
 		$email = strtolower(trim((string)util::post('email')));
 		if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
@@ -442,6 +446,13 @@ class authentication
 		$v = validation::get();
 		if (!$v->submitted()) return false;
 		if (!$v->valid()) return $this->form_again();
+		// a bot that asks too often gets the answer for an unknown address, so
+		// it learns nothing and no mail goes out; other reasons don't matter
+		// here, and too many from one IP only when spam_ip_blocks says so
+		if (array_intersect(validation_spam::holds($v->suspect(array())), array('too_many_from_ip', 'too_many_from_email'))) {
+			util::done('reset_sent');
+			return false;
+		}
 		self::connect();
 		$user = self::find(util::post('email'));
 		// asked again within a few minutes: the link already sent still works

@@ -11,12 +11,33 @@
       <h1>Book a table</h1>
       <!-- print.if.static --><p>Call us on <a href="tel:+40721000000">+40 721 000 000</a> and we'll keep a table for you.</p><!-- /print.if.static -->
       <!-- print.if.live -->
-      <p class="error-count"><!-- print.self.error_count -->0<!-- /print.self.error_count --> problems</p>
-      <!-- print.validation.alert('fully_booked') --><p class="error">We are full that day. Try another date, or call us.</p><!-- /print.validation.alert('fully_booked') -->
-      <!-- print.validation.alert('guests_invalid') --><p class="error">We seat whole guests: how many are coming?</p><!-- /print.validation.alert('guests_invalid') -->
-      <!-- print.validation.alert('booked') --><p class="notice">Thank you, your table is booked. We sent the details to the staff.</p><!-- /print.validation.alert('booked') -->
-      <!-- render.reservation.book -->
+      <p>Two sittings, at 19:00 and 21:00, Tuesday to Sunday. Pick a day, then a time. A booking is a request until we confirm it, and every email we send has a link to change or cancel it.</p>
+      <!-- print.validation.alert('booked') --><p class="notice">Thank you, we have your request. We emailed you a link to change or cancel it, and we'll write again once we confirm it.</p><!-- /print.validation.alert('booked') -->
+      <!-- print.validation.alert('fully_booked') --><p class="error">That sitting is full now. Try the other one or another day, or call us.</p><!-- /print.validation.alert('fully_booked') -->
+      <!-- print.validation.alert('not_open') --><p class="error">We aren't taking bookings online yet. Call us on +40 721 000 000.</p><!-- /print.validation.alert('not_open') -->
+      <!-- print.validation.alert('not_a_slot') --><p class="error">Pick one of the times shown for an open day: we are closed on Mondays.</p><!-- /print.validation.alert('not_a_slot') -->
+      <!-- print.validation.alert('too_soon') --><p class="error">That is too soon to book online. Call us and we'll see what we can do.</p><!-- /print.validation.alert('too_soon') -->
+      <!-- print.validation.alert('too_far') --><p class="error">We take bookings up to two months ahead.</p><!-- /print.validation.alert('too_far') -->
+      <!-- print.validation.alert('too_many') --><p class="error">For groups over 8, please call us.</p><!-- /print.validation.alert('too_many') -->
+      <!-- print.validation.alert('people_invalid') --><p class="error">We seat whole people: how many are coming?</p><!-- /print.validation.alert('people_invalid') -->
+      <!-- print.validation.alert('already_booked') --><p class="notice">You have already booked that time: check your email.</p><!-- /print.validation.alert('already_booked') -->
+      <!-- print.validation.alert('name_invalid') --><p class="error">Tell us your name.</p><!-- /print.validation.alert('name_invalid') -->
+      <!-- print.validation.alert('email_invalid') --><p class="error">We need a valid email to confirm.</p><!-- /print.validation.alert('email_invalid') -->
+      <form method="get" class="filters">
+        <label>Day <input type="date" name="date"></label>
+        <label>People <input type="number" name="people" min="1" max="8"></label>
+        <button>Show times</button>
+      </form>
+      <form method="get" class="days">
+        <p>Evenings with a free table:</p>
+        <input type="hidden" name="people">
+        <!-- render.booking.days('resource=dining-room&people=?people&limit=7') -->
+        <!-- print.@value.date --><button class="day" name="date" value="2026-10-20"><!-- print.date -->2026-10-20<!-- /print.date -->, <!-- print.slots_free -->2<!-- /print.slots_free --> sittings</button><!-- /print.@value.date -->
+        <!-- /render.booking.days('resource=dining-room&people=?people&limit=7') -->
+      </form>
+      <!-- render.booking.form -->
       <form method="post" class="stack">
+        <input type="hidden" name="resource" value="dining-room">
         <label>Name <input type="text" name="name" required minlength="2" maxlength="80" value="Your name"></label>
         <!-- render.validation.field('name') --><p class="error">Tell us your name (2 to 80 letters).</p><!-- /render.validation.field('name') -->
         <!-- render.validation.cant_be('name', 'Your name') --><p class="error">Please replace the example name with yours.</p><!-- /render.validation.cant_be('name', 'Your name') -->
@@ -26,17 +47,15 @@
         <!-- render.validation.field('phone') --><p class="error">Digits and spaces only, like +40 721 000 000.</p><!-- /render.validation.field('phone') -->
         <label>Date <input type="date" name="date" required min="2026-01-01" max="2030-12-31"></label>
         <!-- render.validation.field('date') --><p class="error">Pick a date between 2026 and 2030.</p><!-- /render.validation.field('date') -->
-        <!-- render.validation.not_monday('date') --><p class="error">We are closed on Mondays.</p><!-- /render.validation.not_monday('date') -->
-        <label>Guests <input type="number" name="guests" required min="1" max="8" value="2"></label>
-        <!-- render.validation.field('guests') --><p class="error">Tables are for 1 to 8 guests.</p><!-- /render.validation.field('guests') -->
-        <!-- render.validation.field('guests', 'max') --><p class="error">For groups over 8, please call us.</p><!-- /render.validation.field('guests', 'max') -->
-        <label>Seating
-          <select name="seating"><option value="inside">Inside</option><option value="terrace">Terrace</option><option value="window">By the window</option></select>
-        </label>
-        <fieldset><legend>Occasion</legend>
-          <label><input type="radio" name="occasion" value="none" checked> None</label>
-          <label><input type="radio" name="occasion" value="birthday"> Birthday</label>
+        <fieldset class="times"><legend>Time</legend>
+          <!-- render.booking.slots('date=?date&resource=dining-room&people=?people') -->
+          <!-- print.+class.state --><label class="slot "><!-- print.@value.time --><input type="radio" name="time" value="19:00"><!-- /print.@value.time --> <!-- print.time -->19:00<!-- /print.time --> to <!-- print.ends -->21:00<!-- /print.ends -->, <!-- print.left_people -->20<!-- /print.left_people --> places left</label><!-- /print.+class.state -->
+          <!-- /render.booking.slots('date=?date&resource=dining-room&people=?people') -->
+          <p class="hint">No times here? Pick an open day above.</p>
         </fieldset>
+        <label>People <input type="number" name="people" required min="1" max="8" value="2"></label>
+        <!-- render.validation.field('people') --><p class="error">Tables are for 1 to 8 people.</p><!-- /render.validation.field('people') -->
+        <!-- render.validation.field('people', 'max') --><p class="error">For groups over 8, please call us.</p><!-- /render.validation.field('people', 'max') -->
         <label><input type="checkbox" name="newsletter" value="yes"> Also send me the newsletter</label>
         <label>Notes <textarea name="notes" maxlength="300"></textarea></label>
         <!-- render.validation.field('notes') --><p class="error">Keep notes under 300 characters.</p><!-- /render.validation.field('notes') -->
@@ -44,26 +63,38 @@
         <!-- render.validation.accepted('terms') --><p class="error">Please agree to the house rules.</p><!-- /render.validation.accepted('terms') -->
         <button>Book</button>
       </form>
-      <!-- /render.reservation.book -->
+      <!-- /render.booking.form -->
+      <p>Booked already? Your emails have the link to change or cancel, and <a href="account.html">your account</a> lists what you booked while logged in.</p>
       <!-- /print.if.live -->
     </section>
     <section>
       <h2>Write to us</h2>
       <!-- print.if.static --><p>Write to <a href="mailto:hello@cafe.test">hello@cafe.test</a>.</p><!-- /print.if.static -->
       <!-- print.if.live -->
-      <!-- print.validation.alert('contacted') --><p class="notice">Thanks, we will write back soon.</p><!-- /print.validation.alert('contacted') -->
-      <!-- render.reservation.contact -->
+      <p class="error-count"><!-- print.cafe.problem_count -->0<!-- /print.cafe.problem_count --> problems</p>
+      <!-- print.validation.alert('sent') --><p class="notice">Thanks, we will write back soon.</p><!-- /print.validation.alert('sent') -->
+      <!-- print.validation.alert('name_invalid') --><p class="error">That name has characters we can't use.</p><!-- /print.validation.alert('name_invalid') -->
+      <!-- print.validation.alert('email_invalid') --><p class="error">We need a valid email to write back.</p><!-- /print.validation.alert('email_invalid') -->
+      <!-- print.validation.alert('phone_invalid') --><p class="error">That phone number has characters we can't use.</p><!-- /print.validation.alert('phone_invalid') -->
+      <!-- print.validation.alert('subject_invalid') --><p class="error">Keep the subject short, on one line.</p><!-- /print.validation.alert('subject_invalid') -->
+      <!-- print.validation.alert('message_invalid') --><p class="error">Write us a message, but not a novel.</p><!-- /print.validation.alert('message_invalid') -->
+      <!-- render.contact.form -->
       <form method="post" class="stack">
+        <label>Name <input type="text" name="name" maxlength="80"></label>
         <label>Email <input type="email" name="email"></label>
         <!-- render.validation.not_empty('email') --><p class="error">Your email, please.</p><!-- /render.validation.not_empty('email') -->
         <!-- render.validation.email_format('email') --><p class="error">That email does not look right.</p><!-- /render.validation.email_format('email') -->
+        <label>About
+          <select name="subject"><option value="A table">A table</option><option value="An event">An event</option><option value="Something else">Something else</option></select>
+        </label>
         <label>Website <input type="url" name="website"></label>
         <!-- render.validation.field('website') --><p class="error">A web address starts with https://</p><!-- /render.validation.field('website') -->
         <label>Message <textarea name="message" required maxlength="2000"></textarea></label>
         <!-- render.validation.field('message') --><p class="error">Write a message.</p><!-- /render.validation.field('message') -->
+        <!-- render.validation.no_links('message') --><p class="error">Please leave out web links: write the address in words.</p><!-- /render.validation.no_links('message') -->
         <button>Send</button>
       </form>
-      <!-- /render.reservation.contact -->
+      <!-- /render.contact.form -->
       <!-- /print.if.live -->
     </section>
   </main>

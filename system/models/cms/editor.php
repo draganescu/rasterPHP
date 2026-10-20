@@ -9,6 +9,9 @@
 // cms_store like MCP and the command line: every page save is a revision,
 // only fields the templates define can be written, and the same events fire.
 class cms_editor {
+	// the largest picture upload() takes; doctor checks PHP's limits against
+	// it, and the nginx config in private_paths.php allows a little more
+	const UPLOAD_MB = 12;
 
 	// ##Marking
 
@@ -41,34 +44,31 @@ class cms_editor {
 	// Marks can't stay where the page can't show them as editable: in <head>,
 	// inside a tag, or in <title>, <script>, <style>, <textarea> and
 	// <option>. Those are taken out and their fields listed as hidden (the
-	// editor offers them in its page panel).
+	// editor offers them in its page panel). One pass from the top carries
+	// what it saw from mark to mark (the last < and >, which of those tags
+	// is open), so a long list costs no more than it does for visitors.
 	static function settle($html) {
 		$template = template::instance();
 		if (!preg_match_all('/<!--raster:(s|a) (\d+)-->/', $html, $found, PREG_OFFSET_CAPTURE)) return $html;
+		preg_match_all('/<(\/?)(title|script|style|textarea|option)\b/i', $html, $tags, PREG_SET_ORDER | PREG_OFFSET_CAPTURE);
 		$body = stripos($html, '<body');
 		$hidden = array();
+		$from = 0; $lt = false; $gt = false; $next = 0; $open = array();
 		foreach ($found[0] as $i => $match) {
-			$id = (int)$found[2][$i][0];
-			if (self::out_of_reach($html, $match[1], $body)) $hidden[$id] = true;
+			$offset = $match[1];
+			$part = substr($html, $from, $offset - $from);
+			if (($at = strrpos($part, '<')) !== false) $lt = $from + $at;
+			if (($at = strrpos($part, '>')) !== false) $gt = $from + $at;
+			$from = $offset;
+			for (; $next < count($tags) && $tags[$next][0][1] < $offset; $next++) $open[strtolower($tags[$next][2][0])] = $tags[$next][1][0] === '';
+			$in_tag = $lt !== false && ($gt === false || $lt > $gt);
+			if ($body === false || $offset < $body || $in_tag || in_array(true, $open, true)) $hidden[(int)$found[2][$i][0]] = true;
 		}
-		foreach (array_keys($hidden) as $id) {
-			$template->marks[$id]['hidden'] = true;
-			$html = str_replace(array('<!--raster:s '.$id.'-->', '<!--raster:e '.$id.'-->', '<!--raster:a '.$id.'-->'), '', $html);
-		}
-		return $html;
-	}
-
-	protected static function out_of_reach($html, $offset, $body) {
-		if ($body === false || $offset < $body) return true;
-		$before = substr($html, 0, $offset);
-		$lt = strrpos($before, '<');
-		$gt = strrpos($before, '>');
-		if ($lt !== false && ($gt === false || $lt > $gt)) return true;
-		foreach (array('title', 'script', 'style', 'textarea', 'option') as $tag) {
-			if (!preg_match_all('/<(\/?)'.$tag.'\b/i', $before, $tags)) continue;
-			if (end($tags[1]) === '') return true;
-		}
-		return false;
+		if (!$hidden) return $html;
+		foreach (array_keys($hidden) as $id) $template->marks[$id]['hidden'] = true;
+		return preg_replace_callback('/<!--raster:(s|e|a) (\d+)-->/', function ($m) use ($hidden) {
+			return isset($hidden[(int)$m[2]]) ? '' : $m[0];
+		}, $html);
 	}
 
 	// the script and what it needs, before </body>
@@ -323,7 +323,7 @@ class cms_editor {
 		cms::require_admin(true);
 		$types = array(IMAGETYPE_JPEG => 'jpg', IMAGETYPE_PNG => 'png', IMAGETYPE_GIF => 'gif', IMAGETYPE_WEBP => 'webp');
 		if (empty($_FILES['image']) || $_FILES['image']['error'] !== UPLOAD_ERR_OK) return self::fail('The upload did not arrive');
-		if ($_FILES['image']['size'] > 12 * 1024 * 1024) return self::fail('Pictures can be up to 12 MB');
+		if ($_FILES['image']['size'] > self::UPLOAD_MB * 1024 * 1024) return self::fail('Pictures can be up to 12 MB');
 		$info = @getimagesize($_FILES['image']['tmp_name']);
 		if (!$info || !isset($types[$info[2]])) return self::fail('Only JPEG, PNG, GIF and WebP pictures can be used');
 		$folder = trim(config::get('raster_media_folder', 'media'), '/');

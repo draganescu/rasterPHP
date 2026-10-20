@@ -31,9 +31,9 @@ A static host can't receive a form. If a page still shows a form, the export **s
 
 ```html
 <!-- print.if.live -->
-<!-- render.contact.send -->
+<!-- render.contact.form -->
 <form method="post"> … </form>
-<!-- /render.contact.send -->
+<!-- /render.contact.form -->
 <!-- /print.if.live -->
 
 <!-- print.if.static -->
@@ -67,7 +67,7 @@ With [translations](Translations), the first language goes at the root and each 
 
 Export to the same folder again and Raster only does what's needed:
 
-- If nothing the site is made of has changed (content, templates, models, theme files, media), it does nothing: *Nothing changed since the last export*.
+- If nothing the site is made of has changed (content, templates, models, theme files, media) and it is still the same day, it does nothing: *Nothing changed since the last export*. A new day (in the site's `timezone`) always counts as a change, so a nightly export drops what `date>=today` no longer lists; pages that come out the same are still not written again.
 - Otherwise it renders every page again but **writes only files whose content changed**, and **removes files the site no longer has**.
 
 So an upload tool that syncs changed files (rsync, most static hosting CLIs) only sends what changed. The folder's `.raster-export.json` keeps track. Files the export didn't write (say, a `CNAME` file for GitHub Pages) are left alone.

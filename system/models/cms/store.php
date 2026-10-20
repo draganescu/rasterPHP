@@ -86,6 +86,78 @@ class cms_store {
 		return (int)R::count($type, $sql.$more, $bindings + $more_bindings);
 	}
 
+	// ##A list's rows
+	//
+	// What render.cms.<name>('…') shows and pagination.links('cms.<name>', '…')
+	// counts are built here, once, so the pager counts the rows the list
+	// shows (#88).
+
+	// how many a page of the list holds, and whether it is a limit list:
+	// limit=3 shows at most three, the same three on every page of the site
+	static function page_size($name, $options) {
+		if (isset($options['limit']) && (int)$options['limit'] > 0) return array((int)$options['limit'], true);
+		$size = (int)config::get($name.'_page_size') ?: ((int)config::get('raster_page_size') ?: 10);
+		return array($size, false);
+	}
+
+	// The WHERE of a list of $name, array($sql, $bindings), or null when it
+	// lists nothing whoever asks (owner=me with nobody logged in, an id or
+	// slug the table can't have). $conditions are its list options' (as
+	// list_options gives them), $filters equal values from the URL
+	// (/news/news_items/tag/php) and the item asked for (id or slug), $uri
+	// the ones of those the URL asked for. Drafts and scheduled items for
+	// editors only; a private type's records for editors and their owners.
+	static function list_where($name, $conditions, $filters = array(), $uri = array()) {
+		$fields = self::columns(cms::collection_type($name));
+		$record = cms_records::info($name);
+		$compare = array();
+		$mine = false;
+		foreach ($conditions as $condition) {
+			if ($condition === array('owner', '=', 'me')) $mine = true;
+			if ($condition[1] === '=') $filters[$condition[0]] = $condition[2];
+			else $compare[] = $condition;
+		}
+		list($sql, $bindings) = self::published_sql($fields, cms::loggedin());
+		if ($record) {
+			list($visible, $more) = cms_records::visibility_sql($record);
+			$sql .= $visible;
+			$bindings += $more;
+			// owner=me: the logged in person's own records, editors included
+			// (their /account shows what they made, not everyone's)
+			if (isset($filters['owner']) && $filters['owner'] === 'me') {
+				$filters['owner'] = cms_records::owner_me($record);
+				if ($filters['owner'] === null) return null;
+			}
+		}
+		// a record's hidden fields are no filter for visitors (no asking
+		// "did this email book?"), and neither is owner, except the
+		// template's own owner=me (#89)
+		if ($record && !cms::loggedin()) {
+			$secret = array_merge($record['hidden'], $mine ? array() : array('owner'));
+			if ($mine && isset($uri['owner'])) raster_cache::skip();
+			foreach ($secret as $hidden) {
+				// a filter the URL asks for and the list ignores
+				if (isset($uri[$hidden])) raster_cache::skip();
+				unset($filters[$hidden]);
+			}
+			$secret[] = 'owner';
+			$compare = array_filter($compare, function ($c) use ($secret) { return !in_array($c[0], $secret, true); });
+		}
+		foreach ($filters as $key => $value) {
+			if (!array_key_exists($key, $fields) || !preg_match('/^[a-z0-9_]+$/', $key)) {
+				if ($key === 'id' || $key === 'slug') return null;
+				// /news/news_items/nonsense/x lists everything; it answers,
+				// but every made-up field would be a page of its own
+				if (array_key_exists($key, $uri)) raster_cache::skip();
+				continue;
+			}
+			$compare[] = array($key, '=', $value);
+		}
+		// featured=1, date>=today, guests>4, each as its field's type
+		list($more, $more_bindings) = self::conditions_sql($compare, $fields);
+		return array($sql.$more, $bindings + $more_bindings);
+	}
+
 	// ##List options
 	//
 	// What render.cms.<name>('…') and pagination.links('cms.<name>', '…')
@@ -404,9 +476,9 @@ class cms_store {
 		if (!empty($bean->published_at) && strtotime($bean->published_at) > time()) {
 			raster_cache::schedule(strtotime($bean->published_at));
 		}
+		// never from a hidden field: the slug is in the record's public URL
+		$skip = $info ? array_merge($info['hidden'], array('owner', 'created_at')) : array();
 		if (empty($bean->slug)) {
-			// never from a hidden field: the slug is in the record's public URL
-			$skip = $info ? array_merge($info['hidden'], array('owner', 'created_at')) : array();
 			$bean->slug = self::unique_slug($type, self::slug_source($bean->export(), $skip), (int)$bean->id);
 		}
 		if ($info && !$id) {
@@ -436,6 +508,9 @@ class cms_store {
 						? json_encode(array_values((array)$value), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
 						: cms_types::clean(isset($types[$field]) ? $types[$field] : 'text', $value, $field);
 				}
+				// a new record's slug comes from what fill() works out too (a
+				// contact message's title, so never its email), unless it was given
+				if ($filled && !$id && !isset($values['slug'])) $bean->slug = self::unique_slug($type, self::slug_source($bean->export(), $skip), 0);
 				if ($filled) $after = cms_records::decode($info, cms_types::read_row($type, $bean->export()));
 				cms_records::check($info, $after, $before);
 			} finally {

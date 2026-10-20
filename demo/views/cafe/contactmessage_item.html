@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <!-- dry._layout.head /-->
+  <title>Message</title>
+</head>
+<body>
+  <!-- dry._layout.header /-->
+  <main class="narrow">
+    <h1>Message</h1>
+    <p>One message from the contact form, for staff: mark it done or spam with its buttons. <a href="staff.html">Back to staff</a></p>
+    <!-- render.cms.contactmessage -->
+    <dl class="booking-details">
+      <dt>From</dt><dd><!-- print.name -->Ana<!-- /print.name --></dd>
+      <dt>Email</dt><dd><!-- print.email -->ana@example.com<!-- /print.email --></dd>
+      <dt>Phone</dt><dd><!-- print.phone -->+40 721 000 000<!-- /print.phone --></dd>
+      <dt>About</dt><dd><!-- print.subject -->A table<!-- /print.subject --></dd>
+      <dt>Message</dt><dd><!-- print.message -->Is the terrace open?<!-- /print.message --></dd>
+      <dt>Sent from</dt><dd><!-- print.page -->/visit<!-- /print.page --></dd>
+      <dt>Status</dt><dd class="status"><!-- print.status -->new<!-- /print.status --></dd>
+      <dt>Why it looks like spam</dt><dd><!-- print.spam --><!-- /print.spam --></dd>
+    </dl>
+    <!-- /render.cms.contactmessage -->
+  </main>
+  <!-- dry._layout.footer /-->
+</body>
+</html>

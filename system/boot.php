@@ -20,13 +20,15 @@ class boot {
 		boot::file_system_setup();
 		// loads and instanced the main system classes (/system/*.php)
 		boot::load_core_files();
+		// models load on first use, from here on: system/config/events.php
+		// binds the bundled models' listens()
+		boot::autoload_models();
 		// loads default configuration (can be easily overriden)
 		boot::load_core_config();
 		// configuration initialization sets up the current used hostname,
 		// determines the index file and the rewrite procedure
 		// and figures out if its development or production or whatever
 		config::initialize();
-		boot::autoload_models();
 		// listeners models declare in static function listens()
 		event::discover();
 		// the first event (hook) that our system launches
@@ -48,9 +50,9 @@ class boot {
 		$_SERVER['REQUEST_URI'] = $uri;
 		boot::file_system_setup();
 		boot::load_core_files();
+		boot::autoload_models();
 		boot::load_core_config();
 		config::initialize();
-		boot::autoload_models();
 		event::discover();
 	}
 

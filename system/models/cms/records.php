@@ -7,20 +7,22 @@
 // valid; the CMS stores it, lists it where a view renders it, and lets editors
 // and agents change it through the same editor and MCP tools as any item.
 //
-//   class reservation {
+//   class inquiry {
 //       static function types() {
-//           return array('reservation' => array(
-//               'fields'   => array('name' => '', 'date' => '', 'guests' => 0, 'status' => 'new'),
+//           return array('inquiry' => array(
+//               'fields'   => array('name' => '', 'date' => '', 'people' => 0, 'status' => 'new'),
 //               'types'    => array('date' => 'date'),     // the rest come from the defaults: 0 is an int
 //               'create'   => 'visitor',              // who may send the form: visitor, member, editor
 //               'readonly' => array('status'),         // shown to editors, changed only by the model
-//               'actions'  => array('confirm' => 'editor'),
+//               'actions'  => array('answer' => 'editor'),
 //           ));
 //       }
-//       static function check($type, $after, $before) { ... return array('fully_booked'); }
-//       static function confirm($item, $input) { return cms_records::update('reservation', $item['id'], array('status' => 'confirmed')); }
-//       function book() { return cms_records::submit('reservation', 'booked'); }
+//       static function check($type, $after, $before) { ... return array('too_few'); }
+//       static function answer($item, $input) { return cms_records::update('inquiry', $item['id'], array('status' => 'answered')); }
+//       function form() { return cms_records::submit('inquiry', 'sent'); }
 //   }
+//
+// Bookings are the bundled booking model's (system/models/booking).
 //
 // Every write, from a form, the editor, MCP or the model's own code, goes
 // through cms_store::save_item, which asks the model's check() first. Hooks are
@@ -32,7 +34,7 @@ class cms_records {
 	// that took the name: booking => array('type' => 'booking', 'by' => 'salon')
 	static $left_out = array();
 	// names a type declaration understands
-	static $keys = array('fields', 'types', 'public', 'owner', 'create', 'staff_add', 'readonly', 'hidden', 'actions', 'html');
+	static $keys = array('fields', 'types', 'public', 'owner', 'create', 'staff_add', 'readonly', 'hidden', 'actions', 'html', 'spam');
 	// the model methods with a meaning of their own, never actions
 	static $hooks = array('types', 'check', 'fill', 'schema', 'listens', 'api', 'requires');
 	// who is writing while fill() and check() run: visitor (a form), editor
@@ -150,6 +152,9 @@ class cms_records {
 			// fields printed as HTML; every other field prints escaped, since
 			// records hold what visitors typed
 			'html' => array_values(array_intersect((array)(isset($d['html']) ? $d['html'] : array()), array_keys($fields))),
+			// visitor forms are checked for spam before anything is stored; a
+			// type that runs its own checks says 'spam' => false
+			'spam' => !isset($d['spam']) || !empty($d['spam']),
 			'unknown' => array_values(array_diff(array_keys($d), self::$keys)),
 		);
 	}
@@ -161,7 +166,7 @@ class cms_records {
 		return isset($types[$collection]) ? $types[$collection] : null;
 	}
 
-	// the declaration whose table this is (reservationdata), or null
+	// the declaration whose table this is (bookingdata), or null
 	static function for_table($table) {
 		foreach (self::types() as $info) {
 			if ($info['type'] === $table) return $info;
@@ -483,7 +488,7 @@ class cms_records {
 	//
 	// The body of a form handler that stores what a visitor sent:
 	//
-	//   function book() { return cms_records::submit('reservation', 'booked'); }
+	//   function form() { return cms_records::submit('inquiry', 'sent'); }
 	//
 	// It keeps the fields the type lets people write, runs the HTML rules and
 	// check(), raises each problem as an alert and shows the form again, or
@@ -494,6 +499,8 @@ class cms_records {
 		$v = validation::get();
 		if (!$v->submitted()) return false;
 		if (!$v->valid()) return template::instance()->form_state();
+		// before may_create() refuses, so a bot doesn't learn which types need a login
+		if ($info['spam'] && in_array($info['create'], array('visitor', 'member'), true) && ($reasons = validation_spam::holds($v->suspect(array())))) return $v->hold($reasons);
 		if (!self::may_create($info)) {
 			$v->raise($info['create'] === 'member' ? 'login_required' : 'not_allowed');
 			return template::instance()->form_state();

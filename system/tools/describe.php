@@ -28,6 +28,8 @@ class raster_describe
 		'languages', 'domain_language', 'language_cookie', 'page_cache',
 		'page_cache_ttl', 'page_cache_skip', 'api_system_models',
 		'allow_deprecated',
+		'spam_min_seconds', 'spam_max_age', 'spam_per_ip', 'spam_per_email', 'spam_ip_blocks',
+		'spam_max_links', 'spam_blocklist', 'trusted_proxies', 'client_ip_header',
 	);
 
 	static function sections() {

@@ -175,7 +175,7 @@ static function requires() {
 }
 ```
 
-`php bin/raster lint` then reports a view with `render.quote.ask` in a theme without `_email/quote_received.html`; the sitemap and `raster export` leave the pages out (`sitemap_skip` and `export_skip` add to them); and `describe` lists the settings. It may read settings, as here, so a page moved by its setting is left out where it now is. The bundled `authentication` and `newsletter` models declare their emails and pages this way, and theirs count only on a site whose views use them.
+`php bin/raster lint` then reports a view with `render.quote.ask` in a theme without `_email/quote_received.html`; the sitemap and `raster export` leave the pages out (`sitemap_skip` and `export_skip` add to them); and `describe` lists the settings. It may read settings, as here, so a page moved by its setting is left out where it now is. The bundled `authentication`, `newsletter` and `booking` models declare their emails and pages this way, and theirs count only on a site whose views use them.
 
 ## A model's JSON API
 
@@ -219,4 +219,4 @@ A method you list for visitors can be called by anyone, so one that changes data
 
 ## Overriding a bundled model
 
-To change how a bundled model (such as `feed` or `authentication`) behaves, extend it instead of editing `system/`. See [Extending Raster](Extending-Raster).
+To change how a bundled model (such as `feed` or `authentication`) behaves, extend it instead of editing `system/`. See [Extending Raster](Extending-Raster). A `the_booking` override adds fields to the bundled bookings ([Bookings](Bookings#more-fields)).

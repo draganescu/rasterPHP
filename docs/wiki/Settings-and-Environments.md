@@ -13,7 +13,7 @@ config::set('protected')->to(array('account' => 'member'));
 config::set('after_login')->to('account');
 ```
 
-This file is loaded after the framework's defaults (`system/config/app.php`), so what you set wins. Read a setting anywhere with `config::get('name')`, or `config::get('name', $default)`. You can add settings of your own the same way; the demo café keeps its staff email address in `config::set('cafe_staff_email')`.
+This file is loaded after the framework's defaults (`system/config/app.php`), so what you set wins. Read a setting anywhere with `config::get('name')`, or `config::get('name', $default)`. You can add settings of your own the same way; the demo café sets `config::set('contact_staff_email')` for its contact form.
 
 Other files in `application/config/`:
 
@@ -81,10 +81,11 @@ In production, whole pages are saved and sent again to the next visitor without 
 
 - Only pages for visitors **without a session** (not logged in) and **without a query string** are cached. `/api`, `/mcp` and `/login` never are.
 - **Tracking parameters don't count as a query string.** A link shared as `/about?utm_source=newsletter` (any `utm_*`, or the click ids `fbclid`, `gclid` and `msclkid`) gets the cached `/about`, and is made the way `/about` is: the tracking values are left out of `$_GET`, so they never end up in the page other visitors get (in a pagination link, say). Any other parameter skips the cache.
-- **Any content change clears the whole cache**: a save in the editor, over MCP or from the command line. The cached files are deleted then, so the folder only holds pages for the current content. When a scheduled item's publish time arrives, the cache is cleared too. A page that was being made while the content changed is not kept.
+- **Any content change clears the whole cache**: a save in the editor, over MCP or from the command line. The cached files are deleted then, so the folder only holds pages for the current content. When a scheduled item's publish time arrives, the cache is cleared too, for each of several scheduled items. A page that was being made while the content changed is not kept.
 - **Lists nobody can fill aren't cached.** A filter page with no items (`/news/news_items/tag/nothing`), a page number past the last one (`/news/news_page/999`) and a filter on a field the list doesn't have still answer 200, but are never kept. Neither is a list or item address spelled other than the way the site's own links spell it: `/news/news_page/1` or `/news/news_page/02` for a page, `/news/news_item/007` for item 7, or a segment left over at the end. The same goes for a filter on a number, date or yes/no field written another way than the page prints it: `/menu/menu_items/price/14.500` when the price shows as `14.50`, or `/events/events_items/date/10 Oct 2026` for `2026-10-10`. Nor is a view name in other letter case: on a disk that ignores case (macOS, Windows) `/ABOUT` or `/News/news_page/2` finds `about.html` or `news.html` and answers, but only the file's own spelling is kept. All of them are kept out so a crawler trying made-up addresses can't fill the disk. A model of your own that knows its page shouldn't be kept calls `raster_cache::skip()`.
 - If your own model changes data that pages show, call `util::content_changed()` afterwards.
-- **Changes made outside Raster don't clear it**: a view, theme file, model or config edited in a text editor (or by an agent with plain file tools), or the database changed directly. Visitors who aren't logged in keep seeing the old page until the cache is cleared or `page_cache_ttl` runs out. Clear it with `php bin/raster cache clear`, or the MCP tool `clear_cache`. `raster render` and MCP `render_url` never read the cache, so they show the change before visitors do.
+- **Changes made outside Raster don't clear it**: a view, theme file, model or config edited in a text editor (or by an agent with plain file tools), or the database changed directly. Visitors who aren't logged in keep seeing the old page until the cache is cleared or `page_cache_ttl` runs out. Clear it with `php bin/raster cache clear`, or the MCP tool `clear_cache`. Run it as the user the web server runs as: when it can't write the cache folder it says so and exits 1, and nothing was cleared. `raster update` and `raster upgrade` clear it themselves. `raster render` and MCP `render_url` never read or write the cache, so they show the change before visitors do.
+- A cached page is sent with the headers it was first made with (an `X-Robots-Tag` or CORS header your model sets, say), except cookies: a page that sets one isn't cached. It carries `Last-Modified`, and a browser or proxy asking with `If-Modified-Since` gets a short 304 when its copy is current.
 - Responses carry an `X-Raster-Cache: hit` or `miss` header, so you can check what happened.
 - Cached files are in `application/data/cache/`. `describe` says whether the cache is on (`site.page_cache`).
 
@@ -125,6 +126,18 @@ Set with `config::set('name')->to(value)` in `config/the_app.php`.
 | `reset_page` | `reset` | the page password-reset emails link to |
 | `password_min_length` | `8` | |
 | `timezone` | PHP's (`date.timezone` in php.ini, UTC on most servers) | the site's time zone, such as `'Europe/Bucharest'`: `today` in lists, scheduled items and every date Raster stores follow it. An unknown name is logged and PHP's zone is kept. `doctor` warns in production when neither this nor `date.timezone` is set |
+| `contact_staff_email` | the sender (`RASTER_MAIL_FROM`, `mail_from`) | where the bundled contact form's staff emails go |
+| `contact_staff_page` | `staff` | the page with the messages, for the link in that email |
+| `contact_max_length` | `5000` | characters in a contact message |
+| `contact_spam_days` | `30` | days a message kept aside as spam stays; `false` keeps it |
+| `spam_min_seconds` | `3` | a post sooner than this after its form was shown is `too_fast`; `false` turns the stamp checks off |
+| `spam_max_age` | `86400` | a stamp older than this many seconds is `stamp_old`; `false` allows any age |
+| `spam_per_ip`, `spam_per_email` | `5`, `3` | posts of one form in an hour from one IP, with one address; `false` turns that limit off |
+| `spam_ip_blocks` | `false` | `true` holds back a post over `spam_per_ip` too; by default it is only flagged, since many people can share one IP (the contact form keeps it as spam) |
+| `spam_max_links` | `2` | links allowed in the fields a form checks; `0` allows none, `false` any number |
+| `spam_blocklist` | none | words and domains (`casino`, `pills.example`) that make a post `blocked` |
+| `trusted_proxies` | private addresses | proxies in front of the site, such as `array('10.0.0.0/8')`: only a post from one of them has its visitor's address read from a header. Not set, any private, loopback or link-local address counts as one; `array()` trusts nobody |
+| `client_ip_header` | `X-Forwarded-For` | the header those proxies send the visitor's address in (`Fly-Client-IP` is one address) |
 | `newsletter_double_opt_in` | `true` | `false` subscribes without a confirmation email |
 | `newsletter_confirm_page` | `newsletter-confirm` | |
 | `newsletter_unsubscribe_page` | `newsletter-unsubscribe` | |
@@ -156,5 +169,6 @@ Environment variables win over the settings above. Set them in your server's con
 | `RASTER_MAIL` | the mail transport: `log://`, `mail://`, `smtp://…`, `smtps://…` |
 | `RASTER_MAIL_FROM` | the sender, e.g. `My Site <hello@example.com>` |
 | `RASTER_MCP_TOKEN` | turns on MCP over HTTP; clients must send this token |
+| `RASTER_SECRET` | the site's key for signing form stamps. Without it the site makes `application/data/secret` (mode 0600) the first time a web request needs one; a command (`raster render`, a script) never makes it, since the web server's user might not be able to read a file it made, and signs with a key of its own instead. Set it when several servers share a site, so all of them sign and check with one key. Changing it makes forms already open send their stamp again |
 | `NO_COLOR` | plain command-line output, without colours |
 | `RASTER_REPO` | the GitHub repository `raster update` downloads from (default `draganescu/rasterPHP`), for forks |

@@ -327,8 +327,7 @@ class raster_inspector {
 	// Finds the file that would be loaded for a model (controller::model)
 	// and lists its public methods.
 	function model_info($model) {
-		static $cache = array();
-		if (isset($cache[$model])) return $cache[$model];
+		if (isset(self::$known[$model])) return self::$known[$model];
 		$found = controller::model($model);
 		$info = false;
 		foreach ($found ? array($found['file']) : array() as $file) {
@@ -383,7 +382,18 @@ class raster_inspector {
 			}
 			break;
 		}
-		return $cache[$model] = $info;
+		return self::$known[$model] = $info;
+	}
+
+	// What model_info() and raised_names() read is kept for the process,
+	// since lint asks for the same models over and over; the stdio MCP server
+	// lives longer than a lint and forgets it before every call.
+	static $known = array();
+	static $raised = null;
+
+	static function forget() {
+		self::$known = array();
+		self::$raised = null;
 	}
 
 	// methods of a system model file, for overrides
@@ -718,12 +728,16 @@ class raster_inspector {
 		if ($block['keyword'] === 'render' && $block['type'] === 'open' && trim($block['inner']) !== '' && trim(strip_tags($block['inner'])) === '' && strpos($block['inner'], '<!--') === false && strpos($block['inner'], '<') === false) {
 			$problems[] = self::problem('warning', $block, "{$block['raw']} is empty; render repeats its inner HTML once per item");
 		}
-		// records listed by a model's own rows are invisible to the in-page
-		// editor: staff can't edit them in the page or add one
-		if ($block['keyword'] === 'render' && $ref['model'] !== 'cms' && stripos($block['inner'], '<form') === false && $this->admin_view($this->linting)) {
-			$type = $this->record_rows($info['file'], $method);
-			if ($type !== null) {
+		// records a model hands back itself print a false bool as the
+		// mock-up and what visitors typed as HTML (#125); on a staff page the
+		// in-page editor can't edit them or add one either
+		if ($block['keyword'] === 'render' && $ref['model'] !== 'cms' && stripos($block['inner'], '<form') === false) {
+			$admin = $this->admin_view($this->linting);
+			$type = $this->record_rows($info['file'], $method, !$admin);
+			if ($type !== null && $admin) {
 				$problems[] = self::problem('warning', $block, "{$block['raw']} shows $type records the {$ref['model']} model reads itself without cms_records::listed(), so the in-page editor can't edit them or add one. Return cms_records::listed('$type', \$rows) (for a list inside a row too), or list them with <!-- render.cms.$type('…') -->: filters from the URL (field=?param), dates (date>=today) and order=a,b cover most staff pages.");
+			} elseif ($type !== null) {
+				$problems[] = self::problem('warning', $block, "{$block['raw']} shows $type records the {$ref['model']} model reads itself without cms_records::listed(), so a false bool prints the mock-up and what visitors typed prints as HTML. Return cms_records::listed('$type', \$rows) (for a list inside a row too), or list them with <!-- render.cms.$type('…') -->.");
 			}
 		}
 	}
@@ -740,14 +754,17 @@ class raster_inspector {
 	}
 
 	// the record type a model method reads with cms_records::find() or get()
-	// and hands to the template without cms_records::listed(), or null
-	function record_rows($file, $method) {
+	// and hands to the template without cms_records::listed(), or null. With
+	// $text, rows a method makes text itself, with cms_records::for_template()
+	// or util::e(), are fine too (they print as records do, but aren't
+	// editable).
+	function record_rows($file, $method, $text = false) {
 		$source = @file_get_contents($file);
 		if ($source === false || !preg_match('/function\s+'.preg_quote($method, '/').'\s*\(/', $source, $m, PREG_OFFSET_CAPTURE)) return null;
 		$body = substr($source, $m[0][1]);
 		// up to the next method
 		if (preg_match('/\n\s*(?:(?:public|protected|private|static|final)\s+)*function\s/', $body, $next, PREG_OFFSET_CAPTURE, 1)) $body = substr($body, 0, $next[0][1]);
-		if (strpos($body, 'cms_records::listed(') !== false) return null;
+		if (strpos($body, 'cms_records::listed(') !== false || ($text && (strpos($body, 'cms_records::for_template(') !== false || strpos($body, 'util::e(') !== false))) return null;
 		if (!preg_match_all('/cms_records::(?:find|get)\(\s*[\'"]([a-z][a-z0-9]*)[\'"]/', $body, $found)) return null;
 		foreach ($found[1] as $type) {
 			if (cms_records::info($type)) return $type;
@@ -805,8 +822,7 @@ class raster_inspector {
 
 	// every raise('x') and done('x') in the models, so alerts can be checked
 	function raised_names() {
-		static $names = null;
-		if ($names !== null) return $names;
+		if (self::$raised !== null) return self::$raised;
 		$names = array();
 		foreach (array(BASE.'models', APPBASE.config::get('models_path', 'models')) as $dir) {
 			if (!is_dir($dir)) continue;
@@ -818,7 +834,7 @@ class raster_inspector {
 				// problems a check() names: $problems[] = 'sold_out'
 				preg_match_all('/\$problems\[\]\s*=\s*[\'"]([a-z0-9_]+)[\'"]/', $source, $m);
 				$names = array_merge($names, $m[1]);
-				// cms_records::submit('reservation', 'booked') redirects with ?done=booked
+				// cms_records::submit('inquiry', 'sent') redirects with ?done=sent
 				// (the type's name when there is no second argument)
 				preg_match_all('/submit\(\s*[\'"]([a-z0-9_]+)[\'"](?:\s*,\s*[\'"]([a-z0-9_]+)[\'"])?/', $source, $m, PREG_SET_ORDER);
 				foreach ($m as $call) $names[] = isset($call[2]) && $call[2] !== '' ? $call[2] : $call[1];
@@ -830,7 +846,7 @@ class raster_inspector {
 		foreach (cms_records::types() as $info) {
 			foreach ($info['types'] as $field => $type) if ($type !== 'text') $names[] = $field.'_invalid';
 		}
-		return $names = array_unique($names);
+		return self::$raised = array_unique($names);
 	}
 
 	// ##Forms
@@ -914,6 +930,16 @@ class raster_inspector {
 				$problems[] = self::problem_at('warning', $html, $alert[0][1], "No model raises '{$alert[1][0]}': call validation::get()->raise('{$alert[1][0]}') or util::done('{$alert[1][0]}') for this alert to show");
 			}
 		}
+		// forms that can turn a post away need alerts to say so
+		// (a fragment the view includes, such as a layout's header, counts)
+		$whole = $this->expand($html, $theme);
+		foreach (validation_spam::$checked_regions as $region) {
+			if (!preg_match('/<!-- '.preg_quote($region, '/').'[ (]/', $html, $m, PREG_OFFSET_CAPTURE)) continue;
+			if (strpos($whole, "print.validation.alert('try_again')") === false || strpos($whole, "print.validation.alert('slow_down')") === false) {
+				$problems[] = self::problem_at('warning', $html, $m[0][1], "$this->linting: $region can turn a post away as spam; add print.validation.alert('try_again') and print.validation.alert('slow_down') so the person knows to send it again");
+				break;
+			}
+		}
 		// models that send emails need their email views, as their
 		// requires() names them; a region in this view is a use of its
 		// model, so a draft is checked before it is written
@@ -940,6 +966,11 @@ class raster_inspector {
 		$at = strpos($html, '<!-- render.booking.manage -->');
 		if ($at !== false && $this->admin_view($this->linting)) {
 			$problems[] = self::problem_at('warning', $html, $at, "render.booking.manage is the guests' page, but config 'protected' keeps this view for staff: protect staff pages by their own names (staff, booking_item), never booking");
+		}
+		// the contact messages are for staff: the region shows visitors
+		// nothing, but the page belongs in the Admin menu, behind the login
+		if (preg_match('/<!-- render\.contact\.messages[ (]/', $html, $m, PREG_OFFSET_CAPTURE) && !$this->admin_view($this->linting)) {
+			$problems[] = self::problem_at('warning', $html, $m[0][1], "$this->linting lists contact messages but isn't protected for editors: add it to config 'protected' (config::set('protected')->to(array('staff' => 'editor')))");
 		}
 	}
 
@@ -1141,10 +1172,23 @@ class raster_inspector {
 		$themes = $themes ?: array($this->theme);
 		foreach ($themes as $theme) {
 			foreach ($this->views($theme) as $view) {
-				$problems = array_merge($problems, $this->lint_file($view, $theme));
+				$problems = array_merge($problems, $this->lint_file($view, $theme), $this->lint_address($view, $theme));
 			}
 		}
 		return array_merge($problems, $this->lint_routes(), $this->lint_events(), $this->lint_queries(), $this->lint_types(), $this->lint_api(), $this->lint_models());
+	}
+
+	// A view whose address the server refuses: the rules that keep an app's
+	// config/, models/, data/ and i18n/ private apply to the second segment
+	// of every URL, so docs/config.html is a page nobody can open (#98).
+	function lint_address($view, $theme) {
+		if (preg_match('#(^|/)_#', $view)) return array();
+		$url = '/'.(substr($view, -strlen($this->ext)) === $this->ext ? substr($view, 0, -strlen($this->ext)) : $view);
+		if ($url === '/index') $url = '/';
+		require_once BASE.'private_paths.php';
+		if (!private_paths::blocked($url)) return array();
+		return array(array('file' => self::short($this->theme_dir($theme).'/'.$view), 'line' => 1, 'column' => 1, 'severity' => 'warning',
+			'message' => "$url is refused by the server (system/private_paths.php keeps config/, models/, data/ and i18n/ private under any folder), so nobody can open this page: give the view another name"));
 	}
 
 	// A site model with a bundled model's name replaces it whole: the
@@ -1302,11 +1346,17 @@ class raster_inspector {
 	// Describes the CMS content of the theme: page fields per view and
 	// collections with their fields. Defaults are the placeholder content
 	// in the markup, which is what the CMS stores on first render.
-	// whether a view of any theme renders render.cms.<name> (partials too)
+	// whether a view of any theme renders render.cms.<name> (partials too),
+	// or a model's region that its requires() says lists the type
+	// ('lists' => array('contactmessage' => array('render.contact.messages')))
 	function listed($name) {
+		$regions = array('render.cms.'.$name);
+		$lists = controller::required('lists');
+		if (isset($lists[$name])) $regions = array_merge($regions, (array)$lists[$name]);
+		$pattern = '/<!-- (?:'.implode('|', array_map(function ($region) { return preg_quote($region, '/'); }, $regions)).')(\(| -->)/';
 		foreach (glob($this->views_dir.'/*', GLOB_ONLYDIR) ?: array() as $dir) {
 			foreach ($this->views(basename($dir)) as $view) {
-				if (preg_match('/<!-- render\.cms\.'.preg_quote($name, '/').'(\(| -->)/', file_get_contents("$dir/$view"))) return true;
+				if (preg_match($pattern, file_get_contents("$dir/$view"))) return true;
 			}
 		}
 		return false;

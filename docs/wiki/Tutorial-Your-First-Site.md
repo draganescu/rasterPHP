@@ -1,6 +1,6 @@
 # Tutorial: your first site
 
-In this tutorial you add a **Team** page to the starter site. By the end it has editable text, an editable list of people with photos and their own detail pages, data from your own PHP class, and a working contact form that sends email.
+In this tutorial you add a **Team** page to the starter site. By the end it has editable text, an editable list of people with photos and their own detail pages, data from your own PHP class, and a working contact form that emails you.
 
 You need a running site from [Getting started](Getting-Started) and an admin account. Every file below lives in `application/`.
 
@@ -182,56 +182,49 @@ Add this under the list in `team.html`:
 
 ## Step 7: a contact form
 
-A form posts back to its own page. The `render` block around it names the model method that handles it. Add to `team.html`:
+A form posts back to its own page. The `render` block around it names the model that handles it, and for a contact form Raster has one built in: `contact`. Add to `team.html`:
 
 ```html
 <h2>Write to us</h2>
 <!-- print.validation.alert('sent') --><p class="notice">Thanks, we got your message.</p><!-- /print.validation.alert('sent') -->
-<!-- render.contact.send -->
+<!-- print.validation.alert('email_invalid') --><p class="error">Check your email address.</p><!-- /print.validation.alert('email_invalid') -->
+<!-- print.validation.alert('message_invalid') --><p class="error">Write a message, up to 2000 characters.</p><!-- /print.validation.alert('message_invalid') -->
+<!-- render.contact.form -->
 <form method="post">
+  <label>Your name <input name="name"></label>
   <label>Your email <input type="email" name="email" required></label>
   <!-- render.validation.field('email') --><p class="error">Please enter your email address.</p><!-- /render.validation.field('email') -->
   <label>Message <textarea name="message" required maxlength="2000"></textarea></label>
   <!-- render.validation.field('message') --><p class="error">Please write a message (up to 2000 characters).</p><!-- /render.validation.field('message') -->
   <button>Send</button>
 </form>
-<!-- /render.contact.send -->
+<!-- /render.contact.form -->
 ```
 
-The **rules** are the ordinary HTML attributes (`required`, `type="email"`, `maxlength`). Raster checks them on the server as well, so a visitor can't get around them. The **messages** are in the template: each `validation.field` block shows only when its field breaks a rule. The `alert('sent')` block stays hidden until the model says the message was sent.
+The **rules** are the ordinary HTML attributes (`required`, `type="email"`, `maxlength`). Raster checks them on the server as well, so a visitor can't get around them. The **messages** are in the template: each `validation.field` block shows only when its field breaks a rule. The `alert('sent')` block stays hidden until the message is stored. You wrote no PHP: the form's model is the bundled `contact`, which stores every message for you and, when it looks like spam, keeps it aside.
 
-Create the model, `application/models/contact/contact.php`:
+Tell it who to email, in `application/config/the_app.php`:
 
 ```php
-<?php
-class contact {
-    function send() {
-        $v = validation::get();
-        if (!$v->submitted()) return false;                            // not sent yet: show the form as written
-        if (!$v->valid()) return template::instance()->form_state();   // show it again, with what they typed
-        mail::send_view('_email/contact', 'me@example.com', array(
-            'from' => util::post('email'),
-            'message' => util::post('message'),
-        ));
-        util::done('sent');                                            // redirect back and show the 'sent' alert
-    }
-}
+config::set('contact_staff_email')->to('me@example.com');
 ```
 
-And the email, `application/views/default/_email/contact.html`. The `<title>` becomes the subject, and `print.self.<name>` prints the values the model passed in:
+And write the email staff get, `application/views/default/_email/contact_received.html`. The `<title>` becomes the subject, and `print.self.<name>` prints the message's fields:
 
 ```html
 <!doctype html>
 <html><head><meta charset="utf-8"><title>New message from the website</title></head>
 <body>
-  <p>From: <!-- print.self.from /--></p>
+  <p>From: <!-- print.self.name /--> <!-- print.self.email /--></p>
   <p><!-- print.self.message /--></p>
 </body></html>
 ```
 
-Send the form empty: the two error messages appear, and whatever you typed is kept. Fill it in and send it: the page reloads with `?done=sent` and the thank-you message shows.
+Replying to that email answers the visitor: their address is in `Reply-To`, and nothing is ever mailed to it by the site. Send the form empty: the error messages appear, and whatever you typed is kept. Fill it in and send it: the page reloads with `?done=sent` and the thank-you message shows. [Contact forms](Contact-Forms) shows how staff read the messages on a page of their own.
 
 In development, emails are not really sent. Each one is saved as a `.eml` file in `application/data/mail/`, which you can open with any mail program. [Sending email](Sending-Email) explains how to send real email.
+
+**Writing a form of your own.** When no bundled model fits, a form is a model method: `submitted()`, `valid()`, do the work, then `util::done('sent')`, as in the feedback form of [Forms and validation](Forms-and-Validation). Ask `suspect()` before the work if the form is public.
 
 ## Step 8: add the page to the navigation
 
@@ -245,8 +238,10 @@ array('label' => 'Team', 'url' => '/team'),
 
 ```sh
 php bin/raster lint     # no errors expected
-php bin/raster schema   # shows the new fields: title, heading, and the team collection
+php bin/raster schema   # shows the new fields: title, heading, the team collection, and contactmessage
 ```
+
+`contactmessage` is where the contact form's messages are kept. `lint` shows a warning about it until there is a staff page that lists the messages: nobody can read them otherwise. [Contact forms](Contact-Forms#the-staff-page) shows how to make one.
 
 Try breaking something on purpose. Change `print.office.today` to `print.office.todya` in both tags and run `lint`:
 

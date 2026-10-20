@@ -83,7 +83,7 @@ Pass options as one string, in the style of a URL query:
 | `order=<field>` | by that field, A to Z |
 | `order=-<field>` | by that field, Z to A |
 | `order=date,time` | by several fields, each may have its `-` |
-| `limit=<n>` | at most n items (otherwise the page size, see below) |
+| `limit=<n>` | at most n items, the same ones on every page (otherwise the page size, see below) |
 | `<field>=<value>` | only items whose field equals the value |
 | `<field>=?<name>` | equals the URL's `?<name>=`; left out when the URL has none or it is empty |
 | `<field>>=<value>` | also `>`, `<`, `<=`, and `!=` (which keeps items where the field is empty) |
@@ -115,7 +115,7 @@ Each collection gets URLs without any routing work:
 | URL | Shows |
 |---|---|
 | `/news/news_item/our-new-office` | one item, by its slug |
-| `/news/news_item/3` | one item, by its id |
+| `/news/news_item/3` | one item, by its id (unless an item's slug is `3`, as for one titled "3") |
 | `/news/news_page/2` | page 2 of the list |
 | `/news/news_items/tag/php` | only the items whose `tag` field is `php` |
 

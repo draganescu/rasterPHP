@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <!-- dry._layout.head /-->
+  <title>The salon</title>
+</head>
+<body>
+  <!-- dry._layout.header /-->
+  <main class="narrow">
+    <h1>The salon upstairs</h1>
+    <p>Ana and Mihai cut hair upstairs, one guest at a time. A cut takes 30 minutes, a colour 90 (Ana only). Pick who, what and a day, then a time.</p>
+    <!-- print.if.static --><p>Call us on <a href="tel:+40721000000">+40 721 000 000</a> to book.</p><!-- /print.if.static -->
+    <!-- print.if.live -->
+    <!-- print.validation.alert('booked') --><p class="notice">Thank you, we have your request. We emailed you a link to change or cancel it.</p><!-- /print.validation.alert('booked') -->
+    <!-- print.validation.alert('fully_booked') --><p class="error">That time was just taken. Pick another.</p><!-- /print.validation.alert('fully_booked') -->
+    <!-- print.validation.alert('service_unavailable') --><p class="error">Pick a service the stylist offers: only Ana does colour.</p><!-- /print.validation.alert('service_unavailable') -->
+    <!-- print.validation.alert('resource_invalid') --><p class="error">Pick a stylist.</p><!-- /print.validation.alert('resource_invalid') -->
+    <!-- print.validation.alert('resource_inactive') --><p class="error">That stylist isn't taking bookings now.</p><!-- /print.validation.alert('resource_inactive') -->
+    <!-- print.validation.alert('not_a_slot') --><p class="error">Pick one of the times shown.</p><!-- /print.validation.alert('not_a_slot') -->
+    <!-- print.validation.alert('too_soon') --><p class="error">That is too soon to book online. Call us.</p><!-- /print.validation.alert('too_soon') -->
+    <!-- print.validation.alert('too_far') --><p class="error">We take bookings up to two months ahead.</p><!-- /print.validation.alert('too_far') -->
+    <!-- print.validation.alert('already_booked') --><p class="notice">You have already booked that time: check your email.</p><!-- /print.validation.alert('already_booked') -->
+    <!-- print.validation.alert('not_open') --><p class="error">We aren't taking bookings online yet.</p><!-- /print.validation.alert('not_open') -->
+    <!-- print.validation.alert('name_invalid') --><p class="error">Tell us your name.</p><!-- /print.validation.alert('name_invalid') -->
+    <!-- print.validation.alert('email_invalid') --><p class="error">We need a valid email to confirm.</p><!-- /print.validation.alert('email_invalid') -->
+    <form method="get" class="filters">
+      <label>With
+        <select name="resource"><option value="">Pick a stylist</option><!-- render.booking.resources('service=?service') --><!-- print.@value.slug --><option value="ana"><!-- print.name -->Ana<!-- /print.name --></option><!-- /print.@value.slug --><!-- /render.booking.resources('service=?service') --></select>
+      </label>
+      <label>For
+        <select name="service"><option value="">Pick a service</option><!-- render.booking.services('resource=?resource') --><!-- print.@value.slug --><option value="cut"><!-- print.name -->Cut<!-- /print.name --> (<!-- print.minutes -->30<!-- /print.minutes --> minutes)</option><!-- /print.@value.slug --><!-- /render.booking.services('resource=?resource') --></select>
+      </label>
+      <label>Day <input type="date" name="date"></label>
+      <button>Show times</button>
+    </form>
+    <form method="get" class="days">
+      <p>Days with a free time:</p>
+      <input type="hidden" name="resource">
+      <input type="hidden" name="service">
+      <!-- render.booking.days('resource=?resource&service=?service&limit=7') -->
+      <!-- print.@value.date --><button class="day" name="date" value="2026-10-20"><!-- print.date -->2026-10-20<!-- /print.date -->, <!-- print.slots_free -->12<!-- /print.slots_free --> times</button><!-- /print.@value.date -->
+      <!-- /render.booking.days('resource=?resource&service=?service&limit=7') -->
+    </form>
+    <!-- render.booking.form -->
+    <form method="post" class="stack">
+      <fieldset class="times"><legend>Time</legend>
+        <!-- render.booking.slots('date=?date&resource=?resource&service=?service') -->
+        <!-- print.+class.state --><label class="slot "><!-- print.@value.time --><input type="radio" name="time" value="10:00"><!-- /print.@value.time --> <!-- print.time -->10:00<!-- /print.time --> to <!-- print.ends -->10:30<!-- /print.ends --></label><!-- /print.+class.state -->
+        <!-- /render.booking.slots('date=?date&resource=?resource&service=?service') -->
+        <p class="hint">No times here? Pick a stylist, a service and a day above.</p>
+      </fieldset>
+      <label>Name <input type="text" name="name" required maxlength="80"></label>
+      <!-- render.validation.field('name') --><p class="error">Tell us your name.</p><!-- /render.validation.field('name') -->
+      <label>Email <input type="email" name="email" required></label>
+      <!-- render.validation.field('email') --><p class="error">We need a valid email to confirm.</p><!-- /render.validation.field('email') -->
+      <label>Phone <input type="tel" name="phone"></label>
+      <label>Notes <textarea name="notes" maxlength="300"></textarea></label>
+      <button>Book</button>
+    </form>
+    <!-- /render.booking.form -->
+    <!-- /print.if.live -->
+  </main>
+  <!-- dry._layout.footer /-->
+</body>
+</html>

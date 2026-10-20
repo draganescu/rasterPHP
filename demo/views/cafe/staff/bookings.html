@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <!-- dry._layout.head /-->
+  <title>Every booking</title>
+</head>
+<body>
+  <!-- dry._layout.header /-->
+  <main class="">
+    <h1>Every booking</h1>
+    <p>Every booking, by date, fifty to a page. Bookings are private, so only staff see anything here. <a href="staff.html">Back to staff</a></p>
+    <form method="get" class="filters">
+      <label>Status <select name="status"><option value="">Any</option><option value="requested">Requested</option><option value="confirmed">Confirmed</option><option value="declined">Declined</option><option value="cancelled">Cancelled</option></select></label>
+      <button>Show</button>
+    </form>
+    <table class="list"><tbody>
+      <!-- render.cms.booking('status=?status&order=date,time') -->
+      <tr class="booking"><td><!-- print.name -->Ana<!-- /print.name --></td><td><!-- print.date -->2026-10-20<!-- /print.date --> <!-- print.time -->19:00<!-- /print.time --></td><td><!-- print.resource -->dining-room<!-- /print.resource --> <!-- print.service --><!-- /print.service --></td><td><!-- print.people -->2<!-- /print.people --> people</td><td><!-- print.phone -->+40 721 000 000<!-- /print.phone --></td><td><!-- print.notes -->Window seat<!-- /print.notes --></td><td class="status"><!-- print.status -->requested<!-- /print.status --></td><td><!-- print.@href.raster_detail_link --><a href="booking/booking_item/1">Open</a><!-- /print.@href.raster_detail_link --></td></tr>
+      <!-- /render.cms.booking('status=?status&order=date,time') -->
+    </tbody></table>
+    <!-- render.pagination.links('cms.booking', 'status=?status') -->
+    <nav class="pager">
+      <!-- print.+class.prev_state --><!-- print.@href.prev_url --><a class="prev" href="#">Earlier</a><!-- /print.@href.prev_url --><!-- /print.+class.prev_state -->
+      page <!-- print.current -->1<!-- /print.current --> of <!-- print.total -->1<!-- /print.total -->
+      <!-- print.+class.next_state --><!-- print.@href.next_url --><a class="next" href="#">Later</a><!-- /print.@href.next_url --><!-- /print.+class.next_state -->
+    </nav>
+    <!-- /render.pagination.links('cms.booking', 'status=?status') -->
+  </main>
+  <!-- dry._layout.footer /-->
+</body>
+</html>

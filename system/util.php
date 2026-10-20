@@ -4,6 +4,53 @@
 // providing a view wrappers for often uses situations
 class util {
 
+	// the site's key for signing things (the form stamp): RASTER_SECRET, else
+	// data/secret, made by the first web request that needs it. '' when there
+	// is none to be had.
+	static $secret = null;
+	static function secret() {
+		if (self::$secret !== null) return self::$secret;
+		$env = getenv('RASTER_SECRET');
+		if ($env !== false && $env !== '') return self::$secret = $env;
+		$file = APPBASE.'data/secret';
+		// a command (raster render, a script) would make the file as its own
+		// user, mode 0600, and PHP-FPM, running as another, could never read
+		// it: the stamp would be off for good. So the command line signs with
+		// a key of its own, for this process only, and the site makes the file.
+		if (PHP_SAPI === 'cli' && !(is_file($file) && is_readable($file))) return self::$secret = bin2hex(random_bytes(32));
+		if (!is_file($file)) {
+			if (!is_dir(dirname($file))) @mkdir(dirname($file), 0775, true);
+			// 'x' fails when the file exists, so two first requests can't
+			// write different keys: the loser reads the winner's
+			$handle = @fopen($file, 'x');
+			if ($handle) {
+				// private before there is anything in it
+				if (!@chmod($file, 0600)) {
+					fclose($handle);
+					@unlink($file);
+					log::warning("data/secret can't be made private, so there is no key");
+					return self::$secret = '';
+				}
+				$key = bin2hex(random_bytes(32));
+				$written = fwrite($handle, $key);
+				fclose($handle);
+				if ($written !== 64) @unlink($file);
+			}
+		}
+		if (is_file($file) && !is_readable($file)) {
+			log::warning("data/secret can't be read by this user (made by another, such as a command?), so there is no key; delete it and the site makes a new one, or set RASTER_SECRET");
+			return self::$secret = '';
+		}
+		$key = trim((string)@file_get_contents($file));
+		// an empty or partial file (a crash, a full disk) would switch the
+		// checks off for good, so it is not a key
+		if (!preg_match('/^[0-9a-f]{64}$/', $key)) {
+			if (is_file($file)) log::warning('data/secret is not a valid key; delete it and a new one is made');
+			return self::$secret = '';
+		}
+		return self::$secret = $key;
+	}
+
 	// get the value from a key/value set passed in the url
 	static function param($name, $v = false)
 	{
@@ -93,7 +140,7 @@ class util {
 			cms_records::$changed = true;
 			return;
 		}
-		raster_cache::bump();
+		if (raster_cache::bump() === false) log::warning("page cache: can't write ".raster_cache::dir().'version, so visitors still get the pages cached before this change');
 		event::dispatch('content_changed');
 	}
 
@@ -205,7 +252,9 @@ class raster_cache {
 	static function cacheable() {
 		if (self::$cacheable !== null) return self::$cacheable;
 		$uri = (string)config::get('uri_string');
-		$ok = self::enabled()
+		// `raster render` (and MCP render_url) always makes the page afresh,
+		// and keeps no copy of it
+		$ok = self::enabled() && !defined('RASTER_RENDER')
 			&& isset($_SERVER['REQUEST_METHOD']) && in_array($_SERVER['REQUEST_METHOD'], array('GET', 'HEAD'))
 			&& !isset($_COOKIE[session_name()])
 			&& !preg_match('#^/(api|mcp|login)(/|$)#', $uri);
@@ -231,11 +280,14 @@ class raster_cache {
 	}
 
 	// writes a file whole, under a temporary name it then takes: whoever
-	// reads it gets the old file or the new one, never part of one
+	// reads it gets the old file or the new one, never part of one. Returns
+	// whether it wrote.
 	static function write($file, $content) {
 		if (!is_dir(self::dir())) @mkdir(self::dir(), 0775, true);
 		$temporary = $file.'.'.bin2hex(random_bytes(6)).'.tmp';
-		if (@file_put_contents($temporary, $content) === false || !@rename($temporary, $file)) @unlink($temporary);
+		if (@file_put_contents($temporary, $content) !== false && @rename($temporary, $file)) return true;
+		@unlink($temporary);
+		return false;
 	}
 
 	// content changed: a new version, and the pages cached under the old one
@@ -243,42 +295,75 @@ class raster_cache {
 	// one an hour old was left by a request that died before it was done.
 	// The version is random, not counted, so it is never read to make the
 	// next one and an old one never comes back. Returns how many pages were
-	// deleted.
+	// deleted, or false when the version can't be written (the cache belongs
+	// to another user): the cached pages are then still served.
 	static function bump() {
-		self::write(self::dir().'version', bin2hex(random_bytes(8)));
+		$written = self::write(self::dir().'version', bin2hex(random_bytes(8)));
 		$removed = 0;
 		foreach (glob(self::dir().'*') ?: array() as $file) {
 			if (preg_match('/^[0-9a-f]{40}$/', basename($file)) && @unlink($file)) $removed++;
 			elseif (substr($file, -4) === '.tmp' && @filemtime($file) < time() - 3600) @unlink($file);
 		}
-		return $removed;
+		return $written ? $removed : false;
 	}
 
 	// throws every cached page away: for changes Raster can't see, such as
-	// views, models or the database edited directly. Returns the new version
-	// and how many cached pages were deleted.
+	// views, models or the database edited directly. Returns the new version,
+	// how many cached pages were deleted and an error when it could not.
 	static function clear() {
 		// and what controller::models() keeps of the models and views
 		@unlink(self::dir().'models.json');
 		$removed = self::bump();
+		if ($removed === false) {
+			return array('version' => self::version(), 'removed' => 0, 'error' => "can't write ".self::dir().'version, so the page cache was not cleared.'
+				.' Run this as the user the web server runs as, or let this user write to that folder');
+		}
 		return array('version' => self::version(), 'removed' => $removed);
 	}
 
-	// an item scheduled for later: the cache is thrown away at that time
+	// an item scheduled for later: the cache is thrown away at that time.
+	// data/cache/next keeps every time still to come, one per line.
 	static function schedule($timestamp) {
 		if ($timestamp <= time()) return;
-		$file = self::dir().'next';
-		$next = is_file($file) ? (int)file_get_contents($file) : 0;
-		if ($next === 0 || $next <= time() || $timestamp < $next) self::write($file, (string)$timestamp);
+		self::reschedule(function ($times) use ($timestamp) {
+			$times[] = (int)$timestamp;
+			return $times;
+		});
 	}
 
-	// a scheduled item's time has come: that's a content change too
+	// a scheduled item's time has come: that's a content change too. The
+	// cache is thrown away once however many came, and the later times stay.
 	static function publish_due() {
-		$next = self::dir().'next';
-		if (is_file($next) && (int)file_get_contents($next) <= time()) {
-			@unlink($next);
-			self::bump();
+		$file = self::dir().'next';
+		$times = is_file($file) ? array_map('intval', file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES)) : array();
+		if (!$times || min($times) > time()) return;
+		$due = false;
+		self::reschedule(function ($times) use (&$due) {
+			$later = array_filter($times, function ($time) { return $time > time(); });
+			$due = count($later) < count($times);
+			return $later;
+		});
+		if ($due && self::bump() === false) log::warning("page cache: can't write ".self::dir().'version, so a scheduled item waits for page_cache_ttl');
+	}
+
+	// changes the scheduled times under a lock, so a time scheduled while
+	// another request publishes the ones due is never lost
+	static function reschedule($change) {
+		if (!is_dir(self::dir())) @mkdir(self::dir(), 0775, true);
+		$handle = @fopen(self::dir().'next', 'c+');
+		if (!$handle) {
+			log::warning("page cache: can't write ".self::dir().'next, so scheduled items wait for page_cache_ttl');
+			return;
 		}
+		flock($handle, LOCK_EX);
+		$times = array_map('intval', array_filter(explode("\n", (string)stream_get_contents($handle))));
+		$times = array_unique($change($times));
+		sort($times);
+		ftruncate($handle, 0);
+		rewind($handle);
+		fwrite($handle, $times ? implode("\n", $times)."\n" : '');
+		flock($handle, LOCK_UN);
+		fclose($handle);
 	}
 
 	static function serve() {
@@ -297,10 +382,31 @@ class raster_cache {
 		$ttl = (int)config::get('page_cache_ttl', 3600);
 		if (!$meta || $meta['v'] !== self::$version || time() - $meta['t'] > $ttl) { fclose($handle); return; }
 		header('Content-Type: '.$meta['type']);
+		// the headers the page was made with, a name given twice sent twice
+		$sent = array();
+		foreach (isset($meta['headers']) ? (array)$meta['headers'] : array() as $header) {
+			$name = strtolower(strtok($header, ':'));
+			header($header, !isset($sent[$name]));
+			$sent[$name] = true;
+		}
+		header('Last-Modified: '.self::http_date($meta['t']));
 		header('X-Raster-Cache: hit');
-		fpassthru($handle);
+		// the browser's copy is as new as this one
+		$since = isset($_SERVER['HTTP_IF_MODIFIED_SINCE']) ? strtotime((string)$_SERVER['HTTP_IF_MODIFIED_SINCE']) : false;
+		if ($since !== false && $since >= $meta['t']) http_response_code(304);
+		elseif (!empty($meta['ts'])) {
+			// the forms on this page carry a marker where the stamp goes:
+			// one fresh stamp for all of them, so "too fast" works on a cached page
+			echo str_replace('{{raster:ts}}', validation_spam::stamp(), (string)stream_get_contents($handle));
+		}
+		else fpassthru($handle);
 		fclose($handle);
 		exit;
+	}
+
+	// a time as HTTP writes it, in GMT whatever the site's time zone
+	static function http_date($time) {
+		return gmdate('D, d M Y H:i:s', (int)$time).' GMT';
 	}
 
 	// Is the view file spelled as the request found it? Each name under the
@@ -324,15 +430,26 @@ class raster_cache {
 		// content changed while the page was made: it may show the old content
 		if (self::$version === null || self::$version !== self::version()) return;
 		$type = 'text/html; charset=utf-8';
+		// what models and listeners set (X-Robots-Tag, a CORS header) goes
+		// out again with every copy; PHP's own X-Powered-By it sends itself
+		$headers = array();
 		foreach (headers_list() as $header) {
-			if (stripos($header, 'Set-Cookie:') === 0) return;
-			if (stripos($header, 'Content-Type:') === 0) $type = trim(substr($header, 13));
+			$name = strtolower(trim(strtok($header, ':')));
+			if ($name === 'set-cookie') return;
+			if ($name === 'content-type') $type = trim(substr($header, 13));
+			elseif (!in_array($name, array('x-powered-by', 'last-modified', 'x-raster-cache'), true)) $headers[] = $header;
 		}
 		// /ABOUT finds about.html on a disk that ignores case: it answers,
 		// but every spelling would be a copy of its own
 		if (!self::spelled_as_on_disk(controller::instance()->current_route)) return;
-		$meta = json_encode(array('v' => self::$version, 't' => time(), 'type' => $type));
-		self::write(self::dir().self::key(), $meta."\n".$output);
-		if (!headers_sent()) header('X-Raster-Cache: miss');
+		$time = time();
+		$meta = array('v' => self::$version, 't' => $time, 'type' => $type, 'headers' => $headers);
+		// the form stamps are not kept: each is a marker serve() fills in
+		$output = preg_replace('/(name="raster_ts" value=")[^"]*"/', '$1{{raster:ts}}"', $output, -1, $stamps);
+		if ($stamps) $meta['ts'] = true;
+		$meta = json_encode($meta);
+		if (!self::write(self::dir().self::key(), $meta."\n".$output) || headers_sent()) return;
+		header('Last-Modified: '.self::http_date($time));
+		header('X-Raster-Cache: miss');
 	}
 }

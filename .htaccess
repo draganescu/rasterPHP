@@ -3,6 +3,10 @@
 
 RewriteEngine on
 
+# PHP-FPM gets the Authorization header only this way (MCP over HTTP needs it)
+RewriteCond %{HTTP:Authorization} .
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
 # Never serve code, configuration, data or tooling directly
 # dotfiles and dot folders: .git, .env, .htaccess, .github (not .well-known)
 RewriteRule (^|/)\.(?!well-known(/|$)) - [F,L,NC]
@@ -15,7 +19,18 @@ RewriteRule ^[^/]+/views/.*\.(html|rss|atom|xml|json|txt)$ - [F,L,NC]
 # code, databases, dumps and notes, wherever they are (index.php excepted)
 RewriteRule ^(?!index\.php$).*\.(php|phar|sqlite|sql|md|lock|ini|bak)$ - [F,L,NC]
 # SQLite's journal, write-ahead log and shared memory files
-RewriteRule -(journal|wal|shm)$ - [F,L,NC]
+RewriteRule \.sqlite-(journal|wal|shm)$ - [F,L,NC]
+
+# theme files: kept a year with ?v= (Raster adds it, a new one when the
+# file changes), checked each time without
+<IfModule mod_headers.c>
+<If "-f %{REQUEST_FILENAME} && %{REQUEST_URI} =~ m#/views/# && %{QUERY_STRING} =~ /(^|&)v=/">
+Header set Cache-Control "public, max-age=31536000, immutable"
+</If>
+<ElseIf "-f %{REQUEST_FILENAME} && %{REQUEST_URI} =~ m#/views/#">
+Header set Cache-Control "no-cache"
+</ElseIf>
+</IfModule>
 
 # everything else is the site
 RewriteCond %{REQUEST_FILENAME} !-d

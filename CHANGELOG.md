@@ -3,6 +3,152 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.29
+
+Nothing you must do; a site's own form model keeps holding over `spam_per_ip` until it passes the reasons through `validation_spam::holds()` (below). **Real visitors are no longer turned away when many of them share one address** (#208). Before, on shared hosting or behind a proxy every post could come from one address, and after five posts of a form in an hour everyone was held with `slow_down`, or kept as spam on the contact form, without the owner knowing.
+
+**A private address is a proxy by default.** With `trusted_proxies` not set, a post from a private, loopback or link-local address (`10/8`, `172.16/12`, `192.168/16`, `127/8`, `169.254/16`, `::1`, `fc00::/7` with Fly's `fdaa::`, `fe80::/10`) is counted by the visitor's address in `client_ip_header` (`X-Forwarded-For`). Nobody on the open internet can post from such an address, so something on the same network forwarded the post. This holds only when the proxy writes the header itself, setting or overwriting `client_ip_header`; something that only forwards the connection (Docker's port proxy, a NAT port-forward, nginx in front of Apache without `proxy_set_header X-Forwarded-For`) passes on the visitor's own header, which a bot can change on every post. Behind one of those, set `trusted_proxies` to `array()`. raster-builder sites, Fly, and most hosts with nginx or LiteSpeed in front count real visitors with no settings. Setting `trusted_proxies` trusts only what it lists, as before; `array()` trusts nobody.
+
+**Too many posts from one IP flag a post, they don't hold it.** `too_many_from_ip` is still a reason, but the newsletter, sign-up, booking and record forms take the post, and forgot still mails. The contact form still keeps such a message as spam. `spam_ip_blocks` true (a new setting, false by default) holds them back as before. The per-email limit still holds. A site's own form model should pass the reasons through `validation_spam::holds()`: `if ($reasons = validation_spam::holds($v->suspect())) return $v->hold($reasons);`. One that calls `hold()` on `suspect()`'s answer directly still holds back over `spam_per_ip`.
+
+**`doctor` says when many people seem to share one address.** When one IP sends one form more than 5 different emails in an hour, `doctor` warns in production: "Many people seem to share one address. If the site is behind Cloudflare or another proxy, set `trusted_proxies` and `client_ip_header`." It can also be one sender trying many addresses, a bot rather than a crowd. It replaces the warning about posts from a private address, which the new default makes moot. Cloudflare's addresses are public, so a site behind it still sets `trusted_proxies` to Cloudflare's ranges and `client_ip_header` to `CF-Connecting-IP`.
+
+## 2.2.28
+
+Nothing for sites to do. This release carries 2.2.25, 2.2.26 and 2.2.27: their release runs stopped on the in-page editor's browser test, which posted a booking without the form's time stamp (2.2.23), so 2.2.25 turned it away. The test now sends a stamp, as a browser does. Nothing in the framework changed.
+
+## 2.2.27
+
+Nothing for sites to do. **The café and the docs move onto the contact model.** The demo café's contact form is `render.contact.form` now (its own `cafe::contact()` is gone), with `_email/contact_received`, `contact_staff_email` and a Messages section on `/staff`: new, spam and done. AGENTS.md and the wiki teach a `feedback` form (a rating and a comment, stored, nothing mailed) in place of the old `contact` model, and a new wiki page, Contact forms, covers the bundled one. The Forms, Static export, Tutorial, Security and Settings pages say how the stamp, the limits and the other spam checks work. #168 Phase 1.5 is done.
+
+**A held post shows its message once.** `lint` now counts the `try_again` and `slow_down` alerts in the fragments a view includes, so they can live once in a layout's `res.header` instead of on each page. The demo café and the starter theme do that; before, a page that also had its own pair showed the message twice. If your layout's footer has the pair and a page has it too, keep one: the top of the page is the best place.
+
+**A long non-ASCII name in a mail header is folded.** The encoded words of a name in `From`, `To` or `Reply-To` are joined with a folding break, so 200 characters of emoji no longer make a header line over 998 characters. A name that fits one word is sent as before.
+
+## 2.2.26
+
+Nothing for sites to do. **A bundled contact model.** `render.contact.form` stores every message as a private `contactmessage` record and emails staff about it after the answer (`_email/contact_received`, to `contact_staff_email`, else the sender), with `Reply-To` the visitor. Nothing is mailed to the visitor. A message that looks like spam is kept with status `spam` and its reasons, nobody is emailed, and the visitor is thanked all the same. A newline in the name, email, phone or subject is refused, so nothing a visitor types can add a mail header. A double click stores one message. Spam older than `contact_spam_days` (30) is deleted as new messages come. Staff list the messages with `render.contact.messages` (done, spam and not spam are its buttons) and count them with `print.contact.count`, on a page protected for editors; `lint` warns when it isn't. Events: `contact.received` and `contact.flagged`. Settings: `contact_staff_email`, `contact_staff_page`, `contact_max_length`, `contact_spam_days`. AGENTS.md has the steps and a worked staff page.
+
+**Behind a proxy, set `trusted_proxies` before using it** (see 2.2.25). With `trusted_proxies` empty the whole site shares one count, so after five messages in an hour every visitor's message is kept as spam (`too_many_from_ip`) and staff get no email about it. They see it under spam on the staff page.
+
+**An address that is more than an address is refused.** PHP's email filter takes `"x>,evil@evil.test,<y"@x.com`; the contact model refuses, as `email_invalid`, an email with whitespace, a quoted local part, any of `" ( ) , : ; < > [ ] \` or a second `@`, so nothing a visitor types can put another address in `Reply-To`.
+
+**A site with its own `contact` model keeps it.** Its `render.contact.send` calls its own class and nothing of the bundled model loads; `lint` says the bundled one is hidden. To move: rename your model (or delete it once its messages are elsewhere), put `render.contact.form` around your form with the fields `name email phone subject message`, write `_email/contact_received.html` from your old email, add the alerts (`sent`, `email_invalid`, `message_invalid`, …), and make the staff page from AGENTS.md.
+
+**A record's slug comes from what `fill()` works out too.** A new record whose model fills its title gets its slug from that title, not from the fields the form sent. A name that isn't plain ASCII in `From`, `To` or a `Reply-To` passed to `mail::send_view()` is now sent encoded whole (`=?UTF-8?B?…?= <a@b.test>`), so no part of it can be read as another address; plain ASCII names are sent as before.
+
+## 2.2.25
+
+The newsletter sign-up, the sign-up and forgot-password forms, the booking form and every `cms_records::submit` form (a record type with `create` `visitor` or `member`) now turn away posts that look like spam, using the checks from 2.2.24. A suspect post gets the form again with what was typed and the alert `try_again` (no fresh stamp, or one forged or too young) or `slow_down` (too many posts from one IP or address in the hour). Nothing is stored or mailed. Forgot answers `reset_sent` as for an unknown address when the limits are passed, and mails nothing. Editors are never held. A record type can say `'spam' => false` to run its own checks.
+
+**Behind a proxy (a load balancer, Cloudflare, a host such as Fly), set `trusted_proxies` and `client_ip_header` before updating.** With `trusted_proxies` empty every post seems to come from the proxy, so the whole site shares one count: after five posts in an hour, forgot-password answers `reset_sent` and sends no email, and the sign-up, newsletter, booking and record forms answer `slow_down` to everyone, for the rest of the hour. `doctor` says when posts come from a private address. On a host that runs the site on several machines, also set `RASTER_SECRET` to one value on all of them, or a form shown by one machine fails its stamp on another (`try_again`).
+
+**To do:** add `print.validation.alert('try_again')` and `print.validation.alert('slow_down')` to pages with these forms, in your words; `php bin/raster lint` names the pages. A script that posts to your forms without fetching them first now gets `try_again`.
+
+## 2.2.24
+
+On a frozen (production) database, run `php bin/raster schema --apply` once after updating: it makes the two new tables, `formhit` and `formsalt`. Until then `doctor` reports that the database and the templates differ, and the limits pass. A form model can call `validation::get()->suspect()` after `valid()` to ask whether a post looks like spam: it checks the form's stamp (sent too fast, forged, missing or replayed), counts posts per IP and per address for each form, and counts links and blocked words. `$v->hold($reasons)` shows the form again with what was typed and the alert `try_again`, or `slow_down` for a limit. No bundled form asks yet; that comes next. Editors are never flagged, and a check that can't run (no key, no table) passes and logs a warning. Behind a proxy, set `trusted_proxies` (doctor says when).
+
+**No raw IP is stored.** Counts are hashed with a salt made each day, and the salt goes with its counts at midnight. They live in the two new tables, which a fluid database makes on first use.
+
+**Settings:** `spam_min_seconds` (3), `spam_max_age` (86400), `spam_per_ip` (5), `spam_per_email` (3), `spam_max_links` (2), `spam_blocklist`, `trusted_proxies` and `client_ip_header` (`X-Forwarded-For`). `describe` lists the ones a site sets.
+
+`suspect(array())` runs no text checks at all, the blocklist on the email's domain included, so a form that answers `try_again` can't refuse a blocked address over and over, a message that could never help; pass the fields to check (`suspect(array('message'))`) to have them. Behind a trusted proxy, an entry of the header with a port or in brackets (`1.2.3.4:5678`, `[2001:db8::1]:443`) counts as its address.
+
+**doctor** warns when the user running it can't read `data/secret`, or it isn't a key: if the web server can't read it either, the stamp is off. Delete it and let the site make it again, or set `RASTER_SECRET`. doctor runs as you, so run it as the web server's user to be sure. It also warns in production when posts come from a private address while `trusted_proxies` is empty.
+
+## 2.2.23
+
+Nothing for most sites to do. Every post form that has a render block around it now gets a hidden `raster_ts` field: the time the form was shown, signed with the site's key. Nothing checks it yet; the spam checks that read it come next. The key is `RASTER_SECRET` when set, else the first web request that needs one makes `data/secret` (make sure the web server can write to `data/`, as for the SQLite file and the cache). A command (`raster render`, a script) never makes the file, since PHP-FPM might not be able to read one made by another user; with no file it can read, it signs with a key of its own for that process only. Emails, static exports and forms with no render block carry no stamp. The page cache keeps a marker in the stamp's place and writes a fresh stamp into the page on every hit, so cached forms stay fresh too.
+
+**A site model that reads `$_POST` whole:** one that left out Raster's own fields by the old list `raster_form`, `raster_hp`, `csrf` now also gets `raster_ts`. Use `template::$internal_fields` instead of a list of your own, so a field Raster adds later is left out too.
+
+## 2.2.22
+
+Nothing for sites to do. `raster update` brings the new `.htaccess`; behind nginx or Caddy, add the theme file lines from `php bin/raster deploy --config=nginx|caddy`.
+
+**A changed stylesheet shows right after a publish.** Relative links to theme files (`href="style.css"`, `src`, `srcset`, `poster`) get `?v=` and a version made from the file's time and size, so the URL changes when the file does. The `.htaccess` and the nginx and Caddy configs keep a theme file with a version for a year, and have browsers check one without it each time. Pages are sent with `Cache-Control: no-cache`, so a browser asks again each time and gets a 304 when nothing changed. `php -S` sends the same headers. `asset_versions => false` leaves the URLs as written.
+
+## 2.2.21
+
+A list that pairs `limit=N` with a pager now shows the same N rows on every page: set `<name>_page_size` instead. A site's own `reservation` or `booking` model keeps working.
+
+**The demo and the docs use the bundled booking model.** The demo café takes table bookings on `/visit` and a salon's appointments on `/salon`. Guests manage their booking on `/booking`, and the staff pages are made from list options and the booking regions. `php demo/seed.php` sets up what can be booked. AGENTS.md has the steps to take bookings and a worked staff page. Its Records and Events examples, and the wiki's, are now a catering request type rather than a booking model of your own. The wiki has a new Bookings page.
+
+**The pager counts what the list shows (#88).** `pagination.links('cms.<name>', '…')` now counts drafts for editors, `owner=me`, and a private type's records for whoever may read them. Visitors get no pager over private records. A list with `limit=3` shows the same three on every page, so it no longer moves with a paged list beside it, and it has no pager.
+
+**lint warns about raw `find()` rows on any page (#125).** Rows a model hands back from `cms_records::find()` without `cms_records::listed()` print a `false` bool as the mock-up and visitor text unescaped, on any page. AGENTS.md now says so. Rows a model makes text itself (`cms_records::for_template()`, `util::e()`) aren't warned about outside admin pages.
+
+**The booking events are listed by name.** `booking.confirmed`, `booking.declined` and `booking.cancelled` now show in the vocabulary, and lint checks bindings to them.
+
+## 2.2.20
+
+- MCP: a malformed message gets a JSON-RPC error (`-32600`) instead of ending the stdio server, and a batch of non-objects over HTTP no longer causes a PHP error. A batch over stdio gets a list back. An unknown tool is a `-32602` error. `serverInfo.version` is Raster's version. (#134)
+- MCP over HTTP works on Apache with PHP-FPM: the `.htaccess` passes the `Authorization` header on, `/mcp` also reads `REDIRECT_HTTP_AUTHORIZATION`, and `doctor` reports a `.htaccess` without the line. `raster update` brings the new `.htaccess`. If you edited yours, add the two lines from `php bin/raster deploy --config=apache`. (#106)
+- `render_url` works over HTTP under PHP-FPM, passes the whole environment to the page, and no longer hangs on a page that logs a lot. (#107)
+- The stdio MCP server sees fields, collections, methods and record types written during the session. After a PHP file it has loaded changes (a model's `api()`, `types()` or `listens()`), a fresh process answers each later call. (#105)
+
+## 2.2.19
+
+Nothing for sites to do.
+
+**`raster render` shows what visitors get.** It never reads or writes the page cache, also in production, so a view edited by hand shows at once. A protected page answers with its 303 to the login page: `Location: …` and `HTTP 303` go to stderr, no page is printed, and the exit code is 1. MCP `render_url` gives status 303. `--as` still renders the page as that person.
+
+**Every scheduled item clears the page cache.** Before, only the earliest did, and later ones were missing from cached pages until `page_cache_ttl` ran out. `data/cache/next` now keeps every time still to come.
+
+**`cache clear` says when it couldn't.** When the cache belongs to another user (the web server's) and nothing could be written, `raster cache clear` says so and exits 1, and MCP `clear_cache` answers an error. Run it as the web server's user. `raster update` and `raster upgrade` now clear the page cache when they finish.
+
+**Cached pages keep their headers and answer 304.** Headers a model or listener sets (`X-Robots-Tag`, CORS, `Link`) are sent on cache hits too. Cached pages carry `Last-Modified`, and a request with a current `If-Modified-Since` gets a 304 with no body.
+
+## 2.2.18
+
+Nothing for sites to do. On nginx or Caddy, print the server config again with `raster deploy` so pages whose slug ends in `-journal`, `-wal` or `-shm` can be opened.
+
+**Items titled with a number open.** An item titled `1984` opens at `/news/news_item/1984`. A number in an item URL is a slug first and an id only when no item has it as its slug.
+
+**A domain per language works with the site's address set.** With `RASTER_URL` set, a request on a domain listed in `domain_language` keeps its host. Its pages come in that language, its links stay on it and its forms are accepted. Every other host still gets the site's address.
+
+**Pages ending in -journal are pages.** Only SQLite's own side files (`.sqlite-journal`, `.sqlite-wal`, `.sqlite-shm`) are refused now, on every server. `lint` warns about a view such as `docs/config.html`, whose address the server refuses because `config/`, `models/`, `data/` and `i18n/` are private under any folder.
+
+**Extensions on routed and missing URLs.** `/specials.json` is a 404 page unless `menu.json` exists, and page 2 of a feed (`/journal/journal_page/2.rss`) is the feed. A missing page is HTML whatever its extension.
+
+**One address per page.** `/menu/`, and `/index.php/menu` while `rewrite` is on, redirect (301) to `/menu`. Filter links no longer end in a slash.
+
+## 2.2.17
+
+Nothing for sites to do.
+
+**The in-page editor is fast on long pages.** Placing the edit marks took time that grew with the square of the page (over half a second for a 500-row list). It now takes one pass, so editors get long lists about as fast as visitors.
+
+**Enter in a paragraph field makes a new line.** A rich field that is a `<p>`, a heading or a list item no longer stores a paragraph inside a paragraph (which split the text and locked the field after a reload). Enter adds a line break, and pasted paragraphs become lines.
+
+**The editor works from the keyboard.** In edit mode, Tab reaches items, photos and the new-item card. Enter on an item opens its handle (Esc returns), Enter on a photo replaces it, and Enter on the card starts a new item.
+
+## 2.2.16
+
+- Listeners of bundled models declared in `listens()` now run with the framework's own bindings: before `config/the_events.php` and before the site's models' `listens()`. A site listener sees what the bundled listener already did, and `the_events.php` can unbind it with `event::unbind(…)->from(…)` (#27).
+- Models now autoload before the config files load.
+
+## 2.2.15
+
+Nothing for sites to do.
+
+**A new day exports again.** `raster export` counts the date (in the site's `timezone`) as part of what the site is made of. A nightly export now drops events that `date>=today` no longer lists, where before it said "Nothing changed since the last export". Pages that come out the same are still not written again.
+
+**`raster update` stops when it can't replace a file.** A framework file it can't write or remove now stops the update with exit 1 and the file's name, and the files already replaced are put back. Before, it said "Updated" while some files were still old. `update <folder>` also refuses a folder that doesn't hold `system/boot.php`, even with `--force`.
+
+**The comment at the top of `bin/raster`** lists the same commands and options as `raster help`.
+
+## 2.2.14
+
+Behind nginx: regenerate the config with `php bin/raster deploy --config=nginx`, or add `client_max_body_size 13m;` to it. Make sure the php.ini PHP-FPM reads has `upload_max_filesize = 12M` and `post_max_size = 13M`.
+
+**The nginx config makes room for the editor's pictures.** nginx takes 1 MB request bodies unless told otherwise, so the editor's larger pictures were refused. `deploy --config=nginx` now allows 13 MB. It also gzips CSS, scripts, feeds and other text, and gives `/media/` a year's cache lifetime, since an upload never reuses a file name.
+
+**doctor checks PHP's upload limits.** In production it warns when PHP takes files under 12 MB or requests under 13 MB, the size of the editor's largest picture. Stock PHP takes 2 MB, so large PNGs never arrived and the editor could only say "The upload did not arrive".
+
+**Ready for PHP 8.5.** `update` and `export` no longer read `$http_response_header`, and the example shop no longer calls `curl_close()`. PHP 8.5 deprecates both. CI now tests PHP 8.1, 8.4 and 8.5, MySQL on 8.1 and 8.4, the in-page editor in Chromium, and updating a site from GitHub.
+
 ## 2.2.13
 
 To take bookings, add the six `_email/booking_*.html` views (`booking_requested`, `booking_new`, `booking_confirmed`, `booking_declined`, `booking_cancelled`, `booking_changed`) and a manage page (`booking.html`, or set `booking_manage_page`) with `render.booking.manage`. lint names any view that is missing.

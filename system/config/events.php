@@ -26,6 +26,15 @@ if ($booking && $booking['bundled'] && controller::uses('booking')) {
 	foreach (array('requested', 'confirmed', 'declined', 'cancelled', 'rescheduled') as $step) event::bind("booking.$step")->to('booking', $step.'_mail');
 }
 unset($booking, $step);
+// The staff email about a contact message that isn't spam, after the
+// commit; only the bundled contact model, and only where a view uses it.
+$contact = controller::model('contact');
+if ($contact && $contact['bundled'] && controller::uses('contact')) event::bind('contact.received')->to('contact', 'staff_mail');
+unset($contact);
+// What the bundled models declare in listens() (an override's, for a
+// the_ model), here so it runs before the site's listeners and
+// config/the_events.php can unbind it; the site's models are bound at boot
+event::discover(true);
 // The CMS editing toolbar for logged in editors
 event::bind('before_output')->to('cms','inject_toolbar');
 // Alerts (<!-- print.validation.alert('name') -->) show or hide at the end

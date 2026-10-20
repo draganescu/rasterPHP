@@ -23,12 +23,15 @@
     </form>
     <!-- /render.authentication.account -->
     <h2>Your bookings</h2>
-    <p>Tables you booked while logged in. Only you, and the staff, see them.</p>
+    <p>What you booked while logged in. Only you, and the staff, see them.</p>
     <ul class="bookings">
-      <!-- render.cms.reservation('owner=me&order=newest') -->
-      <li><!-- print.date -->2026-10-01<!-- /print.date -->, <!-- print.guests -->2<!-- /print.guests --> guests: <!-- print.status -->new<!-- /print.status --></li>
-      <!-- /render.cms.reservation('owner=me&order=newest') -->
+      <!-- render.cms.booking('owner=me&order=-date,-time') -->
+      <li><!-- print.date -->2026-10-20<!-- /print.date --> at <!-- print.time -->19:00<!-- /print.time -->, <!-- print.people -->2<!-- /print.people --> people: <!-- print.status -->requested<!-- /print.status --> <form method="get" action="booking.html" class="inline"><!-- print.@value.id --><button class="secondary" name="booking" value="1">Change or cancel</button><!-- /print.@value.id --></form></li>
+      <!-- /render.cms.booking('owner=me&order=-date,-time') -->
     </ul>
+    <!-- render.pagination.links('cms.booking', 'owner=me') -->
+    <nav class="pager"><!-- print.@href.prev_url --><a class="prev" href="#">Newer</a><!-- /print.@href.prev_url --> page <!-- print.current -->1<!-- /print.current --> of <!-- print.total -->1<!-- /print.total --> <!-- print.@href.next_url --><a class="next" href="#">Older</a><!-- /print.@href.next_url --></nav>
+    <!-- /render.pagination.links('cms.booking', 'owner=me') -->
     <!-- render.authentication.logout -->
     <form method="post"><button class="secondary">Log out</button></form>
     <!-- /render.authentication.logout -->
