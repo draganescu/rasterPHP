@@ -376,7 +376,7 @@ alike:
 | `booking.rescheduled` | the same, after a move of an active booking (its `date`, `time`, `resource` or `service`; a guest's goes back to `requested`) |
 | `contact.received` | a contact message that isn't spam was stored: its fields but `title`, and `who` (`visitor`; `staff` when staff marked one not spam). After the commit, as is the one below |
 | `contact.flagged` | a message kept as spam: the same, with `spam` (the reasons) |
-| `rsvp.replied` | a reply to an event was made (by staff in the page, over MCP or in model code): its fields but `token_hashes` and `link_sent_at`, `who` (`guest`, `staff` or `waitlist`), `event_title`, `event_date`, `event_starts`. After the commit, as are the two below |
+| `rsvp.replied` | a reply to an event was made (by a guest on the form, or by staff in the page, over MCP or in model code): its fields but `token_hashes` and `link_sent_at`, `who` (`guest`, `staff` or `waitlist`), `event_title`, `event_date`, `event_starts`. After the commit, as are the two below |
 | `rsvp.changed` | the same, after its `answer`, `people` or `event` changed, with `was` and `was_people` (the status and party before) |
 | `rsvp.promoted` | the same, after a waiting reply was moved in (`who` `waitlist`; `staff` by the `promote` action) |
 | `cms.item_saved` | `collection`, `created` (true for new items), `item` |
@@ -615,14 +615,15 @@ of your own. Staff read the feedback on a page that renders
     | `render.newsletter.signup` | nothing stored or mailed; the form again with what was typed, and `try_again` (stamp) or `slow_down` (a limit); `too_many_from_ip` alone is taken, unless `spam_ip_blocks` |
     | `render.authentication.register` | the same |
     | `render.booking.form` | the same |
+    | `render.rsvp.form` | the same; it is asked before the form looks for an earlier reply with the address, so a post held back mails no link (`already_replied`) |
     | `render.authentication.forgot` | only the limits count: a post over `spam_per_email` (or over `spam_per_ip` with `spam_ip_blocks`) answers `reset_sent` as for an unknown address and mails nothing; the stamp is not checked |
     | `cms_records::submit` (a record form whose type has `create` `visitor` or `member`) | the form again with `try_again` / `slow_down` (as the newsletter: not for `too_many_from_ip` alone); checked before `create` is, so a bot learns nothing about which types need a login |
     | `render.contact.form` | stored as `spam` with its reasons (`too_many_from_ip` included), nobody emailed, and `sent` as for anyone (see **Bundled models**, contact); it also checks `name`, `subject` and `message` for links and blocked words, and the email's domain against the blocklist |
 
     Login, reset, account, logout, the booking and rsvp manage pages and the
     newsletter's unsubscribe aren't checked. `lint` warns on a view with
-    `render.newsletter.signup`, `render.authentication.register` or
-    `render.booking.form` that lacks `print.validation.alert('try_again')`
+    `render.newsletter.signup`, `render.authentication.register`,
+    `render.booking.form` or `render.rsvp.form` that lacks `print.validation.alert('try_again')`
     or `('slow_down')`: word them where the person will see them, as for
     any alert. Put the pair once at the top of the layout's `res.header`
     (`lint` counts alerts in the fragments a view includes), so a held post
@@ -1496,10 +1497,10 @@ model owns the replies, the place arithmetic, the waitlist and the events.
 Nothing in `the_app.php` is required when the collection is called
 `events`. It counts only on a site whose views use `render.rsvp.*` or
 `print.rsvp.*`; a site's own `rsvp` model or type keeps the name, and
-`lint` warns. The reply form and the staff regions come in the next
-releases; until then replies are made by staff in the page
-(`render.cms.rsvp`), over MCP or by model code, and the guest gets an
-email with their link at each step.
+`lint` warns. Guests reply on the site's form (`render.rsvp.form`), staff
+add replies in the page (`render.cms.rsvp`), over MCP or by model code,
+and the guest gets an email with their link at each step. The staff
+regions come in the next release.
 - **The event is an item** of `rsvp_collection` (`events`), read with
   `cms_store::get_item()`, never written. Four of its fields, written in
   its item view like any other (`<!-- print.places -->40<!-- /print.places -->`),
@@ -1594,6 +1595,57 @@ email with their link at each step.
   <!-- render.rsvp.event --><!-- print.+class.state --><p class="places"><!-- print.left -->12<!-- /print.left --> of <!-- print.places -->40<!-- /print.places --> places left</p><!-- /print.+class.state --><!-- /render.rsvp.event -->
   ```
 
+- `render.rsvp.form`: the reply form, posting fields `name email phone
+  answer people notes` (a `the_rsvp` override adds more). The event is
+  the page's, found as `render.rsvp.event` finds it: on its item page, or
+  on any page by `?event=<id>`; a visitor's reply never takes the event
+  from the post, whatever it names. It stores the reply and redirects
+  with `?done=going`, `?done=waiting` or `?done=noted` (its status) to
+  the page it was sent from, `?event=` kept, or shows the form again,
+  with what was typed, and the rules' alert (`closed`, `full`,
+  `too_many`, `people_invalid`, …). Shown first, it raises `not_open`
+  when the page has no event visitors can see (none, a draft, scheduled,
+  no `date`) and `closed` from the deadline. The guest gets
+  `rsvp_going`, `rsvp_waiting` (with `position`) or `rsvp_noted` with
+  their link. Never page-cached; wrap it in `print.if.live` for a static
+  export. A post that looks like spam gets `try_again` or `slow_down`
+  (see **Forms**), so word both.
+  - **One reply per address.** A post with an address that already
+    replied to this event (in any letter case) stores nothing, shows the
+    form again with `already_replied` ("we've emailed you a link to
+    change your reply"), and emails `_email/rsvp_link` with a new link to
+    **the reply's own address**, at most once every five minutes
+    (`mail::RESEND_AFTER`; the hidden `link_sent_at`). So nobody changes
+    someone else's reply by typing their address, and nobody floods an
+    inbox: the spam checks come first, so a post without a stamp mails
+    nothing, and the 4th post in an hour with one address is held
+    (`slow_down`, `spam_per_email`). Nothing is mailed for an event that
+    has started or is hidden.
+  - A reply made by the form inside a site's own
+    `cms_records::transaction()` still sends its event and its email
+    once, after that commit.
+  - `lint` errors on a view with `render.rsvp.form` when no view of
+    `rsvp_collection` has a `date` field, and warns when none has
+    `places` (no limit, so no waitlist).
+
+  ```html
+  <!-- events_item.html, under render.rsvp.event -->
+  <!-- print.validation.alert('going') --><p>You're in. We've emailed you a link to change your reply.</p><!-- /print.validation.alert('going') -->
+  <!-- print.validation.alert('waiting') --><p>It's full: you're on the waitlist, and we'll email you if a place frees up.</p><!-- /print.validation.alert('waiting') -->
+  <!-- print.validation.alert('noted') --><p>Thanks for letting us know.</p><!-- /print.validation.alert('noted') -->
+  <!-- print.validation.alert('already_replied') --><p>You've replied already: we've emailed you a link to change your reply.</p><!-- /print.validation.alert('already_replied') -->
+  <!-- print.validation.alert('closed') --><p>Replies are closed.</p><!-- /print.validation.alert('closed') -->
+  <!-- print.validation.alert('too_many') --><p>That's more people than we can take in one reply.</p><!-- /print.validation.alert('too_many') -->
+  <!-- render.rsvp.form -->
+  <form method="post">
+    <input name="name" required> <input type="email" name="email" required> <input name="phone">
+    <label><input type="radio" name="answer" value="yes" checked> Yes</label> <label><input type="radio" name="answer" value="maybe"> Maybe</label>
+    <label><input type="radio" name="answer" value="no"> No</label> <input type="number" name="people" min="1" max="6" value="1">
+    <textarea name="notes"></textarea> <button>Reply</button>
+  </form>
+  <!-- /render.rsvp.form -->
+  ```
+
 - `render.rsvp.manage`: the guest's page (the `rsvp` view, or
   `rsvp_manage_page`), one row: the reply without its hidden fields, with
   `event_title`, `event_date`, `event_starts`, `event_url`, `deadline`
@@ -1641,7 +1693,7 @@ email with their link at each step.
     listener within the request. Don't protect `rsvp` for staff
     (`protected`): `lint` warns, since guests would get the login page.
 - Emails, after the answer (the site writes the views, and `lint` reports a
-  missing one where `render.rsvp.manage` is):
+  missing one where `render.rsvp.form` or `render.rsvp.manage` is):
 
   | View | To | When |
   |---|---|---|
@@ -1649,6 +1701,7 @@ email with their link at each step.
   | `_email/rsvp_waiting` | guest | the reply becomes `waiting`, or a waiting party changes size |
   | `_email/rsvp_promoted` | guest | moved in from the waitlist (or by the `promote` action) |
   | `_email/rsvp_noted` | guest | the reply becomes `no` or `maybe` |
+  | `_email/rsvp_link` | guest | they replied again on the form with the same address: their link again, to the reply's address (`render.rsvp.form` only) |
   | `_email/rsvp_new` | staff | a guest replied or changed their reply; only when `rsvp_staff_email` is set |
 
   Each gets the reply's fields (not the hidden ones), `who`, `manage_url`
