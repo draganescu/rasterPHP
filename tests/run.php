@@ -11,15 +11,8 @@ if (PHP_SAPI !== 'cli') exit;
 
 $root = dirname(__DIR__);
 require __DIR__.'/db.php';
-// what a killed run left in the checkout: the views, bundled-model stubs and
-// app models its tests write (see test_sweep())
-test_sweep($root, array(
-	'application/views/default/zz*', 'application/views/default/_zz*', 'application/views/default/_email/zz*',
-	'application/views/default/_email/booking_*.html', 'application/views/default/_email/rsvp_*.html', 'application/views/default/_email/contact_received.html',
-	'application/views/default/booking.html', 'application/views/default/events_item.html', 'application/views/default/rsvp.html', 'application/views/default/docs',
-	'application/views/zz*', 'system/models/zz*', 'application/models/zz*', 'application/models/the_zz*', 'application/models/the_cms', 'application/models/the_booking', 'application/models/the_mail',
-	'application/models/booking', 'application/models/contact', 'application/models/feed', 'application/models/newsletter', 'application/models/rsvp', 'application/models/sql.php',
-));
+// what a killed run left in the checkout (see test_sweep() in db.php)
+test_sweep($root, array('zz*', '_zz*'), array('application/views/default', 'application/views/default/_email', 'application/views', 'application/models', 'system/models'));
 $db = test_db(sys_get_temp_dir().'/raster-test-'.getmypid().'.sqlite');
 $maildir = sys_get_temp_dir().'/raster-mail-'.getmypid();
 putenv("RASTER_DB=$db");
@@ -248,6 +241,7 @@ test('a page request loads no command line tools and looks up no core overrides'
 
 // a model's files, written for one test and removed after it
 function temp_model($dir, $files) {
+	test_fixture($dir);
 	@mkdir($dir, 0775, true);
 	foreach ($files as $name => $source) file_put_contents("$dir/$name", $source);
 }
@@ -438,6 +432,7 @@ test('bundled types count only where views use them', function () {
 		controller::forget_models();
 		cms_records::forget();
 		check(!isset(cms_records::types()['zzbook']), 'zzbook counts without a view');
+		test_fixture($view);
 		file_put_contents($view, "<!-- render.zzbook.form -->\n<p>x</p>\n<!-- /render.zzbook.form -->\n");
 		controller::forget_models();
 		cms_records::forget();
@@ -536,7 +531,7 @@ $port = free_port();
 $base = "http://127.0.0.1:$port";
 $server = proc_open(php_argv('-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array('RASTER_DB' => $db, 'RASTER_MCP_TOKEN' => 'test-token', 'RASTER_MAIL' => "log://$maildir", 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
 register_shutdown_function(function () use ($server, $db, $maildir) {
-	proc_terminate($server);
+	proc_terminate($server); proc_close($server);
 	array_map('unlink', glob("$db*") ?: array());
 	array_map('unlink', glob("$maildir/*") ?: array());
 	@rmdir($maildir);
@@ -639,6 +634,7 @@ test('collection urls only for views that render the collection', function () us
 	same(200, http('GET', "$base/news/news_page/1")[0]);
 	// a view in a _ folder that renders a collection is still a partial
 	$view = "$root/application/views/default/_email/zz_digest.html";
+	test_fixture($view);
 	file_put_contents($view, "<h1>zz digest</h1><!-- render.cms.news --><p><!-- print.headline -->x<!-- /print.headline --></p><!-- /render.cms.news -->");
 	try {
 		foreach (array('/_email/zz_digest', '/_email/zz_digest/news_page/1', '/_email/zz_digest/news_items/headline/x', '/_email/zz_digest/news_page/1.rss') as $url) {
@@ -705,6 +701,7 @@ test('editor login and csrf', function () use ($base) {
 });
 test('staff /api methods refuse cross-site requests on every verb (#122)', function () use ($base, $root) {
 	$dir = "$root/application/models/zzstaff";
+	test_fixture($dir);
 	@mkdir($dir);
 	file_put_contents("$dir/zzstaff.php", "<?php\nclass zzstaff {\n\tstatic function api() { return array('close_day' => 'editor', 'hours' => 'visitor'); }\n\tfunction close_day() { return 'closed'; }\n\tfunction hours() { return 'open'; }\n}\n");
 	cms_store::connect();
@@ -777,6 +774,7 @@ test('mcp lint and schema tools', function () {
 test('frozen database falls back to template defaults', function () use ($root, $db) {
 	$view = "$root/application/views/default/about.html";
 	$original = file_get_contents($view);
+	test_fixture($view);
 	file_put_contents($view, str_replace('</main>', '<p><!-- print.cms.frozen_test -->Fallback<!-- /print.cms.frozen_test --></p></main>', $original));
 	try {
 		$env = 'RASTER_ENV=production RASTER_DB='.escapeshellarg($db);
@@ -790,6 +788,7 @@ test('frozen database falls back to template defaults', function () use ($root, 
 		exec("$env ".php_cmd().' '.escapeshellarg("$root/bin/raster").' schema --check', $out, $code);
 		same(0, $code, 'schema --apply did not fix drift');
 	} finally {
+		test_fixture($view);
 		file_put_contents($view, $original);
 		exec('RASTER_DB='.escapeshellarg($db).' '.php_cmd().' '.escapeshellarg("$root/bin/raster").' schema --drop=aboutpage.frozen_test');
 	}
@@ -982,6 +981,7 @@ test('render_url keeps the environment and reads a page that logs a lot (#107)',
 	$app = APPBASE.config::get('models_path', 'models');
 	$views = APPBASE.config::get('views_path', 'views').'/'.config::get('theme');
 	temp_model("$app/zzloud", array('zzloud.php' => "<?php\nclass zzloud\n{\n\tfunction env() { return (string)getenv('ZZ_SITE_SETTING'); }\n\tfunction noise() { for (\$i = 0; \$i < 3000; \$i++) error_log(str_repeat('x', 60).\" \$i\"); return 'done'; }\n}\n"));
+	test_fixture("$views/zz-loud.html");
 	file_put_contents("$views/zz-loud.html", "<p>env=<!-- print.zzloud.env /--> <!-- print.zzloud.noise /--></p>\n");
 	putenv('ZZ_SITE_SETTING=from-the-environment');
 	// a server of its own, given up on after a while: a hang fails the test
@@ -1181,7 +1181,7 @@ test('page cache in production', function () use ($root, $db) {
 		util::content_changed();
 		same('X-Raster-Cache: miss', $cache());
 	} finally {
-		proc_terminate($server);
+		proc_terminate($server); proc_close($server);
 		foreach (glob(APPBASE.'data/cache/*') ?: array() as $f) unlink($f);
 	}
 });
@@ -1237,7 +1237,7 @@ test('a site under a path: RASTER_URL with a folder', function () use ($root, $d
 		same(403, http('GET', "$base/application/config/the_app.php")[0], 'private paths still refused');
 		same(403, http('GET', "$base/system/boot.php")[0]);
 	} finally {
-		proc_terminate($server);
+		proc_terminate($server); proc_close($server);
 	}
 });
 
@@ -1256,7 +1256,7 @@ test('raster serve passes site_url with a folder to the router', function () use
 		file_put_contents($config, $original);
 		// serve starts php -S through a shell, so the server is found by its
 		// address ([-] keeps the pattern from matching pkill's own shell)
-		proc_terminate($server);
+		proc_terminate($server); proc_close($server);
 		exec('pkill -f '.escapeshellarg("[-]S 127.0.0.1:$port"));
 	}
 });
@@ -1341,6 +1341,7 @@ test('feed links, raw views and json lists', function () use ($base, $root) {
 	check(strpos(http('GET', "$base/")[1], 'href="'.$base.'/news.rss"') !== false, 'rss link rewritten');
 	same(403, http('GET', "$base/application/views/default/news.rss")[0]);
 	$view = "$root/application/views/default/zz_feed.json";
+	test_fixture($view);
 	file_put_contents($view, "[<!-- render.feed.items('news') -->{\"title\": \"<!-- print.headline -->x<!-- /print.headline -->\"}<!-- /render.feed.items('news') -->]");
 	try {
 		list($status, $body) = http('GET', "$base/zz_feed.json");
@@ -1440,6 +1441,7 @@ test('private_paths: the rules, and the apps they name', function () use ($root)
 });
 test('lint warns about a view whose address the server refuses (#98)', function () use ($root) {
 	$dir = "$root/application/views/default/docs";
+	test_fixture($dir);
 	@mkdir($dir);
 	file_put_contents("$dir/config.html", '<p>Settings</p>');
 	file_put_contents("$dir/setup.html", '<p>Setup</p>');
@@ -1531,6 +1533,7 @@ test('the engine renders only the full form', function () {
 test('allow_deprecated counts a use apart instead of warning', function () use ($root) {
 	$views = "$root/application/views/default";
 	$file = "$views/zz_deprecated.html";
+	test_fixture($file);
 	file_put_contents($file, '<!-- render.validation.not_empty(\'email\') -->x<!-- /render.validation.not_empty(\'email\') -->');
 	try {
 		$found = raster_project::deprecations($root, 'application');
@@ -1859,7 +1862,7 @@ test('empty filter pages, pages past the last one and unknown filters are not ca
 		same('200 X-Raster-Cache: hit', $get('/news?utm_source=newsletter&fbclid=x'));
 		same('200 not cached', $get('/news?x=1'));
 	} finally {
-		proc_terminate($server);
+		proc_terminate($server); proc_close($server);
 		cache_empty();
 	}
 });
@@ -1877,7 +1880,7 @@ function cache_server($db, $test) {
 	try {
 		$test($get);
 	} finally {
-		proc_terminate($server);
+		proc_terminate($server); proc_close($server);
 		cache_empty();
 	}
 }
@@ -1978,6 +1981,7 @@ test('a content change deletes temporary cache files left long ago', function ()
 	$new = $dir.str_repeat('e', 40).'.'.str_repeat('f', 12).'.tmp';
 	file_put_contents($old, 'left by a request that died');
 	touch($old, time() - 7200);
+	test_fixture($new);
 	file_put_contents($new, 'being written');
 	cache_run('util::content_changed();');
 	check(!is_file($old), 'a temporary file from two hours ago is still there');
@@ -2016,7 +2020,7 @@ function b_server($env) {
 	$process = proc_open(php_argv('-d', 'display_errors=1', '-d', 'log_errors=0', '-d', 'output_buffering=0', '-d', 'html_errors=0', '-d', "error_log=$log", '-S', "127.0.0.1:$port", "$root/index.php"),
 		array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, array_merge(array('PATH' => getenv('PATH'), 'RASTER_SECRET' => 'test-secret'), $env));
 	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
-	register_shutdown_function(function () use ($process, $log) { proc_terminate($process); @unlink($log); });
+	register_shutdown_function(function () use ($process, $log) { proc_terminate($process); proc_close($process); @unlink($log); });
 	return array("http://127.0.0.1:$port", $log);
 }
 function b_header($headers, $name) {
@@ -2027,6 +2031,7 @@ function b_header($headers, $name) {
 function b_with_boom($fn) {
 	global $root;
 	$dir = "$root/application/models/zzboom";
+	test_fixture($dir);
 	@mkdir($dir);
 	file_put_contents("$dir/zzboom.php", "<?php\nclass zzboom {\n"
 		."\tstatic function api() { return array('boom' => 'visitor', 'needs' => 'visitor', 'inner' => 'visitor', 'down' => 'visitor', 'echoes' => 'visitor', 'sql' => 'visitor', 'mine' => 'member'); }\n"
@@ -2057,6 +2062,7 @@ test('cms answers /api only for what its api() lists (#32)', function () use ($b
 	same(array('editor_save_field' => 'visitor', 'style' => 'visitor', 'logout' => 'visitor'), array_intersect_key(api::offered('cms'), array('editor_save_field' => 1, 'style' => 1, 'logout' => 1)));
 	// a public method an override adds is not offered unless listed
 	$dir = "$root/application/models/the_cms";
+	test_fixture($dir);
 	@mkdir($dir);
 	file_put_contents("$dir/the_cms.php", "<?php\nclass the_cms extends cms {\n\tfunction secret_report() { return 'secret'; }\n}\n");
 	try {
@@ -2269,6 +2275,7 @@ test('the editor\'s endpoints refuse a list where they take one value, and chang
 	same('Array saved', $saved('editor_save_item', 'collection=news&id='.$second.'&fields[headline]=Array+saved')['headline']);
 	// a record type's list field takes a list; its actions take input[...]
 	$dir = "$root/application/models/zzlist";
+	test_fixture($dir);
 	@mkdir($dir);
 	file_put_contents("$dir/zzlist.php", "<?php\nclass zzlist {\n"
 		."\tstatic function types() { return array('zzlist' => array('fields' => array('name' => '', 'lines' => array()), 'actions' => array('mark' => 'editor'))); }\n"
@@ -2331,6 +2338,7 @@ test('fields named like SQL words sort, filter, rename and drop', function () {
 // accounts' columns (#109)
 test('schema --drop leaves the tables and columns models declare alone', function () use ($root) {
 	$dir = "$root/application/models/zzweather";
+	test_fixture($dir);
 	@mkdir($dir);
 	file_put_contents("$dir/zzweather.php", '<?php class zzweather { static function schema() { return array("zzweatherdata" => array("city" => "", "degrees" => 0)); }'
 		.' static function types() { return array("zzreading" => array("fields" => array("city" => "", "rain" => 0))); } }');
@@ -2368,6 +2376,7 @@ test('schema --drop leaves the tables and columns models declare alone', functio
 
 test('cms_records::find filters and sorts by fields named like SQL words', function () use ($root) {
 	$dir = "$root/application/models/zzwords";
+	test_fixture($dir);
 	@mkdir($dir);
 	file_put_contents("$dir/zzwords.php", '<?php class zzwords { static function types() { return array("zzword" => array("fields" => array("title" => "", "when" => "", "from" => "", "group" => 0), "types" => array("when" => "date"))); } }');
 	cms_records::forget();
@@ -2637,6 +2646,7 @@ test('mcp view tools refuse a theme outside the views folder', function () use (
 	file_put_contents("$outside/secret.json", '{"secret":"sk-live-123"}');
 	file_put_contents("$outside/index.html", '<p>sk-live-123</p>');
 	$link = "$root/application/views/zzlink";
+	test_fixture($link);
 	symlink($outside, $link);
 	try {
 		// over HTTP with the content token: nothing read or listed outside views/
@@ -3092,9 +3102,11 @@ test('the site time zone sets today and published_at (#84)', function () use ($r
 	$there = new DateTime('now', new DateTimeZone($zone));
 	check($there->format('Y-m-d') !== gmdate('Y-m-d'), "$zone and UTC have different dates now");
 	$dir = "$root/application/models/zztz";
+	test_fixture($dir);
 	@mkdir($dir);
 	file_put_contents("$dir/zztz.php", '<?php class zztz { static function types() { return array("zztzday" => array("fields" => array("title" => "", "day" => ""), "types" => array("day" => "date"), "public" => true)); } }');
 	$view = "$root/application/views/default/zz-tz.html";
+	test_fixture($view);
 	file_put_contents($view, "<html><body><ul><!-- render.cms.zztzday('day>=today&day<=today') --><li><!-- print.title -->x<!-- /print.title --></li><!-- /render.cms.zztzday('day>=today&day<=today') --></ul>"
 		."<ol><!-- render.cms.news('limit=100') --><li><!-- print.headline -->x<!-- /print.headline --></li><!-- /render.cms.news('limit=100') --></ol></body></html>");
 	$config = "$root/application/config/the_app.php";
@@ -3303,6 +3315,7 @@ function booking_site($fn) {
 	$slots = "render.booking.slots('date=?date&resource=?resource&service=?service&people=?people')";
 	$days = "render.booking.days('resource=?resource&service=?service')";
 	$services = "render.booking.services('resource=?resource')";
+	test_fixture($view);
 	file_put_contents($view, "<html><head><title>Book</title></head><body>"
 		."<ul><!-- $slots --><li class=\"slot\"><!-- print.time -->19:00<!-- /print.time -->-<!-- print.ends -->21:00<!-- /print.ends --></li><!-- /$slots --></ul>"
 		."<ol><!-- $days --><li class=\"day\"><!-- print.date -->2026-10-20<!-- /print.date --></li><!-- /$days --></ol>"
@@ -3319,6 +3332,7 @@ function booking_site($fn) {
 		$alerts .= "<!-- print.validation.alert('$alert') --><p>ALERT $alert</p><!-- /print.validation.alert('$alert') -->";
 	}
 	$manage = "render.booking.slots('date=?date&for=manage')";
+	test_fixture("$theme/booking.html");
 	file_put_contents("$theme/booking.html", "<html><head><title>Your booking</title></head><body>$alerts"
 		."<!-- render.booking.manage --><p class=\"booking\"><!-- print.name -->Ana<!-- /print.name --> <!-- print.email -->ana@example.test<!-- /print.email -->"
 		." <!-- print.date -->2026-10-20<!-- /print.date --> <!-- print.time -->19:00<!-- /print.time --> <!-- print.status -->requested<!-- /print.status --></p>"
@@ -3328,6 +3342,7 @@ function booking_site($fn) {
 		."</body></html>");
 	$emails = array('booking_requested', 'booking_new', 'booking_confirmed', 'booking_declined', 'booking_cancelled', 'booking_changed');
 	foreach ($emails as $email) {
+		test_fixture("$theme/_email/$email.html");
 		file_put_contents("$theme/_email/$email.html", "<html><head><title>$email</title></head><body><p><!-- print.self.name -->Ana<!-- /print.self.name -->,"
 			." <!-- print.self.date -->2026-10-20<!-- /print.self.date --> <!-- print.self.time -->19:00<!-- /print.self.time --> <!-- print.self.resource_name -->room<!-- /print.self.resource_name -->"
 			." <!-- print.self.status -->requested<!-- /print.self.status --> by <!-- print.self.who -->guest<!-- /print.self.who --></p>"
@@ -4150,6 +4165,7 @@ test('booking: agenda and attention rows are records', function () {
 		$tue = booking_cafe();
 		booking_guest(array('date' => $tue, 'time' => '19:00', 'people' => 2, 'name' => 'Ana Popescu', 'phone' => '0721 123 456'));
 		$agenda = "render.booking.agenda('from=today&days=10')";
+		test_fixture($view);
 		file_put_contents($view, "<html><head><title>Staff</title></head><body><h1>Requests: <!-- print.booking.count('status=requested') -->3<!-- /print.booking.count('status=requested') --></h1>"
 			."<!-- $agenda --><h2><!-- print.date -->2026-10-20<!-- /print.date --></h2><ul><!-- print.bookings --><li class=\"booking\"><!-- print.name -->Ana<!-- /print.name --> <!-- print.time -->19:00<!-- /print.time --></li><!-- /print.bookings --></ul><!-- /$agenda -->"
 			."</body></html>");
@@ -4188,6 +4204,7 @@ test('booking: the_booking adds a field', function () use ($base) {
 		temp_model("$app/the_booking", array('the_booking.php' => "<?php\nclass the_booking extends booking\n{\n\tstatic function types() {\n\t\t\$types = parent::types();\n\t\t\$types['booking']['fields']['dietary'] = '';\n\t\treturn \$types;\n\t}\n}\n"));
 		$view = APPBASE.config::get('views_path', 'views').'/'.config::get('theme', 'default').'/zzbook.html';
 		$html = file_get_contents($view);
+		test_fixture($view);
 		file_put_contents($view, str_replace('<textarea name="notes">', '<input name="dietary"><textarea name="notes">', $html));
 		try {
 			controller::forget_models();
@@ -4201,6 +4218,7 @@ test('booking: the_booking adds a field', function () use ($base) {
 			same('vegan', $stored[0]['dietary']);
 			same('21:00', $stored[0]['ends']);
 		} finally {
+			test_fixture($view);
 			file_put_contents($view, $html);
 			remove_dir("$app/the_booking");
 			controller::forget_models();
@@ -4291,7 +4309,7 @@ function booking_server($env = array()) {
 	$process = proc_open(php_argv('-d', 'log_errors=1', '-d', "error_log=$log", '-S', "127.0.0.1:$port", "$root/index.php"),
 		array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, $env);
 	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
-	register_shutdown_function(function () use ($process, $log) { proc_terminate($process); @unlink($log); });
+	register_shutdown_function(function () use ($process, $log) { proc_terminate($process); proc_close($process); @unlink($log); });
 	return array("http://127.0.0.1:$port", $log);
 }
 // The mails $fn sent, from this process and from booking_server()'s, in
@@ -4738,6 +4756,7 @@ test('booking: requires(): emails, pages, settings and records', function () {
 			check(preg_grep('/^error: render\.booking\.form sends an email written in .*booking_new\.html/', $messages('zzbook.html')) !== array(), json_encode($messages('zzbook.html')));
 			check(preg_grep('/^error: render\.booking\.manage sends an email written in .*booking_new\.html/', $messages('booking.html')) !== array(), json_encode($messages('booking.html')));
 		} finally {
+			test_fixture($new);
 			file_put_contents($new, $html);
 		}
 		same(array(), array_values(preg_grep('/^error/', $messages('zzbook.html'))));
@@ -4785,6 +4804,7 @@ test('lint counts try_again and slow_down alerts in the fragments a view include
 	$views = sys_get_temp_dir().'/raster-lint-theme-'.getmypid();
 	mkdir($views.'/zz', 0777, true);
 	$alerts = "<!-- print.validation.alert('try_again') --><p>Again.</p><!-- /print.validation.alert('try_again') -->\n<!-- print.validation.alert('slow_down') --><p>Slow.</p><!-- /print.validation.alert('slow_down') -->\n";
+	test_fixture("$views/zz/_layout.html");
 	file_put_contents("$views/zz/_layout.html", "<!-- res.header -->\n$alerts<!-- /res.header -->\n<!-- res.bare -->\n<p>Nothing.</p>\n<!-- /res.bare -->\n");
 	try {
 		$form = "<!-- render.newsletter.signup -->\n<form method=\"post\"><input type=\"email\" name=\"email\" required></form>\n<!-- /render.newsletter.signup -->\n";
@@ -4827,6 +4847,7 @@ test('the pager counts what the list shows (#88)', function () {
 		$links = "render.pagination.links('cms.zzmine'".($filter === '' ? '' : ", '$filter'").")";
 		return "<!-- $links --><nav class=\"$class\"><!-- print.current -->1<!-- /print.current --> of <!-- print.total -->1<!-- /print.total --></nav><!-- /$links -->";
 	};
+	test_fixture($view);
 	file_put_contents($view, "<html><head><title>Pager</title></head><body>"
 		."<!-- render.cms.zzmine('owner=me&order=title') --><p class=\"mine\"><!-- print.title -->x<!-- /print.title --></p><!-- /render.cms.zzmine('owner=me&order=title') -->"
 		.$pager('owner=me', 'mine').$pager('', 'all').$pager('limit=3', 'top')
@@ -5068,6 +5089,7 @@ test('emails and exports carry no stamp', function () {
 });
 test('a cached page with two forms serves fresh stamps to both', function () use ($root, $db) {
 	$view = APPBASE.config::get('views_path', 'views').'/'.config::get('theme', 'default').'/zzstamps.html';
+	test_fixture($view);
 	file_put_contents($view, '<html><head><title>Two forms</title></head><body>'
 		.'<!-- render.newsletter.signup --><form method="post"><input type="email" name="email"><button>Join</button></form><!-- /render.newsletter.signup -->'
 		.'<!-- render.authentication.register --><form method="post"><input name="name"><input type="email" name="email"><input type="password" name="password"><button>Sign up</button></form><!-- /render.authentication.register -->'
@@ -5096,7 +5118,7 @@ test('a cached page with two forms serves fresh stamps to both', function () use
 		same(2, substr_count($copy, '{{raster:ts}}'));
 		check(!preg_match('/raster_ts" value="\d/', $copy), 'no stamp kept on disk');
 	} finally {
-		proc_terminate($server);
+		proc_terminate($server); proc_close($server);
 		unlink($view);
 		foreach (glob(APPBASE.'data/cache/*') ?: array() as $f) unlink($f);
 	}
@@ -5656,9 +5678,11 @@ function contact_site($fn) {
 	foreach (array('sent', 'name_invalid', 'email_invalid', 'phone_invalid', 'subject_invalid', 'message_invalid') as $alert) {
 		$alerts .= "<!-- print.validation.alert('$alert') --><p>ALERT $alert</p><!-- /print.validation.alert('$alert') -->";
 	}
+	test_fixture("$theme/zzcontact.html");
 	file_put_contents("$theme/zzcontact.html", "<html><head><title>Write to us</title></head><body>$alerts"
 		."<!-- render.contact.form --><form method=\"post\"><input name=\"name\"><input type=\"email\" name=\"email\" required><input name=\"phone\"><input name=\"subject\">"
 		."<textarea name=\"message\" required></textarea><button>Send</button></form><!-- /render.contact.form --></body></html>");
+	test_fixture("$theme/_email/contact_received.html");
 	file_put_contents("$theme/_email/contact_received.html", "<html><head><title>Message: <!-- print.self.subject -->none<!-- /print.self.subject --></title></head><body>"
 		."<p>From <!-- print.self.name -->Ana<!-- /print.self.name --> on <!-- print.self.page_url -->page<!-- /print.self.page_url --></p>"
 		."<p><!-- print.self.message -->Hi<!-- /print.self.message --></p><p>All of them: <!-- print.self.staff_url -->staff<!-- /print.self.staff_url --></p></body></html>");
@@ -5767,6 +5791,7 @@ test('a site contact model still answers and the bundled one loads nothing', fun
 	// a site's own, as AGENTS.md and the wiki taught: in processes of their
 	// own, since this one may have the bundled class already
 	temp_model("$app/contact", array('contact.php' => "<?php\nclass contact\n{\n\tfunction send() {\n\t\treturn array(array('x' => 'own'));\n\t}\n}\n"));
+	test_fixture($view);
 	file_put_contents($view, '<html><head><title>Own</title></head><body><!-- render.contact.send --><p class="own"><!-- print.x -->mock<!-- /print.x --></p><!-- /render.contact.send --></body></html>');
 	try {
 		controller::forget_models();
@@ -6084,6 +6109,7 @@ test('contact: messages and count are for staff only', function () {
 		cms_records::ensure(cms_records::info('contactmessage'), true);
 		cms_records::create('contactmessage', array('name' => 'Ana', 'email' => 'ana@zz.test', 'message' => 'A table for two?'));
 		cms_records::create('contactmessage', array('email' => 'bot@zz.test', 'message' => 'Buy now', 'status' => 'spam', 'spam' => 'no_stamp'));
+		test_fixture("$theme/zzstaff.html");
 		file_put_contents("$theme/zzstaff.html", '<html><head><title>Messages</title></head><body><h1>New: <!-- print.contact.count -->3<!-- /print.contact.count --></h1>'
 			.'<ul><!-- render.contact.messages --><li class="message"><!-- print.@href.raster_detail_link --><a href="#"><!-- print.email -->a@b<!-- /print.email --></a><!-- /print.@href.raster_detail_link --></li><!-- /render.contact.messages --></ul></body></html>');
 		try {
@@ -6108,6 +6134,7 @@ test('contact: messages and count are for staff only', function () {
 test('lint: contact staff page not protected', function () {
 	contact_site(function ($theme) {
 		check(has_problem((new raster_inspector())->lint_types(), "Visitors make 'contactmessage' records"), 'no staff page yet');
+		test_fixture("$theme/zzstaff.html");
 		file_put_contents("$theme/zzstaff.html", '<html><head><title>Messages</title></head><body><ul><!-- render.contact.messages(\'status=spam\') --><li><!-- print.email -->a@b<!-- /print.email --></li><!-- /render.contact.messages(\'status=spam\') --></ul></body></html>');
 		try {
 			check(has_problem((new raster_inspector())->lint_path("$theme/zzstaff.html"), "lists contact messages but isn't protected for editors"), 'unprotected');
@@ -6145,15 +6172,18 @@ function rsvp_site($fn) {
 	$region = '<!-- render.rsvp.event --><p class="rsvp">event=<!-- print.event -->1<!-- /print.event --> places=<!-- print.places -->40<!-- /print.places -->'
 		.' going=<!-- print.going -->0<!-- /print.going --> left=<!-- print.left -->40<!-- /print.left --> waiting=<!-- print.waiting -->0<!-- /print.waiting -->'
 		.' state=<!-- print.state -->open<!-- /print.state --> deadline=<!-- print.deadline -->2026-11-20 18:00<!-- /print.deadline --></p><!-- /render.rsvp.event -->';
+	test_fixture("$theme/events_item.html");
 	file_put_contents("$theme/events_item.html", '<html><head><title>Event</title></head><body><!-- render.cms.events --><h1><!-- print.title -->Jazz night<!-- /print.title --></h1>'
 		.'<p><!-- print.date -->2026-11-20<!-- /print.date --> at <!-- print.starts -->20:00<!-- /print.starts -->, <!-- print.places -->40<!-- /print.places --> places,'
 		.' replies until <!-- print.rsvp_until -->2026-11-20 18:00<!-- /print.rsvp_until --></p><!-- /render.cms.events -->'.$region.'</body></html>');
+	test_fixture("$theme/zzrsvp.html");
 	file_put_contents("$theme/zzrsvp.html", '<html><head><title>Reply</title></head><body>'.$region.'</body></html>');
 	// the guest's manage page, and the emails, each with its name as the subject
 	$alerts = '';
 	foreach (array('link_invalid', 'closed', 'full_for_more', 'changed') as $alert) {
 		$alerts .= "<!-- print.validation.alert('$alert') --><p>ALERT $alert</p><!-- /print.validation.alert('$alert') -->";
 	}
+	test_fixture("$theme/rsvp.html");
 	file_put_contents("$theme/rsvp.html", "<html><head><title>Your reply</title></head><body>$alerts"
 		.'<!-- render.rsvp.manage --><p class="reply"><!-- print.name -->Ana<!-- /print.name --> <!-- print.answer -->yes<!-- /print.answer --> <!-- print.people -->2<!-- /print.people -->'
 		.' <!-- print.status -->going<!-- /print.status --> <!-- print.event_title -->Jazz night<!-- /print.event_title --> <!-- print.position -->1<!-- /print.position --></p>'
@@ -6161,6 +6191,7 @@ function rsvp_site($fn) {
 		.'<input type="radio" name="answer" value="maybe"><input type="number" name="people"><button>Change</button></form><!-- /render.rsvp.manage --></body></html>');
 	$emails = array('rsvp_going', 'rsvp_waiting', 'rsvp_promoted', 'rsvp_noted', 'rsvp_link', 'rsvp_new');
 	foreach ($emails as $email) {
+		test_fixture("$theme/_email/$email.html");
 		file_put_contents("$theme/_email/$email.html", "<html><head><title>$email</title></head><body><p><!-- print.self.name -->Ana<!-- /print.self.name -->:"
 			.' <!-- print.self.event_title -->Jazz night<!-- /print.self.event_title --> <!-- print.self.status -->going<!-- /print.self.status --> by <!-- print.self.who -->guest<!-- /print.self.who --></p>'
 			.'<p>Position: <!-- print.self.position -->1<!-- /print.self.position -->.</p><p>Manage: <!-- print.self.manage_url -->none<!-- /print.self.manage_url --></p></body></html>');
@@ -7067,6 +7098,7 @@ test('rsvp requires(): emails, pages, settings', function () {
 		try {
 			check(preg_grep('/^error: render\.rsvp\.manage sends an email written in .*rsvp_noted\.html/', $messages('rsvp.html')) !== array(), json_encode($messages('rsvp.html')));
 		} finally {
+			test_fixture($noted);
 			file_put_contents($noted, $html);
 		}
 		same(array(), array_values(preg_grep('/^error/', $messages('rsvp.html'))));

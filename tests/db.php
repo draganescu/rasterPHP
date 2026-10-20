@@ -90,76 +90,130 @@ register_shutdown_function(function () {
 	foreach ($test_databases as $name) $server->exec("DROP DATABASE IF EXISTS `$name`");
 });
 
-// ## PHP children
-//
-// A suite starts hundreds of PHP processes (php -S servers, bin/raster, MCP
-// sessions, race workers), and each one compiles the whole framework again.
-// With opcache's file cache they read the compiled code from one directory
-// per run instead, which is removed when the run ends. Timestamps are still
-// checked on every file, so a test that writes a PHP file and runs it sees
-// the new code (opcache never caches a file changed in the last two seconds).
-// RASTER_TEST_OPCACHE=off runs the children as they were.
-
-// the -d options for a child PHP: an array, empty when opcache is not there
-function php_flags() {
-	static $flags = null;
-	if ($flags !== null) return $flags;
-	$flags = array();
-	if (getenv('RASTER_TEST_OPCACHE') === 'off' || !extension_loaded('Zend OPcache')) return $flags;
-	$dir = sys_get_temp_dir().'/raster-opcache-'.getmypid();
-	// caches of runs that were killed
-	foreach (glob(sys_get_temp_dir().'/raster-opcache-*') ?: array() as $old) {
-		$pid = (int)substr($old, strrpos($old, '-') + 1);
-		if ($pid !== getmypid() && !file_exists("/proc/$pid") && !(function_exists('posix_kill') && @posix_kill($pid, 0))) exec('rm -rf '.escapeshellarg($old));
-	}
-	@mkdir($dir, 0775, true);
-	foreach (array('opcache.enable=1', 'opcache.enable_cli=1', "opcache.file_cache=$dir", 'opcache.file_cache_only=1', 'opcache.validate_timestamps=1', 'opcache.revalidate_freq=0') as $option) {
-		array_push($flags, '-d', $option);
-	}
-	register_shutdown_function(function () use ($dir) { exec('rm -rf '.escapeshellarg($dir)); });
-	return $flags;
-}
-
-// a PHP command line as an array for proc_open: the binary, the flags above, then the arguments
-function php_argv() {
-	return array_merge(array(PHP_BINARY), php_flags(), func_get_args());
-}
-
-// the same as a string for a shell: the escaped binary and flags, to put
-// where escapeshellarg(PHP_BINARY) went
-function php_cmd() {
-	return implode(' ', array_map('escapeshellarg', array_merge(array(PHP_BINARY), php_flags())));
-}
+require_once __DIR__.'/php.php';
 
 // ## Fixtures a killed run left behind
 //
 // The tests write views and model stubs into the checkout and take them away
 // when they end. A run that is killed in between leaves them, and they break
 // the next run (a stub model that is "installed", a view that is "extra").
-// So a suite starts by removing what its tests create: test_sweep($root,
-// array('application/views/default/zz*', ...)) with paths (and * patterns)
-// relative to the checkout. Only what git does not track is removed, so
-// nothing real can go; with no git, nothing is.
-function test_sweep($root, $patterns) {
-	$listing = shell_exec('git -C '.escapeshellarg($root).' ls-files -z 2>/dev/null');
-	if (!$listing) return array();
-	$tracked = array_flip(array_filter(explode("\0", $listing)));
-	$removed = array();
-	foreach ($patterns as $pattern) {
-		foreach (glob("$root/$pattern") ?: array() as $path) {
-			$relative = substr($path, strlen($root) + 1);
-			if (isset($tracked[$relative])) continue;
-			if (is_link($path)) { @unlink($path); $removed[] = $relative; continue; }
-			if (is_dir($path)) {
-				foreach ($tracked as $file => $unused) if (strpos($file, "$relative/") === 0) continue 2;
-				exec('rm -rf '.escapeshellarg($path));
-			} else {
-				@unlink($path);
-			}
-			$removed[] = $relative;
+//
+// So a test that writes one names it first: test_fixture($path). The run
+// keeps a list of those paths in the temp folder (one list per run and
+// checkout) and holds a lock on it while it lives; a run that ends well
+// deletes its list. A suite starts with test_sweep(): for each list whose run
+// is gone (its lock is free) it MOVES the paths on it, to a folder in the
+// temp folder, and says so. A path is only touched when it is inside the
+// checkout, not tracked by git, and not changed since the list was last
+// written (so work a developer did there afterwards stays). Paths named
+// zz* or _zz* (the tests' own naming) are also moved when found by pattern.
+// Names a developer may have made on purpose (a booking model, rsvp.html)
+// are never swept by pattern.
+function test_fixtures_dir($root) {
+	return sys_get_temp_dir().'/raster-fixtures-'.sha1(realpath($root));
+}
+
+// the path written without . and .. parts
+function test_normal_path($path) {
+	$parts = array();
+	foreach (explode('/', $path) as $part) {
+		if ($part === '' || $part === '.') continue;
+		if ($part === '..') array_pop($parts); else $parts[] = $part;
+	}
+	return '/'.implode('/', $parts);
+}
+
+// a path as the checkout's file for git: its folder's real path plus its
+// name, relative to the checkout's real path, or null when it is outside
+function test_relative($root, $path) {
+	$base = realpath($root);
+	$path = test_normal_path($path);
+	$folder = realpath(dirname($path));
+	if ($base === false || $folder === false) return null;
+	$full = ($folder === '/' ? '' : $folder).'/'.basename($path);
+	return strpos($full, $base.'/') === 0 ? substr($full, strlen($base) + 1) : null;
+}
+
+// the newest modification time in a file or a folder with all inside it
+function test_newest($path) {
+	$stat = @lstat($path);
+	$newest = $stat ? (int)$stat['mtime'] : 0;
+	if (is_dir($path) && !is_link($path)) {
+		foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS)) as $file) $newest = max($newest, (int)@$file->getMTime());
+	}
+	return $newest;
+}
+
+// the files git tracks, as the keys of an array (null when git can't say)
+function test_tracked($root) {
+	static $tracked = array();
+	if (!isset($tracked[$root])) {
+		$listing = shell_exec('git -C '.escapeshellarg($root).' ls-files -z 2>/dev/null');
+		$tracked[$root] = $listing ? array_flip(array_filter(explode("\0", $listing))) : null;
+	}
+	return $tracked[$root];
+}
+
+function test_is_tracked($tracked, $relative) {
+	if (isset($tracked[$relative])) return true;
+	foreach ($tracked as $file => $unused) if (strpos($file, "$relative/") === 0) return true;
+	return false;
+}
+
+// moves a leftover out of the checkout, to raster-swept-<date> in the temp folder
+function test_move_aside($root, $relative) {
+	$to = sys_get_temp_dir().'/raster-swept-'.date('Y-m-d').'/'.$relative;
+	if (file_exists($to) || is_link($to)) $to .= '.'.uniqid();
+	@mkdir(dirname($to), 0775, true);
+	exec('mv '.escapeshellarg(realpath($root).'/'.$relative).' '.escapeshellarg($to).' 2>/dev/null', $out, $code);
+	if ($code === 0) echo "moved leftover test fixture: $relative -> $to\n";
+	return $code === 0;
+}
+
+// the paths of the dead runs' lists, and the suite's own zz* names, moved aside
+function test_sweep($root, $patterns = array('zz*', '_zz*'), $folders = array()) {
+	$tracked = test_tracked($root);
+	if ($tracked === null || realpath($root) === false) return;
+	$moved = array();
+	$sweep = function ($relative, $limit) use ($root, $tracked, &$moved) {
+		if ($relative === null || isset($moved[$relative]) || test_is_tracked($tracked, $relative)) return;
+		$path = realpath($root).'/'.$relative;
+		if (!file_exists($path) && !is_link($path)) return;
+		if ($limit !== null && test_newest($path) > $limit) return;
+		if (test_move_aside($root, $relative)) $moved[$relative] = true;
+	};
+	foreach (glob(test_fixtures_dir($root).'/*.list', GLOB_NOESCAPE) ?: array() as $list) {
+		$handle = @fopen($list, 'r+');
+		if (!$handle) continue;
+		if (flock($handle, LOCK_EX | LOCK_NB)) {
+			// each path is written just after it is named, so a little leeway
+			$limit = filemtime($list) + 2;
+			foreach (array_unique(array_filter(explode("\n", (string)stream_get_contents($handle)))) as $path) $sweep(test_relative($root, $path), $limit);
+			unlink($list);
+		}
+		fclose($handle);
+	}
+	// zz* and _zz* in the folders the tests write to
+	foreach ($folders as $folder) {
+		foreach (@scandir(realpath($root)."/$folder") ?: array() as $name) {
+			foreach ($patterns as $pattern) if (fnmatch($pattern, $name)) $sweep($folder === '' ? $name : "$folder/$name", null);
 		}
 	}
-	return $removed;
+}
+
+// names a path this run is about to create in the checkout
+function test_fixture($path) {
+	global $root;
+	static $handle = null, $file = null;
+	if ($handle === null) {
+		$dir = test_fixtures_dir($root);
+		@mkdir($dir, 0775, true);
+		$file = "$dir/".getmypid().'.list';
+		$handle = fopen($file, 'c+');
+		if (!$handle || !flock($handle, LOCK_EX | LOCK_NB)) { $handle = false; return; }
+		register_shutdown_function(function () use (&$handle, $file) { if ($handle) { fclose($handle); @unlink($file); } });
+	}
+	if ($handle) { fseek($handle, 0, SEEK_END); fwrite($handle, test_normal_path($path)."\n"); fflush($handle); }
 }
 
 // The stamp a browser would post: a form shown $ago seconds ago, signed with

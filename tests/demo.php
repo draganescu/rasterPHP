@@ -10,15 +10,16 @@ if (PHP_SAPI !== 'cli') exit;
 
 $root = dirname(__DIR__);
 require __DIR__.'/db.php';
-// what a killed run left in the checkout: the views and models its tests
-// write, and the app folder of the upgrade test (see test_sweep()). The test
-// that turns the login page off by renaming it may have left it renamed.
+// what a killed run left in the checkout (see test_sweep() in db.php). The
+// test that turns the login page off by renaming it; a run killed inside it
+// leaves login.html under another name.
 $off = "$root/demo/views/cafe/login.html.off";
-if (is_file($off)) is_file("$root/demo/views/cafe/login.html") ? unlink($off) : rename($off, "$root/demo/views/cafe/login.html");
-test_sweep($root, array(
-	'demo/views/zz*', 'demo/views/cafe/zz*', 'demo/views/cafe/_zz*', 'demo/views/cafe/export-probe.html', 'demo/views/cafe/coming.html', 'demo/views/cafe/ticket.html', 'demo/views/cafe/staff/rota.html',
-	'demo/models/zz*', 'demo/models/bookrows', 'demo/models/stopper', 'demo/models/probe', 'demo/models/the_cms', 'zzn15',
-));
+$git_files = test_tracked($root);
+if (is_file($off) && $git_files !== null && !test_is_tracked($git_files, 'demo/views/cafe/login.html.off')) {
+	if (is_file("$root/demo/views/cafe/login.html")) test_move_aside($root, 'demo/views/cafe/login.html.off');
+	else { rename($off, "$root/demo/views/cafe/login.html"); echo "put back demo/views/cafe/login.html\n"; }
+}
+test_sweep($root, array('zz*', '_zz*'), array('demo/views/cafe', 'demo/views', 'demo/models', ''));
 $tmp = sys_get_temp_dir().'/raster-demo-'.getmypid();
 @mkdir($tmp, 0775, true);
 $db = test_db("$tmp/cafe.sqlite");
@@ -81,12 +82,15 @@ function lacks($haystack, $needle, $message = '') {
 }
 
 $servers = array();
-// stops a server (or any process) a test started: with PHP_CLI_SERVER_WORKERS
-// the workers outlive the terminated parent, so a php -S goes by port too
-// (the key it has in $servers ends with its port)
+// stops a server (or any process) a test started. With PHP_CLI_SERVER_WORKERS
+// the workers outlive the terminated parent, so its children go first: by
+// process, not by port, so another run's server on a port is never touched.
 function stop_server($key, $process) {
+	if (!is_resource($process)) return;
+	$status = proc_get_status($process);
+	if ($status['running']) exec('pkill -TERM -P '.(int)$status['pid'].' 2>/dev/null');
 	proc_terminate($process);
-	if (preg_match('/(\d+)$/', $key, $m)) exec("pkill -f -- '[-]S 127[.]0[.]0[.]1:$m[1]( |\$)' 2>/dev/null");
+	proc_close($process);
 }
 // a port nobody is listening on
 function free_port() {
@@ -101,6 +105,11 @@ function server($port, $env) {
 	global $tmp;
 	$process = proc_open(php_argv('-d', 'error_reporting=-1', '-d', 'log_errors=1', '-d', 'display_errors=0', '-d', "error_log=$tmp/php-errors.log", '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, $env);
 	for ($i = 0; $i < 100 && !@fsockopen('127.0.0.1', $port); $i++) usleep(50000);
+	// a server that is not running did not start (the port may be another run's)
+	if (!proc_get_status($process)['running']) {
+		proc_close($process);
+		throw new Exception("the server on port $port did not start");
+	}
 	$servers[$port] = $process;
 	return "http://127.0.0.1:$port";
 }
@@ -284,6 +293,7 @@ function php_parses($code) {
 	return $status === 0;
 }
 function with_file($path, $content, $fn) {
+	test_fixture($path);
 	$existed = file_exists($path);
 	$original = $existed ? file_get_contents($path) : null;
 	file_put_contents($path, $content);
@@ -659,7 +669,7 @@ test('D21', '/api never runs form models', function () use ($base) {
 	same(404, http('POST', "$base/api/booking/form", array('name' => 'x'))[0], 'nor a bundled one');
 	// and one a model does list is not a form submission there
 	$dir = dirname(__DIR__).'/demo/models/zzform';
-	@mkdir($dir);
+	test_fixture($dir); @mkdir($dir);
 	try {
 		with_file("$dir/zzform.php", "<?php\nclass zzform {\n\tstatic function api() { return array('send' => 'visitor'); }\n\tfunction send() { return validation::get()->submitted() ? 'ran' : false; }\n}\n", function () use ($base) {
 			list($status, $body) = http('POST', "$base/api/zzform/send", array('email' => 'x@example.com'));
@@ -777,7 +787,7 @@ test('G6', 'protected pages: dot segments, double slashes and case', function ()
 		// a disk that ignores case renders members.html for /MEMBERS; elsewhere it is a 404
 		check(in_array(http('GET', "$front_base/MEMBERS")[0], array(303, 404)), '/MEMBERS');
 	} finally {
-		proc_terminate($front);
+		proc_terminate($front); proc_close($front);
 	}
 });
 test(array('G1', 'G2', 'G3', 'G9', 'D15'), 'sign up', function () use ($base) {
@@ -1754,7 +1764,7 @@ test('N16', 'a page that answers an error stops the export, and the last export 
 	same(0, raster(array('export', $out, '--url=https://cafe.example/'))[0]);
 	$manifest = file_get_contents("$out/.raster-export.json");
 	$original = file_get_contents("$views/about.html");
-	@mkdir("$root/demo/models/zzthrows");
+	test_fixture("$root/demo/models/zzthrows"); @mkdir("$root/demo/models/zzthrows");
 	$boom = '<!-- print.zzthrows.boom -->x<!-- /print.zzthrows.boom -->';
 	with_file("$root/demo/models/zzthrows/zzthrows.php", "<?php\nclass zzthrows\n{\n\tfunction boom() { throw new RuntimeException('boom'); }\n}\n", function () use ($out, $views, $original, $boom) {
 		// a model that throws, on About
@@ -1811,7 +1821,7 @@ test('N4', 'serve', function () use ($root) {
 	try {
 		has(http('GET', "http://127.0.0.1:$port/about")[1], 'About us');
 	} finally {
-		proc_terminate($process);
+		proc_terminate($process); proc_close($process);
 		// serve's own php -S outlives the terminated parent; match it by
 		// port, since the binary may be php8.2, and [-] keeps pkill from
 		// matching the shell that runs it
@@ -1885,7 +1895,7 @@ test(array('C36', 'C37', 'C49'), 'the log console, and strict templates off', fu
 		lacks($body, 'render.cafe.hours', 'no details for visitors');
 	});
 	// any exception, not only template errors: a named query that doesn't exist
-	@mkdir("$root/demo/models/zzquery");
+	test_fixture("$root/demo/models/zzquery"); @mkdir("$root/demo/models/zzquery");
 	try {
 		with_file("$root/demo/models/zzquery/zzquery.php", '<?php class zzquery { function rows() { return database::instance("zzquery")->no_such_query(); } }', function () use ($loud, $views, $tmp) {
 			with_file("$views/zz-query.html", '<p><!-- render.zzquery.rows -->row<!-- /render.zzquery.rows --></p>', function () use ($loud, $tmp) {
@@ -2129,7 +2139,7 @@ test('C43', 'named queries: a missing name is an error, and lint finds it', func
 		has($e->getMessage(), "No query named 'count_categry': add models/cafe/sql/count_categry.sql, or \$queries['count_categry'] in models/sql.php");
 	}
 	$file = "$root/demo/models/zz_queries/zz_queries.php";
-	@mkdir(dirname($file));
+	test_fixture(dirname($file)); @mkdir(dirname($file));
 	try {
 		file_put_contents($file, "<?php\nclass zz_queries {\n\tfunction a() { return database::instance('cafe')->count_category('coffee'); }\n\tfunction b() { return database::instance()->query('SELECT 1'); }\n\tfunction c() { return database::instance('cafe')->count_categry('coffee'); }\n\tfunction d() { return database::instance()->dish_names('coffee'); }\n\tfunction e() { return database::instance()->nothing_here(); }\n}\n");
 		list($code, $out) = raster(array('lint'));
@@ -2566,7 +2576,7 @@ test('R17', 'lint: records nobody lists, and pages listing what a model reads (#
 	$inspector = new raster_inspector();
 	$views = $inspector->theme_dir();
 	$models = APPBASE.'models';
-	@mkdir("$models/bookrows");
+	test_fixture("$models/bookrows"); @mkdir("$models/bookrows");
 	try {
 		with_file("$models/bookrows/bookrows.php", "<?php\nclass bookrows {\n\tfunction rows() {\n\t\treturn cms_records::find('booking', array(), 'date');\n\t}\n\tfunction counts() { return array(); }\n\tfunction agenda() {\n\t\treturn cms_records::listed('booking', cms_records::find('booking'));\n\t}\n}\n", function () use ($inspector, $views) {
 			$problems = $inspector->lint_source('<!-- render.bookrows.rows --><p><!-- print.name -->x<!-- /print.name --></p><!-- /render.bookrows.rows --><!-- render.bookrows.counts --><p>y</p><!-- /render.bookrows.counts -->', 'staff.html');
@@ -2594,7 +2604,7 @@ test('R17', 'lint: records nobody lists, and pages listing what a model reads (#
 });
 test('M18', 'MCP over stdio: a PHP error in site code answers the call', function () {
 	$models = APPBASE.'models';
-	@mkdir("$models/stopper");
+	test_fixture("$models/stopper"); @mkdir("$models/stopper");
 	try {
 		with_file("$models/stopper/stopper.php", "<?php\nclass stopper {\n\tstatic function listens() { return array('cms.item_deleted' => 'broken'); }\n\tfunction broken(\$deleted) { echo 'stray output'; return no_such_function(); }\n}\n", function () {
 			$item = mcp_stdio(array(array('create_item', array('collection' => 'menu', 'fields' => array('name' => 'Stopper test', 'price' => '1')))));
@@ -2701,7 +2711,7 @@ class probe {
 }
 PHP;
 test(array('R7', 'R9', 'R10', 'R11'), 'hidden fields, lists, transactions and lint, with a probe model', function () use ($base, $probe_dir, $probe, $root) {
-	@mkdir($probe_dir);
+	test_fixture($probe_dir); @mkdir($probe_dir);
 	$log = "$root/demo/data/probe.log";
 	@unlink($log);
 	try {
@@ -2779,7 +2789,7 @@ test(array('R7', 'R9', 'R10', 'R11'), 'hidden fields, lists, transactions and li
 			});
 			// a model with an ordinary types() method declares nothing, and breaks nothing
 			$plain = dirname($probe_dir).'/zzplain';
-			@mkdir($plain);
+			test_fixture($plain); @mkdir($plain);
 			try {
 				with_file("$plain/zzplain.php", "<?php\nclass zzplain { function types() { return array('widget' => array('fields' => array('a' => ''))); } }\n", function () use ($base) {
 					same(200, http('GET', "$base/menu")[0]);
@@ -2810,7 +2820,7 @@ test(array('R7', 'R9', 'R10', 'R11'), 'hidden fields, lists, transactions and li
 test('R5', 'owner=me on a public type lists only the viewer\'s own records, members included (#89)', function () use ($base, $root) {
 	$dir = "$root/demo/models/zzreviews";
 	$views = "$root/demo/views/cafe";
-	@mkdir($dir);
+	test_fixture($dir); @mkdir($dir);
 	try {
 		with_file("$dir/zzreviews.php", "<?php\nclass zzreviews {\n\tstatic function types() {\n\t\treturn array('zzreview' => array('fields' => array('title' => '', 'email' => ''), 'hidden' => array('email'), 'public' => true, 'owner' => true));\n\t}\n}\n", function () use ($base, $views) {
 			cms_records::forget();
@@ -2933,7 +2943,7 @@ test('C48', '/api answers only what a model lists, for the roles it names', func
 	has(raster(array('vocabulary'))[1], '/api: hours (visitor), category_count (visitor), bookings (editor)');
 	// a model that lists nothing offers nothing
 	$dir = "$root/demo/models/zzopen";
-	@mkdir($dir);
+	test_fixture($dir); @mkdir($dir);
 	try {
 		with_file("$dir/zzopen.php", "<?php\nclass zzopen { function ping() { return 'pong'; } }\n", function () use ($base) {
 			lacks(raster(array('render', '/api/zzopen/ping'))[1], 'pong', 'closed');
@@ -3093,7 +3103,7 @@ test('T5', 'templates print text: a number with its mock-up\'s decimals, nothing
 	lacks(raster(array('lint'))[1], 'people_invalid', 'lint knows Raster raises it');
 	// any model's numbers print with the mock-up's decimals, records included
 	$model = dirname(__DIR__).'/demo/models/zzprices/zzprices.php';
-	@mkdir(dirname($model));
+	test_fixture(dirname($model)); @mkdir(dirname($model));
 	try {
 		with_file($model, '<?php class zzprices { function rows() { return array(array("price" => 24.0), array("price" => 9.5)); } }', function () use ($base) {
 			with_file(dirname(__DIR__).'/demo/views/cafe/zz-prices.html', '<!-- render.zzprices.rows --><b><!-- print.price -->24.00<!-- /print.price --></b><!-- /render.zzprices.rows -->', function () use ($base) {
@@ -3371,7 +3381,7 @@ test('C51', 'cms offers over /api only what its api() lists: the editor endpoint
 	same(200, http('GET', "$base/api/cms/style")[0]);
 	same(200, http('GET', "$base/api/cms/editor_script")[0]);
 	$dir = "$root/demo/models/the_cms";
-	@mkdir($dir);
+	test_fixture($dir); @mkdir($dir);
 	try {
 		with_file("$dir/the_cms.php", "<?php\nclass the_cms extends cms\n{\n\tfunction takings() { return 'today: 1200 lei'; }\n}\n", function () use ($base) {
 			list($status, $body) = http('GET', "$base/api/cms/takings");
@@ -3390,7 +3400,7 @@ test('C50', '/api errors answer JSON: 500 logged with the URL, 503 when the data
 	raster(array('schema', '--apply'), $env);
 	$prod = server(free_port(), array_merge($env, array('RASTER_MAIL' => "log://$maildir")));
 	$dir = "$root/demo/models/zzwebhook";
-	@mkdir($dir);
+	test_fixture($dir); @mkdir($dir);
 	try {
 		with_file("$dir/zzwebhook.php", "<?php\nclass zzwebhook\n{\n\tstatic function api() { return array('paid' => 'visitor', 'down' => 'visitor'); }\n"
 			."\tfunction paid(\$order, \$amount) { throw new RuntimeException('signature mismatch for sk_live_123'); }\n"
@@ -3642,6 +3652,7 @@ test('A17', 'theme files of every kind are served: no old .htaccess below the ro
 test('N15', 'raster upgrade takes an app with no version file as current', function () use ($root) {
 	// a second app made by hand: a copy of the demo's settings, no version file
 	$app = "$root/zzn15";
+	test_fixture($app);
 	mkdir("$app/models", 0775, true);
 	exec('cp -R '.escapeshellarg("$root/demo/config").' '.escapeshellarg("$app/config"));
 	@unlink("$app/config/raster-version");
@@ -3667,6 +3678,7 @@ test('M19', 'the MCP view tools take a theme only as a folder directly under vie
 	$outside = sys_get_temp_dir().'/raster-demo-theme-'.getmypid();
 	@mkdir($outside);
 	file_put_contents("$outside/secret.json", '{"secret":"sk-live-123"}');
+	test_fixture("$themes/zzlinked");
 	symlink($outside, "$themes/zzlinked");
 	try {
 		// over HTTP with the content token, the site's .mcp.json and files
@@ -3706,7 +3718,7 @@ test('M19', 'the MCP view tools take a theme only as a folder directly under vie
 // ## 2.1.8 batch H: row loop
 test('C53', 'a print inside a render block fills every row of a long list: 1,500 rows, staff-only blocks hidden in all of them (#54)', function () use ($base, $views, $root) {
 	$dir = "$root/demo/models/zzmany";
-	@mkdir($dir);
+	test_fixture($dir); @mkdir($dir);
 	$row = '<li><!-- print.n -->r0<!-- /print.n --> <!-- print.feed.site_url -->SITE<!-- /print.feed.site_url -->'
 		.'<!-- print.if.is_editor --><b>STAFF</b><!-- /print.if.is_editor --><!-- print.if.logged_out --><i>guest</i><!-- /print.if.logged_out --></li>';
 	try {
@@ -3860,7 +3872,7 @@ test('H14', 'an interrupted send goes on where it stopped (#86)', function () us
 	// a model that stops the run when the second mail is handed over, as a
 	// dropped SSH session would
 	$dir = dirname(__DIR__).'/demo/models/zzstop';
-	@mkdir($dir);
+	test_fixture($dir); @mkdir($dir);
 	try {
 		with_file("$dir/zzstop.php", "<?php\nclass zzstop {\n\tstatic \$n = 0;\n\tstatic function listens() { return array('mail.sent' => 'stop'); }\n\tfunction stop() { if (++self::\$n === (int)getenv('ZZ_STOP_AFTER')) exit(3); }\n}\n", function () use ($base) {
 			same(3, raster(array('send', '/journal'), array('RASTER_URL' => "$base/", 'ZZ_STOP_AFTER' => '2'))[0], 'the run was stopped');
@@ -4465,7 +4477,7 @@ test('Q2', 'too many posts from one place: slow_down, and nothing stored', funct
 	$view = "<html><body>\n<!-- print.validation.alert('try_again') --><p>Again, please.</p><!-- /print.validation.alert('try_again') -->\n<!-- print.validation.alert('slow_down') --><p>Slow down.</p><!-- /print.validation.alert('slow_down') -->\n<!-- render.zzshared.form -->\n<form method=\"post\"><input name=\"title\" required maxlength=\"50\"><button>Send</button></form>\n<!-- /render.zzshared.form -->\n</body></html>\n";
 	// spam_ip_blocks on holds them back again
 	$strict = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'CAFE_SPAM_LIMITS' => 'on', 'CAFE_SPAM_IP_BLOCKS' => 'on'));
-	@mkdir("$root/demo/models/zzshared");
+	test_fixture("$root/demo/models/zzshared"); @mkdir("$root/demo/models/zzshared");
 	try {
 		with_file("$views/zz-shared.html", $view, function () use ($spam_base, $strict, $root, $model, $office) {
 			with_file("$root/demo/models/zzshared/zzshared.php", $model, function () use ($spam_base, $strict, $office) {
@@ -4513,7 +4525,7 @@ test('Q1', 'a record form is covered without code, and a type can turn it off', 
 		return "<?php\nclass zzspam\n{\n\tstatic function types() {\n\t\treturn array('zzspam' => array('fields' => array('title' => '', 'note' => ''), 'create' => 'visitor'".($spam ? '' : ", 'spam' => false")."));\n\t}\n\tfunction form() { return cms_records::submit('zzspam', 'sent'); }\n}\n";
 	};
 	$view = "<html><body>\n<!-- print.validation.alert('try_again') --><p>Again, please.</p><!-- /print.validation.alert('try_again') -->\n<!-- print.validation.alert('slow_down') --><p>Slow down.</p><!-- /print.validation.alert('slow_down') -->\n<!-- render.zzspam.form -->\n<form method=\"post\"><input name=\"title\" required maxlength=\"50\"><input name=\"note\"><button>Send</button></form>\n<!-- /render.zzspam.form -->\n</body></html>\n";
-	@mkdir("$root/demo/models/zzspam");
+	test_fixture("$root/demo/models/zzspam"); @mkdir("$root/demo/models/zzspam");
 	try {
 		with_file("$views/zz-spam.html", $view, function () use ($spam_base, $root, $model) {
 			foreach (array(true => 'held', false => 'stored') as $spam => $outcome) {

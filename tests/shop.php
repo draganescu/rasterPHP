@@ -58,7 +58,7 @@ function server($env) {
 }
 register_shutdown_function(function () use ($tmp, $root) {
 	global $servers;
-	foreach ($servers as $process) proc_terminate($process);
+	foreach ($servers as $process) { proc_terminate($process); proc_close($process); }
 	exec('rm -rf '.escapeshellarg($tmp).' '.escapeshellarg("$root/shop/data/cache"));
 });
 function http($method, $url, $body = null, $headers = array()) {

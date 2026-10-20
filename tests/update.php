@@ -8,7 +8,7 @@
 if (PHP_SAPI !== 'cli') exit;
 
 $repo = dirname(__DIR__);
-require __DIR__.'/db.php';
+require __DIR__.'/php.php';
 $tmp = sys_get_temp_dir().'/raster-update-test-'.getmypid();
 mkdir($tmp, 0775, true);
 register_shutdown_function(function () use ($tmp) { exec('rm -rf '.escapeshellarg($tmp)); });
