@@ -3,6 +3,10 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.33
+
+To take replies, add `render.rsvp.form` to the event's page (or any page, with `?event=<id>`), word its alerts (`going`, `waiting`, `noted`, `already_replied`, `closed`, `full`, `too_many`, `not_open`, …) and `try_again` / `slow_down` (lint names a page without them), and add `_email/rsvp_link`. **The reply form** stores a yes, no or maybe for the page's event, never one the post names, and redirects with `?done=going`, `?done=waiting` or `?done=noted`. **One reply per address:** replying again with an address that replied shows `already_replied` and emails that address its link, at most once every five minutes. The form has the spam checks of the booking form, asked before that lookup, so a post without a stamp mails nothing and the 4th post in an hour with one address is held. `lint` errors on a page with the form when the events collection has no `date` field, and warns when it has no `places`. A reply made by the form inside a site's own `cms_records::transaction()` sends its event and its email once.
+
 ## 2.2.32
 
 To email guests, add `_email/rsvp_going`, `rsvp_waiting`, `rsvp_promoted` and `rsvp_noted` (lint names any missing) and a page `rsvp` with `render.rsvp.manage`. **The guest's link** opens their reply; a GET changes nothing, the page's form changes it, and it works until the event starts, after a no too. **Staff emails** (`_email/rsvp_new`) only when `rsvp_staff_email` is set. Settings: `rsvp_manage_page`, `rsvp_staff_email`.

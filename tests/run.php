@@ -6126,7 +6126,8 @@ test('lint reports a theme with render.contact.form and no _email/contact_receiv
 // ## Bundled rsvp: places and the waitlist
 
 // The site's events collection with the two fields rsvp reads (places,
-// rsvp_until) and render.rsvp.event on the item's page (events_item.html),
+// rsvp_until) and render.rsvp.event and render.rsvp.form, with their
+// alerts, on the item's page (events_item.html),
 // and a page that shows an event by ?event= (zzrsvp.html), so the bundled
 // rsvp model counts, with the guest's manage page (rsvp.html) and the six
 // emails. eventsdata is made with the mock-up's types. $fn runs with the
@@ -6136,6 +6137,13 @@ function rsvp_site($fn) {
 	$region = '<!-- render.rsvp.event --><p class="rsvp">event=<!-- print.event -->1<!-- /print.event --> places=<!-- print.places -->40<!-- /print.places -->'
 		.' going=<!-- print.going -->0<!-- /print.going --> left=<!-- print.left -->40<!-- /print.left --> waiting=<!-- print.waiting -->0<!-- /print.waiting -->'
 		.' state=<!-- print.state -->open<!-- /print.state --> deadline=<!-- print.deadline -->2026-11-20 18:00<!-- /print.deadline --></p><!-- /render.rsvp.event -->';
+	// the reply form, with an alert for each thing it can say
+	foreach (array('going', 'waiting', 'noted', 'already_replied', 'closed', 'full', 'too_many', 'people_invalid', 'not_open', 'try_again', 'slow_down') as $alert) {
+		$region .= "<!-- print.validation.alert('$alert') --><p>ALERT $alert</p><!-- /print.validation.alert('$alert') -->";
+	}
+	$region .= '<!-- render.rsvp.form --><form method="post"><input name="name" required><input type="email" name="email" required><input name="phone">'
+		.'<input type="radio" name="answer" value="yes"><input type="radio" name="answer" value="no"><input type="radio" name="answer" value="maybe">'
+		.'<input type="number" name="people" min="1"><textarea name="notes"></textarea><button>Reply</button></form><!-- /render.rsvp.form -->';
 	file_put_contents("$theme/events_item.html", '<html><head><title>Event</title></head><body><!-- render.cms.events --><h1><!-- print.title -->Jazz night<!-- /print.title --></h1>'
 		.'<p><!-- print.date -->2026-11-20<!-- /print.date --> at <!-- print.starts -->20:00<!-- /print.starts -->, <!-- print.places -->40<!-- /print.places --> places,'
 		.' replies until <!-- print.rsvp_until -->2026-11-20 18:00<!-- /print.rsvp_until --></p><!-- /render.cms.events -->'.$region.'</body></html>');
@@ -6184,6 +6192,7 @@ function rsvp_site($fn) {
 			rsvp::$freed = array();
 			rsvp::$changed = array();
 			rsvp::$links = array();
+			rsvp::$made = array();
 		}
 	}
 }
@@ -7074,6 +7083,300 @@ test('rsvp requires(): emails, pages, settings', function () {
 		with_settings(array('protected' => array('account' => 'member', 'rsvp' => 'editor')), function () use ($messages) {
 			check(preg_grep('/^warning: .*render\.rsvp\.manage.*protected/', $messages('rsvp.html')) !== array(), json_encode($messages('rsvp.html')));
 		});
+	});
+});
+
+// ## Bundled rsvp: the form
+
+// the reply form as a request in this process, as rsvp_manage() asks the
+// manage page: $get is the URL's query, $post what the form sent (stamped
+// a minute ago unless it names raster_ts), from $ip. A fresh validation
+// object, as a new request has. Gives the alerts raised.
+function rsvp_form($get, $post = null, $ip = '192.0.2.10') {
+	$template = template::instance();
+	$kept = array($_GET, $_POST, $_SERVER, $template->current_call, $template->forms);
+	$validation = isset(controller::instance()->objects['validation']) ? controller::instance()->objects['validation'] : null;
+	$_GET = $get;
+	$_POST = array();
+	$_SERVER['REQUEST_METHOD'] = $post === null ? 'GET' : 'POST';
+	$_SERVER['REMOTE_ADDR'] = $ip;
+	if ($post !== null) {
+		if (!array_key_exists('raster_ts', $post)) $post['raster_ts'] = stamp_for_tests(60);
+		$_POST = array('raster_form' => 'rsvp.form') + $post;
+	}
+	$template->current_call = 'rsvp.form';
+	$template->forms['rsvp.form'] = array_fill_keys(array('name', 'email', 'phone', 'answer', 'people', 'notes'), array());
+	unset(controller::instance()->objects['validation']);
+	rsvp::forget();
+	try {
+		(new rsvp())->form();
+		$raised = new ReflectionProperty('validation', 'raised');
+		$raised->setAccessible(true);
+		return array_keys($raised->getValue(validation::get()));
+	} finally {
+		list($_GET, $_POST, $_SERVER, $template->current_call, $template->forms) = $kept;
+		if ($validation) controller::instance()->objects['validation'] = $validation;
+		else unset(controller::instance()->objects['validation']);
+	}
+}
+// a post of the reply form to $url on booking_server(): a yes for one
+// unless $values say otherwise. Gives status, body and where it redirected.
+function rsvp_post($url, $values, $headers = array()) {
+	list($status, $body, $answer) = form_post($url, $values + array('raster_form' => 'rsvp.form', 'answer' => 'yes', 'people' => '1'), $headers);
+	return array($status, $body, location($answer));
+}
+
+test('rsvp form: a yes, a waitlist and a no', function () use ($booking_base) {
+	rsvp_site(function () use ($booking_base) {
+		spam_clear();
+		$event = rsvp_event(array('title' => 'Jazz night', 'places' => 2));
+		$other = rsvp_event(array('title' => 'Other night'));
+		$page = "$booking_base/events/events_item/{$event['slug']}";
+		list($status, $body) = http('GET', $page);
+		same(200, $status, $body);
+		check(strpos($body, '<form method="post"') !== false && strpos($body, 'ALERT not_open') === false && strpos($body, 'ALERT closed') === false, $body);
+		// the event is the page's, whatever the post names
+		$mails = booking_mails(function () use ($page, $other) {
+			list($status, , $location) = rsvp_post($page, array('name' => 'Ana', 'email' => 'ana.form@example.test', 'people' => '2', 'event' => (string)$other['id']));
+			same(array(303, "$page?done=going"), array($status, $location));
+		});
+		$ana = cms_records::find('rsvp', array('email' => 'ana.form@example.test'));
+		same(1, count($ana));
+		same(array((int)$event['id'], 'going', 2, 0), array($ana[0]['event'], $ana[0]['status'], $ana[0]['people'], (int)$ana[0]['owner']));
+		same(array('rsvp_going ana.form@example.test'), booking_sent($mails));
+		same((int)$ana[0]['id'], (int)rsvp::by_token(booking_token($mails[0]))['id'], 'the going email\'s link:');
+		same(array(), cms_records::find('rsvp', array('event' => $other['id'])));
+		// full: the next yes waits, at the head of the queue
+		$mails = booking_mails(function () use ($page) {
+			list($status, , $location) = rsvp_post($page, array('name' => 'Bo', 'email' => 'bo.form@example.test'));
+			same(array(303, "$page?done=waiting"), array($status, $location));
+		});
+		same(array('rsvp_waiting bo.form@example.test'), booking_sent($mails));
+		same('1', rsvp_position($mails[0]));
+		$mails = booking_mails(function () use ($page) {
+			list($status, , $location) = rsvp_post($page, array('name' => 'Cy', 'email' => 'cy.form@example.test', 'answer' => 'no'));
+			same(array(303, "$page?done=noted"), array($status, $location));
+		});
+		same(array('rsvp_noted cy.form@example.test'), booking_sent($mails));
+		same(array('waiting', 'no'), array(cms_records::find('rsvp', array('email' => 'bo.form@example.test'))[0]['status'], cms_records::find('rsvp', array('email' => 'cy.form@example.test'))[0]['status']));
+		list(, $body) = http('GET', "$page?done=noted");
+		check(strpos($body, 'ALERT noted') !== false, $body);
+		// on any page by ?event=, and the redirect keeps it
+		list($status, , $location) = rsvp_post("$booking_base/zzrsvp?event={$other['id']}", array('name' => 'Di', 'email' => 'di.form@example.test', 'event' => (string)$event['id']));
+		same(array(303, "$booking_base/zzrsvp?event={$other['id']}&done=going"), array($status, $location));
+		same((int)$other['id'], cms_records::find('rsvp', array('email' => 'di.form@example.test'))[0]['event']);
+		// a post that names an event on a page without one replies to nothing
+		list($status, $body) = rsvp_post("$booking_base/zzrsvp", array('name' => 'Ed', 'email' => 'ed.form@example.test', 'event' => (string)$event['id']));
+		same(200, $status);
+		check(strpos($body, 'ALERT not_open') !== false, $body);
+		same(array(), cms_records::find('rsvp', array('email' => 'ed.form@example.test')));
+	});
+});
+
+test('rsvp form: not_open, closed, too_many', function () use ($booking_base) {
+	rsvp_site(function () use ($booking_base) {
+		spam_clear();
+		$draft = rsvp_event(array('enabled' => 0));
+		$undated = rsvp_event(array('date' => ''));
+		$closed = rsvp_event(array('rsvp_until' => date('Y-m-d H:i', strtotime('-1 hour'))));
+		$open = rsvp_event();
+		foreach (array('' => 'no event', "?event={$draft['id']}" => 'a draft', "?event={$undated['id']}" => 'no date', '?event=999999' => 'no such item') as $query => $case) {
+			list($status, $body) = http('GET', "$booking_base/zzrsvp$query");
+			same(200, $status, $case);
+			check(strpos($body, 'ALERT not_open') !== false, "$case: $body");
+		}
+		list(, $body) = http('GET', "$booking_base/zzrsvp?event={$closed['id']}");
+		check(strpos($body, 'ALERT closed') !== false && strpos($body, 'ALERT not_open') === false, $body);
+		list(, $body) = http('GET', "$booking_base/zzrsvp?event={$open['id']}");
+		check(strpos($body, 'ALERT closed') === false && strpos($body, 'ALERT not_open') === false, $body);
+		$mails = booking_mails(function () use ($booking_base, $closed, $draft, $open) {
+			list($status, $body) = rsvp_post("$booking_base/zzrsvp?event={$closed['id']}", array('name' => 'Late', 'email' => 'late.form@example.test'));
+			same(200, $status);
+			check(strpos($body, 'ALERT closed') !== false, $body);
+			list($status, $body) = rsvp_post("$booking_base/zzrsvp?event={$draft['id']}", array('name' => 'Draft', 'email' => 'draft.form@example.test'));
+			check(strpos($body, 'ALERT not_open') !== false, $body);
+			list($status, $body) = rsvp_post("$booking_base/zzrsvp?event={$open['id']}", array('name' => 'Seven', 'email' => 'seven.form@example.test', 'people' => '7', 'notes' => 'all of us'));
+			same(200, $status);
+			check(strpos($body, 'ALERT too_many') !== false, $body);
+			check(strpos($body, 'value="Seven"') !== false && strpos($body, 'value="7"') !== false && strpos($body, '>all of us</textarea>') !== false, 'the typed values: '.$body);
+		});
+		same(array(), booking_sent($mails));
+		same(array(), cms_records::find('rsvp'));
+	});
+});
+
+test('already_replied mails the link to the reply\'s address only, once per five minutes', function () use ($booking_base) {
+	rsvp_site(function () use ($booking_base) {
+		spam_clear();
+		$event = rsvp_event();
+		$page = "$booking_base/events/events_item/{$event['slug']}";
+		$first = booking_mails(function () use ($page) {
+			same(303, rsvp_post($page, array('name' => 'Ana', 'email' => 'ana@example.com', 'people' => '2'))[0]);
+		});
+		$ana = cms_records::find('rsvp', array('email' => 'ana@example.com'))[0];
+		$again = function ($values = array(), $headers = array()) use ($page) {
+			$result = null;
+			$mails = booking_mails(function () use ($page, $values, $headers, &$result) {
+				$result = rsvp_post($page, $values + array('name' => 'Someone else', 'email' => 'Ana@Example.com', 'people' => '4'), $headers);
+			});
+			return array($result[0], $result[1], $mails);
+		};
+		list($status, $body, $mails) = $again();
+		same(200, $status);
+		check(strpos($body, 'ALERT already_replied') !== false, $body);
+		same(array('rsvp_link ana@example.com'), booking_sent($mails));
+		$raw = booking_token($mails[0]);
+		check($raw !== null && $raw !== booking_token($first[0]), 'a new link: '.$mails[0]['text']);
+		same((int)$ana['id'], (int)rsvp::by_token($raw)['id']);
+		same((int)$ana['id'], (int)rsvp::by_token(booking_token($first[0]))['id'], 'the first link still works:');
+		$stored = cms_records::find('rsvp');
+		same(1, count($stored));
+		same(array('Ana', 2), array($stored[0]['name'], $stored[0]['people']));
+		check($stored[0]['link_sent_at'] !== '', 'link_sent_at');
+		// within five minutes: the same answer, and nothing sent
+		list($status, $body, $mails) = $again();
+		check(strpos($body, 'ALERT already_replied') !== false, $body);
+		same(array(), booking_sent($mails));
+		// later, the link again
+		spam_clear();
+		$back = function () use ($ana) { cms_records::update('rsvp', $ana['id'], array('link_sent_at' => date('Y-m-d H:i:s', time() - 360))); };
+		$back();
+		list(, $body, $mails) = $again();
+		check(strpos($body, 'ALERT already_replied') !== false, $body);
+		same(array('rsvp_link ana@example.com'), booking_sent($mails));
+		// without a stamp, nothing is looked up or mailed
+		$back();
+		list($status, $body, $mails) = $again(array('raster_ts' => ''));
+		same(200, $status);
+		check(strpos($body, 'ALERT try_again') !== false && strpos($body, 'ALERT already_replied') === false, $body);
+		same(array(), booking_sent($mails));
+		// the 4th post with the address in an hour is held, and mails nothing
+		spam_clear();
+		$back();
+		$sent = array();
+		for ($i = 1; $i <= 4; $i++) {
+			list($status, $body, $mails) = $again();
+			$sent = array_merge($sent, booking_sent($mails));
+			if ($i < 4) check(strpos($body, 'ALERT already_replied') !== false, "post $i: $body");
+		}
+		check(strpos($body, 'ALERT slow_down') !== false && strpos($body, 'ALERT already_replied') === false, $body);
+		same(array('rsvp_link ana@example.com'), $sent);
+		same(1, count(cms_records::find('rsvp')));
+	});
+});
+
+test('rsvp form: a post without a fresh stamp gets the form again', function () use ($booking_base) {
+	rsvp_site(function () use ($booking_base) {
+		spam_clear();
+		$event = rsvp_event(array('places' => 20));
+		$page = "$booking_base/events/events_item/{$event['slug']}";
+		$mails = booking_mails(function () use ($page) {
+			foreach (array('' => 'no stamp', stamp_for_tests(1) => 'a stamp 1 s old') as $stamp => $case) {
+				list($status, $body) = rsvp_post($page, array('name' => 'Quick', 'email' => 'quick@example.test', 'raster_ts' => $stamp));
+				same(200, $status, $case);
+				check(strpos($body, 'ALERT try_again') !== false && strpos($body, 'value="Quick"') !== false, "$case: $body");
+			}
+		});
+		same(array(), booking_sent($mails));
+		same(array(), cms_records::find('rsvp'));
+		// many people on one address: each reply is taken
+		booking_mails(function () use ($page) {
+			for ($i = 1; $i <= 7; $i++) same(303, rsvp_post($page, array('name' => "Office $i", 'email' => "office$i@example.test"), array('X-Forwarded-For: 203.0.113.70'))[0], "reply $i");
+		});
+		same(7, count(cms_records::find('rsvp')));
+		// unless spam_ip_blocks
+		spam_clear();
+		with_settings(array('spam_ip_blocks' => true), function () use ($event) {
+			for ($i = 1; $i <= 6; $i++) {
+				$alerts = rsvp_form(array('event' => (string)$event['id']), array('name' => "Block $i", 'email' => "block$i@example.test", 'answer' => 'yes', 'people' => '1'), '203.0.113.71');
+				same($i < 6 ? array() : array('slow_down'), $alerts, "post $i");
+			}
+		});
+		same(12, count(cms_records::find('rsvp')));
+	});
+});
+
+test('rsvp form: a reply inside the site\'s own transaction sends its event and email once', function () {
+	rsvp_site(function () {
+		spam_clear();
+		$event = rsvp_event();
+		$mails = array();
+		$seen = rsvp_events(function () use ($event, &$mails) {
+			$mails = booking_mails(function () use ($event) {
+				cms_records::transaction(function () use ($event) {
+					same(array(), rsvp_form(array('event' => (string)$event['id']), array('name' => 'Inside', 'email' => 'inside@example.test', 'answer' => 'yes', 'people' => '2')));
+				});
+			});
+		});
+		same(array('rsvp.replied'), array_column($seen, 0));
+		same('guest', $seen[0][1]['who']);
+		same(array('rsvp_going inside@example.test'), booking_sent($mails));
+		check(booking_token($mails[0]) !== null, 'no link: '.$mails[0]['text']);
+		// and a reply staff add after it, in the same request, gets its own
+		$mails = booking_mails(function () use ($event) { rsvp_reply(array('event' => $event['id'], 'email' => 'after@example.test'), 'editor'); });
+		same(array('rsvp_going after@example.test'), booking_sent($mails));
+	});
+});
+
+test('rsvp form: the_rsvp adds a field', function () use ($booking_base) {
+	$app = APPBASE.config::get('models_path', 'models');
+	rsvp_site(function ($theme) use ($app, $booking_base) {
+		spam_clear();
+		temp_model("$app/the_rsvp", array('the_rsvp.php' => "<?php\nclass the_rsvp extends rsvp\n{\n\tstatic function types() {\n\t\t\$types = parent::types();\n\t\t\$types['rsvp']['fields']['dietary'] = '';\n\t\treturn \$types;\n\t}\n}\n"));
+		$view = "$theme/zzrsvp.html";
+		$html = file_get_contents($view);
+		file_put_contents($view, str_replace('<textarea name="notes">', '<input name="dietary"><textarea name="notes">', $html));
+		try {
+			controller::forget_models();
+			cms_records::forget();
+			same('the_rsvp', cms_records::info('rsvp')['class']);
+			$event = rsvp_event();
+			list($status, $body) = rsvp_post("$booking_base/zzrsvp?event={$event['id']}", array('name' => 'Vegan Guest', 'email' => 'vegan.rsvp@example.test', 'people' => '2', 'dietary' => 'vegan'));
+			same(303, $status, $body);
+			$stored = cms_records::find('rsvp', array('email' => 'vegan.rsvp@example.test'));
+			same(array('vegan', 'going', (int)$event['id']), array($stored[0]['dietary'], $stored[0]['status'], $stored[0]['event']));
+		} finally {
+			file_put_contents($view, $html);
+			remove_dir("$app/the_rsvp");
+			controller::forget_models();
+			cms_records::forget();
+		}
+	});
+});
+
+test('lint: rsvp form alerts and the event\'s fields', function () {
+	rsvp_site(function ($theme) {
+		$messages = function ($html) {
+			return array_map(function ($p) { return $p['severity'].': '.$p['message']; }, lint_html($html));
+		};
+		$form = '<!-- render.rsvp.form --><form method="post"><input name="name"><input type="email" name="email"><button>Reply</button></form><!-- /render.rsvp.form -->';
+		$alerts = "<!-- print.validation.alert('try_again') --><p>Again.</p><!-- /print.validation.alert('try_again') -->"
+			."<!-- print.validation.alert('slow_down') --><p>Slow.</p><!-- /print.validation.alert('slow_down') -->";
+		check(preg_grep('/^warning: .*render\.rsvp\.form can turn a post away as spam/', $messages($form)) !== array(), json_encode($messages($form)));
+		$clean = $messages($alerts.$form);
+		same(array(), array_values(preg_grep('/spam|rsvp_collection|date|places/', $clean)), 'events has date and places:');
+		$gig = "$theme/zzgig.html";
+		try {
+			with_settings(array('rsvp_collection' => 'zzgig'), function () use ($gig, $messages, $alerts, $form) {
+				file_put_contents($gig, '<html><body><!-- render.cms.zzgig --><h1><!-- print.title -->Gig<!-- /print.title --></h1><!-- /render.cms.zzgig --></body></html>');
+				check(preg_grep("/^error: .*render\.rsvp\.form.*'zzgig'.*date/", $messages($alerts.$form)) !== array(), json_encode($messages($alerts.$form)));
+				file_put_contents($gig, '<html><body><!-- render.cms.zzgig --><h1><!-- print.title -->Gig<!-- /print.title --></h1><p><!-- print.date -->2026-11-20<!-- /print.date --></p><!-- /render.cms.zzgig --></body></html>');
+				$found = $messages($alerts.$form);
+				same(array(), array_values(preg_grep("/^error: .*'zzgig'/", $found)));
+				check(preg_grep("/^warning: .*render\.rsvp\.form.*'zzgig'.*places/", $found) !== array(), json_encode($found));
+			});
+		} finally {
+			@unlink($gig);
+		}
+		$link = "$theme/_email/rsvp_link.html";
+		$html = file_get_contents($link);
+		unlink($link);
+		try {
+			check(preg_grep('/^error: render\.rsvp\.form sends an email written in .*rsvp_link\.html/', $messages($alerts.$form)) !== array(), json_encode($messages($alerts.$form)));
+		} finally {
+			file_put_contents($link, $html);
+		}
+		same(array(), array_values(preg_grep('/^error/', $messages($alerts.$form))));
 	});
 });
 
