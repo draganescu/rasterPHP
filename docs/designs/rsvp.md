@@ -1,7 +1,9 @@
 # Bundled model: rsvp
 
-Status: draft for approval, 2026-10-18. Tracking: #168 (Phase 2).
-Written against master at 2.2.13 (booking B1–B3 merged, B4 not yet).
+Status: approved 2026-10-20 (see **Decisions**; 3 taken the other way:
+no shared code). Tracking: #168 (Phase 2). Written against master at
+2.2.13; booking's B4 and contact (2.2.21–2.2.29) have landed since, and the
+line numbers in booking.php are from then.
 
 ## Why
 
@@ -25,8 +27,9 @@ already wrote as content, a reply is answered at once, and a full event
 puts people in a queue instead of refusing them. Squeezed into booking, an
 event would need a `bookingresource`, a `bookinghours` row that makes
 exactly one slot, and a status machine with three more states. So RSVP is
-its own small model. It shares the parts of booking that are not about
-slots (see **What is shared with booking**).
+its own small model. It takes booking's ideas for the parts that are not
+about slots, as its own code: nothing is shared between the two models (see
+**What RSVP takes from booking**).
 
 ## Goals
 
@@ -58,12 +61,12 @@ slots (see **What is shared with booking**).
   hours before the next person gets it. Both need a scheduler, as booking's
   reminders do (booking.md, Non-goals). Promotion here is immediate.
 - **Invitations**: an invite-only event where staff upload a guest list
-  and each guest gets a link to reply. *(Question 8.)*
+  and each guest gets a link to reply. *(Decision 8.)*
 - A public "who's coming" list. Only counts are public.
 - Ticket types, seating, recurring events, names for each person in a
   party (plus-ones), calendar files (ICS).
 - Replies for items of more than one collection on one site.
-  *(Question 2.)*
+  *(Decision 2.)*
 - Places left per event on the public **list** page (`events.html`). A
   region nested in `render.cms.events` runs before it (AGENTS.md,
   "Evaluation order"), so it can't know the row. The item page shows them.
@@ -103,7 +106,7 @@ Admin entry and nothing new in `describe` or MCP.
 
 ## How a reply attaches to an event
 
-*(Question 1.)* **The event is an item of a markup collection; the reply
+*(Decision 1.)* **The event is an item of a markup collection; the reply
 is a record.** Both kinds already exist, and each keeps the job it has:
 
 - **Events stay content.** The item has the fields the site already gives
@@ -215,7 +218,7 @@ Staff writes (the in-page editor, MCP, model code: `cms_records::writer()`,
 as `booking::is_staff()` reads it) skip `closed`, `too_many` against
 `rsvp_max_people` and the missing email. They never put anyone over
 `places`: a staff yes that doesn't fit goes on the waitlist like anyone's.
-*(Question 7.)* The rules run when a reply is made and when its `answer`,
+*(Decision 7.)* The rules run when a reply is made and when its `answer`,
 `people` or `event` changes. Any other edit (a phone number, a note)
 always goes through, so a reply that needs attention never gets stuck.
 
@@ -232,7 +235,7 @@ emailed you a link to change your reply".
 ### The deadline
 
 The deadline is `rsvp_until` when the item has one, else the start minus
-`rsvp_closes` minutes (default 0, which is the start itself). *(Question 5.)*
+`rsvp_closes` minutes (default 0, which is the start itself). *(Decision 5.)*
 
 - Before it, anything goes.
 - After it and until the event starts, a guest can only **give places
@@ -253,7 +256,7 @@ The deadline is `rsvp_until` when the item has one, else the start minus
   event. `rsvp::promote($event)` reads the queue and the places inside the
   write's lock and moves in, oldest `waiting_since` first, **every waiting
   reply whose party fits**. A party of 4 that doesn't fit doesn't stop a
-  party of 2 behind it. *(Question 4.)* Each one moved becomes `going`,
+  party of 2 behind it. *(Decision 4.)* Each one moved becomes `going`,
   gets `rsvp_promoted` and sends `rsvp.promoted`.
 - When the model makes the change (a guest's form or link, an action),
   promotion runs in **the same transaction**. When staff make it in the
@@ -263,7 +266,7 @@ The deadline is `rsvp_until` when the item has one, else the start minus
   everything again, so running it twice moves nobody twice.
 - Promotion stops at the deadline. After it, freed places stay free for
   staff to give (the `promote` action, walk-ins at the door), and the
-  waitlist is shown to staff as it stands. *(Question 5.)*
+  waitlist is shown to staff as it stands. *(Decision 5.)*
 - A waiting guest who makes their party smaller keeps their place in the
   queue, and so does one who makes it bigger. One who says no or maybe
   leaves the queue. Saying yes again joins at the end.
@@ -288,12 +291,12 @@ when the event no longer fits it:
 
 As with booking, the reason is worked out when replies are listed, never
 stored. `render.rsvp.attention` lists such replies and
-`print.rsvp.count('attention')` counts them. *(Question 6.)*
+`print.rsvp.count('attention')` counts them. *(Decision 6.)*
 
 ### The guest's link
 
-The same scheme as booking (`booking.php:433`–`470`), shared code (see
-below):
+The same scheme as booking (`booking.php:433`–`470`), written again in
+`rsvp` (see below):
 
 - Every email to the guest carries a fresh link: 32 random bytes, sent only
   in that email. Its sha256 is added to `token_hashes`, which keeps the
@@ -351,7 +354,7 @@ Each view gets the reply's fields (not the hidden ones), `who`,
 item's page), `deadline` and `site_url`. A reply staff add with no email
 sends the guest nothing. Each change sends each email once. An edit that
 changes neither status nor people sends nothing. Editing the event emails
-nobody. *(Question 6.)*
+nobody. *(Decision 6.)*
 
 ## Events (after the commit)
 
@@ -404,25 +407,29 @@ is added in the page with no event id to type.
 Times are the site's clock (`timezone`), and the deadline is real seconds,
 as booking's notice is (`booking::starts_at`).
 
-## What is shared with booking
+## What RSVP takes from booking
 
-Shared code is moved out of booking in RSVP's first PR, with booking's
-tests unchanged as proof. *(Question 3.)*
+*(Decided 2026-10-20, Decision 3: bundled models share no code.)* RSVP
+carries its own copy of every piece it takes from booking. Nothing moves
+out of booking, booking is not touched, and neither model calls the other.
+A fix in one is made in the other by hand. That is the price of two models
+that can each be read, changed and removed alone.
 
-| Piece | Today | Shared as |
+| Piece | In booking | In rsvp |
 |---|---|---|
-| The guest's link: 32 random bytes, sha256 kept in a hidden list of 20, `hash_equals` lookup, the raw token kept for the request only | `booking::issue`, `by_token`, `$links` (`booking.php:444`–`470`) | `cms_links` in `system/models/cms/links.php`: `issue($hashes)` returns the raw token and the new list; `match($rows, $raw)` finds the row a token is for. Each model keeps its own `by_token.sql` (its own table) and decides when a link is live |
-| The manage page's headers: no cache, `Referrer-Policy: same-origin`, the redirect without the token after a change | `booking::manage`, `manage_done` (`booking.php:956`–`1002`) | `cms_links::page()` and `cms_links::done($done, $back)` |
-| Sending a model's email so a failure is logged without the address or link | `booking::send` (`booking.php:580`) | `mail::send_logged($view, $to, $vars, $who)`; booking's goes through it |
-| Region options with `?x` from the URL | `booking::options` (`booking.php:815`) | used as is (it is public); or moved to `cms_store` with the rest of the list options. Left to the builder |
+| The guest's link: 32 random bytes, sha256 kept in a hidden list of 20, `hash_equals` lookup, the raw token kept for the request only | `booking::issue`, `by_token`, `$links` (`booking.php:444`–`470`) | `rsvp::issue`, `by_token`, `$links`, with its own `sql/by_token.sql` |
+| The manage page's headers: no cache, `Referrer-Policy: same-origin`, the redirect without the token after a change | `booking::manage`, `manage_done` (`booking.php:956`–`1002`) | `rsvp::manage`, `manage_done` |
+| Sending a model's email so a failure is logged without the address or link | `booking::send` (`booking.php:580`) | `rsvp::send`, through `controller::model_class('mail')` as booking's does |
+| Region options with `?x` from the URL | `booking::options` (`booking.php:815`) | `rsvp::options` |
 
-Patterns copied, with no code shared, because each is a few lines tied to
-the model: `writing()` (the model's own write in one transaction, who is
-acting, links dropped on rollback), `payload()`, `requires()`, the
-listeners bound in `system/config/events.php` only where the model is used,
-`ready()`, and the staff regions through `cms_records::listed`.
+Also written again, as patterns: `writing()` (the model's own write in one
+transaction, who is acting, links dropped on rollback), `payload()`,
+`requires()`, the listeners bound in `system/config/events.php` only where
+the model is used, `ready()`, and the staff regions through
+`cms_records::listed`. RSVP uses the framework (`cms_records`, `mail`,
+`validation`, `util`) as every model does.
 
-Not shared: slots, hours, `peak`, the `requested` → `confirmed` status. An
+Not taken: slots, hours, `peak`, the `requested` → `confirmed` status. An
 RSVP never waits for staff.
 
 ## Our own examples move onto it
@@ -481,8 +488,9 @@ booking's P and contact's Q, so **S** (R is taken). Tests in
 - every email sent once per change, with the right `manage_url`, and none
   for an edit of a note or the event; staff's only with `rsvp_staff_email`;
 - the events and their payloads, with no hidden fields;
-- booking's existing suite unchanged after `cms_links` (the PR that moves
-  it).
+- booking's existing suite unchanged (booking is not touched);
+- a site using `rsvp` and not `booking` loads no file from
+  `system/models/booking/`, and the reverse.
 
 All on SQLite and MySQL, as CI runs them.
 
@@ -509,7 +517,12 @@ All on SQLite and MySQL, as CI runs them.
   wiki's Records page pointing to it.
 - The demo's words and design.
 
-## Questions for the maintainer
+## Decisions
+
+*(Decided 2026-10-20: every recommendation below is taken except 3, where
+the alternative is taken without the later sharing: bundled models share no
+code.)*
+
 
 1. **Where an event's places and deadline live.** Recommended: fields on
    the markup item (`places`, `rsvp_until`), written in the site's item
@@ -527,6 +540,10 @@ All on SQLite and MySQL, as CI runs them.
    booking moving onto it unchanged. This touches a released model. The
    other way is to copy about 80 lines into rsvp and share later (contact,
    donation and store will want the same links).
+   **Decided: neither.** RSVP copies the code and nothing is shared, now or
+   later. Bundled models stay self-contained, so one can be read, changed
+   or removed without touching another ("no dependency hell"). Contact,
+   donation and store take their own copies too.
 4. **Waitlist order.** Recommended: oldest first, but **every** party that
    fits moves in, so a party of 4 doesn't keep two free places from a
    couple behind it. The other way is strict order: nobody passes the head
