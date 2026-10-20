@@ -8,6 +8,7 @@
 if (PHP_SAPI !== 'cli') exit;
 
 $repo = dirname(__DIR__);
+require __DIR__.'/php.php';
 $tmp = sys_get_temp_dir().'/raster-update-test-'.getmypid();
 mkdir($tmp, 0775, true);
 register_shutdown_function(function () use ($tmp) { exec('rm -rf '.escapeshellarg($tmp)); });
@@ -28,7 +29,7 @@ function lacks($haystack, $needle, $message = '') { if (strpos((string)$haystack
 function raster($dir, $args, $env = array()) {
 	$env = array_merge(getenv(), array('RASTER_APP' => 'application', 'RASTER_DB' => "$dir/application/data/test.sqlite", 'NO_COLOR' => '1'), $env);
 	foreach ($env as $key => $value) if ($value === null) unset($env[$key]);
-	$process = proc_open(array_merge(array(PHP_BINARY, "$dir/bin/raster"), $args), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $dir, $env);
+	$process = proc_open(array_merge(php_argv("$dir/bin/raster"), $args), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $dir, $env);
 	$out = stream_get_contents($pipes[1]).stream_get_contents($pipes[2]);
 	return array(proc_close($process), $out);
 }
@@ -230,7 +231,7 @@ test('doctor in production warns when no time zone is set (#84)', function () us
 		$was = file_get_contents($config);
 		if ($zone !== null) file_put_contents($config, $was."\nconfig::set('timezone')->to('$zone');\n");
 		try {
-			$process = proc_open(array(PHP_BINARY, '-c', "$ini/php.ini", "$site/bin/raster", 'doctor'), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $site, $env);
+			$process = proc_open(php_argv('-c', "$ini/php.ini", "$site/bin/raster", 'doctor'), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $site, $env);
 			$out = stream_get_contents($pipes[1]).stream_get_contents($pipes[2]);
 			return array(proc_close($process), $out);
 		} finally {
@@ -471,7 +472,7 @@ test('doctor in production warns when PHP takes smaller uploads than the editor 
 	$doctor = function ($upload, $post) use ($site) {
 		$env = array_merge(getenv(), array('RASTER_APP' => 'application', 'RASTER_DB' => "$site/application/data/test.sqlite", 'NO_COLOR' => '1', 'RASTER_ENV' => 'production', 'RASTER_URL' => 'https://site.example/', 'RASTER_MAIL' => 'smtp://mail.example:587'));
 		unset($env['RASTER_MCP_TOKEN']);
-		$process = proc_open(array(PHP_BINARY, '-d', "upload_max_filesize=$upload", '-d', "post_max_size=$post", "$site/bin/raster", 'doctor'), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $site, $env);
+		$process = proc_open(php_argv('-d', "upload_max_filesize=$upload", '-d', "post_max_size=$post", "$site/bin/raster", 'doctor'), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $site, $env);
 		$out = stream_get_contents($pipes[1]).stream_get_contents($pipes[2]);
 		return array(proc_close($process), $out);
 	};
@@ -498,14 +499,14 @@ test('update downloads a release over HTTP and reads its status (#113)', functio
 	$name = stream_socket_get_name($socket, false);
 	fclose($socket);
 	$base = 'http://'.$name;
-	$server = proc_open(array(PHP_BINARY, '-S', $name, '-t', $www), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $www);
+	$server = proc_open(php_argv('-S', $name, '-t', $www), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $www);
 	try {
 		for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', (int)substr($name, strrpos($name, ':') + 1)); $i++) usleep(100000);
 		// every notice shows, so a deprecated way of reading the headers
 		// (PHP 8.5 deprecates $http_response_header) fails here
 		$download = function ($url) use ($repo) {
 			$code = 'require '.var_export("$repo/system/tools/project.php", true).'; try { echo raster_project::download($argv[1]); } catch (Exception $e) { echo "refused: ".$e->getMessage(); }';
-			$process = proc_open(array(PHP_BINARY, '-d', 'error_reporting=-1', '-d', 'display_errors=1', '-r', $code, $url), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes);
+			$process = proc_open(php_argv('-d', 'error_reporting=-1', '-d', 'display_errors=1', '-r', $code, $url), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes);
 			$out = stream_get_contents($pipes[1]).stream_get_contents($pipes[2]);
 			proc_close($process);
 			return $out;
