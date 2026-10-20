@@ -90,6 +90,78 @@ register_shutdown_function(function () {
 	foreach ($test_databases as $name) $server->exec("DROP DATABASE IF EXISTS `$name`");
 });
 
+// ## PHP children
+//
+// A suite starts hundreds of PHP processes (php -S servers, bin/raster, MCP
+// sessions, race workers), and each one compiles the whole framework again.
+// With opcache's file cache they read the compiled code from one directory
+// per run instead, which is removed when the run ends. Timestamps are still
+// checked on every file, so a test that writes a PHP file and runs it sees
+// the new code (opcache never caches a file changed in the last two seconds).
+// RASTER_TEST_OPCACHE=off runs the children as they were.
+
+// the -d options for a child PHP: an array, empty when opcache is not there
+function php_flags() {
+	static $flags = null;
+	if ($flags !== null) return $flags;
+	$flags = array();
+	if (getenv('RASTER_TEST_OPCACHE') === 'off' || !extension_loaded('Zend OPcache')) return $flags;
+	$dir = sys_get_temp_dir().'/raster-opcache-'.getmypid();
+	// caches of runs that were killed
+	foreach (glob(sys_get_temp_dir().'/raster-opcache-*') ?: array() as $old) {
+		$pid = (int)substr($old, strrpos($old, '-') + 1);
+		if ($pid !== getmypid() && !file_exists("/proc/$pid") && !(function_exists('posix_kill') && @posix_kill($pid, 0))) exec('rm -rf '.escapeshellarg($old));
+	}
+	@mkdir($dir, 0775, true);
+	foreach (array('opcache.enable=1', 'opcache.enable_cli=1', "opcache.file_cache=$dir", 'opcache.file_cache_only=1', 'opcache.validate_timestamps=1', 'opcache.revalidate_freq=0') as $option) {
+		array_push($flags, '-d', $option);
+	}
+	register_shutdown_function(function () use ($dir) { exec('rm -rf '.escapeshellarg($dir)); });
+	return $flags;
+}
+
+// a PHP command line as an array for proc_open: the binary, the flags above, then the arguments
+function php_argv() {
+	return array_merge(array(PHP_BINARY), php_flags(), func_get_args());
+}
+
+// the same as a string for a shell: the escaped binary and flags, to put
+// where escapeshellarg(PHP_BINARY) went
+function php_cmd() {
+	return implode(' ', array_map('escapeshellarg', array_merge(array(PHP_BINARY), php_flags())));
+}
+
+// ## Fixtures a killed run left behind
+//
+// The tests write views and model stubs into the checkout and take them away
+// when they end. A run that is killed in between leaves them, and they break
+// the next run (a stub model that is "installed", a view that is "extra").
+// So a suite starts by removing what its tests create: test_sweep($root,
+// array('application/views/default/zz*', ...)) with paths (and * patterns)
+// relative to the checkout. Only what git does not track is removed, so
+// nothing real can go; with no git, nothing is.
+function test_sweep($root, $patterns) {
+	$listing = shell_exec('git -C '.escapeshellarg($root).' ls-files -z 2>/dev/null');
+	if (!$listing) return array();
+	$tracked = array_flip(array_filter(explode("\0", $listing)));
+	$removed = array();
+	foreach ($patterns as $pattern) {
+		foreach (glob("$root/$pattern") ?: array() as $path) {
+			$relative = substr($path, strlen($root) + 1);
+			if (isset($tracked[$relative])) continue;
+			if (is_link($path)) { @unlink($path); $removed[] = $relative; continue; }
+			if (is_dir($path)) {
+				foreach ($tracked as $file => $unused) if (strpos($file, "$relative/") === 0) continue 2;
+				exec('rm -rf '.escapeshellarg($path));
+			} else {
+				@unlink($path);
+			}
+			$removed[] = $relative;
+		}
+	}
+	return $removed;
+}
+
 // The stamp a browser would post: a form shown $ago seconds ago, signed with
 // the key the suites give their servers (RASTER_SECRET=test-secret).
 function stamp_for_tests($ago = 60) {

@@ -51,7 +51,7 @@ function server($env) {
 	global $root, $servers, $tmp;
 	$port = free_port();
 	$env = array_merge(array('PATH' => getenv('PATH'), 'RASTER_APP' => 'shop', 'RASTER_SECRET' => 'test-secret'), $env);
-	$process = proc_open(array(PHP_BINARY, '-d', 'error_reporting=-1', '-d', 'log_errors=1', '-d', 'display_errors=0', '-d', "error_log=$tmp/php-errors.log", '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, $env);
+	$process = proc_open(php_argv('-d', 'error_reporting=-1', '-d', 'log_errors=1', '-d', 'display_errors=0', '-d', "error_log=$tmp/php-errors.log", '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, $env);
 	for ($i = 0; $i < 100 && !@fsockopen('127.0.0.1', $port); $i++) usleep(50000);
 	$servers[] = $process;
 	return "http://127.0.0.1:$port";
@@ -142,7 +142,7 @@ function signed_event($base, $event, $signature = null) {
 
 // ## The shop, seeded as the README says
 
-$out = shell_exec(escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/shop/seed.php").' 2>&1');
+$out = shell_exec(php_cmd().' '.escapeshellarg("$root/shop/seed.php").' 2>&1');
 // cards through the pretend provider; the shop without a provider is further down
 $base = server(array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'RASTER_MCP_TOKEN' => 'shop-token', 'SHOP_PAYMENTS' => 'test'));
 database::instance('cms');
@@ -364,7 +364,7 @@ test('the studio: orders to ship, Ship needs a tracking number and happens once,
 });
 
 test('cancelling an unpaid order puts its pieces back once, even when the piece left the shop; editors can\'t refund', function () use ($base) {
-	shell_exec(escapeshellarg(PHP_BINARY).' '.escapeshellarg(dirname(__DIR__).'/bin/raster').' user helper@bluehour.test --role=editor --password='.escapeshellarg('helper password'));
+	shell_exec(php_cmd().' '.escapeshellarg(dirname(__DIR__).'/bin/raster').' user helper@bluehour.test --role=editor --password='.escapeshellarg('helper password'));
 	$v = new visitor($base);
 	$bowl = cms_records::find('product', array('slug' => 'soup-bowl'))[0];
 	$before = (int)$bowl['stock'];
@@ -421,7 +421,7 @@ test('unpaid orders give their pieces back after an hour', function () use ($bas
 });
 
 test('buyers with an account see their own orders, and only theirs', function () use ($base) {
-	shell_exec(escapeshellarg(PHP_BINARY).' '.escapeshellarg(dirname(__DIR__).'/bin/raster').' user dana@example.com --role=member --password='.escapeshellarg('dana password'));
+	shell_exec(php_cmd().' '.escapeshellarg(dirname(__DIR__).'/bin/raster').' user dana@example.com --role=member --password='.escapeshellarg('dana password'));
 	$dana = new visitor($base);
 	$dana->login('dana@example.com', 'dana password');
 	list(, , $headers) = $dana->buy('espresso-cup', 1, array('email' => 'dana@example.com', 'name' => 'Dana'));
@@ -529,7 +529,7 @@ test('the studio\'s own account lists the studio\'s own orders, not everyone\'s'
 test('outside development the pretend provider and the example\'s secret are off, and checkout sells nothing', function () use ($tmp, $root, $maildir) {
 	$env = array('RASTER_ENV' => 'production', 'RASTER_DB' => test_db("$tmp/prod.sqlite"), 'RASTER_URL' => 'https://bluehour.example/', 'RASTER_MAIL' => "log://$maildir");
 	$cmd = function ($args) use ($env, $root) {
-		$process = proc_open(array_merge(array(PHP_BINARY), $args), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, array_merge(getenv(), $env, array('RASTER_APP' => 'shop')));
+		$process = proc_open(array_merge(php_argv(), $args), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, array_merge(getenv(), $env, array('RASTER_APP' => 'shop')));
 		$out = stream_get_contents($pipes[1]).stream_get_contents($pipes[2]);
 		return array(proc_close($process), $out);
 	};
@@ -627,7 +627,7 @@ test('the webhook during a database outage answers 503, so the provider sends it
 // (batch H adds its tests here)
 
 test('lint is clean and there were no PHP warnings', function () use ($root, $tmp) {
-	$out = shell_exec('RASTER_APP=shop '.escapeshellarg(PHP_BINARY).' '.escapeshellarg("$root/bin/raster").' lint 2>&1');
+	$out = shell_exec('RASTER_APP=shop '.php_cmd().' '.escapeshellarg("$root/bin/raster").' lint 2>&1');
 	has($out, 'No errors, 0 warning(s)');
 	$log = is_file("$tmp/php-errors.log") ? file_get_contents("$tmp/php-errors.log") : '';
 	check(!preg_match('/PHP (Warning|Notice|Deprecated|Fatal error|Parse error):.*$/m', $log, $m), $m ? $m[0] : '');

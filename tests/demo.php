@@ -10,6 +10,15 @@ if (PHP_SAPI !== 'cli') exit;
 
 $root = dirname(__DIR__);
 require __DIR__.'/db.php';
+// what a killed run left in the checkout: the views and models its tests
+// write, and the app folder of the upgrade test (see test_sweep()). The test
+// that turns the login page off by renaming it may have left it renamed.
+$off = "$root/demo/views/cafe/login.html.off";
+if (is_file($off)) is_file("$root/demo/views/cafe/login.html") ? unlink($off) : rename($off, "$root/demo/views/cafe/login.html");
+test_sweep($root, array(
+	'demo/views/zz*', 'demo/views/cafe/zz*', 'demo/views/cafe/_zz*', 'demo/views/cafe/export-probe.html', 'demo/views/cafe/coming.html', 'demo/views/cafe/ticket.html', 'demo/views/cafe/staff/rota.html',
+	'demo/models/zz*', 'demo/models/bookrows', 'demo/models/stopper', 'demo/models/probe', 'demo/models/the_cms', 'zzn15',
+));
 $tmp = sys_get_temp_dir().'/raster-demo-'.getmypid();
 @mkdir($tmp, 0775, true);
 $db = test_db("$tmp/cafe.sqlite");
@@ -30,7 +39,7 @@ require_once BASE.'tools/schema.php';
 
 $passed = 0; $failed = array(); $skipped = array(); $covered = array();
 function test($ids, $name, $fn) {
-	global $passed, $failed, $skipped, $covered;
+	global $passed, $failed, $skipped, $covered, $servers;
 	// RASTER_TEST_ONLY=Q runs the tests with an ID starting with Q, or a name with those words
 	$only = getenv('RASTER_TEST_ONLY');
 	if ($only) {
@@ -39,6 +48,9 @@ function test($ids, $name, $fn) {
 		foreach ((array)$ids as $id) if (stripos($id, $only) === 0) $match = true;
 		if (!$match) return;
 	}
+	// servers a test starts for itself stop when it is done; the suite's own
+	// (started before the first test) run to the end
+	$running = array_keys($servers);
 	try {
 		$fn();
 		$passed++;
@@ -51,6 +63,10 @@ function test($ids, $name, $fn) {
 	} catch (Throwable $e) {
 		$failed[] = implode(',', (array)$ids)." $name: ".$e->getMessage().' (line '.$e->getLine().')';
 		echo "F";
+	}
+	foreach (array_diff_key($servers, array_flip($running)) as $key => $process) {
+		stop_server($key, $process);
+		unset($servers[$key]);
 	}
 }
 function check($condition, $message = 'assertion failed') { if (!$condition) throw new Exception($message); }
@@ -65,6 +81,13 @@ function lacks($haystack, $needle, $message = '') {
 }
 
 $servers = array();
+// stops a server (or any process) a test started: with PHP_CLI_SERVER_WORKERS
+// the workers outlive the terminated parent, so a php -S goes by port too
+// (the key it has in $servers ends with its port)
+function stop_server($key, $process) {
+	proc_terminate($process);
+	if (preg_match('/(\d+)$/', $key, $m)) exec("pkill -f -- '[-]S 127[.]0[.]0[.]1:$m[1]( |\$)' 2>/dev/null");
+}
 // a port nobody is listening on
 function free_port() {
 	$socket = stream_socket_server('tcp://127.0.0.1:0');
@@ -76,7 +99,7 @@ function server($port, $env) {
 	global $root, $servers;
 	$env = array_merge(array('PATH' => getenv('PATH'), 'RASTER_APP' => 'demo', 'RASTER_SECRET' => 'test-secret', 'CAFE_SPAM_LIMITS' => 'off'), $env);
 	global $tmp;
-	$process = proc_open(array(PHP_BINARY, '-d', 'error_reporting=-1', '-d', 'log_errors=1', '-d', 'display_errors=0', '-d', "error_log=$tmp/php-errors.log", '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, $env);
+	$process = proc_open(php_argv('-d', 'error_reporting=-1', '-d', 'log_errors=1', '-d', 'display_errors=0', '-d', "error_log=$tmp/php-errors.log", '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, $env);
 	for ($i = 0; $i < 100 && !@fsockopen('127.0.0.1', $port); $i++) usleep(50000);
 	$servers[$port] = $process;
 	return "http://127.0.0.1:$port";
@@ -85,7 +108,7 @@ function server($port, $env) {
 // connection when it answers, or false
 function fake_smtp($port, $log, $mode, $cert = '', $host = '127.0.0.1') {
 	global $root, $servers;
-	$servers[] = proc_open(array(PHP_BINARY, "$root/tests/fake_smtp.php", (string)$port, $log, $mode, $cert, $host), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes);
+	$servers['smtp-'.count($servers).'-'.$port] = proc_open(php_argv("$root/tests/fake_smtp.php", (string)$port, $log, $mode, $cert, $host), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes);
 	// a short timeout: on macOS an address like 127.0.0.2 that lo0 doesn't
 	// have never answers, and the default timeout stalls the whole run
 	for ($up = false, $i = 0; $i < 100 && !($up = @fsockopen($host, $port, $errno, $errstr, 0.2)); $i++) usleep(50000);
@@ -93,12 +116,7 @@ function fake_smtp($port, $log, $mode, $cert = '', $host = '127.0.0.1') {
 }
 register_shutdown_function(function () use ($tmp, $root) {
 	global $servers;
-	// with PHP_CLI_SERVER_WORKERS the workers outlive the terminated
-	// parent, so they go by port too
-	foreach ($servers as $port => $process) {
-		proc_terminate($process);
-		exec("pkill -f -- '[-]S 127.0.0.1:$port' 2>/dev/null");
-	}
+	foreach ($servers as $key => $process) stop_server($key, $process);
 	exec('rm -rf '.escapeshellarg($tmp).' '.escapeshellarg("$root/demo/data/cache").' '.escapeshellarg("$root/demo/data/mail").' '.escapeshellarg("$root/demo/data/changes.log"));
 	foreach (glob("$root/media/*") ?: array() as $file) if (basename($file) !== '.gitignore' && filemtime($file) > time() - 3600) @unlink($file);
 });
@@ -145,7 +163,7 @@ function login($base, $login, $password) {
 function raster($args, $env = array()) {
 	global $root;
 	$env = array_merge(getenv(), $env);
-	$process = proc_open(array_merge(array(PHP_BINARY, "$root/bin/raster"), $args), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, $env);
+	$process = proc_open(array_merge(php_argv("$root/bin/raster"), $args), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, $env);
 	$out = stream_get_contents($pipes[1]).stream_get_contents($pipes[2]);
 	return array(proc_close($process), $out);
 }
@@ -155,7 +173,7 @@ function raster_php($script) {
 }
 function raster_php_env($script, $env) {
 	global $root;
-	$process = proc_open(array(PHP_BINARY, $script), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, array_merge(getenv(), $env));
+	$process = proc_open(php_argv($script), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, array_merge(getenv(), $env));
 	$out = stream_get_contents($pipes[1]).stream_get_contents($pipes[2]);
 	return array(proc_close($process), $out);
 }
@@ -188,7 +206,7 @@ function mcp($base, $name, $arguments = array()) {
 // MCP over stdio, where an agent has the files: one process, several calls
 function mcp_stdio($calls) {
 	global $root;
-	$process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, getenv());
+	$process = proc_open(php_argv("$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, getenv());
 	fwrite($pipes[0], json_encode(array('jsonrpc' => '2.0', 'id' => 1, 'method' => 'initialize', 'params' => array()))."\n");
 	foreach ($calls as $i => $call) {
 		fwrite($pipes[0], json_encode(array('jsonrpc' => '2.0', 'id' => 100 + $i, 'method' => 'tools/call', 'params' => array('name' => $call[0], 'arguments' => isset($call[1]) ? $call[1] : array())))."\n");
@@ -217,7 +235,7 @@ class mcp_session {
 	function __construct($env = array()) {
 		global $root, $tmp;
 		$this->errors = "$tmp/mcp-session-".uniqid().'.log';
-		$this->process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('file', $this->errors, 'w')), $this->pipes, $root, array_merge(getenv(), $env));
+		$this->process = proc_open(php_argv("$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('file', $this->errors, 'w')), $this->pipes, $root, array_merge(getenv(), $env));
 		stream_set_blocking($this->pipes[1], false);
 	}
 	// one line out, one line back (null when there is none in time)
@@ -261,7 +279,7 @@ function has_message($problems, $needle) {
 function php_parses($code) {
 	$file = tempnam(sys_get_temp_dir(), 'raster-php');
 	file_put_contents($file, $code);
-	exec(escapeshellarg(PHP_BINARY).' -l '.escapeshellarg($file).' 2>&1', $out, $status);
+	exec(php_cmd().' -l '.escapeshellarg($file).' 2>&1', $out, $status);
 	unlink($file);
 	return $status === 0;
 }
@@ -747,7 +765,7 @@ test('G6', 'protected pages: dot segments, double slashes and case', function ()
 	@mkdir("$tmp/front");
 	file_put_contents("$tmp/front/index.php", '<?php chdir('.var_export($root, true).'); require "system/boot.php"; boot::$appname = "demo"; boot::up();');
 	$port = free_port();
-	$front = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", "$tmp/front/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, "$tmp/front", array('RASTER_DB' => $db, 'PATH' => getenv('PATH')));
+	$front = proc_open(php_argv('-S', "127.0.0.1:$port", "$tmp/front/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, "$tmp/front", array('RASTER_DB' => $db, 'PATH' => getenv('PATH')));
 	for ($i = 0; $i < 100 && !@fsockopen('127.0.0.1', $port); $i++) usleep(50000);
 	try {
 		$front_base = "http://127.0.0.1:$port";
@@ -858,12 +876,12 @@ test('G17', 'accounts from older versions', function () use ($root, $db) {
 	$code = 'require "'.$root.'/system/boot.php"; boot::$appname = "demo"; boot::cli(); authentication::connect();'
 		.' $u = R::dispense("user"); $u->username = "oldtimer"; $u->email = ""; $u->password = md5("old password"); $u->role = "admin"; R::store($u);'
 		.' echo authentication::check_login("oldtimer", "old password") ? "ok " : "fail "; echo substr(R::findOne("user", " username = ? ", array("oldtimer"))->password, 0, 4);';
-	same('ok $2y$', shell_exec(escapeshellarg(PHP_BINARY).' -r '.escapeshellarg($code).' 2>&1'));
+	same('ok $2y$', shell_exec(php_cmd().' -r '.escapeshellarg($code).' 2>&1'));
 	$legacy = test_db(sys_get_temp_dir().'/raster-legacy-'.getmypid().'.sqlite');
 	$code = 'require "'.$root.'/system/boot.php"; boot::$appname = "demo"; boot::cli(); database::instance();'
 		.' $o = R::dispense("usersdata"); $o->username = "admin"; $o->password = md5("admin pass"); R::store($o);'
 		.' authentication::connect(); echo authentication::check_login("admin", "admin pass") ? "migrated" : "no";';
-	same('migrated', shell_exec('RASTER_DB='.escapeshellarg($legacy).' '.escapeshellarg(PHP_BINARY).' -r '.escapeshellarg($code).' 2>&1'));
+	same('migrated', shell_exec('RASTER_DB='.escapeshellarg($legacy).' '.php_cmd().' -r '.escapeshellarg($code).' 2>&1'));
 	@unlink($legacy);
 });
 
@@ -1153,7 +1171,7 @@ test(array('I3', 'I4', 'I8', 'I9'), 'SMTP: plain on localhost, STARTTLS and smtp
 		$code = 'require "'.$root.'/system/boot.php"; boot::$appname = "demo"; boot::cli();'
 			.' echo mail::send_view("_email/contact_received", "owner@cafe.test", array("email" => "a@b.co", "message" => "Hi")) ? "sent" : "failed: ".mail::$last_error;';
 		$env = 'RASTER_MAIL='.escapeshellarg($dsn).($from ? ' RASTER_MAIL_FROM='.escapeshellarg('Café <hello@cafe.test>') : ' RASTER_MAIL_FROM=');
-		return shell_exec($env.' '.escapeshellarg(PHP_BINARY).' -d openssl.cafile='.escapeshellarg("$cert.crt").' -r '.escapeshellarg($code).' 2>&1');
+		return shell_exec($env.' '.php_cmd().' -d openssl.cafile='.escapeshellarg("$cert.crt").' -r '.escapeshellarg($code).' 2>&1');
 	};
 	// plain text is fine on this machine
 	list($port, $log) = $smtp('plain', '127.0.0.1');
@@ -1256,7 +1274,7 @@ test('M5', 'MCP refuses fields that are not in the templates', function () use (
 	has(json_decode(http('POST', "$base/mcp", json_encode(array('jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => array('name' => 'get_page', 'arguments' => array('page' => '/nope')))), array('Authorization: Bearer demo-token'))[1], true)['result']['content'][0]['text'], 'Unknown page');
 });
 test('M6', 'MCP over stdio', function () use ($root) {
-	$process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w')), $pipes, $root, getenv());
+	$process = proc_open(php_argv("$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w')), $pipes, $root, getenv());
 	fwrite($pipes[0], json_encode(array('jsonrpc' => '2.0', 'id' => 1, 'method' => 'initialize', 'params' => array()))."\n");
 	fwrite($pipes[0], json_encode(array('jsonrpc' => '2.0', 'method' => 'notifications/initialized'))."\n");
 	fwrite($pipes[0], json_encode(array('jsonrpc' => '2.0', 'id' => 2, 'method' => 'tools/call', 'params' => array('name' => 'get_page', 'arguments' => array('page' => 'site'))))."\n");
@@ -1723,7 +1741,7 @@ test('N11', 'an export that crosses midnight records the day its pages were made
 		.' @mkdir('.var_export($out, true).', 0775, true);'
 		.' $e = (new late_export('.var_export($root, true).', '.var_export($out, true).', "https://cafe.example/"))->run();'
 		.' echo $e->errors ? implode("\n", $e->errors) : "exported";');
-	$process = proc_open(array(PHP_BINARY, $script), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, array_merge(getenv(), array('CAFE_TIMEZONE' => 'Etc/GMT+12')));
+	$process = proc_open(php_argv($script), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, array_merge(getenv(), array('CAFE_TIMEZONE' => 'Etc/GMT+12')));
 	$output = stream_get_contents($pipes[1]).stream_get_contents($pipes[2]);
 	same(0, proc_close($process), $output);
 	same('exported', trim($output));
@@ -1788,7 +1806,7 @@ test('N17', 'commands refuse options they do not take, and say which they do', f
 });
 test('N4', 'serve', function () use ($root) {
 	$port = free_port();
-	$process = proc_open(array(PHP_BINARY, "$root/bin/raster", 'serve', "--port=$port", '--host=127.0.0.1'), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, getenv());
+	$process = proc_open(php_argv("$root/bin/raster", 'serve', "--port=$port", '--host=127.0.0.1'), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, getenv());
 	for ($i = 0; $i < 100 && !@fsockopen('127.0.0.1', $port); $i++) usleep(50000);
 	try {
 		has(http('GET', "http://127.0.0.1:$port/about")[1], 'About us');
@@ -1944,7 +1962,7 @@ test(array('I6', 'I7'), 'mail: the default log folder and PHP mail()', function 
 	$send = function ($env, $ini = '') use ($root) {
 		$code = 'require "'.$root.'/system/boot.php"; boot::$appname = "demo"; boot::cli();'
 			.' echo mail::send_view("_email/contact_received", "owner@cafe.test", array("email" => "a@b.co", "message" => "Hello there")) ? "sent" : "failed: ".mail::$last_error;';
-		return shell_exec($env.' '.escapeshellarg(PHP_BINARY).' '.$ini.' -r '.escapeshellarg($code).' 2>&1');
+		return shell_exec($env.' '.php_cmd().' '.$ini.' -r '.escapeshellarg($code).' 2>&1');
 	};
 	$before = count(glob("$root/demo/data/mail/*.eml") ?: array());
 	same('sent', $send('RASTER_MAIL='));
@@ -2137,7 +2155,7 @@ test(array('L1', 'L2'), 'environments', function () use ($root) {
 	same('production', config::environment_for('staging.cafe.test.evil.example', '10.0.0.5', false, $servers), 'whole names only');
 	same('production', config::environment_for('cafe.test', '10.0.0.5', false, $servers));
 	$code = 'require "'.$root.'/system/boot.php"; boot::$appname = "demo"; boot::cli(); echo config::get("environment");';
-	same('staging', shell_exec('RASTER_ENV=staging '.escapeshellarg(PHP_BINARY).' -r '.escapeshellarg($code)));
+	same('staging', shell_exec('RASTER_ENV=staging '.php_cmd().' -r '.escapeshellarg($code)));
 });
 test(array('F3', 'F6', 'I5', 'L3', 'L4', 'L5', 'E13', 'J6'), 'production: frozen schema, trusted address, page cache', function () use ($root, $tmp, $maildir) {
 	$prod_db = test_db("$tmp/prod.sqlite");
@@ -2166,13 +2184,13 @@ test(array('F3', 'F6', 'I5', 'L3', 'L4', 'L5', 'E13', 'J6'), 'production: frozen
 	$boss = login($prod, 'boss@cafe.example', 'boss password');
 	same(null, header_value(http('GET', "$prod/about", null, array("Cookie: $boss"))[2], 'X-Raster-Cache'), 'logged in pages are not cached');
 	$code = 'require "'.$root.'/system/boot.php"; boot::$appname = "demo"; boot::cli(); cms_store::connect(); cms_store::update_page("aboutpage", "/about", array("heading" => "Cached no more"), array("heading"));';
-	shell_exec('RASTER_ENV=production RASTER_DB='.escapeshellarg($prod_db).' '.escapeshellarg(PHP_BINARY).' -r '.escapeshellarg($code));
+	shell_exec('RASTER_ENV=production RASTER_DB='.escapeshellarg($prod_db).' '.php_cmd().' -r '.escapeshellarg($code));
 	list(, $body, $headers) = http('GET', "$prod/about");
 	same('miss', header_value($headers, 'X-Raster-Cache'), 'edits clear the cache');
 	has($body, '<h1>Cached no more</h1>');
 	// a scheduled item clears the cache when it is published
 	$code = 'require "'.$root.'/system/boot.php"; boot::$appname = "demo"; boot::cli(); cms_store::connect(); R::freeze(false); cms_store::save_item("eventsdata", 0, array("title" => "Soon", "date" => "2026-10-20", "published_at" => date("Y-m-d H:i:s", time() + 2)), array("title", "date"));';
-	shell_exec('RASTER_ENV=production RASTER_DB='.escapeshellarg($prod_db).' '.escapeshellarg(PHP_BINARY).' -r '.escapeshellarg($code));
+	shell_exec('RASTER_ENV=production RASTER_DB='.escapeshellarg($prod_db).' '.php_cmd().' -r '.escapeshellarg($code));
 	http('GET', "$prod/events");
 	lacks(http('GET', "$prod/events")[1], 'Soon');
 	sleep(3);
@@ -2192,7 +2210,7 @@ test(array('F3', 'F6', 'I5', 'L3', 'L4', 'L5', 'E13', 'J6'), 'production: frozen
 	// the protocol is part of the cache key
 	$key = function ($https) use ($root) {
 		$code = 'require "'.$root.'/system/boot.php"; boot::$appname = "demo"; '.($https ? '$_SERVER["HTTPS"] = "on"; ' : '').'boot::cli("/about"); echo raster_cache::key();';
-		return shell_exec('RASTER_URL= '.escapeshellarg(PHP_BINARY).' -r '.escapeshellarg($code));
+		return shell_exec('RASTER_URL= '.php_cmd().' -r '.escapeshellarg($code));
 	};
 	check($key(true) !== $key(false), 'http and https share a cache entry');
 });
@@ -2773,7 +2791,7 @@ test(array('R7', 'R9', 'R10', 'R11'), 'hidden fields, lists, transactions and li
 			$problems = (new raster_inspector())->lint_types();
 			check(has_message($problems, "The type 'ticket' has 'surprise', which means nothing"), 'unknown keys');
 			with_file("$probe_dir/probe.php", str_replace(array("'surprise' => true,", 'static function check(', "'link' => ''"), array("'actions' => array('ship' => 'editor', 'check' => 'admin'),", 'function check(', "'link' => '', 'pay' => '', 'pay_id' => ''"), file_get_contents("$probe_dir/probe.php")), function () use ($probe_dir) {
-				$lint = shell_exec(escapeshellarg(PHP_BINARY).' '.escapeshellarg(dirname($probe_dir, 3).'/bin/raster').' lint 2>&1');
+				$lint = shell_exec(php_cmd().' '.escapeshellarg(dirname($probe_dir, 3).'/bin/raster').' lint 2>&1');
 				has($lint, 'probe::check() must be static');
 				has($lint, "has the action 'ship' but probe has no public static function ship(");
 				has($lint, "'check' can't be an action of 'ticket'");
@@ -3207,7 +3225,7 @@ function demo_php($code, $env) {
 	global $root;
 	$prefix = '';
 	foreach ($env as $name => $value) $prefix .= $name.'='.escapeshellarg($value).' ';
-	return shell_exec($prefix.escapeshellarg(PHP_BINARY).' -r '.escapeshellarg('require "'.$root.'/system/boot.php"; boot::$appname = "demo"; boot::cli(); '.$code).' 2>&1');
+	return shell_exec($prefix.php_cmd().' -r '.escapeshellarg('require "'.$root.'/system/boot.php"; boot::$appname = "demo"; boot::cli(); '.$code).' 2>&1');
 }
 
 test('L13', 'raster render never reads or writes the page cache, and a protected page answers its redirect', function () use ($root, $tmp, $maildir) {
@@ -4087,9 +4105,9 @@ test('I10', 'a visitor who leaves before a long page has loaded still has the ma
 	file_put_contents($script, '<?php require '.var_export("$root/system/boot.php", true).'; boot::$appname = "demo"; boot::cli();'
 		.' ob_start(); mail::send("ana@example.com", "Left early", "<p>Hi</p>"); echo str_repeat("x", 4 << 20);');
 	$port = free_port();
-	$process = proc_open(array(PHP_BINARY, '-S', "127.0.0.1:$port", $script), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root,
+	$process = proc_open(php_argv('-S', "127.0.0.1:$port", $script), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root,
 		array('PATH' => getenv('PATH'), 'RASTER_APP' => 'demo', 'RASTER_MAIL' => "log://$dir", 'RASTER_ENV' => ''));
-	$GLOBALS['servers'][] = $process;
+	$GLOBALS['servers']['left-early-'.$port] = $process;
 	for ($i = 0; $i < 100 && !@fsockopen('127.0.0.1', $port); $i++) usleep(50000);
 	$socket = fsockopen('127.0.0.1', $port, $errno, $errstr, 2);
 	fwrite($socket, "GET / HTTP/1.1\r\nHost: 127.0.0.1:$port\r\nConnection: close\r\n\r\n");
@@ -4109,7 +4127,7 @@ test('I11', 'mail headers are encoded: names, long subjects, and the sender for 
 	$send = function ($dsn, $ini = '') use ($root, $subject) {
 		$code = 'require "'.$root.'/system/boot.php"; boot::$appname = "demo"; boot::cli();'
 			.' echo mail::send("Ana Pâr <ana@example.com>", '.var_export($subject, true).', "<p>Hi</p>") ? "sent" : "failed: ".mail::$last_error;';
-		return shell_exec('RASTER_MAIL_FROM= RASTER_MAIL='.escapeshellarg($dsn).' '.escapeshellarg(PHP_BINARY).' '.$ini.' -r '.escapeshellarg($code).' 2>&1');
+		return shell_exec('RASTER_MAIL_FROM= RASTER_MAIL='.escapeshellarg($dsn).' '.php_cmd().' '.$ini.' -r '.escapeshellarg($code).' 2>&1');
 	};
 	same('sent', $send("log://$dir"));
 	$files = glob("$dir/*.eml");
