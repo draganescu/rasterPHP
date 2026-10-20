@@ -675,14 +675,27 @@ class template {
 			list($found, $value) = $lookup($attr($m[1], 'name'));
 			if (!$found) return $m[0];
 			$values = array_map('strval', (array)$value);
+			// a select without multiple sends one option: the first that matches
+			$single = !preg_match('/\smultiple\b/i', $m[1]);
+			$chosen = false;
+			// the editor's mock-up for a new item (<template data-raster-mockup>)
+			// is no option to choose: out while matching, back afterwards
+			$kept = array();
+			$inner = preg_replace_callback('/<template\b.*?<\/template>/is', function ($t) use (&$kept) {
+				$kept[] = $t[0];
+				return '<!--raster:kept '.(count($kept) - 1).'-->';
+			}, $m[2]);
 			// an option without a value sends its text, as browsers do; the
 			// editor's marks (<!--raster:s 3-->) are no part of it
-			$options = preg_replace_callback('/(<option\b[^>]*>)((?:(?!<option\b|<\/option|<\/select).)*)/is', function ($o) use ($attr, $without, $values) {
+			$options = preg_replace_callback('/(<option\b[^>]*>)((?:[^<]|<!--.*?-->)*)/is', function ($o) use ($attr, $without, $values, $single, &$chosen) {
 				$tag = $without($o[1], 'selected');
 				$own = $attr($tag, 'value');
 				if ($own === null) $own = trim(preg_replace('/\s+/', ' ', html_entity_decode(preg_replace('/<!--.*?-->/s', '', $o[2]), ENT_QUOTES, 'UTF-8')));
-				return (in_array((string)$own, $values, true) ? preg_replace('/>$/', ' selected>', $tag) : $tag).$o[2];
-			}, $m[2]);
+				if (($single && $chosen) || !in_array((string)$own, $values, true)) return $tag.$o[2];
+				$chosen = true;
+				return preg_replace('/>$/', ' selected>', $tag).$o[2];
+			}, $inner);
+			$options = preg_replace_callback('/<!--raster:kept (\d+)-->/', function ($k) use ($kept) { return $kept[(int)$k[1]]; }, $options);
 			return $m[1].$options.$m[3];
 		}, $block);
 

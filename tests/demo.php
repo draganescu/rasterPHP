@@ -4841,6 +4841,11 @@ test('S6', 'the staff page: counts, waitlist, attention, a phone reply', functio
 	has($page, '<h3>Poetry evening, '.$poetry['date'].' at 19:00</h3>');
 	has($page, '<option value="">All events</option>');
 	foreach (array($jazz, $poetry) as $event) has($page, '<option value="'.$event['id'].'">'.$event['title'].', '.$event['date'].'</option>', 'the select lists the evenings');
+	$picked = http('GET', "$base/staff/events?event={$poetry['id']}", null, $h)[1];
+	$select = substr($picked, strpos($picked, '<select name="event">'));
+	$select = substr($select, 0, strpos($select, '</select>'));
+	has($select, '<option value="'.$poetry['id'].'" selected>', 'the chosen event stays chosen');
+	same(1, substr_count($select, 'selected'), $select);
 	list($code, $out) = raster(array('render', "/staff/events?event={$poetry['id']}", '--as=editor'));
 	same(0, $code, $out);
 	has($out, "rsvp('event=?event&order=status,waiting_since') + new", 'the replies are editable, with a card for a phone reply');
