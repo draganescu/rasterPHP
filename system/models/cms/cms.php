@@ -267,7 +267,9 @@ class cms
 			$page->$name = cms_types::clean($field_type, $example, $name);
 			R::store($page);
 		}
-		$value = cms_types::show($page->$name, $example);
+		// read as its type, as a collection's are, so 14.5 prints as its mock-up 14.50
+		$types = cms_types::of_table($type);
+		$value = cms_types::show(isset($types[$name]) ? cms_types::read($types[$name], $page->$name) : $page->$name, $example);
 		$value = $value === '' ? false : $value;
 		if (cms_editor::editing()) {
 			return cms_editor::field($type, $type === 'sitepage' ? 'site' : $this->slug, $name, $value, template::get('current_block'));
@@ -351,14 +353,14 @@ class cms
 			// nothing to seed or add: the model declares the fields
 		} elseif (database::$frozen) {
 			// production seeds nothing, and a list with no table keeps the
-			// mock-up (an empty table too, checked once the list is read);
-			// until schema --apply, its filter and page URLs are not kept
+			// mock-up; until schema --apply, its filter and page URLs are not kept
 			if (!$exists) {
 				if ($uri_filters || $page > 1) raster_cache::skip();
 				return false;
 			}
-		} elseif (!$exists || R::count($this->data_name) == 0) {
-			// the first item is the placeholder content from the template
+		} elseif (!$exists) {
+			// the first item is the placeholder content from the template; a
+			// table emptied by deleting its items stays empty (#91)
 			require_once BASE.'tools/inspector.php';
 			$inspector = new raster_inspector();
 			$seed = array_merge($expected_properties, $inspector->collection_defaults($name));
@@ -384,8 +386,10 @@ class cms
 				$types = array_map(array('cms_types', 'of_example'), $new);
 				cms_types::ensure($this->data_name, $types);
 				$latest = cms_store::latest($this->data_name);
-				foreach ($new as $key => $value) $latest->$key = cms_types::clean($types[$key], $value, $key);
-				R::store($latest);
+				if ($latest) {
+					foreach ($new as $key => $value) $latest->$key = cms_types::clean($types[$key], $value, $key);
+					R::store($latest);
+				}
 			}
 		}
 
@@ -412,11 +416,9 @@ class cms
 		list($sql, $bindings) = $where;
 		$sql .= ' ORDER BY '.cms_store::order_sql(isset($options['order']) ? $options['order'] : '', $fields).' LIMIT '.(int)$page_size.' OFFSET '.(int)$roffset;
 		$data = array_values(array_map(array('cms_store', 'export_item'), R::find($this->data_name, $sql, $bindings)));
-		// a filter nothing matches and a page past the last one answer, empty
-		// (or with the mock-up, while the list has no items); they are not
-		// kept, so made-up URLs don't fill the page cache
+		// a filter nothing matches and a page past the last one answer, empty;
+		// they are not kept, so made-up URLs don't fill the page cache
 		if (!$data && ($page > 1 || $uri_filters)) raster_cache::skip();
-		if (!$data && !$record && database::$frozen && R::count($this->data_name) == 0) return false;
 		// the template prints text: 4.5 as its mock-up 4.50 does
 		foreach ($data as $key => $row) $data[$key] = cms_types::show_row($row, $expected_properties);
 		if ($record) {

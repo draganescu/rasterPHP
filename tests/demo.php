@@ -2902,6 +2902,26 @@ test(array('R12', 'R13'), 'schema --apply creates record tables in production; m
 	has($code_out, 'function contact()');
 	lacks($code_out, "'name' => ''", 'only the contact form\'s fields');
 	check(php_parses($code_out), 'the code parses');
+	// each input gives its field a type: decimals, whole numbers, a box, dates and times (#104)
+	$party = "$root/demo/models/zzparty";
+	test_fixture($party);
+	list($typed, $next) = with_file("$views/zz-typed.html", '<html><body><!-- render.zzparty.ask --><form method="post"><input type="number" name="budget" step="0.01"><input type="number" name="guests" min="1"><input type="number" name="hours" step="any"><input type="checkbox" name="newsletter" value="yes"><input type="date" name="day"><input type="time" name="hour"><input type="datetime-local" name="when"><input type="email" name="email" required><button>Ask</button></form><!-- /render.zzparty.ask --></body></html>', function () use ($party) {
+		try {
+			list($code, $out) = raster(array('make', 'model', 'zzparty', '--from=zz-typed'));
+			same(0, $code, $out);
+			return array((string)@file_get_contents("$party/zzparty.php"), $out);
+		} finally {
+			@unlink("$party/zzparty.php");
+			@rmdir($party);
+		}
+	});
+	foreach (array("'budget' => 0.0,", "'guests' => 0,", "'hours' => 0.0,", "'newsletter' => false,", "'day' => '',", "'hour' => '',", "'when' => '',", "'email' => '',") as $line) has($typed, $line);
+	has($typed, "'types' => array('day' => 'date', 'hour' => 'time', 'when' => 'datetime'),");
+	check(php_parses($typed), 'the code parses');
+	// the alerts a refused value raises, for the view to word
+	foreach (array('budget', 'guests', 'hours', 'day', 'hour', 'when') as $field) has($next, "print.validation.alert('{$field}_invalid')");
+	lacks($next, "alert('email_invalid')", 'text is never refused for its type');
+	lacks($next, "alert('newsletter_invalid')", 'a box is yes or no');
 	list($code, $out) = raster(array('make', 'model', 'Bad!', '--from=visit.html'));
 	same(1, $code);
 	same(2, raster(array('make', 'model'))[0], 'usage');

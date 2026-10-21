@@ -71,7 +71,7 @@ These attributes are checked in the browser (as HTML always does) **and again on
 | `type="number"`, `type="range"` | `number` | not a number |
 | `type="date"` | `date` | not a date written as `YYYY-MM-DD` |
 | `min`, `max` on numbers and dates | `min`, `max` | too small or too large |
-| `minlength`, `maxlength` | `minlength`, `maxlength` | too short or too long (in characters) |
+| `minlength`, `maxlength` | `minlength`, `maxlength` | too short or too long (in characters; a line break counts once, as the browser counts it) |
 | `pattern` | `pattern` | doesn't match the regular expression (the whole value must match) |
 
 Empty optional fields are never checked against the other rules: an empty, non-required email field is fine.
@@ -230,6 +230,6 @@ The newsletter, sign-up, forgot-password and booking forms, and every record for
 - **Several forms on one page** are handled separately: each has its own render block, and validation blocks belong to the form they sit in. The demo café's `/visit` page has three: the booking, the contact form and the newsletter sign-up.
 - **Posts from scripts or tests** without the `raster_form` field count as sent for a form when they include at least one of its fields. A script that never fetched the form has no stamp, so a spam check holds its post (`no_stamp`).
 - **The JSON API** at `/api/…` never runs form handlers: there, `submitted()` is always false.
-- **File uploads** aren't handled for you. Add `enctype="multipart/form-data"` to the form and read `$_FILES` in your model.
+- **File uploads** aren't handled for you. Add `enctype="multipart/form-data"` to the form and read `$_FILES` in your model. `required` on a file input works: it is met when the file arrived whole, and a file too big for the server fails it.
 - **Static export**: a static host can't receive forms. Wrap forms in `<!-- print.if.live -->` and write what the static site shows instead (an email address, a phone number) in `<!-- print.if.static -->`. See [Static export](Static-Export).
 - **Older Raster sites** used the regions `not_empty`, `email_format` and `are_the_same`. They still work until Raster 3.0; use `required`, `type="email"` with `validation.field(…)`, and `matches` instead. `raster doctor` lists where they're used.

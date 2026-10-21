@@ -39,10 +39,19 @@ class raster_make {
 
 		$form = $this->find_form(file_get_contents($path), $name, $method);
 		$fields = array();
+		$types = array();
 		foreach (template::instance()->constraints($form['html']) as $field => $rule) {
 			// passwords are never stored as records, nor fields that only repeat another
 			if ($rule['type'] === 'password' || preg_match('/_(again|confirm|confirmation)$/', $field)) continue;
-			$fields[$field] = in_array($rule['type'], array('number', 'range')) ? 0 : '';
+			// each input as its type: a step with decimals (or any) a number, a box a bool
+			$fields[$field] = '';
+			if (in_array($rule['type'], array('number', 'range'))) {
+				$step = isset($rule['step']) ? strtolower(trim((string)$rule['step'])) : '';
+				$fields[$field] = $step === 'any' || strpos($step, '.') !== false ? 0.0 : 0;
+			}
+			if ($rule['type'] === 'checkbox' && empty($rule['list'])) $fields[$field] = false;
+			$dates = array('date' => 'date', 'time' => 'time', 'datetime-local' => 'datetime');
+			if (isset($dates[$rule['type']])) $types[$field] = $dates[$rule['type']];
 		}
 		if (!$fields) throw new InvalidArgumentException("The form in $view has no fields to store");
 		$method = $form['method'];
@@ -62,6 +71,7 @@ class raster_make {
 			."\tstatic function types() {\n"
 			."\t\treturn array('$name' => array(\n"
 			."\t\t\t'fields' => array(\n".implode("\n", $lines)."\n\t\t\t),\n"
+			.($types ? "\t\t\t'types' => array(".implode(', ', array_map(function ($field, $type) { return var_export($field, true).' => '.var_export($type, true); }, array_keys($types), $types))."),\n" : '')
 			."\t\t\t// who may send the form: visitor, member or editor\n"
 			."\t\t\t'create' => 'visitor',\n"
 			."\t\t\t// fields only this model sets, shown to editors but not editable\n"
@@ -90,6 +100,11 @@ class raster_make {
 		$next = array();
 		if (!$form['owned']) $next[] = "Wrap the form in $view in <!-- render.$name.$method --> … <!-- /render.$name.$method -->";
 		$next[] = "Thank the visitor in $view: <!-- print.validation.alert('$done') --><p>Thanks, we got it.</p><!-- /print.validation.alert('$done') -->";
+		// a number, date or time the field's type refuses (12.5 for a whole number) raises <field>_invalid
+		foreach ($fields as $field => $default) {
+			if (!is_int($default) && !is_float($default) && !isset($types[$field])) continue;
+			$next[] = "Word what $field can't be in $view: <!-- print.validation.alert('{$field}_invalid') --><p>Check the $field.</p><!-- /print.validation.alert('{$field}_invalid') -->";
+		}
 		$next[] = "List the records on a page only editors can open: <!-- render.cms.$name('order=newest') --> … <!-- /render.cms.$name('order=newest') -->";
 		$next[] = 'php bin/raster lint';
 		return array(

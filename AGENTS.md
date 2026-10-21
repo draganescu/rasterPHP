@@ -495,7 +495,15 @@ of your own. Staff read the feedback on a page that renders
   server too. A field sent as a list (`name[]=x`) when the form doesn't name
   it `name[]`, or with bytes that aren't UTF-8, fails `required`, so the
   form's own words for an empty field show; a field named `tags[]` takes a
-  list. A `pattern` that can't run counts as not matched.
+  list. A `pattern` that can't run counts as not matched. A line break
+  counts as one character for `minlength` and `maxlength`, as the browser
+  counts it, though it sends two (CR LF).
+- **Uploads.** A form with `<input type="file" name="cv">` needs
+  `enctype="multipart/form-data"`. Its model reads the file from
+  `$_FILES['cv']` (`tmp_name`, `name`, `error`) and moves it out of PHP's
+  temporary folder itself. `required` on a file input is met when the file
+  arrived whole (`error` is `UPLOAD_ERR_OK`; of `photos[]`, any one); a
+  file too big for the server never arrived, so it fails `required`.
 - **What was typed comes back as typed** when the form is shown again:
   `$100`, `\1` and `$0` included. So do the choices: an `<option>` without
   a `value` is chosen by its text, as browsers send it (`<option>Ana</option>`
@@ -651,7 +659,9 @@ of your own. Staff read the feedback on a page that renders
 `print.cms.<field>` declares a page field. Its default is the content inside
 the block, and it is stored separately for each page URL. `render.cms.<name>`
 declares a collection, whose fields are the `print` keys inside it. The first
-item of a collection is the mock-up content.
+item of a collection is the mock-up content. A collection whose items were
+all deleted shows nothing, in development and production alike: the
+mock-up is stored only when the collection's table is made.
 
 ```html
 <h1><!-- print.cms.headline -->Hello<!-- /print.cms.headline --></h1>
@@ -717,7 +727,7 @@ item of a collection is the mock-up content.
     9.50.
   - Models, MCP and `/api` read ints, floats and bools. Templates print
     text: a number with as many decimals as its mock-up (with `14.50` in
-    the mock-up, 4.5 prints `4.50`), a bool `1` or `0`, an empty value
+    the mock-up, 4.5 prints `4.50`, a page field's as an item's), a bool `1` or `0`, an empty value
     nothing, and what visitors typed as text. That holds for records
     printed through `render.cms` and `cms_records::listed()`. Rows a model
     hands back itself follow the plain rules: `false` keeps the mock-up
@@ -984,7 +994,12 @@ own: the bundled booking model has the type, its rules and its emails (see
   came before it, as MySQL does on any schema change.
 - **Starting from a form:** `php bin/raster make model inquiry --from=contact.html`
   writes `models/inquiry/inquiry.php` with the type (fields from the form's
-  inputs, passwords left out), an empty `check()` and the handler.
+  inputs, passwords left out), an empty `check()` and the handler. Each
+  field takes its input's type: a number input an int, or a number (`0.0`)
+  when its `step` has decimals or is `any`; a checkbox a bool; `date`,
+  `time` and `datetime-local` inputs go in `'types'`. What it prints next
+  names the `<field>_invalid` alert of each typed field, for the view to
+  word.
   `--form=<method>` picks one of several forms, `--dry-run` prints it.
 - **In production** `php bin/raster schema --apply` creates the table with
   every declared column, and no row.

@@ -196,7 +196,7 @@ The CMS saves its own content the same way: every save or delete of an item and 
 php bin/raster make model inquiry --from=contact.html
 ```
 
-This writes `models/inquiry/inquiry.php`: the type with a field for each input of the form (passwords left out), an empty `check()` and the handler. The file is yours to change from then on.
+This writes `models/inquiry/inquiry.php`: the type with a field for each input of the form (passwords left out), an empty `check()` and the handler. Each field takes its input's type: a number input is a whole number, or a number with decimals when its `step` has them (`step="0.01"`); a checkbox is yes or no; date, time and datetime-local inputs are dates and times. The command then lists the `<field>_invalid` alerts to word in the view, for a value the type refuses. The file is yours to change from then on.
 
 ## In production
 

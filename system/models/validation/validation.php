@@ -183,6 +183,12 @@ class validation
 
 	// the rules a field breaks, from its HTML constraints
 	protected function check_field($field, $rules) {
+		// a file comes in $_FILES, never in $_POST: required is met by one
+		// that arrived whole (of several, any one)
+		if (isset($rules['type']) && $rules['type'] === 'file') {
+			$errors = isset($_FILES[$field]['error']) ? (array)$_FILES[$field]['error'] : array();
+			return !empty($rules['required']) && !in_array(UPLOAD_ERR_OK, $errors, true) ? array('required') : array();
+		}
 		$value = self::value($field);
 		$failed = array();
 		// a list for a field the form doesn't name field[], or bytes that
@@ -212,8 +218,10 @@ class validation
 				if (!empty($rules['max']) && $value > $rules['max']) $failed[] = 'max';
 			}
 		}
-		if (isset($rules['minlength']) && mb_strlen($value) < (int)$rules['minlength']) $failed[] = 'minlength';
-		if (isset($rules['maxlength']) && mb_strlen($value) > (int)$rules['maxlength']) $failed[] = 'maxlength';
+		// a browser counts a line break once and sends it as two (CR LF)
+		$length = mb_strlen(preg_replace('/\r\n?/', "\n", $value));
+		if (isset($rules['minlength']) && $length < (int)$rules['minlength']) $failed[] = 'minlength';
+		if (isset($rules['maxlength']) && $length > (int)$rules['maxlength']) $failed[] = 'maxlength';
 		if (!empty($rules['pattern']) && is_string($rules['pattern'])) {
 			$regex = '/^(?:'.str_replace('/', '\\/', $rules['pattern']).')$/u';
 			// a pattern that can't run (a bad regex, too much backtracking) fails too
