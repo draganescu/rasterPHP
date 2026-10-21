@@ -3,6 +3,12 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.39
+
+Nothing for most sites to do. A site with a literal route and URLs with parameters behind it can drop the tables those URLs left (below). **A route's URLs with parameters show the route's page fields** (#110). With `controller::route('blog/post')->to('post')`, an editor's headline on `/blog/post` didn't show on `/blog/post/id/7`, which still showed the template's default: page fields were kept per whole URL, so each URL with parameters was a page of its own. In development every such URL a visitor opened made its own table (`blogpostid7…page`), `schema` listed those as unused with a `--drop` hint, and MCP's `get_page` and `update_page` answered "Unknown page" for them. Now a URL a literal route matched (only lowercase letters, digits, `_`, `-` and `/`) is that route's page, as page numbers and filters already were: `/blog/post/id/7` shows and edits the fields of `/blog/post`, no new table is made, and MCP finds the route's page from any of its URLs. A pattern with regular expression parts (`blog/[0-9]+`) is not one address, so each URL it matches keeps its own fields, as before.
+
+**The tables already made.** `php bin/raster schema` lists the tables URLs with parameters made in development as unused. What an editor saved on one of those URLs no longer shows anywhere; copy what you want to keep onto the route's page (`/blog/post`), then drop each table with the command `schema` prints (`php bin/raster schema --drop=<table>`).
+
 ## 2.2.37
 
 Nothing for sites to do. Five fixes to form and field values (#158's group 5).
