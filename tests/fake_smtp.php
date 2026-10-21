@@ -1,6 +1,6 @@
 <?php
 // A tiny SMTP server for tests:
-//   php tests/fake_smtp.php <port> <transcript-file> [plain|starttls|smtps|silent] [cert.pem] [host]
+//   php tests/fake_smtp.php <port> <transcript-file> [plain|starttls|smtps|silent] [cert.pem]
 // plain never offers STARTTLS; starttls offers and performs it; smtps is TLS
 // from the first byte; silent takes connections and never says a word, as a
 // hung mail server does (it notes each one as "CONNECTED"). It accepts AUTH LOGIN and appends every session
@@ -11,9 +11,8 @@
 if ($argc < 3) exit("usage: fake_smtp.php <port> <file> [mode] [cert]\n");
 $mode = isset($argv[3]) ? $argv[3] : 'plain';
 $cert = isset($argv[4]) && $argv[4] !== '' ? $argv[4] : null;
-$host = isset($argv[5]) ? $argv[5] : '127.0.0.1';
 $context = stream_context_create(array('ssl' => array('local_cert' => $cert, 'verify_peer' => false, 'allow_self_signed' => true)));
-$server = stream_socket_server('tcp://'.$host.':'.(int)$argv[1], $errno, $errstr, STREAM_SERVER_BIND | STREAM_SERVER_LISTEN, $context);
+$server = stream_socket_server('tcp://127.0.0.1:'.(int)$argv[1], $errno, $errstr, STREAM_SERVER_BIND | STREAM_SERVER_LISTEN, $context);
 if (!$server) exit("cannot listen: $errstr\n");
 $log = $argv[2];
 $parent = function_exists('posix_getppid') ? posix_getppid() : 0;

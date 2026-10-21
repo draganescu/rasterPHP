@@ -154,11 +154,28 @@ class raster_project
 		if (!is_dir($target)) mkdir($target, 0775, true);
 		$phar = new PharData($archive);
 		$phar->extractTo($target, null, true);
+		self::remove_mac_files($target);
 		// GitHub archives have one folder at the top
 		$entries = array_values(array_diff(scandir($target), array('.', '..')));
 		$root = count($entries) === 1 && is_dir("$target/{$entries[0]}") ? "$target/{$entries[0]}" : $target;
 		if (!is_file("$root/system/boot.php")) throw new RuntimeException("$archive does not hold a Raster release");
 		return $root;
+	}
+
+	// macOS tar keeps a file's extended attributes in a ._<name> entry beside
+	// it, and a zip made on a Mac carries them in a __MACOSX/ folder. Neither
+	// is part of the release: they go before the top folder is looked for,
+	// so they are never counted or copied in.
+	static function remove_mac_files($dir) {
+		$iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
+		foreach ($iterator as $file) {
+			$mac = strpos('/'.substr($file->getPathname(), strlen($dir) + 1).'/', '/__MACOSX/') !== false;
+			if ($file->isDir() && !$file->isLink()) {
+				if ($mac) rmdir($file->getPathname());
+			} elseif ($mac || strpos($file->getFilename(), '._') === 0) {
+				unlink($file->getPathname());
+			}
+		}
 	}
 
 	// ##Updating

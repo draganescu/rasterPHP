@@ -48,3 +48,15 @@ function php_argv() {
 function php_cmd() {
 	return implode(' ', array_map('escapeshellarg', array_merge(array(PHP_BINARY), php_flags())));
 }
+
+// ## Stopping what a run started
+//
+// PHP skips shutdown functions when a signal ends it, which left the
+// servers running after a run stopped with Ctrl-C, kill or a timeout: exit
+// instead, so each suite's shutdown function stops them. A run killed
+// outright runs nothing, so tests/watch.php, started here, stops them then.
+if (function_exists('pcntl_async_signals')) {
+	pcntl_async_signals(true);
+	foreach (array(SIGINT, SIGTERM, SIGHUP) as $signal) pcntl_signal($signal, function ($signal) { exit(128 + $signal); });
+}
+$test_watch = proc_open(array(PHP_BINARY, __DIR__.'/watch.php', (string)getmypid()), array(0 => array('file', '/dev/null', 'r'), 1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $test_watch_pipes);
