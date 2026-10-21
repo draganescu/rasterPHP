@@ -98,6 +98,13 @@ test('slugs', function () {
 	same('/news', cms::slug_for_uri('/news/news_page/2'));
 	same('/news', cms::slug_for_uri('/news/news_items/tag/php'));
 	same('/news/news_item', cms::slug_for_uri('/news/news_item/3'));
+	// a literal route's URLs are its page, whatever parameters follow (#110)
+	same('/blog/post', cms::slug_for_uri('/blog/post/id/7', 'blog/post'));
+	same('/blog/post', cms::slug_for_uri('/blog/post', 'blog/post'));
+	same('/specials', cms::slug_for_uri('/specials/day/friday/menu_page/2', 'specials'));
+	same('/specials', cms::slug_for_uri('specials/day/friday', '/specials/'));
+	// a pattern that isn't literal keeps the URL's own slug
+	same('/blog/7', cms::slug_for_uri('/blog/7', 'blog/[0-9]+'));
 	same('aboutpage', cms::page_type('/about'));
 	same('teammembersdata', cms::collection_type('team_members'));
 });

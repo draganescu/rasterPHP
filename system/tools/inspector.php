@@ -1030,6 +1030,15 @@ class raster_inspector {
 		return $routes;
 	}
 
+	// The pattern of the first route that matches a URL, the way the
+	// controller picks one, or null when none does
+	function route_for($uri) {
+		foreach ($this->routes() as $route) {
+			if (@preg_match('%^/?'.$route['pattern'].'%', ltrim((string)$uri, '/'))) return $route['pattern'];
+		}
+		return null;
+	}
+
 	// Checks routes in application/config/the_routes.php point at views
 	function lint_routes() {
 		$problems = array();
@@ -1415,13 +1424,14 @@ class raster_inspector {
 				'fields' => $fields,
 			);
 		}
-		// literal routes (controller::route('specials')->to('menu')) are pages too:
-		// each URL keeps its own page fields
+		// literal routes (controller::route('specials')->to('menu')) are pages too,
+		// with page fields of their own, shared by the route's URLs with
+		// parameters (/specials/day/friday)
 		foreach ($this->routes() as $route) {
-			if (!preg_match('#^[a-z0-9_\-/]+$#', $route['pattern']) || $route['theme'] !== $theme) continue;
+			$slug = cms::route_slug($route['pattern']);
+			if ($slug === null || $route['theme'] !== $theme) continue;
 			foreach ($pages as $page) {
 				if ($page['view'] !== $route['view'].$this->ext || !$page['fields']) continue;
-				$slug = '/'.trim($route['pattern'], '/');
 				$pages[] = array('view' => $page['view'], 'url' => $slug, 'slug' => $slug, 'type' => cms::page_type($slug), 'fields' => $page['fields']);
 				break;
 			}

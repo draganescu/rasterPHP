@@ -63,6 +63,7 @@ day before, so the waitlist is easy to see.
 | A15 | `rewrite` off: every link goes through index.php |
 | A16 | the private extensions are 403, `composer.phar` too (system/private_paths.php) |
 | A17 | theme files of every kind (svg, webp, woff2, ico, pdf) are served; the root `.htaccess` is the only one |
+| A18 | a literal route's URLs with parameters (`/specials/day/friday`) show the route's page fields, make no table of their own, and MCP finds the route's page from them |
 | B1 | RSS: content type, well-formed, escaped |
 | B2 | Atom |
 | B3 | JSON views: rows become a list |
