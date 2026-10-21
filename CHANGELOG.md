@@ -3,6 +3,10 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.36
+
+Nothing for sites to do. **A filter's select keeps the option a model lists.** A `<form method="get">` was filled from the URL before the page's render blocks ran, so an option a model listed (`render.booking.resources` on a salon's page, `render.rsvp.events` on the replies' staff page) was never chosen, and when the URL asked for the mock-up option's value, every row copied from it was marked chosen. Now the URL's values go in two steps. Options, checkboxes and radios are chosen once the page is rendered, whoever listed them, and exactly one option of a single select is chosen. Text inputs, hidden inputs and textareas are filled before, as until now, so a value a model prints into one (`print.@value`) wins over the URL's: a form per row, with its own hidden id, keeps that id whatever the URL says. For options, checkboxes and radios the URL's choice wins, in every row; a select without `multiple` gets one chosen option, the first that matches, and the editor's mock-up of a new item is never chosen. An option without a `value` is chosen by its text, without the editor's marks.
+
 ## 2.2.35
 
 Nothing for sites to do. The demo café's jazz night and poetry evening take replies (`php demo/seed.php` adds them), with the guest's page on `/rsvp` and the staff page on `/staff/events`. AGENTS.md has the steps, and a new wiki page, Event replies (RSVP), covers the model. #168 Phase 2's RSVP is done.

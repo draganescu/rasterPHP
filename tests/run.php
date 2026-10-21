@@ -4251,6 +4251,68 @@ test('booking: resources and services in use keep their slugs', function () {
 	});
 });
 
+test('a GET form: the URL chooses the options a model lists, and keeps the values it prints', function () {
+	$app = APPBASE.config::get('models_path', 'models');
+	$theme = APPBASE.config::get('views_path', 'views').'/'.config::get('theme', 'default');
+	temp_model("$app/zzpick", array('zzpick.php' => "<?php\nclass zzpick\n{\n\tfunction rows() {\n\t\treturn array(array('id' => '3', 'name' => 'Ana'), array('id' => '5', 'name' => 'Mihai'));\n\t}\n}\n"));
+	test_fixture("$theme/zzpick.html");
+	file_put_contents("$theme/zzpick.html", '<html><head><title>Pick</title></head><body>'
+		// a form per row, its hidden input printed by the model
+		.'<!-- render.zzpick.rows --><form method="get" class="row"><!-- print.@value.id --><input type="hidden" name="event" value="1"><!-- /print.@value.id --><button>Open</button></form><!-- /render.zzpick.rows -->'
+		// a filter whose options the model lists, the mock-up's value one the URL may ask for
+		.'<form method="get" class="by-id"><select name="event"><option value="">All</option><!-- render.zzpick.rows --><!-- print.@value.id --><option value="3"><!-- print.name -->Ana<!-- /print.name --></option><!-- /print.@value.id --><!-- /render.zzpick.rows --></select></form>'
+		// options without a value, chosen by their text; a page field's carries the editor's marks
+		// radios the model lists
+		.'<form method="get" class="by-radio"><!-- render.zzpick.rows --><label><!-- print.@value.id --><input type="radio" name="pick" value="3"><!-- /print.@value.id --> <!-- print.name -->Ana<!-- /print.name --></label><!-- /render.zzpick.rows --></form>'
+		.'<form method="get" class="by-text"><select name="stylist"><option value="">Anyone</option><!-- render.zzpick.rows --><option><!-- print.name -->Ana<!-- /print.name --></option><!-- /render.zzpick.rows --><option><!-- print.cms.zz_house -->The house<!-- /print.cms.zz_house --></option></select></form>'
+		.'</body></html>');
+	controller::forget_models();
+	$select = function ($page, $class) {
+		$form = substr($page, strpos($page, 'class="'.$class.'"'));
+		return substr($form, 0, strpos($form, '</form>'));
+	};
+	try {
+		$page = contact_render('/zzpick?event=3');
+		check(strpos($page, '[exit 0]') !== false, $page);
+		check(strpos($page, 'name="event" value="3">') !== false && strpos($page, 'name="event" value="5">') !== false, 'each row keeps its own value: '.$page);
+		$page = contact_render('/zzpick?event=5');
+		check(strpos($page, 'name="event" value="3">') !== false && strpos($page, 'name="event" value="5">') !== false, 'each row keeps its own value: '.$page);
+		$by_id = $select($page, 'by-id');
+		check(strpos($by_id, '<option value="5" selected>Mihai') !== false && substr_count($by_id, 'selected') === 1, 'the model\'s option is chosen, once: '.$by_id);
+		$by_id = $select(contact_render('/zzpick?event=3'), 'by-id');
+		check(strpos($by_id, '<option value="3" selected>Ana') !== false && substr_count($by_id, 'selected') === 1, 'a mock-up that matches marks one row: '.$by_id);
+		$by_id = $select(contact_render('/zzpick?event='), 'by-id');
+		check(strpos($by_id, '<option value="" selected>All') !== false && substr_count($by_id, 'selected') === 1, '?event= chooses only the empty one: '.$by_id);
+		$by_radio = $select(contact_render('/zzpick?pick=5'), 'by-radio');
+		check(strpos($by_radio, 'value="5" checked>') !== false && substr_count($by_radio, 'checked') === 1, 'the model\'s radio is chosen, once: '.$by_radio);
+		$by_text = $select(contact_render('/zzpick?stylist=Mihai'), 'by-text');
+		check(strpos($by_text, '<option selected>Mihai</option>') !== false && substr_count($by_text, 'selected') === 1, 'by its text: '.$by_text);
+		foreach (array(null, 'editor') as $as) {
+			$page = contact_render('/zzpick?stylist=The%20house', $as);
+			$by_text = $select($page, 'by-text');
+			check(preg_match('#<option selected>The house#', $by_text) === 1 && substr_count($by_text, 'selected') === 1, "by its text, as $as: $by_text");
+			// for an editor the field was marked while the form was filled: the marks
+			// come out of an <option> only after (cms_editor::settle), and the field
+			// is listed as hidden
+			if ($as) check(preg_match('#"field":"zz_house"[^}]*"hidden":true#', $page) === 1, 'the field was marked: '.$page);
+		}
+		// the editor's mock-up of a new item is no option to choose; a single select chooses one
+		$t = template::instance();
+		$mockup = $t->fill_form('<form method="get"><select name="event"><option value="3">Ana</option><template data-raster-mockup="1"><option value="3">Mock</option></template></select></form>', array('event' => '3'), false, false, 'choices');
+		check(strpos($mockup, '<template data-raster-mockup="1"><option value="3">Mock</option></template>') !== false && substr_count($mockup, 'selected') === 1, $mockup);
+		$twice = $t->fill_form('<form method="get"><select name="event"><option value="3">Ana</option><option value="3">Ana again</option></select></form>', array('event' => '3'), false, false, 'choices');
+		check(substr_count($twice, 'selected') === 1 && strpos($twice, '<option value="3" selected>Ana</option>') !== false, $twice);
+		$many = $t->fill_form('<form method="get"><select name="event[]" multiple><option value="3">Ana</option><option value="5">Mihai</option></select></form>', array('event' => array('3', '5')), false, false, 'choices');
+		same(2, substr_count($many, 'selected'), $many);
+		// an option's text the editor marks (<!--raster:s 3-->) is compared without the marks
+		$marked = template::instance()->fill_form('<form method="get"><select name="stylist"><option>Anyone</option><option><!--raster:s 3-->Ana<!--raster:e 3--></option></select></form>', array('stylist' => 'Ana'), false, false, 'choices');
+		check(strpos($marked, '<option selected><!--raster:s 3-->Ana') !== false && substr_count($marked, 'selected') === 1, $marked);
+	} finally {
+		@unlink("$theme/zzpick.html");
+		remove_dir("$app/zzpick");
+		controller::forget_models();
+	}
+});
 test('booking: forms shown again keep choices (#80)', function () {
 	$template = template::instance();
 	$select = '<form method="get"><select name="stylist"><option value="">Anyone</option><option>Ana</option><option> Mihai  Pop </option></select></form>';
@@ -7577,6 +7639,16 @@ test('rsvp staff page in the editor', function () {
 		check(strpos($out, '[exit 0]') !== false && strpos($out, 'waiting=1 attention=0</h1>') !== false, 'the counts: '.$out);
 		check(strpos($out, 'Jazz night going=2 left=0 waiting=1</h2>') !== false && strpos($out, 'Ion Waits') !== false, 'the event: '.$out);
 		check(strpos($out, '<option value="'.$event['id'].'"') !== false, 'the event to choose: '.$out);
+		// the GET form keeps the asked-for event chosen, once, among the options the model lists
+		$quiz = rsvp_event(array('title' => 'Quiz'));
+		foreach (array($event['id'] => 'Jazz night', $quiz['id'] => 'Quiz') as $id => $title) {
+			$picked = contact_render('/zzrsvpstaff?event='.$id, 'editor');
+			$select = substr($picked, strpos($picked, '<select name="event">'));
+			$select = substr($select, 0, strpos($select, '</select>'));
+			check(preg_match('#<option value="'.$id.'" selected>(<!--[^>]*-->)?'.$title.'#', $select) === 1 && substr_count($select, 'selected') === 1, "$title chosen: $select");
+		}
+		cms_store::delete_item('eventsdata', $quiz['id']);
+		rsvp::forget();
 		check(preg_match('#<script id="raster-editor-config" type="application/json">(.*?)</script>#s', $out, $m) === 1, 'no editor: '.$out);
 		$marks = json_decode($m[1], true)['marks'];
 		// both replies, in the event's row and in the event's list

@@ -651,6 +651,7 @@ class controller {
 			event::dispatch("after_print");
 		}
 		
+		$template->fill_get_forms();
 		$this->fix_links();
 	}
 	

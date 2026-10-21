@@ -4355,6 +4355,14 @@ test('P7', 'the salon: two stylists, two services of different lengths, one book
 	has($page, 'name="time" value="17:30"> 17:30 to 19:00', 'the last start');
 	has($page, '<option value="ana" selected>Ana</option></select>', 'only Ana offers colour');
 	lacks($page, '<option value="mihai"');
+	// both cut: the select keeps the stylist the URL chose, and only that one
+	foreach (array('ana' => 'Ana', 'mihai' => 'Mihai') as $slug => $name) {
+		$cut = http('GET', "$base/salon?resource=$slug&service=cut&date=$day")[1];
+		$stylists = substr($cut, strpos($cut, '<select name="resource">'));
+		$stylists = substr($stylists, 0, strpos($stylists, '</select>'));
+		has($stylists, '<option value="'.$slug.'" selected>'.$name.'</option>', 'the stylist stays chosen');
+		same(1, substr_count($stylists, 'selected'), $stylists);
+	}
 	foreach (array('date' => $day, 'resource' => 'ana', 'service' => 'colour') as $name => $value) has($page, '<input type="hidden" name="'.$name.'" value="'.$value.'">', 'what the URL chose comes back as hidden inputs');
 	$salon = function ($resource, $service, $date, $fields) use ($base) {
 		$choice = array('resource' => $resource, 'service' => $service, 'date' => $date);
@@ -4833,6 +4841,11 @@ test('S6', 'the staff page: counts, waitlist, attention, a phone reply', functio
 	has($page, '<h3>Poetry evening, '.$poetry['date'].' at 19:00</h3>');
 	has($page, '<option value="">All events</option>');
 	foreach (array($jazz, $poetry) as $event) has($page, '<option value="'.$event['id'].'">'.$event['title'].', '.$event['date'].'</option>', 'the select lists the evenings');
+	$picked = http('GET', "$base/staff/events?event={$poetry['id']}", null, $h)[1];
+	$select = substr($picked, strpos($picked, '<select name="event">'));
+	$select = substr($select, 0, strpos($select, '</select>'));
+	has($select, '<option value="'.$poetry['id'].'" selected>', 'the chosen event stays chosen');
+	same(1, substr_count($select, 'selected'), $select);
 	list($code, $out) = raster(array('render', "/staff/events?event={$poetry['id']}", '--as=editor'));
 	same(0, $code, $out);
 	has($out, "rsvp('event=?event&order=status,waiting_since') + new", 'the replies are editable, with a card for a phone reply');

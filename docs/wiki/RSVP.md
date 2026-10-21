@@ -165,7 +165,7 @@ The staff page is made of [record](Records) lists, so staff edit replies in the 
 <h2>One evening</h2>
 <form method="get">
   <select name="event"><option value="">All events</option>
-    <!-- render.rsvp.events('from=today') --><!-- print.@value.event --><option value="0"><!-- print.event_title -->Jazz night<!-- /print.event_title --></option><!-- /print.@value.event --><!-- /render.rsvp.events('from=today') -->
+    <!-- render.rsvp.events('from=today') --><!-- print.@value.event --><option value="1"><!-- print.event_title -->Jazz night<!-- /print.event_title --></option><!-- /print.@value.event --><!-- /render.rsvp.events('from=today') -->
   </select>
   <button>Show</button>
 </form>
@@ -173,7 +173,7 @@ The staff page is made of [record](Records) lists, so staff edit replies in the 
 ```
 
 - `render.rsvp.events('from=today')` lists the events from that day, drafts included, with their counts (`going`, `left`, `waiting`, `maybe`, `no`) and `replies`, each with `attention` and `position`.
-- The GET form picks one evening. Give the mock-up option a value no event has (`0`), so it is never the one the URL asks for. The card at the end of its list starts with that evening, so a phone reply needs no id typed in. A phone reply needs no email, and it waits like anyone's when the evening is full.
+- The GET form picks one evening and keeps it chosen. The card at the end of its list starts with that evening, so a phone reply needs no id typed in. A phone reply needs no email, and it waits like anyone's when the evening is full.
 - `count()` takes plain values (`count('status=going&event=7')`), not `?event`, and counts every reply that matches, past events' too. One evening's numbers are in its row.
 - Link to one evening with the GET form, not a link built with `print.+href`: that adds a space before the id.
 

@@ -634,8 +634,17 @@ of your own. Staff read the feedback on a page that renders
     `try_again`.
 - **Forms that ask with the URL** (`<form method="get">`, a filter or a
   search) show what the URL asked: `/bookings?stylist=Ana` keeps Ana chosen,
-  and `?stylist=` chooses only the option whose value is empty.
-  Nothing else happens to them; see `field=?name` in the CMS options.
+  and `?stylist=` chooses only the option whose value is empty. Options,
+  checkboxes and radios are chosen once the page is rendered, so an option
+  a render block lists is chosen too (a `<select>` of
+  `render.booking.resources`), and a mock-up option is never marked before
+  it is copied into every row: for options, checkboxes and radios the
+  URL's choice wins, in every row. A select without `multiple` gets one
+  chosen option, the first that matches. Text inputs, hidden inputs and
+  textareas are filled before: a value a model prints into one
+  (`print.@value`) wins over the URL's, so a form per row keeps its own.
+  Raster does nothing else to these forms; see `field=?name` in the CMS
+  options.
 
 ## The CMS: the markup is the schema
 
@@ -1776,11 +1785,9 @@ from `php demo/seed.php`, and are the worked example of all of it.
   - One event's replies: `render.cms.rsvp('event=?event&order=status,waiting_since')`
     on the staff page, opened with `?event=<id>`: a GET form whose
     `<select name="event">` lists the events with `render.rsvp.events`
-    (`<!-- print.@value.event --><option value="0">…</option><!-- /print.@value.event -->`),
-    after an `<option value="">All events</option>`. Give the mock-up
-    option a value no event has (`0`): a GET form is filled from the URL
-    before the rows are made, so a mock-up that matched would mark every
-    row chosen. Not a link: `print.+href` adds a space before what it
+    (`<!-- print.@value.event --><option value="1">…</option><!-- /print.@value.event -->`),
+    after an `<option value="">All events</option>`, and keeps the chosen
+    evening chosen. Not a link: `print.+href` adds a space before what it
     appends, so it can't finish `?event=`. Without `?event` (All events)
     the list has every reply. The card for a new reply at the end of that list starts with that
     `event`, so a phone reply is added in the page with no id to type.
@@ -1860,7 +1867,7 @@ from `php demo/seed.php`, and are the worked example of all of it.
      <!-- /render.rsvp.events('from=today') -->
      <h3>One evening</h3>
      <form method="get"><select name="event"><option value="">All events</option>
-       <!-- render.rsvp.events('from=today') --><!-- print.@value.event --><option value="0"><!-- print.event_title -->Jazz night<!-- /print.event_title --></option><!-- /print.@value.event --><!-- /render.rsvp.events('from=today') -->
+       <!-- render.rsvp.events('from=today') --><!-- print.@value.event --><option value="1"><!-- print.event_title -->Jazz night<!-- /print.event_title --></option><!-- /print.@value.event --><!-- /render.rsvp.events('from=today') -->
      </select> <button>Show</button></form>
      <!-- render.cms.rsvp('event=?event&order=status,waiting_since') --><p><!-- print.name -->Ana<!-- /print.name --> <!-- print.status -->going<!-- /print.status --></p><!-- /render.cms.rsvp('event=?event&order=status,waiting_since') -->
      ```
