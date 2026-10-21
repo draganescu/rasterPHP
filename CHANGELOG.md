@@ -3,6 +3,16 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.37
+
+Nothing for sites to do. Five fixes to form and field values (#158's group 5).
+
+- **A collection emptied by deleting its items stays empty** (#91). When the last item was deleted, production showed visitors the template's mock-up again, with a link to nowhere, and development stored it again as a new item. Now the mock-up is stored only when the collection's table is made, and a list with no items shows nothing.
+- **A number page field keeps its mock-up's decimals** (#92). With `14.50` in the mock-up, the first view printed `14.50` and every later one `14.5`. A page field is now read as its type before it prints, as an item's field is, so `4.5` prints `4.50`. Its text is read the same way too, so a picture in a page field shows under the folder the site runs in, as an item's does.
+- **`make model` gives each field its input's type** (#104). A number input with a decimal `step` (or `any`) is a number, so `12.50` is no longer refused; a checkbox is a bool, so a ticked box is stored as yes and not `on`; `date`, `time` and `datetime-local` inputs go in `'types'`. What the command prints next names the `<field>_invalid` alert of each typed field.
+- **A line break counts once for `minlength` and `maxlength`** (#111), as the browser counts it. A message the browser accepted at the limit was refused on the server, which counted each line break twice.
+- **A required file input passes when the file arrived** (#112). It was looked up in the post, where files never are, so a form with `<input type="file" required>` could never be sent. AGENTS.md now says how a form takes an upload.
+
 ## 2.2.36
 
 Nothing for sites to do. **A filter's select keeps the option a model lists.** A `<form method="get">` was filled from the URL before the page's render blocks ran, so an option a model listed (`render.booking.resources` on a salon's page, `render.rsvp.events` on the replies' staff page) was never chosen, and when the URL asked for the mock-up option's value, every row copied from it was marked chosen. Now the URL's values go in two steps. Options, checkboxes and radios are chosen once the page is rendered, whoever listed them, and exactly one option of a single select is chosen. Text inputs, hidden inputs and textareas are filled before, as until now, so a value a model prints into one (`print.@value`) wins over the URL's: a form per row, with its own hidden id, keeps that id whatever the URL says. For options, checkboxes and radios the URL's choice wins, in every row; a select without `multiple` gets one chosen option, the first that matches, and the editor's mock-up of a new item is never chosen. An option without a `value` is chosen by its text, without the editor's marks.
