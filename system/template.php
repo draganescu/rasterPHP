@@ -480,7 +480,8 @@ class template {
   		if (in_array($type, array('submit', 'button', 'reset', 'image'))) continue;
   		$rule = isset($fields[$name]) ? $fields[$name] : array('type' => $type);
   		if ($list) $rule['list'] = true;
-  		foreach (array('required', 'minlength', 'maxlength', 'min', 'max', 'pattern') as $constraint) {
+  		// step is no rule the server checks: make model reads it for decimals
+  		foreach (array('required', 'minlength', 'maxlength', 'min', 'max', 'pattern', 'step') as $constraint) {
   			if (array_key_exists($constraint, $attributes)) $rule[$constraint] = $attributes[$constraint];
   		}
   		$fields[$name] = $rule;

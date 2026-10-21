@@ -7686,6 +7686,121 @@ test('rsvp staff page in the editor', function () {
 	});
 });
 
+// ## Form and field values (#158 group 5)
+
+test('a line break counts once for minlength and maxlength, as browsers count it (#111)', function () {
+	$v = validation::get();
+	$r = new ReflectionMethod($v, 'check_field');
+	$r->setAccessible(true);
+	$saved = $_POST;
+	try {
+		// 12 characters to the browser, 14 as posted
+		$_POST = array('notes' => "aaaa\r\naaaa\r\naa");
+		same(array(), $r->invoke($v, 'notes', array('type' => 'textarea', 'maxlength' => '12')), 'at the limit');
+		same(array(), $r->invoke($v, 'notes', array('type' => 'textarea', 'minlength' => '12')), 'at the minimum');
+		$_POST = array('notes' => "aaaa\r\naaaa\r\naaa");
+		same(array('maxlength'), $r->invoke($v, 'notes', array('type' => 'textarea', 'maxlength' => '12')), 'one over');
+		$_POST = array('notes' => "aaaa\r\naaaa\r\na");
+		same(array('minlength'), $r->invoke($v, 'notes', array('type' => 'textarea', 'minlength' => '12')), 'one under');
+		// a lone CR, as old Macs sent it, is one character too
+		$_POST = array('notes' => "aaaa\raaaa\raa");
+		same(array(), $r->invoke($v, 'notes', array('type' => 'textarea', 'maxlength' => '12')), 'CR');
+	} finally { $_POST = $saved; }
+});
+
+test('a required file input passes when the file arrived (#112)', function () {
+	$v = validation::get();
+	$r = new ReflectionMethod($v, 'check_field');
+	$r->setAccessible(true);
+	$saved = array($_POST, $_FILES);
+	$file = function ($error) { return array('name' => 'cv.pdf', 'type' => 'application/pdf', 'tmp_name' => '/tmp/php-cv', 'error' => $error, 'size' => $error === UPLOAD_ERR_OK ? 1200 : 0); };
+	$one = template::instance()->constraints('<input type="file" name="cv" required>')['cv'];
+	$many = template::instance()->constraints('<input type="file" name="photos[]" multiple required>')['photos'];
+	try {
+		$_POST = array();
+		$_FILES = array('cv' => $file(UPLOAD_ERR_OK));
+		same(array(), $r->invoke($v, 'cv', $one), 'attached');
+		$_FILES = array('cv' => $file(UPLOAD_ERR_NO_FILE));
+		same(array('required'), $r->invoke($v, 'cv', $one), 'sent without a file');
+		$_FILES = array();
+		same(array('required'), $r->invoke($v, 'cv', $one), 'no upload at all');
+		// a file too big for the server never arrived
+		$_FILES = array('cv' => $file(UPLOAD_ERR_INI_SIZE));
+		same(array('required'), $r->invoke($v, 'cv', $one), 'too big');
+		// photos[]: PHP lists each part of every file
+		$_FILES = array('photos' => array('name' => array('a.jpg', ''), 'type' => array('image/jpeg', ''), 'tmp_name' => array('/tmp/php-a', ''), 'error' => array(UPLOAD_ERR_OK, UPLOAD_ERR_NO_FILE), 'size' => array(900, 0)));
+		same(array(), $r->invoke($v, 'photos', $many), 'one of several');
+		$_FILES = array('photos' => array('name' => array(''), 'type' => array(''), 'tmp_name' => array(''), 'error' => array(UPLOAD_ERR_NO_FILE), 'size' => array(0)));
+		same(array('required'), $r->invoke($v, 'photos', $many), 'none of several');
+		// without required, no file is fine
+		$_FILES = array();
+		same(array(), $r->invoke($v, 'cv', array('type' => 'file')), 'optional');
+	} finally { list($_POST, $_FILES) = $saved; }
+});
+
+test('a number page field keeps its mock-up\'s decimals on every view (#92)', function () use ($db) {
+	cms_store::connect();
+	$theme = APPBASE.config::get('views_path', 'views').'/'.config::get('theme', 'default');
+	test_fixture("$theme/zzfee.html");
+	file_put_contents("$theme/zzfee.html", '<html><head><title>Fees</title></head><body><p>Corkage: <!-- print.cms.zz_corkage -->14.50<!-- /print.cms.zz_corkage --> lei</p></body></html>');
+	$prod = function ($url) use ($db) {
+		global $root;
+		return (string)shell_exec('RASTER_DB='.escapeshellarg($db).' RASTER_ENV=production '.php_cmd().' '.escapeshellarg("$root/bin/raster").' render '.escapeshellarg($url).' 2>&1');
+	};
+	try {
+		$out = contact_render('/zzfee');
+		check(strpos($out, 'Corkage: 14.50 lei') !== false, 'the first view: '.$out);
+		$out = contact_render('/zzfee');
+		check(strpos($out, 'Corkage: 14.50 lei') !== false, 'the second view: '.$out);
+		cms_store::update_page('zzfeepage', '/zzfee', array('zz_corkage' => '4.5'), array('zz_corkage'));
+		$out = contact_render('/zzfee');
+		check(strpos($out, 'Corkage: 4.50 lei') !== false, 'after a save: '.$out);
+		$out = $prod('/zzfee');
+		check(strpos($out, 'Corkage: 4.50 lei') !== false, 'in production: '.$out);
+	} finally {
+		unlink("$theme/zzfee.html");
+		R::exec('DROP TABLE IF EXISTS zzfeepage');
+	}
+});
+
+test('a collection emptied by deleting its items stays empty (#91)', function () use ($db) {
+	cms_store::connect();
+	$theme = APPBASE.config::get('views_path', 'views').'/'.config::get('theme', 'default');
+	test_fixture("$theme/zzgone.html");
+	$view = function ($extra = '') use ($theme) {
+		file_put_contents("$theme/zzgone.html", '<html><head><title>Gone</title></head><body><ul><!-- render.cms.zzgone --><li><!-- print.title -->Sample evening<!-- /print.title -->'.$extra.'</li><!-- /render.cms.zzgone --></ul></body></html>');
+	};
+	$prod = function ($url) use ($db) {
+		global $root;
+		return (string)shell_exec('RASTER_DB='.escapeshellarg($db).' RASTER_ENV=production '.php_cmd().' '.escapeshellarg("$root/bin/raster").' render '.escapeshellarg($url).' 2>&1');
+	};
+	$view();
+	try {
+		// a new collection starts with its mock-up item
+		$out = contact_render('/zzgone');
+		check(strpos($out, '<li>Sample evening</li>') !== false, 'a new list: '.$out);
+		same(1, (int)R::count('zzgonedata'));
+		foreach (R::getCol('SELECT id FROM zzgonedata') as $id) cms_store::delete_item('zzgonedata', $id);
+		$out = $prod('/zzgone');
+		check(strpos($out, 'Sample evening') === false && strpos($out, '<ul></ul>') !== false, 'production shows nothing: '.$out);
+		$out = contact_render('/zzgone');
+		check(strpos($out, 'Sample evening') === false && strpos($out, '<ul></ul>') !== false, 'development shows nothing: '.$out);
+		same(0, (int)R::count('zzgonedata'), 'and stores nothing');
+		// an editor still gets the card to add the next one
+		$out = contact_render('/zzgone', 'editor');
+		check(strpos($out, 'data-raster-mockup') !== false && strpos($out, 'zzgone + new') !== false, 'the new-item card: '.$out);
+		// a field added to the view of an emptied list is a column, with no item to fill
+		$view('<span><!-- print.zz_where -->Upstairs<!-- /print.zz_where --></span>');
+		$out = contact_render('/zzgone');
+		check(strpos($out, 'Sample evening') === false && strpos($out, '[exit 0]') !== false, $out);
+		check(array_key_exists('zz_where', cms_store::columns('zzgonedata')), 'the new column');
+		same(0, (int)R::count('zzgonedata'));
+	} finally {
+		unlink("$theme/zzgone.html");
+		R::exec('DROP TABLE IF EXISTS zzgonedata');
+	}
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";
 foreach ($skipped as $skip) echo "  - $skip\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";
