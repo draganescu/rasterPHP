@@ -139,7 +139,8 @@ an agent can read it and be sure.
 
 Blocks must nest properly. **Evaluation order:** render blocks run from the
 last in the file to the first, so blocks nested inside a render block run
-before it. That's how a form's model already knows the validation results of
+before it, also when the same tag appears earlier in the page (a list at
+the top and again inside another block). That's how a form's model already knows the validation results of
 the regions inside the form. Print blocks run after all render blocks.
 
 **Closing tags carry the whole name**, arguments included:
