@@ -3,6 +3,12 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.39
+
+Nothing for most sites to do. A site with a literal route and URLs with parameters behind it can drop the tables those URLs left (below). **A route's URLs with parameters show the route's page fields** (#110). With `controller::route('blog/post')->to('post')`, an editor's headline on `/blog/post` didn't show on `/blog/post/id/7`, which still showed the template's default: page fields were kept per whole URL, so each URL with parameters was a page of its own. In development every such URL a visitor opened made its own table (`blogpostid7…page`), `schema` listed those as unused with a `--drop` hint, and MCP's `get_page` and `update_page` answered "Unknown page" for them. Now a URL a literal route matched (only lowercase letters, digits, `_`, `-` and `/`) is that route's page, as page numbers and filters already were: `/blog/post/id/7` shows and edits the fields of `/blog/post`, no new table is made, and MCP finds the route's page from any of its URLs. A pattern with regular expression parts (`blog/[0-9]+`) is not one address, so each URL it matches keeps its own fields, as before.
+
+**The tables already made.** `php bin/raster schema` lists the tables URLs with parameters made in development as unused. What an editor saved on one of those URLs no longer shows anywhere; copy what you want to keep onto the route's page (`/blog/post`), then drop each table with the command `schema` prints (`php bin/raster schema --drop=<table>`).
+
 ## 2.2.38
 
 Nothing for sites to do. **A nested render block runs before its parent, whatever came before it** (#97). Render blocks run from the last in the page to the first, so a block nested inside another runs first. But each one found its block by looking from the top of the page, so when the same tag was used twice, say a list near the top and the same list again inside another block, the nested copy ran after the block around it. By then that block had filled in its rows and taken out their `print` tags, so the nested list repeated its mock-up text (`n`, `n` instead of `Ada`, `Bob`). Two sibling blocks that each held the same list broke the second one the same way. Now each block looks from the bottom of the page, so it takes the last copy of its tag still there, and both lists print their rows.

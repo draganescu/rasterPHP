@@ -21,6 +21,8 @@ class controller {
     public $current_route = '';
     // the view the route resolved to, without the extension (staff/rota), '' for a 404
     public $current_view = '';
+    // the pattern of the route that matched ('specials'), '' when none did
+    public $matched_route = '';
     // Manual routes holder uset by controller::route('a')->to('b');
     public $current_config_route = '';
     // Memory property to keep track in case themes are changed in a 
@@ -315,6 +317,7 @@ class controller {
 			if($this->forced_route == $url)
 			{
 				$template = $file;
+				$this->matched_route = $url;
 				break;
 			}
 			
@@ -327,6 +330,7 @@ class controller {
 				}
 
 				$template = $file;
+				$this->matched_route = $url;
 				break;
 			}
 		}
@@ -341,6 +345,7 @@ class controller {
 			if ($format_ext !== null && !file_exists($route)) {
 				config::set('theme')->to($theme);
 				$template = '';
+				$this->matched_route = '';
 				$route = $is_safe && file_exists($default_file) ? $default_file : '';
 				$view = $route ? $default_view : '';
 			}

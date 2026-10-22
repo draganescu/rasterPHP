@@ -368,6 +368,27 @@ test(array('A5', 'A6'), 'routes file and URL keys', function () use ($base) {
 	has(header_value(http('GET', "$base/journal/journal_page/2.rss")[2], 'Content-Type'), 'application/rss+xml', 'page 2 of the feed is journal.rss');
 	has(between(http('GET', "$base/lab/color/red")[1], 'param'), '<p class="color">red</p>');
 });
+test(array('A18', 'M4'), 'a route\'s parameter URLs show the route\'s page fields (#110)', function () use ($base) {
+	mcp($base, 'update_page', array('page' => '/specials', 'fields' => array('heading' => 'Today only')));
+	try {
+		has(http('GET', "$base/specials")[1], '<h1>Today only</h1>');
+		foreach (array('/specials/day/friday', '/specials/day/saturday', '/specials/menu_page/2') as $url) {
+			has(http('GET', $base.$url)[1], '<h1>Today only</h1>', $url);
+		}
+		// development made no table for those URLs, so schema has none to drop
+		list($code, $out) = raster(array('schema', '--json'));
+		same(0, $code, $out);
+		same(array(), array_values(preg_grep('/^specials/', json_decode($out, true)['unused_tables'])), $out);
+		// MCP knows the page by any URL of the route
+		same('Today only', mcp($base, 'get_page', array('page' => '/specials/day/friday'))['fields']['heading']);
+		mcp($base, 'update_page', array('page' => '/specials/day/sunday', 'fields' => array('heading' => 'Sunday too')));
+		has(http('GET', "$base/specials")[1], '<h1>Sunday too</h1>');
+		// the menu's own page is still its own
+		has(http('GET', "$base/menu")[1], '<h1>Menu</h1>');
+	} finally {
+		mcp($base, 'update_page', array('page' => '/specials', 'fields' => array('heading' => 'Menu')));
+	}
+});
 test(array('A7', 'A8'), 'unknown pages and partials are 404', function () use ($base) {
 	same(404, http('GET', "$base/nothing-here")[0]);
 	same(404, http('GET', "$base/_layout")[0]);

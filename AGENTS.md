@@ -104,9 +104,13 @@ media/                        uploads from the CMS
 - Routes, for URLs that should render a differently named view
   (`application/config/the_routes.php`):
   `controller::route('blog/post')->to('post');`. Patterns are regular
-  expressions matched from the start of the path. A literal route is a page
-  of its own, with its own page fields. `/blog/post/id/7` makes
-  `util::param('id')` return `7`.
+  expressions matched from the start of the path. `/blog/post/id/7` makes
+  `util::param('id')` return `7`. A literal route (only lowercase letters,
+  digits, `_`, `-` and `/`) is a page of its own, with its own page fields,
+  and its URLs with parameters are that same page: `/blog/post/id/7` shows
+  and edits the fields of `/blog/post`. A pattern with regular expression
+  parts (`blog/[0-9]+`) is not one address, so each URL it matches keeps
+  its own page fields.
 - **Several sites in one install:** each app folder has its own config,
   models and views. `RASTER_APP=<folder>` picks one; the default is
   `application`.
@@ -658,7 +662,9 @@ of your own. Staff read the feedback on a page that renders
 ## The CMS: the markup is the schema
 
 `print.cms.<field>` declares a page field. Its default is the content inside
-the block, and it is stored separately for each page URL. `render.cms.<name>`
+the block, and it is stored separately for each page. A page is a view's
+URL or a literal route's; parameters, page numbers and filters don't make
+new pages (`/blog/post/id/7` is `/blog/post`, see Routes). `render.cms.<name>`
 declares a collection, whose fields are the `print` keys inside it. The first
 item of a collection is the mock-up content. A collection whose items were
 all deleted shows nothing, in development and production alike: the
