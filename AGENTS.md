@@ -376,7 +376,7 @@ alike:
 | `authentication.registered`, `logged_in`, `logged_out`, `password_changed`, `account_saved` | `id`, `email`, `name`, `role` |
 | `authentication.login_failed` | `login` |
 | `newsletter.subscribed` | `email`, `name`, `status` (`pending` or `confirmed`), `source` (after the commit; the framework's listener `newsletter.confirmation_mail` emails a pending address) |
-| `newsletter.confirmed`, `newsletter.unsubscribed` | `email`, `name` |
+| `newsletter.confirmed`, `newsletter.unsubscribed` | `email`, `name` (after the commit) |
 | `booking.requested` | a booking was made (by a guest on the form, or by staff in the page, over MCP or in model code): its fields but `token_hashes` and `token_expires`, and `who` (`guest` or `staff`). After the commit, as are the four below |
 | `booking.confirmed`, `booking.declined`, `booking.cancelled` | the same, after the status change (`cancelled` by the guest's link has `who` `guest`) |
 | `booking.rescheduled` | the same, after a move of an active booking (its `date`, `time`, `resource` or `service`; a guest's goes back to `requested`) |

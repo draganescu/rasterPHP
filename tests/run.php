@@ -2861,7 +2861,8 @@ test('many sign-ups at once with the same addresses leave one subscriber each', 
 	foreach ($links as $email => $tokens) {
 		same(array(R::getCell('SELECT token FROM subscriber WHERE email = ?', array($email))), array_values(array_unique($tokens)), "the links $email got:");
 	}
-	echo '['.array_sum(array_map('count', $links)).' confirmations for 25 addresses] ';
+	// each one is noted as sent, under the lock, before it goes (#213)
+	same(25, array_sum(array_map('count', $links)), 'confirmations sent for 25 addresses:');
 });
 
 test('signing up again within 5 minutes sends nothing; later, the same link again (#77 #47)', function () use ($maildir) {
