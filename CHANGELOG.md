@@ -3,6 +3,10 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.38
+
+Nothing for sites to do. **A nested render block runs before its parent, whatever came before it** (#97). Render blocks run from the last in the page to the first, so a block nested inside another runs first. But each one found its block by looking from the top of the page, so when the same tag was used twice, say a list near the top and the same list again inside another block, the nested copy ran after the block around it. By then that block had filled in its rows and taken out their `print` tags, so the nested list repeated its mock-up text (`n`, `n` instead of `Ada`, `Bob`). Two sibling blocks that each held the same list broke the second one the same way. Now each block looks from the bottom of the page, so it takes the last copy of its tag still there, and both lists print their rows.
+
 ## 2.2.37
 
 Nothing for sites to do. Five fixes to form and field values (#158's group 5).

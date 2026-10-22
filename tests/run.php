@@ -4313,6 +4313,41 @@ test('a GET form: the URL chooses the options a model lists, and keeps the value
 		controller::forget_models();
 	}
 });
+test('a nested render block runs before its parent, even when its tag appears earlier in the page (#97)', function () {
+	$app = APPBASE.config::get('models_path', 'models');
+	$theme = APPBASE.config::get('views_path', 'views').'/'.config::get('theme', 'default');
+	temp_model("$app/zznest", array('zznest.php' => "<?php\nclass zznest\n{\n\tfunction rows() {\n\t\treturn array(array('name' => 'Ada'), array('name' => 'Bob'));\n\t}\n\tfunction outer() {\n\t\treturn array(array('title' => 'Outer'));\n\t}\n\tfunction side() {\n\t\treturn array(array('title' => 'Side'));\n\t}\n}\n"));
+	test_fixture("$theme/zznest.html");
+	test_fixture("$theme/zznestside.html");
+	$rows = '<!-- render.zznest.rows --><i><!-- print.name -->n<!-- /print.name --></i><!-- /render.zznest.rows -->';
+	// the list at the top, and again inside another block
+	file_put_contents("$theme/zznest.html", '<html><head><title>Nest</title></head><body>'
+		.'<ul><!-- render.zznest.rows --><li><!-- print.name -->n<!-- /print.name --></li><!-- /render.zznest.rows --></ul>'
+		.'<div class="outer"><!-- render.zznest.outer --><b><!-- print.title -->t<!-- /print.title --></b>'.$rows.'<!-- /render.zznest.outer --></div>'
+		.'</body></html>');
+	// two sibling blocks, each with the list inside
+	file_put_contents("$theme/zznestside.html", '<html><head><title>Nest</title></head><body>'
+		.'<div class="outer"><!-- render.zznest.outer --><b><!-- print.title -->t<!-- /print.title --></b>'.$rows.'<!-- /render.zznest.outer --></div>'
+		.'<div class="side"><!-- render.zznest.side --><b><!-- print.title -->t<!-- /print.title --></b>'.$rows.'<!-- /render.zznest.side --></div>'
+		.'</body></html>');
+	controller::forget_models();
+	try {
+		// rows are joined with a line break
+		$page = str_replace("\n", '', contact_render('/zznest'));
+		check(strpos($page, '[exit 0]') !== false, $page);
+		check(strpos($page, '<ul><li>Ada</li><li>Bob</li></ul>') !== false, 'the list at the top: '.$page);
+		check(strpos($page, '<div class="outer"><b>Outer</b><i>Ada</i><i>Bob</i></div>') !== false, 'the list inside the other block: '.$page);
+		$page = str_replace("\n", '', contact_render('/zznestside'));
+		check(strpos($page, '[exit 0]') !== false, $page);
+		check(strpos($page, '<div class="outer"><b>Outer</b><i>Ada</i><i>Bob</i></div>') !== false, 'the first sibling: '.$page);
+		check(strpos($page, '<div class="side"><b>Side</b><i>Ada</i><i>Bob</i></div>') !== false, 'the second sibling: '.$page);
+	} finally {
+		@unlink("$theme/zznest.html");
+		@unlink("$theme/zznestside.html");
+		remove_dir("$app/zznest");
+		controller::forget_models();
+	}
+});
 test('booking: forms shown again keep choices (#80)', function () {
 	$template = template::instance();
 	$select = '<form method="get"><select name="stylist"><option value="">Anyone</option><option>Ana</option><option> Mihai  Pop </option></select></form>';
