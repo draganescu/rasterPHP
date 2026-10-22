@@ -180,6 +180,14 @@ test('lint: demo theme is clean', function () {
 	$inspector = new raster_inspector();
 	same(array(), $inspector->lint());
 });
+// every new site starts from this theme, so its CSS carries no look to drift back to (raster-builder#161)
+test('the starter style is structure only', function () use ($root) {
+	$css = file_get_contents("$root/application/views/default/style.css");
+	check(!preg_match('/#[0-9a-f]{3,8}\b|\b(rgba?|hsla?|hwb|lab|lch|oklab|oklch|color-mix)\(/i', $css, $m), 'a colour in the starter: '.($m[0] ?? ''));
+	check(!preg_match('/(^|[;{\s])(color|background(-color)?|border(-[a-z]+)?-color)\s*:/i', $css, $m), 'the starter sets a colour: '.($m[0] ?? ''));
+	check(stripos($css, 'prefers-color-scheme') === false, 'the starter picks a dark mode');
+	check(!preg_match('/(^|[}\s,])(main|\.site-header|\.site-footer|\.hero|\.features?)\s*[{,]/', $css, $m), 'the starter lays out the page: '.trim($m[0] ?? ''));
+});
 test('content model from the demo theme', function () {
 	$inspector = new raster_inspector();
 	$model = $inspector->content_model();

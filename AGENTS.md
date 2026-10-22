@@ -37,7 +37,7 @@ else under 20. See **Editors and agents**.
 The demo café in the Raster repository
 (https://github.com/draganescu/rasterPHP/tree/master/demo) is a complete site
 that uses every feature. When you're unsure how something is written, look
-there first.
+there first. Its look is the café's own: don't copy it into another site.
 
 In development, a view with template errors, or with errors in the partials it
 includes, returns HTTP 500 listing the problems (header
@@ -2363,7 +2363,8 @@ stamp check, so people with a page open send it again.
 ## Checklist for a change
 
 1. Edit or add views in `application/views/<theme>/`. Start from static HTML
-   with real content, then annotate.
+   with real content, then annotate. A new site's `style.css` is structure
+   only, on purpose: the site's look (colours, fonts, widths) is yours to write.
 2. `php bin/raster lint` must show no errors. Also read the warnings: they
    point to forms nobody handles, alerts nobody raises, and missing email
    views.

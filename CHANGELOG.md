@@ -3,6 +3,10 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.42
+
+Nothing for sites to do: a site keeps its own `style.css`. **A new site starts plain** (#226). `raster new` copies the starter theme, and its `style.css` was a whole look: one 760px column, a blue accent, a bordered card grid, a large hero and automatic dark mode. Agents building a site recoloured it instead of designing one, so most sites looked alike (draganescu/raster-builder#161). Now it holds only what a page needs to work: box-sizing, pictures that fit their box, forms in the page's font, the form layouts, the nav and pager states and `visually-hidden`. Colours, fonts, widths and spacing are the theme's to write. The starter's pages are unchanged, and AGENTS.md now says the starter is plain on purpose and that the demo café's look is its own.
+
 ## 2.2.41
 
 Nothing for most sites to do. A site served from a copy of the Raster repository (a clone or a GitHub download, not one made with `raster new`) should delete its `sm/` folder if it has one (#227).
