@@ -3,6 +3,12 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.41
+
+Nothing for most sites to do. A site served from a copy of the Raster repository (a clone or a GitHub download, not one made with `raster new`) should delete its `sm/` folder if it has one (#227).
+
+- **`sm/`, the old sourceMakeup code viewer, is gone.** It was a 2013 viewer for the framework's annotated source, never used by Raster and never copied into sites by `raster new` or `raster update`. It read any file named in `?file=` and saved it under `sm/cache/` as a plain `.txt` file the web server would hand out. The private-path rules block URLs ending in `.php`, but a request for the folder `/sm/` doesn't end in `.php`, and Caddy's `php_fastcgi` ran `sm/index.php` anyway. On PHP 8 the viewer failed before it read the file, but it still ran and printed the server's paths; on PHP 7 it would have read any file the PHP user can, the database settings included.
+
 ## 2.2.40
 
 Nothing for sites to do. A tarball packed on a Mac updates a site, and the test suites run clean on a Mac (#116).
