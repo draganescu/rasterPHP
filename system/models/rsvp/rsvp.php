@@ -842,6 +842,19 @@ class rsvp
 		// without a stamp, and the per-email limit stops a loop of them
 		if ($reasons = validation_spam::holds($v->suspect(array()))) return $v->hold($reasons);
 		$email = trim((string)util::post('email'));
+		// the reply's own rules first: a post they refuse anyway (answer=x)
+		// must not say whether this address has replied, as a silent test
+		// of someone else's address. A field the form doesn't send has the
+		// type's default, as in submit().
+		$types = static::types();
+		$reply = array('id' => 0, 'event' => $event ? $event['id'] : 0, 'status' => '');
+		foreach (array('name', 'email', 'answer', 'people') as $field) $reply[$field] = util::post($field) !== false ? util::post($field) : $types['rsvp']['fields'][$field];
+		$reply['people'] = (int)$reply['people'];
+		// already_replied is the lookup's to say, with the link it mails
+		if ($event && ($problems = array_diff(self::rules($reply, null), array('already_replied')))) {
+			foreach ($problems as $problem) $v->raise($problem);
+			return template::instance()->form_state();
+		}
 		$replied = $event && $email !== '' ? self::replied($event['id'], $email, 0) : 0;
 		if ($replied) {
 			$v->raise('already_replied');

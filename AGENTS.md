@@ -1668,7 +1668,10 @@ from `php demo/seed.php`, and are the worked example of all of it.
     inbox: the spam checks come first, so a post without a stamp mails
     nothing, and the 4th post in an hour with one address is held
     (`slow_down`, `spam_per_email`). Nothing is mailed for an event that
-    has started or is hidden.
+    has started or is hidden. The reply's own rules run before the
+    address is looked up, so a post they refuse anyway (an `answer` that
+    isn't one) gets their alert and never says whether that address has
+    replied.
   - A reply made by the form inside a site's own
     `cms_records::transaction()` still sends its event and its email
     once, after that commit.

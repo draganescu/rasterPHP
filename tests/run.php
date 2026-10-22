@@ -7583,6 +7583,11 @@ test('already_replied mails the link to the reply\'s address only, once per five
 		same(array(), booking_sent($mails));
 		// later, the link again
 		spam_clear();
+		// a post the rules refuse anyway says nothing about the address, and mails nothing
+		list($status, $body, $mails) = $again(array('answer' => 'bogus'));
+		same(200, $status);
+		check(strpos($body, 'ALERT already_replied') === false, $body);
+		same(array(), booking_sent($mails));
 		$back = function () use ($ana) { cms_records::update('rsvp', $ana['id'], array('link_sent_at' => date('Y-m-d H:i:s', time() - 360))); };
 		$back();
 		list(, $body, $mails) = $again();
