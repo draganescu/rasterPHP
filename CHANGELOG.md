@@ -9,6 +9,10 @@ Nothing for most sites to do. A site with a literal route and URLs with paramete
 
 **The tables already made.** `php bin/raster schema` lists the tables URLs with parameters made in development as unused. What an editor saved on one of those URLs no longer shows anywhere; copy what you want to keep onto the route's page (`/blog/post`), then drop each table with the command `schema` prints (`php bin/raster schema --drop=<table>`).
 
+## 2.2.38
+
+Nothing for sites to do. **A nested render block runs before its parent, whatever came before it** (#97). Render blocks run from the last in the page to the first, so a block nested inside another runs first. But each one found its block by looking from the top of the page, so when the same tag was used twice, say a list near the top and the same list again inside another block, the nested copy ran after the block around it. By then that block had filled in its rows and taken out their `print` tags, so the nested list repeated its mock-up text (`n`, `n` instead of `Ada`, `Bob`). Two sibling blocks that each held the same list broke the second one the same way. Now each block looks from the bottom of the page, so it takes the last copy of its tag still there, and both lists print their rows.
+
 ## 2.2.37
 
 Nothing for sites to do. Five fixes to form and field values (#158's group 5).

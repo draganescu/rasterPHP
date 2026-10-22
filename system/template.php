@@ -353,7 +353,10 @@ class template {
   		$this->current_action = 'render';
 			$start = "<!-- render.$model.$method -->";
 			$end = "<!-- /render.$model.$method -->";
-			$pos1 = strpos($this->output, $start);
+			// actions run from the last block to the first, so each takes the
+			// last copy of its tag left: a copy nested in a later block runs
+			// before that block, whatever came before it
+			$pos1 = strrpos($this->output, $start);
 			if ($pos1 === false) return false;
 			$endpos = strpos($this->output, $end, $pos1);
 			if ($endpos === false) $this->fail("Unclosed $start (expected $end)");
