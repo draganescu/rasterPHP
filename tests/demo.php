@@ -1255,6 +1255,12 @@ test(array('I3', 'I4', 'I8', 'I9'), 'SMTP: plain on localhost, STARTTLS and smtp
 	list($port, $log) = $smtp('smtps');
 	same('sent', $send("smtps://user:pass@0.0.0.0:$port"));
 	has(file_get_contents($log), 'AUTH OVER TLS');
+	// a refused password is named in the error, never written into it
+	list($port, $log) = $smtp('badauth');
+	$out = $send("smtp://user:s3cret-pass@127.0.0.1:$port");
+	has($out, 'failed: SMTP error after AUTH LOGIN password: 535');
+	lacks($out, base64_encode('s3cret-pass'));
+	lacks($out, base64_encode('user'));
 	// the sender from config mail_from when RASTER_MAIL_FROM is not set
 	list($port, $log) = $smtp('plain');
 	same('sent', $send("smtp://127.0.0.1:$port", false));
