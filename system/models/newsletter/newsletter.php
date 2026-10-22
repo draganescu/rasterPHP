@@ -140,39 +140,65 @@ class newsletter
 	function confirmation_mail($subscribed) {
 		if (!is_array($subscribed) || !isset($subscribed['email'], $subscribed['status']) || $subscribed['status'] !== 'pending') return null;
 		self::connect();
-		$subscriber = self::table_ready() ? R::findOne('subscriber', ' email = ? ', array(strtolower(trim((string)$subscribed['email'])))) : null;
-		if (!$subscriber || $subscriber->status !== 'pending' || !$subscriber->token) return null;
 		// through the site's the_mail, when it has one
 		$mail = controller::model_class('mail');
-		// asked again within a few minutes: the link already sent still works
-		$stamped = self::stamps_confirmations();
-		if ($stamped && $mail::sent_lately($subscriber->confirm_sent_at)) return null;
+		$subscriber = self::claim_confirmation(strtolower(trim((string)$subscribed['email'])), $mail);
+		if (!$subscriber) return null;
 		$sent = $mail::send_view('_email/newsletter_confirm', $subscriber->email, array(
 			'confirm_url' => util::url(config::get('newsletter_confirm_page', 'newsletter-confirm'), array('token' => $subscriber->token)),
 			'name' => (string)$subscriber->name,
 		));
 		if (!$sent) log::error('Newsletter confirmation email failed: '.$mail::$last_error);
-		elseif ($stamped) {
+		return null;
+	}
+
+	// The pending subscriber a confirmation goes to, noted as sent before it
+	// is sent; null when there is none, or one went out within a few minutes
+	// (the link already sent still works). Read and noted under the lock, so
+	// sign-ups at once send one email, and a sign-up holding the lock never
+	// finds the row changed under it (on MariaDB that fails its write, #213).
+	// When the lock stays busy the email goes anyway, unnoted.
+	protected static function claim_confirmation($email, $mail) {
+		$claim = function ($locked) use ($email, $mail) {
+			$subscriber = self::table_ready() ? R::findOne('subscriber', ' email = ? ', array($email)) : null;
+			if (!$subscriber || $subscriber->status !== 'pending' || !$subscriber->token) return null;
+			if (!$locked || !self::stamps_confirmations()) return $subscriber;
+			if ($mail::sent_lately($subscriber->confirm_sent_at)) return null;
 			$subscriber->confirm_sent_at = R::isoDateTime();
 			R::store($subscriber);
+			return $subscriber;
+		};
+		try {
+			return cms_records::transaction(function () use ($claim) { return $claim(true); });
+		} catch (RuntimeException $e) {
+			log::error('Newsletter confirmation not noted as sent: '.$e->getMessage());
+			return $claim(false);
 		}
-		return null;
 	}
 
 	// the page behind the confirmation link (?token=...)
 	function confirm() {
 		$v = validation::get();
 		self::connect();
-		$subscriber = self::find_by_token(util::get('token'));
+		$token = util::get('token');
+		$subscriber = self::find_by_token($token);
+		// written under the lock, read afresh, as a sign-up is, so one for
+		// this address at the same moment can't put it back to pending. A
+		// bad token or an address already confirmed doesn't wait for it.
+		$confirm = function () use ($token) {
+			$subscriber = self::find_by_token($token);
+			if ($subscriber && !in_array($subscriber->status, array('confirmed', 'unsubscribed'), true)) {
+				$subscriber->status = 'confirmed';
+				$subscriber->confirmed_at = R::isoDateTime();
+				R::store($subscriber);
+				cms_records::dispatch('newsletter.confirmed', array('email' => $subscriber->email, 'name' => (string)$subscriber->name));
+			}
+			return $subscriber;
+		};
+		if ($subscriber && !in_array($subscriber->status, array('confirmed', 'unsubscribed'), true)) $subscriber = cms_records::transaction($confirm);
 		if (!$subscriber || $subscriber->status === 'unsubscribed') {
 			$v->raise('confirm_invalid');
 			return array();
-		}
-		if ($subscriber->status !== 'confirmed') {
-			$subscriber->status = 'confirmed';
-			$subscriber->confirmed_at = R::isoDateTime();
-			R::store($subscriber);
-			event::dispatch('newsletter.confirmed', array('email' => $subscriber->email, 'name' => (string)$subscriber->name));
 		}
 		$v->raise('confirmed');
 		// what the visitor typed, escaped: HTML views print rows as they are
@@ -195,11 +221,18 @@ class newsletter
 			return array();
 		}
 		if (!$v->submitted()) return template::instance()->form_state(array('token' => $token, 'email' => $subscriber->email));
-		$subscriber->status = 'unsubscribed';
-		$subscriber->unsubscribed_at = R::isoDateTime();
-		R::store($subscriber);
-		event::dispatch('newsletter.unsubscribed', array('email' => $subscriber->email, 'name' => (string)$subscriber->name));
-		$v->raise('unsubscribed');
+		// under the lock, read afresh, as confirm() does
+		$found = cms_records::transaction(function () use ($token) {
+			$subscriber = self::find_by_token($token);
+			if (!$subscriber) return false;
+			if ($subscriber->status === 'unsubscribed') return true;
+			$subscriber->status = 'unsubscribed';
+			$subscriber->unsubscribed_at = R::isoDateTime();
+			R::store($subscriber);
+			cms_records::dispatch('newsletter.unsubscribed', array('email' => $subscriber->email, 'name' => (string)$subscriber->name));
+			return true;
+		});
+		$v->raise($found ? 'unsubscribed' : 'unsubscribe_invalid');
 		return array();
 	}
 
