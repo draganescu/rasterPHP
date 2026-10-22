@@ -3,7 +3,7 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
-## 2.2.42
+## 2.2.43
 
 Nothing for sites to do. **Sign-ups for one address at the same moment no longer fail on MariaDB, and send one confirmation** (#213).
 
@@ -11,6 +11,10 @@ Nothing for sites to do. **Sign-ups for one address at the same moment no longer
 - **Sign-ups at once send one confirmation email, not one each.** Each listener read the stamp before any had written it, so all of them sent. Now the listener reads the subscriber and notes the email as sent under the lock, then sends it. When the lock stays busy (5 seconds) the email still goes, unnoted, and the log says so. A confirmation that fails to send is still noted, so asking again within 5 minutes sends nothing, as it already was for mail sent after a web request's answer.
 - **Confirming or unsubscribing at the same moment as a sign-up for that address is no longer undone.** Both wrote the subscriber without the lock, so a sign-up in progress could write `pending` back over a confirmation on MySQL, or fail on MariaDB. They now write under the lock, reading the subscriber again first, and `newsletter.confirmed` and `newsletter.unsubscribed` are sent after the commit. A confirmation link that is malformed, unknown or already used doesn't wait for the lock.
 - **The tests pass on MariaDB, and pull requests run them there.** Three checked a column's type as `int`, where MariaDB says `int(11)`. The framework, demo and shop suites now also run on MariaDB 11.8 with PHP 8.4, next to MySQL.
+
+## 2.2.42
+
+Nothing for sites to do: a site keeps its own `style.css`. **A new site starts plain** (#226). `raster new` copies the starter theme, and its `style.css` was a whole look: one 760px column, a blue accent, a bordered card grid, a large hero and automatic dark mode. Agents building a site recoloured it instead of designing one, so most sites looked alike (draganescu/raster-builder#161). Now it holds only what a page needs to work: box-sizing, pictures that fit their box, forms in the page's font, the form layouts, the nav and pager states and `visually-hidden`. Colours, fonts, widths and spacing are the theme's to write. The starter's pages are unchanged, and AGENTS.md now says the starter is plain on purpose and that the demo café's look is its own.
 
 ## 2.2.41
 
