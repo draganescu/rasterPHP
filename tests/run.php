@@ -98,6 +98,13 @@ test('slugs', function () {
 	same('/news', cms::slug_for_uri('/news/news_page/2'));
 	same('/news', cms::slug_for_uri('/news/news_items/tag/php'));
 	same('/news/news_item', cms::slug_for_uri('/news/news_item/3'));
+	// a literal route's URLs are its page, whatever parameters follow (#110)
+	same('/blog/post', cms::slug_for_uri('/blog/post/id/7', 'blog/post'));
+	same('/blog/post', cms::slug_for_uri('/blog/post', 'blog/post'));
+	same('/specials', cms::slug_for_uri('/specials/day/friday/menu_page/2', 'specials'));
+	same('/specials', cms::slug_for_uri('specials/day/friday', '/specials/'));
+	// a pattern that isn't literal keeps the URL's own slug
+	same('/blog/7', cms::slug_for_uri('/blog/7', 'blog/[0-9]+'));
 	same('aboutpage', cms::page_type('/about'));
 	same('teammembersdata', cms::collection_type('team_members'));
 });
@@ -4310,6 +4317,41 @@ test('a GET form: the URL chooses the options a model lists, and keeps the value
 	} finally {
 		@unlink("$theme/zzpick.html");
 		remove_dir("$app/zzpick");
+		controller::forget_models();
+	}
+});
+test('a nested render block runs before its parent, even when its tag appears earlier in the page (#97)', function () {
+	$app = APPBASE.config::get('models_path', 'models');
+	$theme = APPBASE.config::get('views_path', 'views').'/'.config::get('theme', 'default');
+	temp_model("$app/zznest", array('zznest.php' => "<?php\nclass zznest\n{\n\tfunction rows() {\n\t\treturn array(array('name' => 'Ada'), array('name' => 'Bob'));\n\t}\n\tfunction outer() {\n\t\treturn array(array('title' => 'Outer'));\n\t}\n\tfunction side() {\n\t\treturn array(array('title' => 'Side'));\n\t}\n}\n"));
+	test_fixture("$theme/zznest.html");
+	test_fixture("$theme/zznestside.html");
+	$rows = '<!-- render.zznest.rows --><i><!-- print.name -->n<!-- /print.name --></i><!-- /render.zznest.rows -->';
+	// the list at the top, and again inside another block
+	file_put_contents("$theme/zznest.html", '<html><head><title>Nest</title></head><body>'
+		.'<ul><!-- render.zznest.rows --><li><!-- print.name -->n<!-- /print.name --></li><!-- /render.zznest.rows --></ul>'
+		.'<div class="outer"><!-- render.zznest.outer --><b><!-- print.title -->t<!-- /print.title --></b>'.$rows.'<!-- /render.zznest.outer --></div>'
+		.'</body></html>');
+	// two sibling blocks, each with the list inside
+	file_put_contents("$theme/zznestside.html", '<html><head><title>Nest</title></head><body>'
+		.'<div class="outer"><!-- render.zznest.outer --><b><!-- print.title -->t<!-- /print.title --></b>'.$rows.'<!-- /render.zznest.outer --></div>'
+		.'<div class="side"><!-- render.zznest.side --><b><!-- print.title -->t<!-- /print.title --></b>'.$rows.'<!-- /render.zznest.side --></div>'
+		.'</body></html>');
+	controller::forget_models();
+	try {
+		// rows are joined with a line break
+		$page = str_replace("\n", '', contact_render('/zznest'));
+		check(strpos($page, '[exit 0]') !== false, $page);
+		check(strpos($page, '<ul><li>Ada</li><li>Bob</li></ul>') !== false, 'the list at the top: '.$page);
+		check(strpos($page, '<div class="outer"><b>Outer</b><i>Ada</i><i>Bob</i></div>') !== false, 'the list inside the other block: '.$page);
+		$page = str_replace("\n", '', contact_render('/zznestside'));
+		check(strpos($page, '[exit 0]') !== false, $page);
+		check(strpos($page, '<div class="outer"><b>Outer</b><i>Ada</i><i>Bob</i></div>') !== false, 'the first sibling: '.$page);
+		check(strpos($page, '<div class="side"><b>Side</b><i>Ada</i><i>Bob</i></div>') !== false, 'the second sibling: '.$page);
+	} finally {
+		@unlink("$theme/zznest.html");
+		@unlink("$theme/zznestside.html");
+		remove_dir("$app/zznest");
 		controller::forget_models();
 	}
 });

@@ -375,6 +375,14 @@ class mcp
 				return $page;
 			}
 		}
+		// any address of a page finds it: a literal route's URLs with
+		// parameters (/specials/day/friday is /specials), page numbers and filters
+		if (strpos($reference, '/') === 0) {
+			$slug = cms::slug_for_uri($reference, (new raster_inspector())->route_for($reference));
+			foreach ($this->model()['pages'] as $page) {
+				if ($page['slug'] === $slug) return $page;
+			}
+		}
 		throw new InvalidArgumentException("Unknown page '$reference'. Pages: ".implode(', ', array_map(function ($p) { return $p['url']; }, $this->model()['pages'])));
 	}
 

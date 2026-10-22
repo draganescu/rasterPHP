@@ -60,13 +60,25 @@ class cms
 		return strtolower(preg_replace('/[^a-zA-Z0-9]/', '', (string)$name)).'data';
 	}
 
+	// The page a literal route is (controller::route('blog/post') is
+	// /blog/post), or null for a pattern with regular expression parts,
+	// which is not one address.
+	static function route_slug($pattern) {
+		$pattern = trim((string)$pattern, '/');
+		return preg_match('#^[a-z0-9_\-/]+$#', $pattern) ? '/'.$pattern : null;
+	}
+
 	// The slug identifies which page's content a URL shows. Pagination and
 	// filter segments are not part of it, so /news/news_page/2 and
 	// /news/news_items/tag/x show the same page fields as /news.
 	// Item URLs (/news/news_item/3) share one slug per collection.
-	static function slug_for_uri($uri) {
+	// A URL a literal route matched is that route's page, so parameters
+	// don't make pages: /blog/post/id/7 shows the fields of /blog/post.
+	static function slug_for_uri($uri, $route = null) {
 		$slug = '/'.trim(preg_replace('#/+#', '/', (string)$uri), '/');
 		if ($slug === '/' || $slug === '/'.config::get('default_view', 'index')) return 'home';
+		$routed = cms::route_slug($route);
+		if ($routed !== null) return $routed;
 		if (preg_match('#^(/.*?)?/([a-z0-9_]+)_(page|items)(/.*)?$#', $slug, $m)) {
 			$slug = $m[1] !== '' ? $m[1] : '/'.$m[2];
 		} elseif (preg_match('#^(?:/.*?)?/([a-z0-9_]+)_item(/.*)?$#', $slug, $m)) {
@@ -182,7 +194,7 @@ class cms
 
 		$uri_string = config::get('uri_string');
 		$index_file = config::get('index_file');
-		$slug = cms::slug_for_uri(str_replace('/'.$index_file, '', $uri_string));
+		$slug = cms::slug_for_uri(str_replace('/'.$index_file, '', $uri_string), controller::instance()->matched_route);
 
 		if (strpos($slug, '/login') === 0) {
 			return;
