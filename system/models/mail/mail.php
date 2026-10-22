@@ -75,8 +75,13 @@ class mail
 		return trim(str_replace(array("\r", "\n"), '', (string)$value));
 	}
 
+	// The address of "Name <addr>", or a bare address as it is. Only a <…>
+	// that ends the value is one: "1<ana@example.com>"@example.org is an
+	// address of its own (a quoted local part), which a visitor can type
+	// into a form, and it must not deliver to ana@example.com while the
+	// form's limits count it as another address each time.
 	static function address($from) {
-		return preg_match('/<([^>]+)>/', $from, $m) ? $m[1] : $from;
+		return preg_match('/^(.*?)\s*<([^<>]+)>$/s', $from, $m) ? $m[2] : $from;
 	}
 
 	// Renders a view and sends it. Returns true when it was handed over (or,

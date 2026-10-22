@@ -1087,6 +1087,16 @@ function location($headers) {
 	return null;
 }
 
+test('mail goes to the whole address, never to a <...> inside a quoted one', function () {
+	same('ana@example.com', mail::address('Ana <ana@example.com>'));
+	same('ana@example.com', mail::address('"Ana, Pop" <ana@example.com>'));
+	same('ana@example.com', mail::address('ana@example.com'));
+	$quoted = '"1<victim@example.com>"@attacker.example';
+	same($quoted, mail::address($quoted));
+	same('"<victim@example.com>"@attacker.example', mail::address('"<victim@example.com>"@attacker.example'));
+	// an address that is neither is refused, not cut down to its <...>
+	same(false, mail::send('"x" <victim@example.com> junk', 'Hi', '<p>Hi</p>'));
+});
 test('one page has one address: a trailing slash and index.php/ redirect (#131)', function () use ($base) {
 	foreach (array('/about/' => '/about', '/index.php/about' => '/about', '/index.php/about/' => '/about', '/news/news_page/2/' => '/news/news_page/2',
 		'/about/?x=1&y=a%20b' => '/about?x=1&y=a%20b', '/news/news_items/headline/Filler%201/' => '/news/news_items/headline/Filler%201') as $asked => $address) {
