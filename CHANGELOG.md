@@ -3,6 +3,14 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.41
+
+Nothing for sites to do. **Sign-ups for one address at the same moment no longer fail on MariaDB** (#213).
+
+- **Two sign-ups at once with one email gave one of them an error page on MariaDB 11.8.** A sign-up takes the database's lock, but the confirmation email's listener runs after the commit, when the lock is gone, and wrote when it sent the link (`confirm_sent_at`) without it. A second sign-up for the address, already holding the lock and having read the row, then found it changed under it. MariaDB 11.8 checks for that by default (`innodb_snapshot_isolation`) and fails the write ("Record has changed since last read", error 1020); MySQL let it through and wrote back the old stamp. The listener now writes the stamp under the lock, reading the row again first.
+- **Confirming or unsubscribing at the same moment as a sign-up for that address is no longer undone.** Both wrote the subscriber without the lock, so a sign-up in progress could write `pending` back over a confirmation on MySQL, or fail on MariaDB. They now read and write the subscriber under the lock, as a sign-up does, and `newsletter.confirmed` and `newsletter.unsubscribed` are sent after the commit.
+- **The tests pass on MariaDB.** Three checked a column's type as `int`, where MariaDB says `int(11)`.
+
 ## 2.2.40
 
 Nothing for sites to do. A tarball packed on a Mac updates a site, and the test suites run clean on a Mac (#116).

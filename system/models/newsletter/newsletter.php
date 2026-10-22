@@ -153,8 +153,15 @@ class newsletter
 		));
 		if (!$sent) log::error('Newsletter confirmation email failed: '.$mail::$last_error);
 		elseif ($stamped) {
-			$subscriber->confirm_sent_at = R::isoDateTime();
-			R::store($subscriber);
+			// under the lock, read afresh: a sign-up for this address may be
+			// between its read and its write, and on MariaDB (snapshot
+			// isolation) a row changed under it fails its write (#213)
+			cms_records::transaction(function () use ($subscriber) {
+				$fresh = R::load('subscriber', $subscriber->id);
+				if ($fresh->token !== $subscriber->token) return;
+				$fresh->confirm_sent_at = R::isoDateTime();
+				R::store($fresh);
+			});
 		}
 		return null;
 	}
@@ -163,16 +170,23 @@ class newsletter
 	function confirm() {
 		$v = validation::get();
 		self::connect();
-		$subscriber = self::find_by_token(util::get('token'));
-		if (!$subscriber || $subscriber->status === 'unsubscribed') {
+		$token = util::get('token');
+		// read and written under the lock, as a sign-up is, so one for this
+		// address at the same moment can't put it back to pending
+		$subscriber = cms_records::transaction(function () use ($token) {
+			$subscriber = self::find_by_token($token);
+			if (!$subscriber || $subscriber->status === 'unsubscribed') return null;
+			if ($subscriber->status !== 'confirmed') {
+				$subscriber->status = 'confirmed';
+				$subscriber->confirmed_at = R::isoDateTime();
+				R::store($subscriber);
+				cms_records::dispatch('newsletter.confirmed', array('email' => $subscriber->email, 'name' => (string)$subscriber->name));
+			}
+			return $subscriber;
+		});
+		if (!$subscriber) {
 			$v->raise('confirm_invalid');
 			return array();
-		}
-		if ($subscriber->status !== 'confirmed') {
-			$subscriber->status = 'confirmed';
-			$subscriber->confirmed_at = R::isoDateTime();
-			R::store($subscriber);
-			event::dispatch('newsletter.confirmed', array('email' => $subscriber->email, 'name' => (string)$subscriber->name));
 		}
 		$v->raise('confirmed');
 		return array(array('email' => $subscriber->email, 'name' => (string)$subscriber->name));
@@ -194,10 +208,15 @@ class newsletter
 			return array();
 		}
 		if (!$v->submitted()) return template::instance()->form_state(array('token' => $token, 'email' => $subscriber->email));
-		$subscriber->status = 'unsubscribed';
-		$subscriber->unsubscribed_at = R::isoDateTime();
-		R::store($subscriber);
-		event::dispatch('newsletter.unsubscribed', array('email' => $subscriber->email, 'name' => (string)$subscriber->name));
+		// under the lock, read afresh, as confirm() does
+		cms_records::transaction(function () use ($token) {
+			$subscriber = self::find_by_token($token);
+			if (!$subscriber || $subscriber->status === 'unsubscribed') return;
+			$subscriber->status = 'unsubscribed';
+			$subscriber->unsubscribed_at = R::isoDateTime();
+			R::store($subscriber);
+			cms_records::dispatch('newsletter.unsubscribed', array('email' => $subscriber->email, 'name' => (string)$subscriber->name));
+		});
 		$v->raise('unsubscribed');
 		return array();
 	}

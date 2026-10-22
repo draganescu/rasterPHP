@@ -1093,7 +1093,9 @@ bundled model declares none of its types, and `lint` warns.
     form does (and sends the confirmation) and returns `pending`,
     `confirmed`, `already` or false. It looks the address up and stores it
     in one transaction, so sign-ups at once leave one subscriber;
-    inside another transaction it joins it.
+    inside another transaction it joins it. Confirming and unsubscribing
+    read and write the subscriber under the same lock, so a sign-up at
+    the same moment never undoes them.
   - The confirmation email is sent after the commit by the framework's
     listener on `newsletter.subscribed` (status `pending`); a site that
     sends its own unbinds it in `config/the_events.php`:

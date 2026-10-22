@@ -871,7 +871,8 @@ test('schema --apply widens the small MySQL columns that 2.1.8 made for model ta
 	same(0, $code, 'schema --apply: '.implode("\n", $out));
 	check(strpos(implode("\n", $out), 'widened user.name to LONGTEXT') !== false, implode("\n", $out));
 	same('longtext', strtolower($pdo->query("SHOW COLUMNS FROM user LIKE 'name'")->fetch(PDO::FETCH_ASSOC)['Type']));
-	same('int', strtolower($pdo->query("SHOW COLUMNS FROM user LIKE 'failed_count'")->fetch(PDO::FETCH_ASSOC)['Type']));
+	// MariaDB still says int(11)
+	same('int', preg_replace('/\(\d+\)/', '', strtolower($pdo->query("SHOW COLUMNS FROM user LIKE 'failed_count'")->fetch(PDO::FETCH_ASSOC)['Type'])));
 	$out = array();
 	exec("$raster schema --check 2>&1", $out, $code);
 	same(0, $code, 'no drift after --apply: '.implode("\n", $out));
@@ -897,7 +898,8 @@ test('sending on a frozen database widens the small newsletterissue columns 2.2.
 	same('300 0', trim((string)shell_exec('RASTER_ENV=production RASTER_DB='.escapeshellarg($db).' '.php_cmd().' -r '.escapeshellarg($boot.$send).' 2>&1')));
 	same(array($long, '300'), array_map('strval', $pdo->query("SELECT subject, recipients FROM newsletterissue WHERE url = '/new'")->fetch(PDO::FETCH_NUM)));
 	if (on_mysql()) {
-		same('int', strtolower($pdo->query("SHOW COLUMNS FROM newsletterissue LIKE 'recipients'")->fetch(PDO::FETCH_ASSOC)['Type']));
+		// MariaDB still says int(11)
+		same('int', preg_replace('/\(\d+\)/', '', strtolower($pdo->query("SHOW COLUMNS FROM newsletterissue LIKE 'recipients'")->fetch(PDO::FETCH_ASSOC)['Type'])));
 		same('longtext', strtolower($pdo->query("SHOW COLUMNS FROM newsletterissue LIKE 'subject'")->fetch(PDO::FETCH_ASSOC)['Type']));
 	}
 });
