@@ -376,7 +376,7 @@ alike:
 | `authentication.registered`, `logged_in`, `logged_out`, `password_changed`, `account_saved` | `id`, `email`, `name`, `role` |
 | `authentication.login_failed` | `login` |
 | `newsletter.subscribed` | `email`, `name`, `status` (`pending` or `confirmed`), `source` (after the commit; the framework's listener `newsletter.confirmation_mail` emails a pending address) |
-| `newsletter.confirmed`, `newsletter.unsubscribed` | `email`, `name` |
+| `newsletter.confirmed`, `newsletter.unsubscribed` | `email`, `name` (after the commit) |
 | `booking.requested` | a booking was made (by a guest on the form, or by staff in the page, over MCP or in model code): its fields but `token_hashes` and `token_expires`, and `who` (`guest` or `staff`). After the commit, as are the four below |
 | `booking.confirmed`, `booking.declined`, `booking.cancelled` | the same, after the status change (`cancelled` by the guest's link has `who` `guest`) |
 | `booking.rescheduled` | the same, after a move of an active booking (its `date`, `time`, `resource` or `service`; a guest's goes back to `requested`) |
@@ -1093,7 +1093,9 @@ bundled model declares none of its types, and `lint` warns.
     form does (and sends the confirmation) and returns `pending`,
     `confirmed`, `already` or false. It looks the address up and stores it
     in one transaction, so sign-ups at once leave one subscriber;
-    inside another transaction it joins it.
+    inside another transaction it joins it. Confirming and unsubscribing
+    read and write the subscriber under the same lock, so a sign-up at
+    the same moment never undoes them.
   - The confirmation email is sent after the commit by the framework's
     listener on `newsletter.subscribed` (status `pending`); a site that
     sends its own unbinds it in `config/the_events.php`:
@@ -2461,5 +2463,6 @@ workflow in `.github/workflows/release.yml` runs the tests, tags
 `v<version>` and publishes the release with those notes. Pull requests run
 the same tests: the four suites and both lints on PHP 8.1, 8.4 and 8.5,
 an update of a new site from GitHub, the framework, demo and shop suites on
-MySQL with PHP 8.1 and 8.4, and `tests/editor-browser.js` in Chromium. The
+MySQL with PHP 8.1 and 8.4 and on MariaDB 11.8 with PHP 8.4, and
+`tests/editor-browser.js` in Chromium. The
 jobs run side by side, so the slowest one sets the time.

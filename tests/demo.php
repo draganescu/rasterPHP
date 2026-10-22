@@ -3186,7 +3186,8 @@ test('T6', 'schema --apply converts a column whose type changed when every value
 	with_file($view, $markup('5'), function () use ($base, $view, $markup) {
 		http('GET', "$base/zz-retype");
 		cms_store::forget();
-		same('INT', strtoupper(cms_store::columns('zzretypedata')['n']));
+		// MariaDB still says INT(11)
+		same('INT', preg_replace('/\(\d+\)/', '', strtoupper(cms_store::columns('zzretypedata')['n'])));
 		file_put_contents($view, $markup('five'));
 		list(, $out) = raster(array('schema'));
 		has($out, 'n (int in the database, text in the templates; --apply converts it)');
