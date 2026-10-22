@@ -1097,6 +1097,26 @@ test('mail goes to the whole address, never to a <...> inside a quoted one', fun
 	// an address that is neither is refused, not cut down to its <...>
 	same(false, mail::send('"x" <victim@example.com> junk', 'Hi', '<p>Hi</p>'));
 });
+test('the sitemap leaves out the items and pages that need an account, in any case', function () use ($root) {
+	$theme = "$root/application/views/default";
+	file_put_contents("$theme/zzinsider.html", '<!-- render.cms.zzinsider --><h2><!-- print.title -->Plans<!-- /print.title --></h2><!-- /render.cms.zzinsider -->');
+	file_put_contents("$theme/zzinsider_item.html", '<!-- render.cms.zzinsider --><h1><!-- print.title -->Plans<!-- /print.title --></h1><!-- /render.cms.zzinsider -->');
+	file_put_contents("$theme/Zzstaffroom.html", '<p>Rota</p>');
+	$protected = config::get('protected');
+	try {
+		cms_store::connect();
+		cms_store::save_item('zzinsiderdata', 0, array('title' => 'Secret merger plans'), array('title'));
+		$urls = array_column((new feed())->pages(), 'url');
+		check(preg_grep('#/zzinsider/zzinsider_item/secret-merger-plans$#', $urls), 'an open collection is listed: '.json_encode($urls));
+		config::set('protected')->to(array('zzinsider' => 'member', 'zzstaffroom' => 'editor'));
+		$urls = array_column((new feed())->pages(), 'url');
+		same(array(), array_values(preg_grep('#zzinsider|Zzstaffroom#i', $urls)), 'protected: '.json_encode($urls));
+	} finally {
+		config::set('protected')->to($protected);
+		foreach (array('zzinsider.html', 'zzinsider_item.html', 'Zzstaffroom.html') as $file) @unlink("$theme/$file");
+		R::exec('DROP TABLE IF EXISTS zzinsiderdata');
+	}
+});
 test('one page has one address: a trailing slash and index.php/ redirect (#131)', function () use ($base) {
 	foreach (array('/about/' => '/about', '/index.php/about' => '/about', '/index.php/about/' => '/about', '/news/news_page/2/' => '/news/news_page/2',
 		'/about/?x=1&y=a%20b' => '/about?x=1&y=a%20b', '/news/news_items/headline/Filler%201/' => '/news/news_items/headline/Filler%201') as $asked => $address) {

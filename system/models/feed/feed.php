@@ -55,22 +55,33 @@ class feed
 		// the pages the models in use need PHP for (login, the newsletter's
 		// answers), and what sitemap_skip adds
 		$skip = array_merge(controller::required('pages'), (array)config::get('sitemap_skip', array()));
+		// a page that needs an account isn't listed, nor are the items of a
+		// collection whose item page does: matched as authentication::setup()
+		// matches, by URL and by view, in any case
+		$protected = (array)config::get('protected', array());
+		$open = function ($path) use ($protected) {
+			foreach ($protected as $pattern => $role) {
+				if (preg_match('%^/'.ltrim($pattern, '/').'%i', $path)) return false;
+			}
+			return true;
+		};
 		$rows = array();
-		$item_views = array();
+		$item_views = $closed = array();
 		foreach ($inspector->views() as $view) {
 			if (preg_match('#(^|/)_#', $view) || substr($view, -strlen($inspector->ext)) !== $inspector->ext) continue;
 			$name = substr($view, 0, -strlen($inspector->ext));
-			if (preg_match('/^([a-z0-9_]+)_item$/', basename($name), $m)) { $item_views[] = $m[1]; continue; }
-			if (in_array($name, $skip)) continue;
-			foreach ((array)config::get('protected', array()) as $pattern => $role) {
-				if (preg_match('%^/'.ltrim($pattern, '/').'%', '/'.$name)) continue 2;
+			if (preg_match('/^([a-z0-9_]+)_item$/', basename($name), $m)) {
+				if ($open('/'.$name) && $open('/'.$m[1].'/'.$m[1].'_item')) $item_views[] = $m[1]; else $closed[] = $m[1];
+				continue;
 			}
+			if (in_array($name, $skip)) continue;
+			if (!$open('/'.$name)) continue;
 			$updated = date('Y-m-d', filemtime($inspector->theme_dir().'/'.$view));
 			$rows[] = array('url' => $name === config::get('default_view', 'index') ? $link.'/' : $link.'/'.$name, 'updated' => $updated);
 		}
 		database::instance();
 		if (database::configured()) {
-			foreach (array_unique($item_views) as $collection) {
+			foreach (array_diff(array_unique($item_views), $closed) as $collection) {
 				foreach ($this->items($collection, 1000) as $item) {
 					$rows[] = array('url' => $item['url'], 'updated' => substr($item['date_iso'], 0, 10));
 				}
