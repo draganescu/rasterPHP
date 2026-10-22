@@ -372,6 +372,11 @@ test(array('A5', 'A6'), 'routes file and URL keys', function () use ($base) {
 	}
 	has(header_value(http('GET', "$base/journal/journal_page/2.rss")[2], 'Content-Type'), 'application/rss+xml', 'page 2 of the feed is journal.rss');
 	has(between(http('GET', "$base/lab/color/red")[1], 'param'), '<p class="color">red</p>');
+	// a key from the URL is text, in the page and in its script
+	$lab = http('GET', "$base/lab/color/%22%3Balert(1)%3B%3Cimg%20src%3Dx%3E")[1];
+	has($lab, '<p class="color">&quot;;alert(1);&lt;img src=x&gt;</p>');
+	has($lab, 'var labColor = "&quot;;alert(1);&lt;img src=x&gt;";');
+	lacks($lab, '<img src=x>');
 });
 test(array('A18', 'M4'), 'a route\'s parameter URLs show the route\'s page fields (#110)', function () use ($base) {
 	mcp($base, 'update_page', array('page' => '/specials', 'fields' => array('heading' => 'Today only')));

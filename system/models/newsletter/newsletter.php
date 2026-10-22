@@ -175,7 +175,8 @@ class newsletter
 			event::dispatch('newsletter.confirmed', array('email' => $subscriber->email, 'name' => (string)$subscriber->name));
 		}
 		$v->raise('confirmed');
-		return array(array('email' => $subscriber->email, 'name' => (string)$subscriber->name));
+		// what the visitor typed, escaped: HTML views print rows as they are
+		return array(array('email' => util::e($subscriber->email), 'name' => util::e($subscriber->name)));
 	}
 
 	// the page behind unsubscribe links: shows the form, the button unsubscribes.

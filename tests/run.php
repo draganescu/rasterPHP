@@ -1112,6 +1112,12 @@ test('newsletter: double opt-in, send, one-click unsubscribe', function () use (
 	$mail = last_mail();
 	check($mail && preg_match('/token=([a-f0-9]{40})/', $mail['text'], $t), 'confirmation email');
 	check(strpos(http('GET', "$base/newsletter-confirm?token={$t[1]}")[1], 'You are subscribed') !== false, 'confirm');
+	// what was typed at sign-up shows on the page as text, never as markup
+	cms_store::connect();
+	R::exec('UPDATE subscriber SET email = ? WHERE email = ?', array('"<img src=x onerror=alert(1)>"@example.com', 'reader@example.com'));
+	$page = http('GET', "$base/newsletter-confirm?token={$t[1]}")[1];
+	check(strpos($page, '<img src=x') === false && strpos($page, '&quot;&lt;img src=x onerror=alert(1)&gt;&quot;@example.com') !== false, 'the address is escaped');
+	R::exec('UPDATE subscriber SET email = ? WHERE email = ?', array('reader@example.com', '"<img src=x onerror=alert(1)>"@example.com'));
 	$env = 'RASTER_DB='.escapeshellarg($db).' RASTER_MAIL='.escapeshellarg("log://$maildir").' RASTER_URL='.escapeshellarg("$base/");
 	$out = shell_exec("$env ".php_cmd().' '.escapeshellarg("$root/bin/raster").' send /about --dry-run 2>&1');
 	check(strpos($out, 'to 1 subscriber') !== false, "dry run: $out");
