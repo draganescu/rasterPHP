@@ -3,6 +3,30 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.43
+
+Nothing for most sites to do. Security fixes from a review of the framework, the demo and the example shop. Four things to check:
+
+- **A site upgraded from Raster 1.x** whose `admin` account still has the password `admin` can no longer log in with it. Set a new one with `php bin/raster user admin --password=-` (it reads the password from standard input).
+- **The example shop's seed** now prints a random password for the studio account instead of making `studio password`. A shop already seeded keeps its password: change it if it is still that one.
+- **A site's own login view** shows `slow_down` when one address tries more than 20 logins in an hour (`login_per_ip`). Word that alert near the form or in the layout, as the default and demo themes do.
+- **Scripts that call `php bin/raster user … --password=<value>`** still work, and now print a note on stderr. `--password=-` with the password on standard input, or `RASTER_PASSWORD`, keeps it out of the process list.
+
+- **`raster update` can't be handed a release by another user of the server.** It unpacked into `/tmp/raster-update-<pid>` and used that folder even when someone else had made it first, so a local user could put their own `system/boot.php` there and have the update copy it over the site and run it. The folder now has a random name, is made with mode 0700, and the update stops if it can't be made. The test suites' opcache folder had the same gap and is fixed the same way.
+- **Logins: guesses sent at once each count against the lock, and one address can't try many accounts.** The five-try lock read the count, checked the password, then wrote the count plus one, so guesses sent together all read the same count and let through about five per PHP worker. Each try is now counted first, inside the database's write lock, and a login only writes the columns it changes, so it can't put back a password or email another request just changed. The lock counts per account; the new `login_per_ip` setting (20 an hour) counts tries per address, so one sender can't guess across many accounts or try which ones exist. Over it, a login answers `slow_down` and checks nothing: word that alert where a login form is (the default and demo layouts already do). The account form's current password goes through the account's lock too.
+- **Raster 1.x's admin/admin no longer logs in.** An old unsalted md5 password that is the account's own name is refused (see above).
+- **The in-page editor's API reaches no accounts table and no page kept for admins.** `editor_delete_item` and `editor_save_item` could reach the `usersdata` table a 1.x site still has, by spelling the collection `users_`, and the delete answered with the row's password hash. `editor_history`, `editor_save_field` and `editor_restore` took any page table, so an editor could read and change a page `protected` keeps for admins. Both are closed, and a deleted record comes back without its hidden fields.
+- **The in-page editor never puts back a script link the server took out.** A guest's booking with the phone `javascript:…` printed as a link on a staff page had its link removed by the server, but the editor wrote the stored value back after a save or an action.
+- **The newsletter confirmation page escapes the address and name** it shows. An address with a quoted local part could carry markup onto the page for whoever opened that link.
+- **Mail goes to the address a form was given.** An address such as `"1<ana@example.com>"@example.org` was counted by the forms' limits as a new address each time and delivered over SMTP to `ana@example.com`, so anyone could flood an inbox from the site's sender. Only a `<…>` that ends the value, as in `Name <addr>`, is the address now.
+- **A refused SMTP login no longer writes the password into the error log.** The error quoted the line it answered, which during `AUTH LOGIN` is the base64 password.
+- **Names under `localhost` count as development only for requests from this machine**, as `localhost` itself did. The demo maps `ro.localhost`, so any client could switch a demo served without `RASTER_ENV` into development.
+- **A guest's manage links stop working when staff change the email** of the booking or the reply, so a link that went to a mistyped address dies when the address is corrected.
+- **The RSVP form says whether an address has replied only to a post it would take.** A post with an invalid answer could test any address against a private event without a trace.
+- **The sitemap leaves out the items of collections that need an account.** It listed every item of a members-only collection (the slug is the title), and matched `protected` with case where the access check doesn't.
+- **The demo's `/lab/color/<value>` escapes the value**, which it printed raw in the page and in a script.
+- **The example shop sells a scheduled piece only once it is out**, and its seed makes the studio's password at random (see above).
+
 ## 2.2.42
 
 Nothing for sites to do: a site keeps its own `style.css`. **A new site starts plain** (#226). `raster new` copies the starter theme, and its `style.css` was a whole look: one 760px column, a blue accent, a bordered card grid, a large hero and automatic dark mode. Agents building a site recoloured it instead of designing one, so most sites looked alike (draganescu/raster-builder#161). Now it holds only what a page needs to work: box-sizing, pictures that fit their box, forms in the page's font, the form layouts, the nav and pager states and `visually-hidden`. Colours, fonts, widths and spacing are the theme's to write. The starter's pages are unchanged, and AGENTS.md now says the starter is plain on purpose and that the demo café's look is its own.
