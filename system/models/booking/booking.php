@@ -201,6 +201,9 @@ class booking
 		if (!$before || $moved || $after['status'] !== $before['status']) $values['changed_at'] = date('Y-m-d H:i:s');
 		// a guest's link works until the booking starts
 		if ((!$before || $moved) && (string)$after['date'] !== '' && (string)$after['time'] !== '') $values['token_expires'] = $after['date'].' '.$after['time'].':00';
+		// links sent to the old address stop working when staff change it:
+		// whoever got one by a typo can't open the booking any more
+		if ($before && strtolower(trim((string)$after['email'])) !== strtolower(trim((string)$before['email']))) $values['token_hashes'] = array();
 		// a move the model makes itself (move()) has its link and event
 		// already: only staff's own edits are left for saved(), which may run
 		// after writing() is done, at the commit of a transaction around it

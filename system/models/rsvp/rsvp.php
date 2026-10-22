@@ -182,6 +182,9 @@ class rsvp
 		// the start the guest was told, so a moved event shows; an editor's
 		// save (a note: phoned them) says they know the new one
 		if ($event && (!$before || $answered || $status !== $was || $writer === 'editor')) $values['event_at'] = date('Y-m-d H:i:s', $event['starts_at']);
+		// links sent to the old address stop working when staff change it:
+		// whoever got one by a typo can't open the reply any more
+		if ($before && strtolower(trim((string)$after['email'])) !== strtolower(trim((string)$before['email']))) $values['token_hashes'] = array();
 		if ($before) {
 			$smaller = !$moved && $people < (int)$before['people'];
 			// a smaller waiting party may fit now

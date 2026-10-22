@@ -4728,6 +4728,21 @@ test('booking: a GET to the manage link changes nothing', function () use ($book
 	});
 });
 
+test('booking: links sent to an address stop working when staff change it', function () {
+	booking_site(function () {
+		$tue = booking_cafe();
+		$mails = booking_mails(function () use ($tue) { booking_guest(array('email' => 'typo@example.test', 'date' => $tue, 'time' => '19:00')); });
+		$raw = booking_token($mails[0]);
+		$b = cms_records::find('booking', array('email' => 'typo@example.test'))[0];
+		same(array(), booking_manage(array('token' => $raw))[1]);
+		// a note keeps the link; a new address ends it
+		cms_records::update('booking', $b['id'], array('notes' => 'Window seat', 'email' => 'TYPO@example.test'));
+		same(array(), booking_manage(array('token' => $raw))[1], 'the same address in other letters');
+		cms_records::update('booking', $b['id'], array('email' => 'right@example.test'));
+		same(array(array(), array('link_invalid')), booking_manage(array('token' => $raw)));
+		same(null, booking::by_token($raw));
+	});
+});
 test('booking: expired, used and foreign links are invalid', function () {
 	booking_site(function () {
 		$tue = booking_cafe();
@@ -7064,6 +7079,17 @@ test('rsvp: every guest email carries a fresh link; only its hash is kept', func
 	});
 });
 
+test('rsvp: links sent to an address stop working when staff change it', function () {
+	rsvp_site(function () {
+		$event = rsvp_event();
+		list($id, $raw) = rsvp_linked(array('event' => $event['id'], 'email' => 'typo@example.test'));
+		same($id, (int)rsvp::by_token($raw)['id']);
+		cms_records::update('rsvp', $id, array('notes' => 'Phoned them'));
+		same($id, (int)rsvp::by_token($raw)['id'], 'a note keeps the link');
+		cms_records::update('rsvp', $id, array('email' => 'right@example.test'));
+		same(null, rsvp::by_token($raw), 'a new address ends it');
+	});
+});
 test('rsvp: a GET to the manage link changes nothing', function () use ($booking_base) {
 	rsvp_site(function () use ($booking_base) {
 		$event = rsvp_event();
