@@ -2531,6 +2531,70 @@ test('after a lock runs out, wrong passwords are counted from zero (#73)', funct
 	same($id, authentication::check_login('relock@example.test', 'right password'), 'four wrong passwords after the lock ran out locked it');
 });
 
+test('wrong passwords sent at once each count against the lock', function () {
+	authentication::connect();
+	$id = authentication::save_user('burst@example.test', 'right password', 'member');
+	race_php('authentication::check_login("burst@example.test", "wrong ".$n);', 4);
+	reconnect();
+	same('4', (string)R::getCell('SELECT failed_count FROM user WHERE id = ?', array($id)), 'four guesses at once, four tries counted');
+	race_php('authentication::check_login("burst@example.test", "wrong ".$n);', 4);
+	reconnect();
+	same(false, authentication::check_login('burst@example.test', 'right password'), 'eight wrong guesses lock it');
+});
+test('one address gets login_per_ip tries an hour, whatever the accounts', function () use ($base) {
+	authentication::connect();
+	authentication::save_user('per-ip@example.test', 'right password', 'member');
+	spam_clear();
+	$login = function ($who, $password) use ($base) {
+		return form_post("$base/login", array('raster_form' => 'authentication.login', 'login' => $who, 'password' => $password));
+	};
+	// 20 tries at 20 accounts, none of them locked, most of them not there
+	for ($i = 0; $i < 20; $i++) check(strpos($login("nobody$i@example.test", 'guess')[1], 'Wrong email or password') !== false, "try $i");
+	list($status, $body) = $login('per-ip@example.test', 'right password');
+	same(200, $status, 'the 21st, the right password included, is not checked');
+	check(strpos($body, 'Too many tries from here') !== false && strpos($body, 'Wrong email or password') === false, $body);
+	same(0, (int)R::getCell('SELECT failed_count FROM user WHERE email = ?', array('per-ip@example.test')), 'and counts nothing against the account');
+	spam_clear();
+	same(303, $login('per-ip@example.test', 'right password')[0], 'a new hour, or another address');
+});
+test('a login that works leaves what changed meanwhile alone', function () {
+	authentication::connect();
+	$id = authentication::save_user('stale@example.test', 'right password', 'member');
+	$user = authentication::find('stale@example.test');
+	// another request renames the account while this login hashes
+	R::exec('UPDATE user SET name = ? WHERE id = ?', array('Renamed', $id));
+	same($id, authentication::check_login('stale@example.test', 'right password'));
+	same('Renamed', (string)R::getCell('SELECT name FROM user WHERE id = ?', array($id)));
+});
+test('an old md5 password logs in once and is rehashed, but 1.x\'s admin/admin never does', function () {
+	authentication::connect();
+	foreach (array('legacyadmin' => 'legacyadmin', 'legacybob' => 'bobs secret') as $name => $password) {
+		R::exec('DELETE FROM user WHERE username = ?', array($name));
+		$user = R::dispense('user');
+		$user->username = $name; $user->email = ''; $user->name = $name; $user->role = 'admin';
+		$user->password = md5($password);
+		R::store($user);
+	}
+	same(false, authentication::check_login('legacyadmin', 'legacyadmin'), 'a password that is the account\'s name');
+	$id = authentication::check_login('legacybob', 'bobs secret');
+	check($id > 0, 'an old account logs in');
+	check(strpos((string)R::getCell('SELECT password FROM user WHERE id = ?', array($id)), '$') === 0, 'and its password is rehashed');
+});
+test('the account form\'s current password counts against the lock', function () use ($base) {
+	authentication::connect();
+	authentication::save_user('guess@example.test', 'right password', 'member');
+	list(, , $headers) = form_post("$base/login", array('raster_form' => 'authentication.login', 'login' => 'guess@example.test', 'password' => 'right password'));
+	$cookie = preg_replace('/^Set-Cookie:\s*([^;]+).*$/i', '$1', current(preg_grep('/^Set-Cookie/i', $headers)));
+	$page = http('GET', "$base/account", null, array("Cookie: $cookie"))[1];
+	check(preg_match('/name="csrf" value="([a-f0-9]+)"/', $page, $m), 'the account form');
+	$change = function ($current) use ($base, $cookie, $m) {
+		return form_post("$base/account", array('raster_form' => 'authentication.account', 'csrf' => $m[1], 'name' => 'Guess', 'email' => 'guess@example.test', 'password' => 'a new password', 'current_password' => $current), array("Cookie: $cookie"));
+	};
+	for ($i = 0; $i < 5; $i++) check(strpos($change('wrong '.$i)[1], 'Your current password is not right') !== false, "wrong guess $i");
+	check(strpos($change('right password')[1], 'Your current password is not right') !== false, 'locked after five wrong guesses');
+	same(false, authentication::check_login('guess@example.test', 'right password'), 'and so is the login');
+});
+
 // ## 2.1.8 batch E: template output
 test('a form shown again keeps $100, \\1 and $0 as typed (#66)', function () {
 	$typed = 'Table for $20 a head, not $100 \\1 $0 \\\\2 ${1}';

@@ -635,7 +635,8 @@ of your own. Staff read the feedback on a page that renders
     | `render.contact.form` | stored as `spam` with its reasons (`too_many_from_ip` included), nobody emailed, and `sent` as for anyone (see **Bundled models**, contact); it also checks `name`, `subject` and `message` for links and blocked words, and the email's domain against the blocklist |
 
     Login, reset, account, logout, the booking and rsvp manage pages and the
-    newsletter's unsubscribe aren't checked. `lint` warns on a view with
+    newsletter's unsubscribe aren't checked (login has a limit of its own,
+    `login_per_ip`; see **Bundled models**, authentication). `lint` warns on a view with
     `render.newsletter.signup`, `render.authentication.register`,
     `render.booking.form` or `render.rsvp.form` that lacks `print.validation.alert('try_again')`
     or `('slow_down')`: word them where the person will see them, as for
@@ -1046,7 +1047,8 @@ bundled model declares none of its types, and `lint` warns.
 - Alerts: `login_failed`, `email_taken`, `email_invalid`, `password_short`,
   `reset_sent`, `reset_invalid`, `registered`, `password_changed`,
   `account_saved`, `current_password_wrong`; `try_again` and `slow_down` on
-  `register` (a post that looks like spam; see **Forms**).
+  `register` (a post that looks like spam; see **Forms**); `slow_down` on
+  `login` (over `login_per_ip`).
 - Flags: `if.logged_in`, `if.logged_out`, `if.is_member`, `if.is_editor`,
   `if.is_admin`.
 - Roles: `admin`, `editor` (edits content), `member`.
@@ -1060,8 +1062,16 @@ bundled model declares none of its types, and `lint` warns.
   `raster render` (MCP `render_url`) does the same: it prints `Location:
   …` and `HTTP 303` on stderr, no page, and exits 1. `--as` renders it
   as that person sees it.
-- Five wrong passwords lock an account for 15 minutes. Once 15 minutes have
-  passed since the last wrong one, counting starts again from zero.
+- Five wrong passwords lock an account for 15 minutes, at the login and
+  in the account form's `current_password` alike. Once 15 minutes have
+  passed since the last wrong one, counting starts again from zero. Each
+  try is counted before the password is checked, inside the database's
+  write lock, so guesses sent at once each count. The lock counts per
+  account; `login_per_ip` (20) counts tries per address, any account and
+  none: over it in an hour, a login answers `slow_down` and checks
+  nothing, so one sender can't guess across many accounts or try which
+  ones exist. It counts the address as the spam checks do (hashed, by
+  `client_ip_header` behind a trusted proxy; see **Forms**).
 - One email, one account: two sign-ups at once with one email (a double
   click) make one account, and the other answers `email_taken`; so do two
   members changing to one email at once, or a member changing to the email
@@ -2332,6 +2342,7 @@ Set in `config/the_app.php` with `config::set('name')->to(value)`.
 | `spam_min_seconds` | 3 | a post sooner than this after its form was shown is `too_fast`; false turns the stamp checks off |
 | `spam_max_age` | 86400 | a stamp older than this many seconds is `stamp_old`; false allows any age |
 | `spam_per_ip`, `spam_per_email` | 5, 3 | posts of one form in an hour from one IP, with one address; false turns that limit off |
+| `login_per_ip` | 20 | login tries from one address in an hour, whatever the account; over it, `slow_down`. false turns it off |
 | `spam_ip_blocks` | false | true holds back a post over `spam_per_ip` too; by default it is only flagged (the contact form keeps it as spam) |
 | `spam_max_links` | 2 | links allowed in the checked fields; 0 allows none, false any number |
 | `spam_blocklist` | none | words and domains (`casino`, `pills.example`) that make a post `blocked` |

@@ -170,9 +170,16 @@ function token_in($html) {
 	return preg_match('/name="csrf" value="([a-f0-9]+)"/', $html, $m) ? $m[1] : (preg_match('/"csrf":"([a-f0-9]+)"/', $html, $m) ? $m[1] : null);
 }
 function login($base, $login, $password) {
+	// the suite logs in from one address far more often than login_per_ip
+	// lets a person in an hour; 'login per address' tests the limit itself
+	login_clear();
 	list($status, , $headers) = http('POST', "$base/login", array('raster_form' => 'authentication.login', 'login' => $login, 'password' => $password));
 	same(303, $status, "login $login");
 	return cookie_from($headers);
+}
+function login_clear() {
+	cms_store::connect();
+	if (in_array('formhit', R::inspect())) R::exec("DELETE FROM formhit WHERE form = 'authentication.login'");
 }
 function raster($args, $env = array()) {
 	global $root;
