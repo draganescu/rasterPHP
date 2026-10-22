@@ -27,11 +27,13 @@ class product
 		return $problems;
 	}
 
-	// a product visitors may buy, by its slug
+	// a product visitors may buy, by its slug: one the catalogue shows, so
+	// neither a draft nor a piece scheduled for later (its published_at)
 	static function for_sale($slug) {
 		if (!preg_match('/^[a-z0-9\-]+$/', (string)$slug)) return null;
 		$found = cms_records::find('product', array('slug' => $slug));
 		if (!$found || !$found[0]['enabled']) return null;
+		if ((string)$found[0]['published_at'] !== '' && (string)$found[0]['published_at'] > date('Y-m-d H:i:s')) return null;
 		return $found[0];
 	}
 }

@@ -409,6 +409,21 @@ test('a piece that leaves the shop leaves carts too', function () use ($base) {
 	}
 });
 
+test('a piece scheduled for later can\'t be bought before then', function () use ($base) {
+	$cup = cms_records::find('product', array('slug' => 'espresso-cup'))[0];
+	cms_records::update('product', $cup['id'], array('published_at' => date('Y-m-d H:i:s', time() + 86400)));
+	try {
+		$v = new visitor($base);
+		list($status, $body) = $v->go('POST', '/product/product_item/espresso-cup', array('raster_form' => 'cart.add', 'qty' => '1'));
+		check($status !== 303, "added to the cart: $status");
+		has($v->go('GET', '/cart')[1], 'Cart (0)');
+	} finally {
+		cms_records::update('product', $cup['id'], array('published_at' => null));
+	}
+	$v = new visitor($base);
+	same(303, $v->go('POST', '/product/product_item/espresso-cup', array('raster_form' => 'cart.add', 'qty' => '1'))[0], 'and can once it is out');
+});
+
 test('unpaid orders give their pieces back after an hour', function () use ($base) {
 	$v = new visitor($base);
 	$before = stock('morning-mug');
