@@ -8,7 +8,7 @@ RASTER_APP=shop php bin/raster serve     # http://localhost:8000
 php tests/shop.php                       # buyers, the studio and the payment provider, over HTTP
 ```
 
-Log in at `/login` as `studio@bluehour.test` with the password `studio password`, and change the password straight away.
+Log in at `/login` as `studio@bluehour.test` with the password the seed printed. It is made for this shop and shown only once; `php bin/raster user studio@bluehour.test` makes a new one.
 
 ## How it's put together
 

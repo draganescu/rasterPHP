@@ -25,7 +25,10 @@ foreach ($pieces as $piece) {
 	cms_records::create('product', $piece);
 	echo "added {$piece['name']}\n";
 }
+// a password of its own, shown once: a fixed one, printed in the README,
+// would let anyone into a shop seeded on a server
 if (!authentication::has_users()) {
-	authentication::save_user('studio@bluehour.test', 'studio password', 'admin');
-	echo "studio account: studio@bluehour.test / studio password (change it)\n";
+	$password = bin2hex(random_bytes(9));
+	authentication::save_user('studio@bluehour.test', $password, 'admin');
+	echo "studio account: studio@bluehour.test, password $password (shown only now)\n";
 }
