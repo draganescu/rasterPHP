@@ -1080,10 +1080,14 @@ bundled model declares none of its types, and `lint` warns.
   `authentication::create_user($login, $password, $role, $name)` makes an
   account, or returns null when the login is taken; `save_user(…)` creates
   or updates.
-- Command line: `php bin/raster user <email|name> [--role=…] [--password=…]`
+- Command line: `php bin/raster user <email|name> [--role=…] [--password=-]`
   and `php bin/raster users`. A new account is an admin with a random
   password unless the options say otherwise; an existing one keeps the role
-  or password the command isn't given.
+  or password the command isn't given. `--password=-` reads the password
+  from standard input (`printf '%s\n' "$pw" | php bin/raster user ana@example.com --password=-`),
+  and so does `RASTER_PASSWORD` from the environment: a command's
+  arguments are in the process list for every user of the machine.
+  `--password=<value>` still works, with a note saying so.
 - `php bin/raster login-link <email|name> [--next=/path]` prints a link
   (`<site>/?raster_login=<token>`) that logs that account in without a
   password, once, within a minute; then the page comes again without the

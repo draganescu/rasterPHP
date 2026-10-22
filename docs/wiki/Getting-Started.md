@@ -58,10 +58,10 @@ Log in at http://localhost:8000/login
 To choose the password, the role or the display name yourself:
 
 ```sh
-php bin/raster user admin@example.com --password=a-long-password --role=editor --name="Ada Lovelace"
+printf '%s\n' 'a-long-password' | php bin/raster user admin@example.com --password=- --role=editor --name="Ada Lovelace"
 ```
 
-Running it again for an existing account with `--password=…` resets the password and keeps the role; `--role=…` changes the role and keeps the password. `php bin/raster users` lists all accounts.
+`--password=-` reads the password from standard input (or set `RASTER_PASSWORD`), so it never shows in the process list, where other users of the machine could read it. Running it again for an existing account with `--password=-` resets the password and keeps the role; `--role=…` changes the role and keeps the password. `php bin/raster users` lists all accounts.
 
 ## 4. Edit a page
 

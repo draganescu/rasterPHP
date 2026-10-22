@@ -18,12 +18,12 @@ Roles are ordered: an admin counts as an editor and a member too.
 
 ```sh
 php bin/raster user ada@example.com                       # a new account: role admin, random password printed
-php bin/raster user ada@example.com --role=editor --password=… --name="Ada Lovelace"
+printf '%s\n' "$password" | php bin/raster user ada@example.com --role=editor --password=- --name="Ada Lovelace"
 php bin/raster user ada                                   # a username instead of an email works too
 php bin/raster users                                      # list accounts
 ```
 
-Running `user` for an existing account changes only what you give it: `--password=…` resets the password and keeps the role, `--role=…` changes the role and keeps the password. The command says what it kept.
+Running `user` for an existing account changes only what you give it: `--password=-` (the password on standard input, or in `RASTER_PASSWORD`) resets the password and keeps the role, `--role=…` changes the role and keeps the password. The command says what it kept.
 
 **From the site**: visitors sign up on your registration page and get the `member` role. Turn sign-up off with:
 

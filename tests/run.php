@@ -2548,8 +2548,8 @@ test('a time reads without seconds, as MySQL gives it', function () {
 test('raster user keeps the role and password it is not given (#71)', function () use ($root) {
 	$db = test_db(sys_get_temp_dir().'/raster-user-'.getmypid().'.sqlite');
 	$env = 'RASTER_ENV=development RASTER_DB='.escapeshellarg($db);
-	$raster = function ($args) use ($env, $root) {
-		exec("$env ".php_cmd().' '.escapeshellarg("$root/bin/raster").' '.$args.' 2>&1', $out, $code);
+	$raster = function ($args, $more = '') use ($env, $root) {
+		exec("$env $more ".php_cmd().' '.escapeshellarg("$root/bin/raster").' '.$args.' 2>&1', $out, $code);
 		same(0, $code, implode("\n", $out));
 		return implode("\n", $out);
 	};
@@ -2561,6 +2561,15 @@ test('raster user keeps the role and password it is not given (#71)', function (
 	try {
 		$raster('user reader@example.test --role=member --password=first-password');
 		same('member ok', $account('reader@example.test', 'first-password'));
+		// the password from standard input, or the environment, out of the process list
+		$stdin = tempnam(sys_get_temp_dir(), 'raster-pw-');
+		file_put_contents($stdin, "piped password\n");
+		$out = $raster('user piped@example.test --role=member --password=- < '.escapeshellarg($stdin));
+		unlink($stdin);
+		check(strpos($out, 'Password:') === false && strpos($out, 'note:') === false, $out);
+		same('member ok', $account('piped@example.test', 'piped password'));
+		$raster('user envpass@example.test --role=member', 'RASTER_PASSWORD='.escapeshellarg('from the env'));
+		same('member ok', $account('envpass@example.test', 'from the env'));
 		// a password reset keeps the role
 		$out = $raster('user reader@example.test --password=second-password');
 		check(strpos($out, 'saved as member') !== false && strpos($out, 'role kept') !== false, $out);
