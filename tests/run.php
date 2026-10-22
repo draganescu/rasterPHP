@@ -714,6 +714,48 @@ test('editor login and csrf', function () use ($base) {
 	same(200, $status, 'wrong password must not log in');
 	check(strpos($body, 'Wrong email or password') !== false);
 });
+test('editors reach no accounts table and no page kept for admins', function () use ($base, $root) {
+	authentication::connect();
+	authentication::save_user('pages-editor@example.test', 'editor password', 'editor');
+	$app = "$root/application/config/the_app.php";
+	$settings = file_get_contents($app);
+	file_put_contents("$root/application/views/default/zzsecret.html", '<!doctype html><html><head><title>Secret</title></head><body><p><!-- print.cms.note -->Mock<!-- /print.cms.note --></p></body></html>');
+	file_put_contents($app, $settings."\nconfig::set('protected')->to(array('account' => 'member', 'zzsecret' => 'admin'));\n");
+	try {
+		cms_store::update_page('zzsecretpage', '/zzsecret', array('note' => 'Only for admins'), array('note'));
+		list(, , $headers) = form_post("$base/login", array('raster_form' => 'authentication.login', 'login' => 'pages-editor@example.test', 'password' => 'editor password'));
+		$cookie = preg_replace('/^Set-Cookie:\s*([^;]+).*$/i', '$1', current(preg_grep('/^Set-Cookie/i', $headers)));
+		check(preg_match('/"csrf":"([a-f0-9]+)"/', http('GET', "$base/about", null, array("Cookie: $cookie"))[1], $m), 'editor missing');
+		$post = function ($endpoint, $fields) use ($base, $cookie, $m) {
+			list($status, $text) = form_post("$base/api/cms/$endpoint", $fields + array('csrf' => $m[1]), array("Cookie: $cookie"));
+			return array($status, json_decode($text, true), $text);
+		};
+		same(403, http('GET', "$base/zzsecret", null, array("Cookie: $cookie"))[0], 'the page itself');
+		foreach (array(array('editor_history', array('type' => 'zzsecretpage', 'slug' => '/zzsecret')),
+			array('editor_save_field', array('type' => 'zzsecretpage', 'slug' => '/zzsecret', 'field' => 'note', 'value' => 'Changed')),
+			// a slug the editor may open, with another page's table
+			array('editor_save_field', array('type' => 'zzsecretpage', 'slug' => '/about', 'field' => 'note', 'value' => 'Changed')),
+			array('editor_restore', array('type' => 'zzsecretpage', 'slug' => '/zzsecret', 'revision' => 1))) as $call) {
+			list($status, $json, $text) = $post($call[0], $call[1]);
+			same(400, $status, $call[0].' '.json_encode($call[1]).': '.$text);
+			same('Unknown page', $json['error']);
+		}
+		same('Only for admins', cms_store::page_values('zzsecretpage')['fields']['note'], 'nothing changed');
+		same(200, $post('editor_history', array('type' => 'aboutpage', 'slug' => '/about'))[0], 'a page the editor may open');
+		// the accounts of the first versions, by any spelling of the name
+		foreach (array('users', 'users_', 'u_sers', 'raster') as $collection) {
+			foreach (array('editor_delete_item', 'editor_save_item') as $endpoint) {
+				list($status, $json, $text) = $post($endpoint, array('collection' => $collection, 'id' => 1));
+				same(400, $status, "$endpoint $collection: $text");
+				same('Unknown collection', $json['error']);
+			}
+		}
+	} finally {
+		file_put_contents($app, $settings);
+		@unlink("$root/application/views/default/zzsecret.html");
+		R::exec('DROP TABLE IF EXISTS zzsecretpage');
+	}
+});
 test('staff /api methods refuse cross-site requests on every verb (#122)', function () use ($base, $root) {
 	$dir = "$root/application/models/zzstaff";
 	test_fixture($dir);

@@ -1648,7 +1648,7 @@
 		setTimeout(function () { field.el.classList.remove('raster-pulse'); if (field.kind !== 'image') field.el.focus(); }, 500);
 	}
 	function loadHistory(section) {
-		call('editor_history', { type: C.page.type }).then(function (result) {
+		call('editor_history', { type: C.page.type, slug: C.page.slug }).then(function (result) {
 			var list = result.revisions || [];
 			section.innerHTML = '';
 			section.appendChild(h('h3', { text: t('history') }));

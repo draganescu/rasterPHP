@@ -1052,7 +1052,7 @@ test(array('E18', 'E19', 'E28'), 'the editor saves pages and items, keeps revisi
 	same(400, $status, 'only CMS page tables');
 	has($error['error'], 'Unknown page');
 	same(400, $save('editor_save_field', array('type' => 'subscriber', 'field' => 'email', 'value' => 'x@y.zz'))[0]);
-	list(, $history) = $save('editor_history', array('type' => 'aboutpage'));
+	list(, $history) = $save('editor_history', array('type' => 'aboutpage', 'slug' => '/about'));
 	check(count($history['revisions']) >= 2, 'revisions');
 	same('Edited in the page', $history['revisions'][0]['fields']['heading']);
 	check(preg_match('/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d$/', $history['revisions'][0]['updated_at']), 'times with their offset');

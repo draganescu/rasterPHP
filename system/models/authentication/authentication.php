@@ -393,6 +393,16 @@ class authentication
 		return true;
 	}
 
+	// whether the person asking may open the page at $uri: the 'protected'
+	// patterns setup() checks, for the in-page editor's saves
+	static function may_open($uri) {
+		$uri = '/'.ltrim((string)$uri, '/');
+		foreach ((array)config::get('protected', array()) as $pattern => $role) {
+			if (preg_match('%^/'.ltrim($pattern, '/').'%i', $uri) && !self::can($role)) return false;
+		}
+		return true;
+	}
+
 	// on the command line only `raster render` follows it: the page ends
 	// there with 303, and the address goes to stderr
 	protected function redirect($location) {

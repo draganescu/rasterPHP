@@ -49,9 +49,11 @@ class cms
 		return $readable.substr(md5($slug), 0, 6).'page';
 	}
 
-	// names that can't be used for page fields or collections
+	// names that can't be used for page fields or collections. A collection
+	// is reserved by its table: users_ and u_sers are usersdata too, the
+	// accounts of the first versions, which no editor may read
 	static function reserved($name, $kind) {
-		if ($kind === 'collection') return in_array($name, array('users', 'raster'));
+		if ($kind === 'collection') return in_array(self::collection_type($name), array('usersdata', 'rasterdata'));
 		return method_exists('cms', $name) || in_array($name, array('slug', 'id', 'updated_at', 'enabled', 'published_at'));
 	}
 
