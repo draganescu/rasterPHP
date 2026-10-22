@@ -221,15 +221,16 @@ class config {
 	}
 
 	// The environment for a host, from the servers map. Loopback names only
-	// count when the request comes from this machine. Unlisted hosts are
-	// production.
+	// count when the request comes from this machine: localhost, every
+	// name under it (ro.localhost, which browsers send to this machine
+	// too), 127.0.0.1 and ::1. Unlisted hosts are production.
 	static function environment_for($host, $remote_addr, $is_cli, $servers) {
 		$host = preg_replace('/:\d+$/', '', strtolower($host));
 		$from_this_machine = $is_cli || in_array($remote_addr, array('127.0.0.1', '::1'));
 		$environment = 'production';
 		foreach ((array)$servers as $key => $candidate) {
 			if(!preg_match("|^(".$key.")$|i", $host)) continue;
-			if(preg_match('/^(localhost|127\.0\.0\.1|\[?::1\]?)$/i', $host) && !$from_this_machine) continue;
+			if(preg_match('/^(([a-z0-9-]+\.)*localhost\.?|127\.0\.0\.1|\[?::1\]?)$/i', $host) && !$from_this_machine) continue;
 			$environment = $candidate;
 		}
 		return $environment;

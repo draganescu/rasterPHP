@@ -2214,6 +2214,11 @@ test(array('L1', 'L2'), 'environments', function () use ($root) {
 	$servers = array('localhost' => 'development', '127\.0\.0\.1' => 'development', 'staging\.cafe\.test' => 'staging');
 	same('development', config::environment_for('localhost:8000', '127.0.0.1', false, $servers));
 	same('production', config::environment_for('localhost', '10.0.0.5', false, $servers), 'loopback names need a local client');
+	// and so does every name under localhost (the café maps ro.localhost)
+	$cafe = array('ro\.localhost' => 'development');
+	same('production', config::environment_for('ro.localhost', '203.0.113.9', false, $cafe), 'ro.localhost from another machine');
+	same('production', config::environment_for('ro.localhost.', '203.0.113.9', false, $cafe + array('ro\.localhost\.' => 'development')), 'with the root dot too');
+	same('development', config::environment_for('ro.localhost:8000', '127.0.0.1', false, $cafe), 'ro.localhost from this machine');
 	same('staging', config::environment_for('staging.cafe.test', '10.0.0.5', false, $servers));
 	same('production', config::environment_for('staging.cafe.test.evil.example', '10.0.0.5', false, $servers), 'whole names only');
 	same('production', config::environment_for('cafe.test', '10.0.0.5', false, $servers));
