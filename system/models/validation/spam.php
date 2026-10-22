@@ -115,6 +115,20 @@ class validation_spam
 		return $reasons;
 	}
 
+	// Counts this request's address against $form and gives the hour's count,
+	// this one included; null when it can't count (no table yet, a
+	// database error), so the caller lets the request through
+	static function count_ip($form) {
+		$salt = self::salt();
+		if ($salt === null) return null;
+		try {
+			return self::count_hit($form, 'ip', self::hash(self::network(self::client_ip()), $salt));
+		} catch (Exception $e) {
+			self::warn($e->getMessage());
+			return null;
+		}
+	}
+
 	// the posted email, lower-cased, or null when there is none that is valid
 	protected static function email() {
 		$email = validation::value('email');

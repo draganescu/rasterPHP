@@ -714,6 +714,48 @@ test('editor login and csrf', function () use ($base) {
 	same(200, $status, 'wrong password must not log in');
 	check(strpos($body, 'Wrong email or password') !== false);
 });
+test('editors reach no accounts table and no page kept for admins', function () use ($base, $root) {
+	authentication::connect();
+	authentication::save_user('pages-editor@example.test', 'editor password', 'editor');
+	$app = "$root/application/config/the_app.php";
+	$settings = file_get_contents($app);
+	file_put_contents("$root/application/views/default/zzsecret.html", '<!doctype html><html><head><title>Secret</title></head><body><p><!-- print.cms.note -->Mock<!-- /print.cms.note --></p></body></html>');
+	file_put_contents($app, $settings."\nconfig::set('protected')->to(array('account' => 'member', 'zzsecret' => 'admin'));\n");
+	try {
+		cms_store::update_page('zzsecretpage', '/zzsecret', array('note' => 'Only for admins'), array('note'));
+		list(, , $headers) = form_post("$base/login", array('raster_form' => 'authentication.login', 'login' => 'pages-editor@example.test', 'password' => 'editor password'));
+		$cookie = preg_replace('/^Set-Cookie:\s*([^;]+).*$/i', '$1', current(preg_grep('/^Set-Cookie/i', $headers)));
+		check(preg_match('/"csrf":"([a-f0-9]+)"/', http('GET', "$base/about", null, array("Cookie: $cookie"))[1], $m), 'editor missing');
+		$post = function ($endpoint, $fields) use ($base, $cookie, $m) {
+			list($status, $text) = form_post("$base/api/cms/$endpoint", $fields + array('csrf' => $m[1]), array("Cookie: $cookie"));
+			return array($status, json_decode($text, true), $text);
+		};
+		same(403, http('GET', "$base/zzsecret", null, array("Cookie: $cookie"))[0], 'the page itself');
+		foreach (array(array('editor_history', array('type' => 'zzsecretpage', 'slug' => '/zzsecret')),
+			array('editor_save_field', array('type' => 'zzsecretpage', 'slug' => '/zzsecret', 'field' => 'note', 'value' => 'Changed')),
+			// a slug the editor may open, with another page's table
+			array('editor_save_field', array('type' => 'zzsecretpage', 'slug' => '/about', 'field' => 'note', 'value' => 'Changed')),
+			array('editor_restore', array('type' => 'zzsecretpage', 'slug' => '/zzsecret', 'revision' => 1))) as $call) {
+			list($status, $json, $text) = $post($call[0], $call[1]);
+			same(400, $status, $call[0].' '.json_encode($call[1]).': '.$text);
+			same('Unknown page', $json['error']);
+		}
+		same('Only for admins', cms_store::page_values('zzsecretpage')['fields']['note'], 'nothing changed');
+		same(200, $post('editor_history', array('type' => 'aboutpage', 'slug' => '/about'))[0], 'a page the editor may open');
+		// the accounts of the first versions, by any spelling of the name
+		foreach (array('users', 'users_', 'u_sers', 'raster') as $collection) {
+			foreach (array('editor_delete_item', 'editor_save_item') as $endpoint) {
+				list($status, $json, $text) = $post($endpoint, array('collection' => $collection, 'id' => 1));
+				same(400, $status, "$endpoint $collection: $text");
+				same('Unknown collection', $json['error']);
+			}
+		}
+	} finally {
+		file_put_contents($app, $settings);
+		@unlink("$root/application/views/default/zzsecret.html");
+		R::exec('DROP TABLE IF EXISTS zzsecretpage');
+	}
+});
 test('staff /api methods refuse cross-site requests on every verb (#122)', function () use ($base, $root) {
 	$dir = "$root/application/models/zzstaff";
 	test_fixture($dir);
@@ -1047,6 +1089,36 @@ function location($headers) {
 	return null;
 }
 
+test('mail goes to the whole address, never to a <...> inside a quoted one', function () {
+	same('ana@example.com', mail::address('Ana <ana@example.com>'));
+	same('ana@example.com', mail::address('"Ana, Pop" <ana@example.com>'));
+	same('ana@example.com', mail::address('ana@example.com'));
+	$quoted = '"1<victim@example.com>"@attacker.example';
+	same($quoted, mail::address($quoted));
+	same('"<victim@example.com>"@attacker.example', mail::address('"<victim@example.com>"@attacker.example'));
+	// an address that is neither is refused, not cut down to its <...>
+	same(false, mail::send('"x" <victim@example.com> junk', 'Hi', '<p>Hi</p>'));
+});
+test('the sitemap leaves out the items and pages that need an account, in any case', function () use ($root) {
+	$theme = "$root/application/views/default";
+	file_put_contents("$theme/zzinsider.html", '<!-- render.cms.zzinsider --><h2><!-- print.title -->Plans<!-- /print.title --></h2><!-- /render.cms.zzinsider -->');
+	file_put_contents("$theme/zzinsider_item.html", '<!-- render.cms.zzinsider --><h1><!-- print.title -->Plans<!-- /print.title --></h1><!-- /render.cms.zzinsider -->');
+	file_put_contents("$theme/Zzstaffroom.html", '<p>Rota</p>');
+	$protected = config::get('protected');
+	try {
+		cms_store::connect();
+		cms_store::save_item('zzinsiderdata', 0, array('title' => 'Secret merger plans'), array('title'));
+		$urls = array_column((new feed())->pages(), 'url');
+		check(preg_grep('#/zzinsider/zzinsider_item/secret-merger-plans$#', $urls), 'an open collection is listed: '.json_encode($urls));
+		config::set('protected')->to(array('zzinsider' => 'member', 'zzstaffroom' => 'editor'));
+		$urls = array_column((new feed())->pages(), 'url');
+		same(array(), array_values(preg_grep('#zzinsider|Zzstaffroom#i', $urls)), 'protected: '.json_encode($urls));
+	} finally {
+		config::set('protected')->to($protected);
+		foreach (array('zzinsider.html', 'zzinsider_item.html', 'Zzstaffroom.html') as $file) @unlink("$theme/$file");
+		R::exec('DROP TABLE IF EXISTS zzinsiderdata');
+	}
+});
 test('one page has one address: a trailing slash and index.php/ redirect (#131)', function () use ($base) {
 	foreach (array('/about/' => '/about', '/index.php/about' => '/about', '/index.php/about/' => '/about', '/news/news_page/2/' => '/news/news_page/2',
 		'/about/?x=1&y=a%20b' => '/about?x=1&y=a%20b', '/news/news_items/headline/Filler%201/' => '/news/news_items/headline/Filler%201') as $asked => $address) {
@@ -1114,6 +1186,12 @@ test('newsletter: double opt-in, send, one-click unsubscribe', function () use (
 	$mail = last_mail();
 	check($mail && preg_match('/token=([a-f0-9]{40})/', $mail['text'], $t), 'confirmation email');
 	check(strpos(http('GET', "$base/newsletter-confirm?token={$t[1]}")[1], 'You are subscribed') !== false, 'confirm');
+	// what was typed at sign-up shows on the page as text, never as markup
+	cms_store::connect();
+	R::exec('UPDATE subscriber SET email = ? WHERE email = ?', array('"<img src=x onerror=alert(1)>"@example.com', 'reader@example.com'));
+	$page = http('GET', "$base/newsletter-confirm?token={$t[1]}")[1];
+	check(strpos($page, '<img src=x') === false && strpos($page, '&quot;&lt;img src=x onerror=alert(1)&gt;&quot;@example.com') !== false, 'the address is escaped');
+	R::exec('UPDATE subscriber SET email = ? WHERE email = ?', array('reader@example.com', '"<img src=x onerror=alert(1)>"@example.com'));
 	$env = 'RASTER_DB='.escapeshellarg($db).' RASTER_MAIL='.escapeshellarg("log://$maildir").' RASTER_URL='.escapeshellarg("$base/");
 	$out = shell_exec("$env ".php_cmd().' '.escapeshellarg("$root/bin/raster").' send /about --dry-run 2>&1');
 	check(strpos($out, 'to 1 subscriber') !== false, "dry run: $out");
@@ -2472,8 +2550,8 @@ test('a time reads without seconds, as MySQL gives it', function () {
 test('raster user keeps the role and password it is not given (#71)', function () use ($root) {
 	$db = test_db(sys_get_temp_dir().'/raster-user-'.getmypid().'.sqlite');
 	$env = 'RASTER_ENV=development RASTER_DB='.escapeshellarg($db);
-	$raster = function ($args) use ($env, $root) {
-		exec("$env ".php_cmd().' '.escapeshellarg("$root/bin/raster").' '.$args.' 2>&1', $out, $code);
+	$raster = function ($args, $more = '') use ($env, $root) {
+		exec("$env $more ".php_cmd().' '.escapeshellarg("$root/bin/raster").' '.$args.' 2>&1', $out, $code);
 		same(0, $code, implode("\n", $out));
 		return implode("\n", $out);
 	};
@@ -2485,6 +2563,15 @@ test('raster user keeps the role and password it is not given (#71)', function (
 	try {
 		$raster('user reader@example.test --role=member --password=first-password');
 		same('member ok', $account('reader@example.test', 'first-password'));
+		// the password from standard input, or the environment, out of the process list
+		$stdin = tempnam(sys_get_temp_dir(), 'raster-pw-');
+		file_put_contents($stdin, "piped password\n");
+		$out = $raster('user piped@example.test --role=member --password=- < '.escapeshellarg($stdin));
+		unlink($stdin);
+		check(strpos($out, 'Password:') === false && strpos($out, 'note:') === false, $out);
+		same('member ok', $account('piped@example.test', 'piped password'));
+		$raster('user envpass@example.test --role=member', 'RASTER_PASSWORD='.escapeshellarg('from the env'));
+		same('member ok', $account('envpass@example.test', 'from the env'));
 		// a password reset keeps the role
 		$out = $raster('user reader@example.test --password=second-password');
 		check(strpos($out, 'saved as member') !== false && strpos($out, 'role kept') !== false, $out);
@@ -2525,6 +2612,70 @@ test('after a lock runs out, wrong passwords are counted from zero (#73)', funct
 	$expire();
 	$wrong(4);
 	same($id, authentication::check_login('relock@example.test', 'right password'), 'four wrong passwords after the lock ran out locked it');
+});
+
+test('wrong passwords sent at once each count against the lock', function () {
+	authentication::connect();
+	$id = authentication::save_user('burst@example.test', 'right password', 'member');
+	race_php('authentication::check_login("burst@example.test", "wrong ".$n);', 4);
+	reconnect();
+	same('4', (string)R::getCell('SELECT failed_count FROM user WHERE id = ?', array($id)), 'four guesses at once, four tries counted');
+	race_php('authentication::check_login("burst@example.test", "wrong ".$n);', 4);
+	reconnect();
+	same(false, authentication::check_login('burst@example.test', 'right password'), 'eight wrong guesses lock it');
+});
+test('one address gets login_per_ip tries an hour, whatever the accounts', function () use ($base) {
+	authentication::connect();
+	authentication::save_user('per-ip@example.test', 'right password', 'member');
+	spam_clear();
+	$login = function ($who, $password) use ($base) {
+		return form_post("$base/login", array('raster_form' => 'authentication.login', 'login' => $who, 'password' => $password));
+	};
+	// 20 tries at 20 accounts, none of them locked, most of them not there
+	for ($i = 0; $i < 20; $i++) check(strpos($login("nobody$i@example.test", 'guess')[1], 'Wrong email or password') !== false, "try $i");
+	list($status, $body) = $login('per-ip@example.test', 'right password');
+	same(200, $status, 'the 21st, the right password included, is not checked');
+	check(strpos($body, 'Too many tries from here') !== false && strpos($body, 'Wrong email or password') === false, $body);
+	same(0, (int)R::getCell('SELECT failed_count FROM user WHERE email = ?', array('per-ip@example.test')), 'and counts nothing against the account');
+	spam_clear();
+	same(303, $login('per-ip@example.test', 'right password')[0], 'a new hour, or another address');
+});
+test('a login that works leaves what changed meanwhile alone', function () {
+	authentication::connect();
+	$id = authentication::save_user('stale@example.test', 'right password', 'member');
+	$user = authentication::find('stale@example.test');
+	// another request renames the account while this login hashes
+	R::exec('UPDATE user SET name = ? WHERE id = ?', array('Renamed', $id));
+	same($id, authentication::check_login('stale@example.test', 'right password'));
+	same('Renamed', (string)R::getCell('SELECT name FROM user WHERE id = ?', array($id)));
+});
+test('an old md5 password logs in once and is rehashed, but 1.x\'s admin/admin never does', function () {
+	authentication::connect();
+	foreach (array('legacyadmin' => 'legacyadmin', 'legacybob' => 'bobs secret') as $name => $password) {
+		R::exec('DELETE FROM user WHERE username = ?', array($name));
+		$user = R::dispense('user');
+		$user->username = $name; $user->email = ''; $user->name = $name; $user->role = 'admin';
+		$user->password = md5($password);
+		R::store($user);
+	}
+	same(false, authentication::check_login('legacyadmin', 'legacyadmin'), 'a password that is the account\'s name');
+	$id = authentication::check_login('legacybob', 'bobs secret');
+	check($id > 0, 'an old account logs in');
+	check(strpos((string)R::getCell('SELECT password FROM user WHERE id = ?', array($id)), '$') === 0, 'and its password is rehashed');
+});
+test('the account form\'s current password counts against the lock', function () use ($base) {
+	authentication::connect();
+	authentication::save_user('guess@example.test', 'right password', 'member');
+	list(, , $headers) = form_post("$base/login", array('raster_form' => 'authentication.login', 'login' => 'guess@example.test', 'password' => 'right password'));
+	$cookie = preg_replace('/^Set-Cookie:\s*([^;]+).*$/i', '$1', current(preg_grep('/^Set-Cookie/i', $headers)));
+	$page = http('GET', "$base/account", null, array("Cookie: $cookie"))[1];
+	check(preg_match('/name="csrf" value="([a-f0-9]+)"/', $page, $m), 'the account form');
+	$change = function ($current) use ($base, $cookie, $m) {
+		return form_post("$base/account", array('raster_form' => 'authentication.account', 'csrf' => $m[1], 'name' => 'Guess', 'email' => 'guess@example.test', 'password' => 'a new password', 'current_password' => $current), array("Cookie: $cookie"));
+	};
+	for ($i = 0; $i < 5; $i++) check(strpos($change('wrong '.$i)[1], 'Your current password is not right') !== false, "wrong guess $i");
+	check(strpos($change('right password')[1], 'Your current password is not right') !== false, 'locked after five wrong guesses');
+	same(false, authentication::check_login('guess@example.test', 'right password'), 'and so is the login');
 });
 
 // ## 2.1.8 batch E: template output
@@ -4609,6 +4760,21 @@ test('booking: a GET to the manage link changes nothing', function () use ($book
 	});
 });
 
+test('booking: links sent to an address stop working when staff change it', function () {
+	booking_site(function () {
+		$tue = booking_cafe();
+		$mails = booking_mails(function () use ($tue) { booking_guest(array('email' => 'typo@example.test', 'date' => $tue, 'time' => '19:00')); });
+		$raw = booking_token($mails[0]);
+		$b = cms_records::find('booking', array('email' => 'typo@example.test'))[0];
+		same(array(), booking_manage(array('token' => $raw))[1]);
+		// a note keeps the link; a new address ends it
+		cms_records::update('booking', $b['id'], array('notes' => 'Window seat', 'email' => 'TYPO@example.test'));
+		same(array(), booking_manage(array('token' => $raw))[1], 'the same address in other letters');
+		cms_records::update('booking', $b['id'], array('email' => 'right@example.test'));
+		same(array(array(), array('link_invalid')), booking_manage(array('token' => $raw)));
+		same(null, booking::by_token($raw));
+	});
+});
 test('booking: expired, used and foreign links are invalid', function () {
 	booking_site(function () {
 		$tue = booking_cafe();
@@ -6945,6 +7111,17 @@ test('rsvp: every guest email carries a fresh link; only its hash is kept', func
 	});
 });
 
+test('rsvp: links sent to an address stop working when staff change it', function () {
+	rsvp_site(function () {
+		$event = rsvp_event();
+		list($id, $raw) = rsvp_linked(array('event' => $event['id'], 'email' => 'typo@example.test'));
+		same($id, (int)rsvp::by_token($raw)['id']);
+		cms_records::update('rsvp', $id, array('notes' => 'Phoned them'));
+		same($id, (int)rsvp::by_token($raw)['id'], 'a note keeps the link');
+		cms_records::update('rsvp', $id, array('email' => 'right@example.test'));
+		same(null, rsvp::by_token($raw), 'a new address ends it');
+	});
+});
 test('rsvp: a GET to the manage link changes nothing', function () use ($booking_base) {
 	rsvp_site(function () use ($booking_base) {
 		$event = rsvp_event();
@@ -7409,6 +7586,11 @@ test('already_replied mails the link to the reply\'s address only, once per five
 		same(array(), booking_sent($mails));
 		// later, the link again
 		spam_clear();
+		// a post the rules refuse anyway says nothing about the address, and mails nothing
+		list($status, $body, $mails) = $again(array('answer' => 'bogus'));
+		same(200, $status);
+		check(strpos($body, 'ALERT already_replied') === false, $body);
+		same(array(), booking_sent($mails));
 		$back = function () use ($ana) { cms_records::update('rsvp', $ana['id'], array('link_sent_at' => date('Y-m-d H:i:s', time() - 360))); };
 		$back();
 		list(, $body, $mails) = $again();

@@ -358,8 +358,16 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 		check(await card.evaluate(el => el.classList.contains('raster-new') && el.contains(document.activeElement)), 'Enter on the new-item card starts a new item');
 		await page.keyboard.press('Escape');
 
-		// a record: the model's actions are buttons, its readonly fields are not editable
+		// a record: the model's actions are buttons, its readonly fields are not
+		// editable. Its phone, a link a visitor typed, is never one that runs
+		// script, before or after an action answers with the stored value
+		const staffView = path.join(root, 'demo/views/cafe/staff.html');
+		const staffHtml = fs.readFileSync(staffView, 'utf8');
+		process.on('exit', () => fs.writeFileSync(staffView, staffHtml));
+		fs.writeFileSync(staffView, staffHtml.split('<tr class="booking"><td><!-- print.name -->').join('<tr class="booking"><td><!-- print.@href.phone --><a class="call" href="#">Call</a><!-- /print.@href.phone --> <!-- print.name -->'));
 		await fetch(base + '/visit?date=' + soon, { method: 'POST', body: new URLSearchParams({ raster_form: 'booking.form', raster_ts: stamp(), resource: 'dining-room', name: 'Ilinca', email: 'ilinca@example.com', date: soon, time: '19:00', people: '2', terms: '1' }), redirect: 'manual' });
+		// the form's own pattern refuses such a phone; a site's form may not
+		execFileSync('php', ['-r', "require 'system/boot.php'; boot::$appname = 'demo'; boot::cli(); foreach (cms_records::find('booking', array('name' => 'Ilinca')) as $b) cms_records::update('booking', $b['id'], array('phone' => 'javascript:alert(1)'));"], { cwd: root, env });
 		await page.goto(base + '/staff');
 		await page.waitForTimeout(500);
 		const booking = page.locator('[data-raster-item]', { hasText: 'Ilinca' }).first();
@@ -374,6 +382,10 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 		await inShadow(page, h => [...h.shadowRoot.querySelectorAll('.handle button')].find(b => b.textContent === 'Confirm booking').click());
 		await page.waitForTimeout(900);
 		check((await booking.locator('td.status').innerText()).trim() === 'confirmed', 'the action\'s result shows in the page');
+		check(!/^\s*javascript:/i.test(await booking.locator('a.call').getAttribute('href') || ''), 'the action\'s answer puts no script link back: ' + await booking.locator('a.call').getAttribute('href'));
+		fs.writeFileSync(staffView, staffHtml);
+		await page.goto(base + '/staff');
+		await page.waitForTimeout(500);
 		// staff_add: a booking taken over the phone, from the card at the end of
 		// each render.cms list of bookings
 		const cards = async title => page.locator('h3:has-text("' + title + '") + table .raster-ghost').count();

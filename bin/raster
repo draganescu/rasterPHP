@@ -9,7 +9,7 @@
 //   php bin/raster vocabulary [--json]
 //   php bin/raster describe [--json] [--sections=a,b]
 //   php bin/raster schema [--json] [--apply] [--check] [--rename=table.old:new] [--drop=table.column|table] [--force] [--dry-run]
-//   php bin/raster user <email|name> [--password=…] [--role=admin|editor|member] [--name=…]
+//   php bin/raster user <email|name> [--password=-] [--role=admin|editor|member] [--name=…]
 //   php bin/raster users
 //   php bin/raster login-link <email|name> [--next=/path]
 //   php bin/raster make model <name> --from=<view> [--form=<method>] [--dry-run] [--force]
@@ -114,8 +114,11 @@ function raster_project_command($command, $root, $positional, $options, $paint) 
 
 	case 'update':
 		$source = isset($positional[0]) ? $positional[0] : 'latest';
-		$work = sys_get_temp_dir().'/raster-update-'.getmypid();
-		mkdir($work, 0775, true);
+		// a folder nobody could have made first: a name of 32 random hex
+		// characters, made here or not at all. A guessable name made by
+		// another user would hand them the release we copy in and run.
+		$work = sys_get_temp_dir().'/raster-update-'.bin2hex(random_bytes(16));
+		if (!@mkdir($work, 0700)) throw new RuntimeException("Can't make the folder $work for the update");
 		register_shutdown_function(function () use ($work) { exec('rm -rf '.escapeshellarg($work)); });
 		echo "Getting Raster ($source)…\n";
 		$release = raster_project::fetch($source, $work);
@@ -371,13 +374,27 @@ switch ($command) {
 	case 'user':
 		$login = isset($positional[0]) ? $positional[0] : null;
 		if (!$login) {
-			fwrite(STDERR, "Usage: php bin/raster user <email or username> [--password=secret] [--role=admin|editor|member] [--name=\"Ada Lovelace\"]\n");
+			fwrite(STDERR, "Usage: php bin/raster user <email or username> [--password=-] [--role=admin|editor|member] [--name=\"Ada Lovelace\"]\n(--password=- reads the password from standard input; RASTER_PASSWORD works too)\n");
 			exit(2);
 		}
 		// an existing account keeps the role and password it isn't given; a
 		// new one is an admin with a random password unless told otherwise
 		$role = isset($options['role']) && is_string($options['role']) ? $options['role'] : null;
 		$password = isset($options['password']) && is_string($options['password']) ? $options['password'] : null;
+		// a command's arguments are in the process list for every user of
+		// the machine to read: --password=- reads it from standard input
+		// instead, and so does RASTER_PASSWORD from the environment
+		if ($password === '-') {
+			$password = rtrim((string)fgets(STDIN), "\r\n");
+			if ($password === '') {
+				fwrite(STDERR, $paint('error', '31').": --password=- reads the password from standard input, and there was none\n");
+				exit(2);
+			}
+		} elseif ($password === null && getenv('RASTER_PASSWORD') !== false && getenv('RASTER_PASSWORD') !== '') {
+			$password = getenv('RASTER_PASSWORD');
+		} elseif ($password !== null) {
+			fwrite(STDERR, "note: other users of this machine can read --password=… in the process list; --password=- reads it from standard input\n");
+		}
 		$kept = array();
 		$was_frozen = database::$frozen;
 		try {
@@ -718,9 +735,11 @@ Raster command line
         --drop=table                     delete a table no template uses
         --force                          --drop even what the templates use
         --dry-run                        say what --rename, --drop and --apply would change
-  php bin/raster user <email|name> [--password=...] [--role=admin|editor|member] [--name=...]
+  php bin/raster user <email|name> [--password=-] [--role=admin|editor|member] [--name=...]
                                          create a user (admin, random password), or change
-                                         an existing one's password or role, keeping the other
+                                         an existing one's password or role, keeping the other;
+                                         --password=- reads the password from standard input
+                                         (or RASTER_PASSWORD), out of the process list
   php bin/raster users                   list users
   php bin/raster login-link <email|name> [--next=/path]
                                          print a link that logs that account in, without

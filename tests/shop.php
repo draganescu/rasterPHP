@@ -143,6 +143,8 @@ function signed_event($base, $event, $signature = null) {
 // ## The shop, seeded as the README says
 
 $out = shell_exec(php_cmd().' '.escapeshellarg("$root/shop/seed.php").' 2>&1');
+// the studio's password, made by the seed and printed once
+$studio_password = preg_match('/password ([a-f0-9]{18}) /', (string)$out, $m) ? $m[1] : '';
 // cards through the pretend provider; the shop without a provider is further down
 $base = server(array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'RASTER_MCP_TOKEN' => 'shop-token', 'SHOP_PAYMENTS' => 'test'));
 database::instance('cms');
@@ -150,6 +152,8 @@ database::instance('cms');
 test('the seed puts four pieces on the shelf and makes the studio\'s account', function () use ($out) {
 	has($out, 'added Morning mug');
 	has($out, 'studio@bluehour.test');
+	same(18, strlen($GLOBALS['studio_password']), "a password of its own: $out");
+	lacks($out, 'studio password');
 	same(4, count(cms_records::find('product')));
 });
 
@@ -314,7 +318,7 @@ test('paid after the studio cancelled it: the money goes back and the studio hea
 
 test('the studio: orders to ship, Ship needs a tracking number and happens once, readonly status, refunds for admins', function () use ($base) {
 	$studio = new visitor($base);
-	$studio->login('studio@bluehour.test', 'studio password');
+	$studio->login('studio@bluehour.test', $GLOBALS['studio_password']);
 	list($status, $page) = $studio->go('GET', '/orders');
 	same(200, $status);
 	has($page, 'Ana &lt;script&gt;x&lt;/script&gt;', 'what buyers typed prints as text');
@@ -409,6 +413,21 @@ test('a piece that leaves the shop leaves carts too', function () use ($base) {
 	}
 });
 
+test('a piece scheduled for later can\'t be bought before then', function () use ($base) {
+	$cup = cms_records::find('product', array('slug' => 'espresso-cup'))[0];
+	cms_records::update('product', $cup['id'], array('published_at' => date('Y-m-d H:i:s', time() + 86400)));
+	try {
+		$v = new visitor($base);
+		list($status, $body) = $v->go('POST', '/product/product_item/espresso-cup', array('raster_form' => 'cart.add', 'qty' => '1'));
+		check($status !== 303, "added to the cart: $status");
+		has($v->go('GET', '/cart')[1], 'Cart (0)');
+	} finally {
+		cms_records::update('product', $cup['id'], array('published_at' => null));
+	}
+	$v = new visitor($base);
+	same(303, $v->go('POST', '/product/product_item/espresso-cup', array('raster_form' => 'cart.add', 'qty' => '1'))[0], 'and can once it is out');
+});
+
 test('unpaid orders give their pieces back after an hour', function () use ($base) {
 	$v = new visitor($base);
 	$before = stock('morning-mug');
@@ -486,7 +505,7 @@ test('pay on delivery, the default: no provider, no pretending the order is paid
 	has($sent[1]['text'], 'to be paid on delivery');
 	// the studio ships it unpaid, and marks it paid when the courier brings the money
 	$studio = new visitor($plain);
-	$studio->login('studio@bluehour.test', 'studio password');
+	$studio->login('studio@bluehour.test', $GLOBALS['studio_password']);
 	$page = $studio->go('GET', '/orders')[1];
 	has($page, $order['number'], 'in To ship');
 	$token = $studio->token('/orders');
@@ -519,7 +538,7 @@ test('pay on delivery, the default: no provider, no pretending the order is paid
 
 test('the studio\'s own account lists the studio\'s own orders, not everyone\'s', function () use ($base) {
 	$studio = new visitor($base);
-	$studio->login('studio@bluehour.test', 'studio password');
+	$studio->login('studio@bluehour.test', $GLOBALS['studio_password']);
 	// (the editor's own copy of the template's example is left out)
 	$account = preg_replace('#<template data-raster-mockup.*?</template>#s', '', $studio->go('GET', '/account')[1]);
 	same(0, substr_count($account, 'class="order"'), 'a guest\'s order is not the studio\'s');

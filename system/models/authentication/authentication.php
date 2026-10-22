@@ -118,16 +118,6 @@ class authentication
 		});
 	}
 
-	// bookkeeping must never block a login, even on a schema that lacks
-	// the columns (run `raster schema --apply` to add them)
-	protected static function store_quietly($bean) {
-		try {
-			R::store($bean);
-		} catch (Exception $e) {
-			log::warning('authentication: '.$e->getMessage());
-		}
-	}
-
 	// the columns this model uses, for `raster schema --apply`
 	static function schema() {
 		return array('user' => array(
@@ -156,25 +146,58 @@ class authentication
 	static function check_login($login, $password) {
 		$user = self::find($login);
 		if (!$user || !is_string($password) || $password === '') return false;
-		// five wrong passwords lock the account for 15 minutes; once 15
-		// minutes have passed since the last one, counting starts again
-		if ((int)$user->failed_count > 0 && (int)strtotime((string)$user->failed_at) <= time() - 900) $user->failed_count = 0;
-		if ((int)$user->failed_count >= 5 && strtotime((string)$user->failed_at) > time() - 900) return false;
+		if (!self::password_ok($user, $password)) return false;
 		$hash = (string)$user->password;
-		$ok = preg_match('/^[a-f0-9]{32}$/', $hash) ? hash_equals($hash, md5($password)) : password_verify($password, $hash);
-		if (!$ok) {
-			$user->failed_count = (int)$user->failed_count + 1;
-			$user->failed_at = R::isoDateTime();
-			self::store_quietly($user);
-			return false;
-		}
-		if (preg_match('/^[a-f0-9]{32}$/', $hash) || password_needs_rehash($hash, PASSWORD_DEFAULT)) {
-			$user->password = password_hash($password, PASSWORD_DEFAULT);
-		}
-		$user->failed_count = 0;
-		$user->last_login = R::isoDateTime();
-		self::store_quietly($user);
+		$values = array('failed_count' => 0, 'last_login' => R::isoDateTime());
+		if (preg_match('/^[a-f0-9]{32}$/', $hash) || password_needs_rehash($hash, PASSWORD_DEFAULT)) $values['password'] = password_hash($password, PASSWORD_DEFAULT);
+		self::update_quietly($user->id, $values);
 		return (int)$user->id;
+	}
+
+	// Whether $password is the account's. Five wrong passwords lock the
+	// account for 15 minutes, for logins and the account form alike; once
+	// 15 minutes have passed since the last one, counting starts again. The
+	// try is counted before the slow check, read and written in the write
+	// lock, so guesses sent at once each count. The caller sets
+	// failed_count back to 0 when it was right.
+	protected static function password_ok($user, $password) {
+		$counted = true;
+		try {
+			$counted = cms_records::transaction(function () use ($user) {
+				$fresh = R::load('user', (int)$user->id);
+				$recent = (int)strtotime((string)$fresh->failed_at) > time() - 900;
+				$count = $recent ? (int)$fresh->failed_count : 0;
+				if ($count >= 5) return false;
+				$fresh->failed_count = $count + 1;
+				$fresh->failed_at = R::isoDateTime();
+				R::store($fresh);
+				return true;
+			});
+		} catch (Exception $e) {
+			// a schema without the columns (`raster schema --apply` adds them)
+			log::warning('authentication: the login lock can\'t count: '.$e->getMessage());
+		}
+		if (!$counted) return false;
+		$hash = (string)$user->password;
+		// Raster 1.x kept unsalted md5. Its first account was admin with the
+		// password admin, which it had no screen to change: an old hash of
+		// the account's own name never logs in (`raster user` sets a new one)
+		if (preg_match('/^[a-f0-9]{32}$/', $hash)) return hash_equals($hash, md5($password)) && !hash_equals($hash, md5((string)$user->username));
+		return password_verify($password, $hash);
+	}
+
+	// writes $values to the account, read again in the write lock, so what
+	// another request changed meanwhile isn't written back as it was
+	protected static function update_quietly($id, $values) {
+		try {
+			cms_records::transaction(function () use ($id, $values) {
+				$user = R::load('user', (int)$id);
+				foreach ($values as $key => $value) $user->$key = $value;
+				R::store($user);
+			});
+		} catch (Exception $e) {
+			log::warning('authentication: '.$e->getMessage());
+		}
 	}
 
 	// ties a session to the password it was opened with, so changing the
@@ -370,6 +393,16 @@ class authentication
 		return true;
 	}
 
+	// whether the person asking may open the page at $uri: the 'protected'
+	// patterns setup() checks, for the in-page editor's saves
+	static function may_open($uri) {
+		$uri = '/'.ltrim((string)$uri, '/');
+		foreach ((array)config::get('protected', array()) as $pattern => $role) {
+			if (preg_match('%^/'.ltrim($pattern, '/').'%i', $uri) && !self::can($role)) return false;
+		}
+		return true;
+	}
+
 	// on the command line only `raster render` follows it: the page ends
 	// there with 303, and the address goes to stderr
 	protected function redirect($location) {
@@ -391,6 +424,14 @@ class authentication
 		if (!$v->submitted()) return false;
 		if (!$v->valid()) return $this->form_again();
 		self::connect();
+		// the lock counts per account; this counts per address, so one
+		// sender can't guess at many accounts, or try which ones exist:
+		// over login_per_ip tries in an hour, none is checked
+		$limit = config::get('login_per_ip', 20);
+		if ($limit !== false && validation_spam::count_ip('authentication.login') > (int)$limit) {
+			$v->raise('slow_down');
+			return $this->form_again();
+		}
 		$login = util::post('login') !== false ? util::post('login') : (util::post('email') !== false ? util::post('email') : util::post('username'));
 		$id = self::check_login($login, util::post('password'));
 		if (!$id) {
@@ -525,9 +566,15 @@ class authentication
 		$email = strtolower(trim((string)util::post('email')));
 		$password = (string)util::post('password');
 		$changes_login = ($email !== '' && $email !== $bean->email) || $password !== '';
-		if ($changes_login && !password_verify((string)util::post('current_password'), (string)$bean->password)) {
-			$v->raise('current_password_wrong');
-			return $this->form_again();
+		// counted against the account's lock, as logins are, so a session
+		// left open can't be used to guess the password
+		if ($changes_login) {
+			if (!self::password_ok($bean, (string)util::post('current_password'))) {
+				$v->raise('current_password_wrong');
+				return $this->form_again();
+			}
+			$bean = R::load('user', $user['id']);
+			$bean->failed_count = 0;
 		}
 		$new_email = $email !== '' && $email !== $bean->email;
 		if ($new_email) {

@@ -170,9 +170,16 @@ function token_in($html) {
 	return preg_match('/name="csrf" value="([a-f0-9]+)"/', $html, $m) ? $m[1] : (preg_match('/"csrf":"([a-f0-9]+)"/', $html, $m) ? $m[1] : null);
 }
 function login($base, $login, $password) {
+	// the suite logs in from one address far more often than login_per_ip
+	// lets a person in an hour; 'login per address' tests the limit itself
+	login_clear();
 	list($status, , $headers) = http('POST', "$base/login", array('raster_form' => 'authentication.login', 'login' => $login, 'password' => $password));
 	same(303, $status, "login $login");
 	return cookie_from($headers);
+}
+function login_clear() {
+	cms_store::connect();
+	if (in_array('formhit', R::inspect())) R::exec("DELETE FROM formhit WHERE form = 'authentication.login'");
 }
 function raster($args, $env = array()) {
 	global $root;
@@ -372,6 +379,11 @@ test(array('A5', 'A6'), 'routes file and URL keys', function () use ($base) {
 	}
 	has(header_value(http('GET', "$base/journal/journal_page/2.rss")[2], 'Content-Type'), 'application/rss+xml', 'page 2 of the feed is journal.rss');
 	has(between(http('GET', "$base/lab/color/red")[1], 'param'), '<p class="color">red</p>');
+	// a key from the URL is text, in the page and in its script
+	$lab = http('GET', "$base/lab/color/%22%3Balert(1)%3B%3Cimg%20src%3Dx%3E")[1];
+	has($lab, '<p class="color">&quot;;alert(1);&lt;img src=x&gt;</p>');
+	has($lab, 'var labColor = "&quot;;alert(1);&lt;img src=x&gt;";');
+	lacks($lab, '<img src=x>');
 });
 test(array('A18', 'M4'), 'a route\'s parameter URLs show the route\'s page fields (#110)', function () use ($base) {
 	mcp($base, 'update_page', array('page' => '/specials', 'fields' => array('heading' => 'Today only')));
@@ -1040,7 +1052,7 @@ test(array('E18', 'E19', 'E28'), 'the editor saves pages and items, keeps revisi
 	same(400, $status, 'only CMS page tables');
 	has($error['error'], 'Unknown page');
 	same(400, $save('editor_save_field', array('type' => 'subscriber', 'field' => 'email', 'value' => 'x@y.zz'))[0]);
-	list(, $history) = $save('editor_history', array('type' => 'aboutpage'));
+	list(, $history) = $save('editor_history', array('type' => 'aboutpage', 'slug' => '/about'));
 	check(count($history['revisions']) >= 2, 'revisions');
 	same('Edited in the page', $history['revisions'][0]['fields']['heading']);
 	check(preg_match('/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d$/', $history['revisions'][0]['updated_at']), 'times with their offset');
@@ -1243,6 +1255,12 @@ test(array('I3', 'I4', 'I8', 'I9'), 'SMTP: plain on localhost, STARTTLS and smtp
 	list($port, $log) = $smtp('smtps');
 	same('sent', $send("smtps://user:pass@0.0.0.0:$port"));
 	has(file_get_contents($log), 'AUTH OVER TLS');
+	// a refused password is named in the error, never written into it
+	list($port, $log) = $smtp('badauth');
+	$out = $send("smtp://user:s3cret-pass@127.0.0.1:$port");
+	has($out, 'failed: SMTP error after AUTH LOGIN password: 535');
+	lacks($out, base64_encode('s3cret-pass'));
+	lacks($out, base64_encode('user'));
 	// the sender from config mail_from when RASTER_MAIL_FROM is not set
 	list($port, $log) = $smtp('plain');
 	same('sent', $send("smtp://127.0.0.1:$port", false));
@@ -2196,6 +2214,11 @@ test(array('L1', 'L2'), 'environments', function () use ($root) {
 	$servers = array('localhost' => 'development', '127\.0\.0\.1' => 'development', 'staging\.cafe\.test' => 'staging');
 	same('development', config::environment_for('localhost:8000', '127.0.0.1', false, $servers));
 	same('production', config::environment_for('localhost', '10.0.0.5', false, $servers), 'loopback names need a local client');
+	// and so does every name under localhost (the café maps ro.localhost)
+	$cafe = array('ro\.localhost' => 'development');
+	same('production', config::environment_for('ro.localhost', '203.0.113.9', false, $cafe), 'ro.localhost from another machine');
+	same('production', config::environment_for('ro.localhost.', '203.0.113.9', false, $cafe + array('ro\.localhost\.' => 'development')), 'with the root dot too');
+	same('development', config::environment_for('ro.localhost:8000', '127.0.0.1', false, $cafe), 'ro.localhost from this machine');
 	same('staging', config::environment_for('staging.cafe.test', '10.0.0.5', false, $servers));
 	same('production', config::environment_for('staging.cafe.test.evil.example', '10.0.0.5', false, $servers), 'whole names only');
 	same('production', config::environment_for('cafe.test', '10.0.0.5', false, $servers));

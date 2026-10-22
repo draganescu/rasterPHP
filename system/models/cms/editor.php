@@ -179,9 +179,16 @@ class cms_editor {
 		return null;
 	}
 
+	// the page's table, from type and slug: only the page the slug names,
+	// and only one the person may open, so a page 'protected' keeps for
+	// admins is not an editor's to read or change. The site's own fields
+	// (sitepage) are on every page.
 	protected static function page_type() {
 		$type = strtolower((string)util::post('type'));
 		if (!preg_match('/^[a-z0-9]+page$/', $type) || !cms_store::table_exists($type)) return null;
+		if ($type === 'sitepage') return $type;
+		$slug = (string)util::post('slug');
+		if (cms::page_type($slug) !== $type || !authentication::may_open($slug === 'home' ? '/' : $slug)) return null;
 		return $type;
 	}
 
@@ -246,10 +253,13 @@ class cms_editor {
 		cms::require_admin(true);
 		if ($bad = self::one_value()) return $bad;
 		$collection = (string)util::post('collection');
-		if (!preg_match('/^[a-z][a-z0-9_]*$/', $collection)) return self::fail('Unknown collection');
+		if (!preg_match('/^[a-z][a-z0-9_]*$/', $collection) || cms::reserved($collection, 'collection')) return self::fail('Unknown collection');
 		$type = cms::collection_type($collection);
 		$item = cms_store::get_item($type, (int)util::post('id'));
 		if (!$item) return self::fail('No such item', 404);
+		// a record's hidden fields never reach the editor, also on the way out
+		$record = cms_records::info($collection);
+		if ($record) $item = cms_records::shown($record, $item);
 		try {
 			cms_store::delete_item($type, (int)util::post('id'));
 		} catch (cms_refused $e) {

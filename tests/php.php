@@ -26,9 +26,11 @@ function php_flags() {
 		if (flock($handle, LOCK_EX | LOCK_NB)) { exec('rm -rf '.escapeshellarg($old)); }
 		fclose($handle);
 	}
-	$dir = "$base/raster-opcache-".getmypid();
-	@mkdir($dir, 0775, true);
-	if (!is_dir($dir) || !is_writable($dir)) return $flags;
+	// a name nobody could have made first, made here or not used at all: the
+	// children run the compiled code they find in it, so a folder another
+	// user made in the shared temp folder would run their code as ours
+	$dir = "$base/raster-opcache-".bin2hex(random_bytes(16));
+	if (!@mkdir($dir, 0700)) return $flags;
 	$lock = fopen("$dir/.lock", 'c');
 	if (!$lock || !flock($lock, LOCK_EX | LOCK_NB)) return $flags;
 	foreach (array('opcache.enable=1', 'opcache.enable_cli=1', "opcache.file_cache=$dir", 'opcache.file_cache_only=1', 'opcache.validate_timestamps=1', 'opcache.revalidate_freq=0', 'opcache.file_update_protection=2') as $option) {

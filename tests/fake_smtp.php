@@ -1,11 +1,12 @@
 <?php
 // A tiny SMTP server for tests:
-//   php tests/fake_smtp.php <port> <transcript-file> [plain|starttls|smtps|silent] [cert.pem]
+//   php tests/fake_smtp.php <port> <transcript-file> [plain|starttls|smtps|silent|badauth] [cert.pem]
 // plain never offers STARTTLS; starttls offers and performs it; smtps is TLS
 // from the first byte; silent takes connections and never says a word, as a
 // hung mail server does (it notes each one as "CONNECTED"). It accepts AUTH LOGIN and appends every session
 // (commands and message) to the transcript file. Addresses listed in
-// <transcript-file>.refuse, one a line, are answered 450 greylisted. It
+// <transcript-file>.refuse, one a line, are answered 450 greylisted. In
+// badauth mode the password is answered 535, as a wrong one would be. It
 // stops by itself once the test run that started it is gone, even one
 // killed before it could stop it.
 if ($argc < 3) exit("usage: fake_smtp.php <port> <file> [mode] [cert]\n");
@@ -84,7 +85,7 @@ while ($client = $accept()) {
 			break;
 		} elseif (preg_match('/^[A-Za-z0-9+\/=]+$/', trim($line))) {
 			// the two AUTH LOGIN answers (base64 user and password)
-			$say(strpos($session, 'S: 334 UGFzc3dvcmQ6') === false ? '334 UGFzc3dvcmQ6' : '235 authenticated');
+			$say(strpos($session, 'S: 334 UGFzc3dvcmQ6') === false ? '334 UGFzc3dvcmQ6' : ($mode === 'badauth' ? '535 authentication failed' : '235 authenticated'));
 		} else {
 			$say('502 unknown');
 		}

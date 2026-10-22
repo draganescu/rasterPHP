@@ -68,11 +68,11 @@ A health check: PHP version and extensions, whether the app needs upgrade steps,
 ## Accounts
 
 ```sh
-php bin/raster user <email or username> [--role=admin|editor|member] [--password=…] [--name="…"]
+php bin/raster user <email or username> [--role=admin|editor|member] [--password=-] [--name="…"]
 php bin/raster users
 ```
 
-`user` creates an account, or updates an existing one. A new account gets the role `admin` unless `--role` says otherwise, and a random password, printed, unless `--password` gives one. For an existing account it changes only what you give: without `--role` it keeps the role, without `--password` it keeps the password, and it says what it kept. `users` lists accounts with their role and last log-in. See [Accounts and roles](Accounts-and-Roles).
+`user` creates an account, or updates an existing one. A new account gets the role `admin` unless `--role` says otherwise, and a random password, printed, unless `--password=-` gives one: it reads the password from standard input (`RASTER_PASSWORD` works too), out of the process list other users of the machine can read. `--password=<value>` still works, with a note saying so. For an existing account it changes only what you give: without `--role` it keeps the role, without `--password` it keeps the password, and it says what it kept. `users` lists accounts with their role and last log-in. See [Accounts and roles](Accounts-and-Roles).
 
 ## Newsletter
 

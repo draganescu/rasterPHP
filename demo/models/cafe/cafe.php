@@ -188,9 +188,11 @@ class cafe
 		return $rows ? implode(', ', array_column($rows, 'name')) : 'none';
 	}
 
-	// a key from the URL: /lab/color/red
+	// a key from the URL: /lab/color/red. Escaped, as anything from the URL
+	// must be: HTML views print what a model returns as it is, and lab.html
+	// also prints it inside a <script> string
 	function color() {
-		return util::param('color', 'none');
+		return util::e(util::param('color', 'none'));
 	}
 
 	// a query with a bound parameter

@@ -75,8 +75,13 @@ class mail
 		return trim(str_replace(array("\r", "\n"), '', (string)$value));
 	}
 
+	// The address of "Name <addr>", or a bare address as it is. Only a <…>
+	// that ends the value is one: "1<ana@example.com>"@example.org is an
+	// address of its own (a quoted local part), which a visitor can type
+	// into a form, and it must not deliver to ana@example.com while the
+	// form's limits count it as another address each time.
 	static function address($from) {
-		return preg_match('/<([^>]+)>/', $from, $m) ? $m[1] : $from;
+		return preg_match('/^(.*?)\s*<([^<>]+)>$/s', $from, $m) ? $m[2] : $from;
 	}
 
 	// Renders a view and sends it. Returns true when it was handed over (or,
@@ -339,7 +344,9 @@ class mail
 			}
 			return $response;
 		};
-		$command = function ($line, $expect) use ($socket, $read) {
+		// an error names the command, never what was sent with it: during
+		// AUTH that is the user and the password, which go to the log
+		$command = function ($line, $expect, $label = null) use ($socket, $read) {
 			if ($line === false) {
 				@fwrite($socket, "QUIT\r\n");
 				return fclose($socket);
@@ -347,7 +354,7 @@ class mail
 			if ($line !== null) fwrite($socket, $line."\r\n");
 			$response = $read();
 			if ((int)substr($response, 0, 3) !== $expect) {
-				throw new RuntimeException('SMTP error after '.($line === null ? 'connect' : strtok($line, ' ')).': '.trim($response));
+				throw new RuntimeException('SMTP error after '.($label !== null ? $label : ($line === null ? 'connect' : strtok($line, ' '))).': '.trim($response));
 			}
 			return $response;
 		};
@@ -366,8 +373,8 @@ class mail
 		}
 		if ($user !== null) {
 			$command('AUTH LOGIN', 334);
-			$command(base64_encode($user), 334);
-			$command(base64_encode((string)$pass), 235);
+			$command(base64_encode($user), 334, 'AUTH LOGIN user');
+			$command(base64_encode((string)$pass), 235, 'AUTH LOGIN password');
 		}
 		return $command;
 	}
