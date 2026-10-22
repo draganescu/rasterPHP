@@ -466,6 +466,31 @@ test('update takes only a folder that holds a Raster release, even with --force 
 	same($before, file_get_contents("$site/system/checksums.json"));
 });
 
+test('update takes a tarball made with macOS tar (#116)', function () use ($tmp, $rel200, $rel210) {
+	$site = "$tmp/site-mac";
+	same(0, raster($rel200, array('new', $site))[0]);
+	// macOS tar keeps a file's extended attributes in a ._<name> entry next
+	// to it, and a folder unzipped from a Mac can carry a __MACOSX/ folder
+	$pack = "$tmp/mac-pack";
+	mkdir($pack);
+	exec('cp -a '.escapeshellarg($rel210).' '.escapeshellarg("$pack/rel210"), $o, $status);
+	same(0, $status);
+	file_put_contents("$pack/._rel210", "Mac OS X attributes\n");
+	file_put_contents("$pack/rel210/system/._util.php", "Mac OS X attributes\n");
+	mkdir("$pack/__MACOSX/rel210", 0775, true);
+	file_put_contents("$pack/__MACOSX/rel210/._index.php", "Mac OS X attributes\n");
+	$tar = new PharData("$tmp/mac.tar");
+	$tar->buildFromDirectory($pack);
+	$tar->compress(Phar::GZ);
+	list($code, $out) = raster($site, array('update', "$tmp/mac.tar.gz"));
+	same(0, $code, $out);
+	has($out, 'Updated to Raster 2.1.0');
+	same("2.1.0\n", file_get_contents("$site/system/VERSION"));
+	check(!file_exists("$site/system/._util.php"), 'the attributes are not copied in as a file');
+	list($code, $out) = raster($site, array('doctor'));
+	has($out, '✓ Framework files as installed');
+});
+
 // ## Uploads and downloads (#115, #113)
 
 test('doctor in production warns when PHP takes smaller uploads than the editor sends (#115)', function () use ($site) {

@@ -19,7 +19,7 @@ if (is_file($off) && $git_files !== null && !test_is_tracked($git_files, 'demo/v
 	if (is_file("$root/demo/views/cafe/login.html")) test_move_aside($root, 'demo/views/cafe/login.html.off');
 	else { rename($off, "$root/demo/views/cafe/login.html"); echo "put back demo/views/cafe/login.html\n"; }
 }
-test_sweep($root, array('zz*', '_zz*'), array('demo/views/cafe', 'demo/views', 'demo/models', ''));
+test_sweep($root, array('zz*', '_zz*'), array('demo/views/cafe', 'demo/views', 'demo/models', 'media', ''));
 $tmp = sys_get_temp_dir().'/raster-demo-'.getmypid();
 @mkdir($tmp, 0775, true);
 $db = test_db("$tmp/cafe.sqlite");
@@ -113,29 +113,34 @@ function server($port, $env) {
 	$servers[$port] = $process;
 	return "http://127.0.0.1:$port";
 }
-// tests/fake_smtp.php on $host:$port, stopped with the servers; the first
-// connection when it answers, or false
-function fake_smtp($port, $log, $mode, $cert = '', $host = '127.0.0.1') {
+// tests/fake_smtp.php on 127.0.0.1:$port, stopped with the servers; the
+// first connection when it answers, or false at once when it stopped (it
+// couldn't listen)
+function fake_smtp($port, $log, $mode, $cert = '') {
 	global $root, $servers;
-	$servers['smtp-'.count($servers).'-'.$port] = proc_open(php_argv("$root/tests/fake_smtp.php", (string)$port, $log, $mode, $cert, $host), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes);
-	// a short timeout: on macOS an address like 127.0.0.2 that lo0 doesn't
-	// have never answers, and the default timeout stalls the whole run
-	for ($up = false, $i = 0; $i < 100 && !($up = @fsockopen($host, $port, $errno, $errstr, 0.2)); $i++) usleep(50000);
+	$process = $servers['smtp-'.count($servers).'-'.$port] = proc_open(php_argv("$root/tests/fake_smtp.php", (string)$port, $log, $mode, $cert), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes);
+	for ($up = false, $i = 0; $i < 100 && !($up = @fsockopen('127.0.0.1', $port, $errno, $errstr, 0.2)); $i++) {
+		if (!proc_get_status($process)['running']) return false;
+		usleep(50000);
+	}
 	return $up;
 }
+// files the run puts in media/ (an upload is named by the server), deleted
+// when it ends and nothing else there; a run killed outright leaves them to
+// the next run's test_sweep()
+$media = array();
+function media_made($url) {
+	global $root, $media;
+	$file = "$root/media/".basename($url);
+	test_fixture($file);
+	$media[] = $file;
+}
 register_shutdown_function(function () use ($tmp, $root) {
-	global $servers;
+	global $servers, $media;
 	foreach ($servers as $key => $process) stop_server($key, $process);
 	exec('rm -rf '.escapeshellarg($tmp).' '.escapeshellarg("$root/demo/data/cache").' '.escapeshellarg("$root/demo/data/mail").' '.escapeshellarg("$root/demo/data/changes.log"));
-	foreach (glob("$root/media/*") ?: array() as $file) if (basename($file) !== '.gitignore' && filemtime($file) > time() - 3600) @unlink($file);
+	foreach ($media as $file) @unlink($file);
 });
-// PHP skips shutdown functions when a signal ends it, which left the
-// servers running after a run stopped with Ctrl-C, kill or a timeout: exit
-// instead, so the shutdown above stops them
-if (function_exists('pcntl_async_signals')) {
-	pcntl_async_signals(true);
-	foreach (array(SIGINT, SIGTERM, SIGHUP) as $signal) pcntl_signal($signal, function ($signal) { exit(128 + $signal); });
-}
 
 function http($method, $url, $body = null, $headers = array()) {
 	if (is_array($body)) {
@@ -1084,10 +1089,12 @@ test(array('E21', 'E29', 'C44'), 'pictures: upload, page and item photos, empty 
 	list($status, $response) = http('POST', "$base/api/cms/editor_upload", $multipart('cake.png', $png), $type);
 	same(200, $status, $response);
 	$upload = json_decode($response, true);
+	if (isset($upload['url'])) media_made($upload['url']);
 	same(40, $upload['width']);
 	check(preg_match('#/media/\d{8}-[a-f0-9]{12}\.png$#', $upload['url']), 'a new file name');
 	check(is_file($root.'/media/'.basename($upload['url'])));
 	list($status, $response) = http('POST', "$base/api/cms/editor_upload", $multipart('shell.png', '<?php echo 1;'), $type);
+	if (isset(json_decode($response, true)['url'])) media_made(json_decode($response, true)['url']);
 	same(400, $status);
 	has($response, 'Only JPEG, PNG, GIF and WebP');
 	// a page field in an attribute: <!-- print.@src.cms.photo -->
@@ -1189,15 +1196,18 @@ test('G15', 'registration off', function () use ($db, $maildir) {
 // ## I. Mail over SMTP
 
 test(array('I3', 'I4', 'I8', 'I9'), 'SMTP: plain on localhost, STARTTLS and smtps elsewhere', function () use ($root, $tmp) {
-	// a certificate for 127.0.0.2, trusted through openssl.cafile
+	// "another host" is 0.0.0.0: mail counts only localhost, 127.0.0.1 and
+	// ::1 as this machine, and Linux and macOS alike connect to 0.0.0.0 on
+	// 127.0.0.1, where the fake server listens. (127.0.0.2 needs an alias
+	// on macOS's lo0.) A certificate for it, trusted through openssl.cafile.
 	$cert = "$tmp/smtp-cert.pem";
-	exec('openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=127.0.0.2 -addext subjectAltName=IP:127.0.0.2 -keyout '.escapeshellarg($cert).' -out '.escapeshellarg("$cert.crt").' 2>/dev/null', $o, $code);
+	exec('openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=0.0.0.0 -addext subjectAltName=IP:0.0.0.0 -keyout '.escapeshellarg($cert).' -out '.escapeshellarg("$cert.crt").' 2>/dev/null', $o, $code);
 	same(0, $code, 'openssl');
 	file_put_contents($cert, file_get_contents("$cert.crt"), FILE_APPEND);
-	$smtp = function ($mode, $host) use ($root, $tmp, $cert) {
+	$smtp = function ($mode) use ($root, $tmp, $cert) {
 		$port = free_port();
-		$transcript = "$tmp/smtp-$mode-$host.log";
-		if (!fake_smtp($port, $transcript, $mode, $cert, $host)) throw new Exception("the fake SMTP server did not answer on $host:$port".($host === '127.0.0.1' ? '' : "; on macOS add the address with `sudo ifconfig lo0 alias $host up`"));
+		$transcript = "$tmp/smtp-$mode-$port.log";
+		if (!fake_smtp($port, $transcript, $mode, $cert)) throw new Exception("the fake SMTP server did not answer on 127.0.0.1:$port");
 		return array($port, $transcript);
 	};
 	$send = function ($dsn, $from = true) use ($root, $cert) {
@@ -1207,7 +1217,7 @@ test(array('I3', 'I4', 'I8', 'I9'), 'SMTP: plain on localhost, STARTTLS and smtp
 		return shell_exec($env.' '.php_cmd().' -d openssl.cafile='.escapeshellarg("$cert.crt").' -r '.escapeshellarg($code).' 2>&1');
 	};
 	// plain text is fine on this machine
-	list($port, $log) = $smtp('plain', '127.0.0.1');
+	list($port, $log) = $smtp('plain');
 	same('sent', $send("smtp://user:pass@127.0.0.1:$port"), 'localhost may skip TLS');
 	$transcript = file_get_contents($log);
 	has($transcript, 'AUTH IN PLAIN TEXT');
@@ -1216,23 +1226,25 @@ test(array('I3', 'I4', 'I8', 'I9'), 'SMTP: plain on localhost, STARTTLS and smtp
 	has($transcript, 'C: RCPT TO:<owner@cafe.test>');
 	has($transcript, 'From: =?UTF-8?B?'.base64_encode('Café').'?= <hello@cafe.test>');
 	// but not to another host, unless you insist
-	list($port, $log) = $smtp('plain', '127.0.0.2');
-	has($send("smtp://user:pass@127.0.0.2:$port"), 'does not offer STARTTLS');
+	list($port, $log) = $smtp('plain');
+	// said here, or every step below fails with a less clear reason
+	if (!@fsockopen('0.0.0.0', $port, $errno, $errstr, 1)) throw new Exception("0.0.0.0:$port does not reach the fake server on 127.0.0.1:$port ($errstr); these steps need a system that connects to 0.0.0.0 on this machine, as Linux and macOS do");
+	has($send("smtp://user:pass@0.0.0.0:$port"), 'does not offer STARTTLS');
 	lacks((string)@file_get_contents($log), 'C: AUTH', 'no password sent in plain text');
-	same('sent', $send("smtp://user:pass@127.0.0.2:$port?insecure=1"));
+	same('sent', $send("smtp://user:pass@0.0.0.0:$port?insecure=1"));
 	// STARTTLS upgrades before the password
-	list($port, $log) = $smtp('starttls', '127.0.0.2');
-	same('sent', $send("smtp://user:pass@127.0.0.2:$port"));
+	list($port, $log) = $smtp('starttls');
+	same('sent', $send("smtp://user:pass@0.0.0.0:$port"));
 	$transcript = file_get_contents($log);
 	has($transcript, 'TLS STARTED');
 	has($transcript, 'AUTH OVER TLS');
 	lacks($transcript, 'AUTH IN PLAIN TEXT');
 	// smtps is TLS from the first byte
-	list($port, $log) = $smtp('smtps', '127.0.0.2');
-	same('sent', $send("smtps://user:pass@127.0.0.2:$port"));
+	list($port, $log) = $smtp('smtps');
+	same('sent', $send("smtps://user:pass@0.0.0.0:$port"));
 	has(file_get_contents($log), 'AUTH OVER TLS');
 	// the sender from config mail_from when RASTER_MAIL_FROM is not set
-	list($port, $log) = $smtp('plain', '127.0.0.1');
+	list($port, $log) = $smtp('plain');
 	same('sent', $send("smtp://127.0.0.1:$port", false));
 	has(file_get_contents($log), 'From: =?UTF-8?B?'.base64_encode('Raster Café').'?= <hello@cafe.test>');
 });
@@ -3748,6 +3760,7 @@ test('M19', 'the MCP view tools take a theme only as a folder directly under vie
 		// the site's other theme is still there to read
 		same('print', mcp($base, 'read_view', array('view' => mcp($base, 'list_views', array('theme' => 'print'))['views'][0], 'theme' => 'print'))['theme']);
 		// over stdio, write_view writes nowhere but a theme
+		media_made('zz-pwned.html');
 		$answers = mcp_stdio(array(
 			array('write_view', array('view' => 'zz-pwned.html', 'content' => '<p>x</p>', 'theme' => '../../media')),
 			array('write_view', array('view' => 'zz-pwned.html', 'content' => '<p>x</p>', 'theme' => 'zzlinked')),
@@ -3757,7 +3770,6 @@ test('M19', 'the MCP view tools take a theme only as a folder directly under vie
 		check(!file_exists("$outside/zz-pwned.html"), 'nothing through the link');
 	} finally {
 		@unlink("$themes/zzlinked");
-		@unlink("$root/media/zz-pwned.html");
 		foreach (glob("$outside/*") as $file) unlink($file);
 		@rmdir($outside);
 	}

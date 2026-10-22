@@ -2384,7 +2384,9 @@ stamp check, so people with a page open send it again.
   (`system/checksums.json` records them); `--force` goes ahead. Replaced
   files are kept in `application/data/backups/`. A folder or archive must
   hold `system/boot.php` to count as a release; anything else is refused,
-  `--force` or not. A framework file it can't write or remove stops the
+  `--force` or not. An archive packed on a Mac is fine: the `._<name>`
+  files macOS `tar` adds and a `__MACOSX/` folder are left out, never
+  copied in. A framework file it can't write or remove stops the
   update with exit 1 and the file's name, and the old files are put back,
   so nothing is half updated or recorded as installed.
 - It then runs `php bin/raster upgrade` for every app: the steps in
@@ -2429,7 +2431,7 @@ php tests/shop.php                # the example shop in shop/: records, checkout
 node tests/editor-browser.js      # the in-page editor in Chromium (needs Playwright)
 ```
 
-The suites start their PHP children (servers, `bin/raster`, MCP sessions) with opcache's file cache (`php_flags()` in `tests/db.php`), so each one reads compiled code instead of compiling the framework again; `RASTER_TEST_OPCACHE=off` turns it off. A suite also removes, at its start, the untracked fixtures a killed run left behind (`test_sweep()`).
+The suites start their PHP children (servers, `bin/raster`, MCP sessions) with opcache's file cache (`php_flags()` in `tests/db.php`), so each one reads compiled code instead of compiling the framework again; `RASTER_TEST_OPCACHE=off` turns it off. A suite also removes, at its start, the untracked fixtures a killed run left behind (`test_sweep()`). A run stopped with Ctrl-C, `kill` or a timeout still stops its servers, and `tests/watch.php`, started with every suite, stops them after one killed outright (`kill -9`). The demo suite deletes only the files it put in `media/`.
 
 Run, demo and shop also run on MySQL: `RASTER_DB=mysql://root@127.0.0.1:3306/raster
 php tests/demo.php`. Each run makes new, empty databases beside the one named

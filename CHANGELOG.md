@@ -3,6 +3,15 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.40
+
+Nothing for sites to do. A tarball packed on a Mac updates a site, and the test suites run clean on a Mac (#116).
+
+- **`raster update <file.tar.gz>` takes a tarball made with macOS `tar`.** macOS `tar` adds a hidden `._<folder>` entry next to the release's folder, so the update saw two things at the top and said the file did not hold a Raster release. Now the `._<name>` files macOS adds, and a `__MACOSX/` folder from a Mac's zip, are left out before the release's folder is looked for, and are never copied into the site.
+- **The SMTP tests no longer need 127.0.0.2.** They stand in for "a mail server that isn't this machine", which `mail` must not send a password to in plain text. macOS has no 127.0.0.2, so the demo suite hung there. They now use `0.0.0.0`, which Linux and macOS both connect to this machine, and the fake mail server listens on 127.0.0.1. A fake server that can't start fails its test at once instead of being waited for.
+- **A stopped or killed test run leaves no servers running.** Every suite now stops its servers when it is stopped with Ctrl-C, `kill` or a timeout (only the demo suite did), and a small watcher started with each suite stops them after a `kill -9` too.
+- **The demo suite deletes only the files it put in `media/`.** It deleted every file there newer than an hour. A run killed outright leaves its files to the next run, which moves them aside, as it does with the other files the tests write.
+
 ## 2.2.39
 
 Nothing for most sites to do. A site with a literal route and URLs with parameters behind it can drop the tables those URLs left (below). **A route's URLs with parameters show the route's page fields** (#110). With `controller::route('blog/post')->to('post')`, an editor's headline on `/blog/post` didn't show on `/blog/post/id/7`, which still showed the template's default: page fields were kept per whole URL, so each URL with parameters was a page of its own. In development every such URL a visitor opened made its own table (`blogpostid7…page`), `schema` listed those as unused with a `--drop` hint, and MCP's `get_page` and `update_page` answered "Unknown page" for them. Now a URL a literal route matched (only lowercase letters, digits, `_`, `-` and `/`) is that route's page, as page numbers and filters already were: `/blog/post/id/7` shows and edits the fields of `/blog/post`, no new table is made, and MCP finds the route's page from any of its URLs. A pattern with regular expression parts (`blog/[0-9]+`) is not one address, so each URL it matches keeps its own fields, as before.
