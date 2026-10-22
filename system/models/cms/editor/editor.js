@@ -665,7 +665,7 @@
 		var empty = value === '' && field.info.default != null && !field.item;
 		var shown = empty ? field.info.default : value;
 		[field].concat(twins(field)).forEach(function (f) {
-			if (f.kind === 'image' || f.kind === 'attr') { if (shown) f.el.setAttribute(f.attr || 'src', shown); return; }
+			if (f.kind === 'image' || f.kind === 'attr') { if (shown) setAttr(f, shown); return; }
 			if (f.kind === 'text') f.el.textContent = shown; else f.el.innerHTML = shown;
 			if (empty) f.el.setAttribute('data-raster-default', ''); else f.el.removeAttribute('data-raster-default');
 		});
@@ -702,6 +702,15 @@
 			return { colon: ':', tab: '\t', newline: '\n' }[n.toLowerCase()];
 		});
 		return /^(javascript|data|vbscript):/i.test(plain.replace(/[\x00-\x20]+/g, ''));
+	}
+
+	// an attribute field's value as the page prints it: a link that would run
+	// script goes, as template::render_rows drops it from what visitors typed.
+	// A save or an action answers with the stored value, which the page never
+	// printed, so it is checked here again
+	function setAttr(f, value) {
+		var name = f.attr || 'src';
+		if (scriptLink(value)) f.el.removeAttribute(name); else f.el.setAttribute(name, value);
 	}
 
 	// inline: for a region that can't hold paragraphs; its paragraphs,
@@ -1225,7 +1234,7 @@
 		item.fields.forEach(function (f) {
 			if (!(f.info.field in saved)) return;
 			var value = saved[f.info.field] == null ? '' : String(saved[f.info.field]);
-			if (f.kind === 'image' || f.kind === 'attr') { if (value) f.el.setAttribute(f.attr || 'src', value); }
+			if (f.kind === 'image' || f.kind === 'attr') { if (value) setAttr(f, value); }
 			else if (f.kind === 'text') f.el.textContent = value;
 			else f.el.innerHTML = value;
 		});
