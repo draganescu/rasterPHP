@@ -3,7 +3,7 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
-## 2.2.41
+## 2.2.42
 
 Nothing for sites to do. **Sign-ups for one address at the same moment no longer fail on MariaDB, and send one confirmation** (#213).
 
@@ -11,6 +11,12 @@ Nothing for sites to do. **Sign-ups for one address at the same moment no longer
 - **Sign-ups at once send one confirmation email, not one each.** Each listener read the stamp before any had written it, so all of them sent. Now the listener reads the subscriber and notes the email as sent under the lock, then sends it. When the lock stays busy (5 seconds) the email still goes, unnoted, and the log says so. A confirmation that fails to send is still noted, so asking again within 5 minutes sends nothing, as it already was for mail sent after a web request's answer.
 - **Confirming or unsubscribing at the same moment as a sign-up for that address is no longer undone.** Both wrote the subscriber without the lock, so a sign-up in progress could write `pending` back over a confirmation on MySQL, or fail on MariaDB. They now write under the lock, reading the subscriber again first, and `newsletter.confirmed` and `newsletter.unsubscribed` are sent after the commit. A confirmation link that is malformed, unknown or already used doesn't wait for the lock.
 - **The tests pass on MariaDB, and pull requests run them there.** Three checked a column's type as `int`, where MariaDB says `int(11)`. The framework, demo and shop suites now also run on MariaDB 11.8 with PHP 8.4, next to MySQL.
+
+## 2.2.41
+
+Nothing for most sites to do. A site served from a copy of the Raster repository (a clone or a GitHub download, not one made with `raster new`) should delete its `sm/` folder if it has one (#227).
+
+- **`sm/`, the old sourceMakeup code viewer, is gone.** It was a 2013 viewer for the framework's annotated source, never used by Raster and never copied into sites by `raster new` or `raster update`. It read any file named in `?file=` and saved it under `sm/cache/` as a plain `.txt` file the web server would hand out. The private-path rules block URLs ending in `.php`, but a request for the folder `/sm/` doesn't end in `.php`, and Caddy's `php_fastcgi` ran `sm/index.php` anyway. On PHP 8 the viewer failed before it read the file, but it still ran and printed the server's paths; on PHP 7 it would have read any file the PHP user can, the database settings included.
 
 ## 2.2.40
 
