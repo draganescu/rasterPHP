@@ -1,13 +1,37 @@
-/* Structure only: the site's look (colours, fonts, widths, spacing) is the theme's to write. */
+/* A plain, classic web page: one readable column in the browser's own colours.
+   No colours here on purpose: the site's look is the theme's to write. */
 *, *::before, *::after { box-sizing: border-box; }
-body { margin: 0; padding: 1rem; font-family: system-ui, sans-serif; line-height: 1.5; }
+body { max-width: 40rem; margin: 0 auto; padding: 2rem 1.25rem 3rem; font-family: Georgia, "Times New Roman", serif; font-size: 1.125rem; line-height: 1.6; }
+h1, h2, h3 { line-height: 1.2; }
+h1 { font-size: 2.25rem; margin: 0 0 1rem; }
+h2 { font-size: 1.4rem; margin: 2.5rem 0 .75rem; }
 img, video { max-width: 100%; height: auto; }
 input, button, textarea, select { font: inherit; }
+input, textarea, select { padding: .3rem .5rem; }
+button { padding: .3rem .9rem; cursor: pointer; }
+
+.site-header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: .5rem 1.5rem; padding-bottom: 1rem; margin-bottom: 2.5rem; border-bottom: 1px solid; }
+.brand { font-size: 1.3rem; font-weight: bold; text-decoration: none; }
 nav, .inline-form { display: flex; flex-wrap: wrap; gap: 1rem; }
 .inline-form { gap: .5rem; }
-.stack, .stack label { display: grid; gap: .5rem; }
-.narrow { max-width: 30rem; }
-.error { margin: 0; }
-.nav-link.active, .pager a.current { font-weight: bold; }
+.nav-link.active, .pager a.current { font-weight: bold; text-decoration: none; }
+
+.lede { font-size: 1.2rem; }
+.news-list { padding-left: 1.25rem; }
+.news-list li { margin: .4rem 0; }
+.news-item { margin: 0 0 2rem; }
+.news-item h2 { margin: 0 0 .25rem; }
+.meta { margin: 0 0 .75rem; font-size: .9rem; font-style: italic; }
+.pager { margin-top: 2rem; }
 .pager a.disabled { pointer-events: none; opacity: .4; }
+
+.stack, .stack label { display: grid; gap: .5rem; }
+.stack { gap: 1rem; margin: 1.5rem 0; }
+.narrow { max-width: 26rem; }
+.error { margin: 0; font-weight: bold; }
+.notice { font-style: italic; }
+
+.site-footer { margin-top: 4rem; padding-top: 1rem; border-top: 1px solid; font-size: .95rem; }
+.signup h2 { font-size: 1.1rem; margin: 0 0 .25rem; }
+.signup p { margin: 0 0 .75rem; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
