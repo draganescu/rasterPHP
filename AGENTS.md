@@ -2383,8 +2383,9 @@ stamp check, so people with a page open send it again.
 ## Checklist for a change
 
 1. Edit or add views in `application/views/<theme>/`. Start from static HTML
-   with real content, then annotate. A new site's `style.css` is structure
-   only, on purpose: the site's look (colours, fonts, widths) is yours to write.
+   with real content, then annotate. A new site's `style.css` is a plain
+   page in the browser's own colours, on purpose: the site's look (colours,
+   fonts, layout) is yours to write.
 2. `php bin/raster lint` must show no errors. Also read the warnings: they
    point to forms nobody handles, alerts nobody raises, and missing email
    views.

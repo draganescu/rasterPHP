@@ -3,6 +3,14 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.45
+
+Nothing for existing sites to do. This changes only what a new site starts with (`php bin/raster new`).
+
+- **A new site says welcome instead of talking about Raster.** The starter's home page is "Hello, and welcome" with a short introduction, its first post is "Hello, world", the about page says what it is for, the site name is "My website" and the footer says "Made with Raster". The list of Raster's features is gone from the home page. Field names are the same.
+- **The starter looks like a plain classic web page.** One readable column, a serif font, the browser's own colours and blue links, a line under the header and above the footer. It still sets no colours and no dark mode, so the look is still the site's to write.
+- **A demo test no longer fails on Fridays.** It took the sixth Friday from today to come before the sixth Saturday, which is not true when today is a Friday.
+
 ## 2.2.44
 
 Nothing for most sites to do. Security fixes from a review of the framework, the demo and the example shop. Four things to check:

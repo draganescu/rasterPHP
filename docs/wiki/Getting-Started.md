@@ -70,10 +70,10 @@ Go to http://localhost:8000/login and log in. Then open the home page. You now s
 That headline came from this line in `application/views/default/index.html`:
 
 ```html
-<h1><!-- print.cms.headline -->Write HTML. Get a CMS.<!-- /print.cms.headline --></h1>
+<h1><!-- print.cms.headline -->Hello, and welcome<!-- /print.cms.headline --></h1>
 ```
 
-You didn't create a database table or an admin form for it. The comment told Raster "this is an editable field called `headline`, and its starting text is *Write HTML. Get a CMS.*". [The CMS](The-CMS) explains the rest.
+You didn't create a database table or an admin form for it. The comment told Raster "this is an editable field called `headline`, and its starting text is *Hello, and welcome*". [The CMS](The-CMS) explains the rest.
 
 ## 5. Look around the project
 

@@ -180,13 +180,12 @@ test('lint: demo theme is clean', function () {
 	$inspector = new raster_inspector();
 	same(array(), $inspector->lint());
 });
-// every new site starts from this theme, so its CSS carries no look to drift back to (raster-builder#161)
-test('the starter style is structure only', function () use ($root) {
+// every new site starts from this theme: a plain page in the browser's own colours, so there is no look to drift back to (raster-builder#161)
+test('the starter style has no colours', function () use ($root) {
 	$css = file_get_contents("$root/application/views/default/style.css");
 	check(!preg_match('/#[0-9a-f]{3,8}\b|\b(rgba?|hsla?|hwb|lab|lch|oklab|oklch|color-mix)\(/i', $css, $m), 'a colour in the starter: '.($m[0] ?? ''));
 	check(!preg_match('/(^|[;{\s])(color|background(-color)?|border(-[a-z]+)?-color)\s*:/i', $css, $m), 'the starter sets a colour: '.($m[0] ?? ''));
 	check(stripos($css, 'prefers-color-scheme') === false, 'the starter picks a dark mode');
-	check(!preg_match('/(^|[}\s,])(main|\.site-header|\.site-footer|\.hero|\.features?)\s*[{,]/', $css, $m), 'the starter lays out the page: '.trim($m[0] ?? ''));
 });
 test('content model from the demo theme', function () {
 	$inspector = new raster_inspector();
@@ -196,7 +195,7 @@ test('content model from the demo theme', function () {
 	same(array('title', 'headline', 'intro'), $pages['/']);
 	same(array('title', 'heading', 'body'), $pages['/about']);
 	same(array('headline', 'date', 'summary', 'body'), array_keys($model['collections']['news']['fields']));
-	foreach ($model['pages'] as $page) if ($page['url'] === '/') same('Write HTML. Get a CMS.', $page['fields']['headline']['default']);
+	foreach ($model['pages'] as $page) if ($page['url'] === '/') same('Hello, and welcome', $page['fields']['headline']['default']);
 	same(array('site_name', 'site_footer'), $pages['site']);
 });
 // the inspector reads a view as the engine does: script-form annotations are
@@ -615,9 +614,8 @@ test('version_assets: only relative URLs to real theme files', function () {
 });
 test('template defaults become content', function () use ($base) {
 	list(, $body) = http('GET', "$base/");
-	check(strpos($body, '<h1>Write HTML. Get a CMS.</h1>') !== false);
-	check(strpos($body, 'Placeholder') === false, 'remove block leaked');
-	check(strpos($body, 'href="'.$base.'/news/news_item/raster-runs-on-php-8"') !== false, 'detail link');
+	check(strpos($body, '<h1>Hello, and welcome</h1>') !== false);
+	check(strpos($body, 'href="'.$base.'/news/news_item/hello-world"') !== false, 'detail link');
 	check(strpos($body, 'href="'.$base.'/news"') !== false, '.html links rewritten');
 });
 test('an extension on a routed or missing URL is never HTML labelled as another type (#120)', function () use ($base) {
@@ -806,7 +804,7 @@ test('mcp edits pages with revisions', function () use ($base) {
 	check(strpos(http('GET', "$base/")[1], '<h1>Edited by an agent</h1>') !== false, 'page not updated');
 	$history = mcp_call('page_history', array('page' => 'index'))['structuredContent']['revisions'];
 	check(count($history) >= 2, 'no revision history');
-	same('Write HTML. Get a CMS.', $history[1]['fields']['headline']);
+	same('Hello, and welcome', $history[1]['fields']['headline']);
 });
 test('mcp rejects fields that are not in templates', function () {
 	$result = mcp_call('update_page', array('page' => '/about', 'fields' => array('made_up' => 'x')));
@@ -1220,7 +1218,7 @@ test('collections: slugs, drafts, scheduling, order', function () use ($base) {
 	same('my-travel-journal', $journal['slug']);
 	same(200, http('GET', "$base/news/news_item/my-travel-journal")[0]);
 	mcp_call('delete_item', array('collection' => 'news', 'id' => $journal['id']));
-	check(strpos($body, 'Ünïcode') < strpos($body, 'Raster runs on PHP 8'), 'order=newest');
+	check(strpos($body, 'Ünïcode') < strpos($body, 'Hello, world'), 'order=newest');
 });
 test('an item titled only with digits opens at its own slug (#90)', function () use ($base) {
 	http('GET', "$base/news");
@@ -1370,7 +1368,7 @@ test('/api does not run form models', function () use ($base) {
 	check(!preg_grep('/^Set-Cookie/i', $headers), 'logged in through /api');
 });
 test('item URLs only under their collection', function () use ($base) {
-	same(404, http('GET', "$base/zzz/news_item/raster-runs-on-php-8")[0]);
+	same(404, http('GET', "$base/zzz/news_item/hello-world")[0]);
 });
 test('a password reset ends other sessions', function () use ($base, $maildir) {
 	list(, , $headers) = form_post("$base/login", array('raster_form' => 'authentication.login', 'login' => 'ada@example.com', 'password' => 'brand new pass'));
@@ -2005,7 +2003,7 @@ test('a typed filter spelled another way is not cached', function () use ($db) {
 		// the same date, the same id, but there is no end to the spellings
 		foreach (array('/news/news_items/date/25%20Sep%202026', '/news/news_items/date/2026-09-25%2000:00', '/news/news_items/date/%202026-09-25',
 			'/news/news_items/id/+1') as $path) {
-			check(strpos($get($path)[1], 'Raster runs on PHP 8') !== false, "$path lists the item");
+			check(strpos($get($path)[1], 'Hello, world') !== false, "$path lists the item");
 			same('200 not cached', $get($path)[0], $path);
 		}
 		same(0, count(cached_pages()), 'cache files');
@@ -2291,7 +2289,7 @@ test('a database that can\'t be reached answers 503 outside development, logged,
 	try {
 		list($status, $body) = http('GET', "$prod/");
 		same(200, $status);
-		check(strpos($body, 'Write HTML. Get a CMS.') !== false, 'template default');
+		check(strpos($body, 'Hello, and welcome') !== false, 'template default');
 	} finally {
 		array_map('unlink', glob("$empty*") ?: array());
 		if (!$had_cache) exec('rm -rf '.escapeshellarg($cache));
