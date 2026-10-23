@@ -456,6 +456,10 @@
 			'.format button{width:30px;height:30px;border-radius:7px;display:grid;place-items:center}',
 			'.format button:hover,.format button.on{background:' + look.accentSoft + ';color:' + look.accent + '}',
 			'.format input{border:0;background:transparent;color:inherit;font:inherit;width:220px;padding:0 8px;outline:none}',
+			// on a phone it sits above the keyboard, with buttons a finger can hit
+			'.format.docked{gap:4px;border-radius:12px;z-index:1}',
+			'.format.docked button{width:44px;height:44px;border-radius:9px}',
+			'.format.docked input{width:min(220px,calc(100vw - 100px));font-size:16px}',
 			// popovers and dialogs
 			'.popover{width:min(360px,calc(100vw - 24px));padding:16px;pointer-events:auto;animation:pop .18s both;max-height:min(70vh,560px);overflow:auto}',
 			'.popover h3,.panel h3{margin:0 0 12px;font:600 17px/1.25 ' + look.heading + '}',
@@ -893,11 +897,15 @@
 		if (field.inline) commands = commands.filter(function (c) { return c[0] !== 'list'; });
 		formatBar = h('div', { class: 'float format surface', role: 'toolbar' });
 		commands.forEach(function (c) {
-			formatBar.appendChild(h('button', { title: t(c[0]), 'aria-label': t(c[0]), html: icon(c[0]), onmousedown: function (e) {
+			// on the press, not the click, and cancelled, so the field keeps its
+			// focus and the words chosen; a finger's touchstart, cancelled, also
+			// stops the phone clearing the selection and sending a mousedown after
+			var press = function (e) {
 				e.preventDefault();
 				if (c[0] === 'link') return askLink(field);
 				document.execCommand(c[1], false, null);
-			} }));
+			};
+			formatBar.appendChild(h('button', { title: t(c[0]), 'aria-label': t(c[0]), html: icon(c[0]), onmousedown: press, ontouchstart: press }));
 		});
 		ui.floats.appendChild(formatBar);
 		formatBar.field = field;
@@ -925,6 +933,19 @@
 	function hideFormatBar() { if (formatBar) { formatBar.remove(); formatBar = null; } }
 	function placeFormatBar() {
 		if (!formatBar) return;
+		// a phone draws its own Copy, Cut and Paste menu over the words chosen,
+		// where the bar would be, and a page can't turn that menu off: the bar
+		// goes to the bottom of what shows instead, just above the keyboard
+		if (touch) {
+			var vv = window.visualViewport || { offsetLeft: 0, offsetTop: 0, width: window.innerWidth, height: window.innerHeight };
+			var bottom = vv.offsetTop + vv.height;
+			// with no keyboard up, the dock may be down there
+			if (bottom >= window.innerHeight - 1) bottom -= 64;
+			formatBar.classList.add('docked');
+			formatBar.style.left = Math.max(8, vv.offsetLeft + (vv.width - formatBar.offsetWidth) / 2) + 'px';
+			formatBar.style.top = (bottom - formatBar.offsetHeight - 8) + 'px';
+			return;
+		}
 		var r = formatBar.field.el.getBoundingClientRect();
 		formatBar.style.left = Math.max(8, Math.min(window.innerWidth - 240, r.left)) + 'px';
 		formatBar.style.top = (r.top > 60 ? r.top - 48 : r.bottom + 8) + 'px';
@@ -1025,6 +1046,8 @@
 	function schedulePlace() { if (placing) return; placing = true; requestAnimationFrame(function () { placing = false; place(); }); }
 	window.addEventListener('scroll', schedulePlace, { passive: true });
 	window.addEventListener('resize', schedulePlace);
+	// a phone's keyboard opening or closing changes only the visual viewport
+	if (window.visualViewport) { visualViewport.addEventListener('resize', schedulePlace); visualViewport.addEventListener('scroll', schedulePlace); }
 
 	function refreshBadges() {
 		badges.forEach(function (b) { b.node.remove(); });

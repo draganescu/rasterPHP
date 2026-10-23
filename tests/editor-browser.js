@@ -461,6 +461,40 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 		const panel = await inShadow(page, h => h.shadowRoot.querySelector('.panel').innerText);
 		check(/Description/i.test(panel) && /not shown in the page/i.test(panel), 'the panel offers fields the page can\'t show');
 		await page.screenshot({ path: path.join(screens, 'panel.png') });
+
+		// the format bar: with a mouse it sits by the field; on a phone, where
+		// the phone's own Copy and Paste menu covers the words chosen, it sits
+		// at the bottom, and a tap on Bold keeps the field and its selection
+		const chooseSmall = p => p.evaluate(() => { const t = document.querySelector('.lede p').firstChild; const r = document.createRange(); r.setStart(t, 2); r.setEnd(t, 7); getSelection().removeAllRanges(); getSelection().addRange(r); });
+		const boldButton = p => host(p).evaluate(h => { const b = h.shadowRoot.querySelector('.format button[aria-label=Bold]'); const r = b.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, docked: b.parentNode.classList.contains('docked') }; });
+		const startEditing = async p => { if (!(await p.evaluate(() => document.documentElement.classList.contains('raster-editing')))) await host(p).evaluate(h => h.shadowRoot.querySelector('.dock .pill.primary').click()); await p.waitForTimeout(300); };
+		await page.goto(base + '/');
+		await page.waitForTimeout(400);
+		await startEditing(page);
+		await page.locator('.lede').click();
+		await chooseSmall(page);
+		let bold = await boldButton(page);
+		check(!bold.docked && bold.y < (await page.locator('.lede').boundingBox()).y, 'with a mouse the format bar is above the field');
+		await page.mouse.click(bold.x, bold.y);
+		check(/<b>small<\/b>/.test(await page.locator('.lede').innerHTML()), 'Bold, clicked, makes the words chosen bold');
+		await page.keyboard.press('Escape');
+		const phoneContext = await browser.newContext({ viewport: { width: 390, height: 664 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, storageState: await context.storageState() });
+		const phoneTab = await phoneContext.newPage();
+		phoneTab.on('pageerror', e => errors.push(e.message));
+		await phoneTab.goto(base + '/');
+		await phoneTab.waitForTimeout(500);
+		await startEditing(phoneTab);
+		await phoneTab.locator('.lede').tap();
+		await chooseSmall(phoneTab);
+		await phoneTab.waitForTimeout(300);
+		bold = await boldButton(phoneTab);
+		check(bold.docked && bold.y > 664 - 160, 'on a phone the format bar sits at the bottom: ' + JSON.stringify(bold));
+		await phoneTab.touchscreen.tap(bold.x, bold.y);
+		await phoneTab.waitForTimeout(200);
+		check(/<b>small<\/b>/.test(await phoneTab.locator('.lede').innerHTML()), 'Bold, tapped, makes the words chosen bold');
+		check(await phoneTab.evaluate(() => document.activeElement.classList.contains('lede') && String(getSelection()) === 'small'), 'after the tap the field keeps its focus and the words chosen');
+		await phoneTab.screenshot({ path: path.join(screens, 'format-phone.png') });
+		await phoneContext.close();
 		check(errors.length === 0, 'no script errors: ' + errors.join('; '));
 	} finally {
 		await browser.close();
