@@ -2511,7 +2511,10 @@ test(array('R15', 'D26'), 'list options: filters from the URL, dates, several or
 	staff_booking(array('name' => 'Zed Window', 'date' => $later, 'time' => '21:00'));
 	staff_booking(array('name' => 'Abe Window', 'date' => $later));
 	staff_booking(array('name' => 'Ida Inside', 'date' => $later, 'resource' => 'ana', 'service' => 'cut', 'time' => '10:00'));
-	staff_booking(array('name' => 'Early Window', 'date' => next_open('fri', 6), 'time' => '21:00'));
+	// the Friday before $later: on a Friday, next_open('fri', 6) is a week after next_open('sat', 6)
+	$early = next_open('fri', 6);
+	if ($early >= $later) $early = next_open('fri', 5);
+	staff_booking(array('name' => 'Early Window', 'date' => $early, 'time' => '21:00'));
 
 	$page = http('GET', "$base/staff", null, $h)[1];
 	$names = booking_names(staff_section($page, 'Requests'));
@@ -2526,7 +2529,7 @@ test(array('R15', 'D26'), 'list options: filters from the URL, dates, several or
 	$names = booking_names(staff_section($room, 'Requests'));
 	check(in_array('Abe Window', $names) && !in_array('Ida Inside', $names), 'resource=?resource filters by the URL');
 	has($room, '<option value="dining-room" selected>', 'the get form keeps the choice');
-	same(array('Early Window'), booking_names(staff_section(http('GET', "$base/staff?resource=dining-room&day=".next_open('fri', 6), null, $h)[1], 'Requests')), 'two filters from the URL');
+	same(array('Early Window'), booking_names(staff_section(http('GET', "$base/staff?resource=dining-room&day=$early", null, $h)[1], 'Requests')), 'two filters from the URL');
 	has(http('GET', "$base/staff?day=$later", null, $h)[1], 'name="day" value="'.$later.'"');
 	same(booking_names(staff_section($page, 'Requests')), booking_names(staff_section(http('GET', "$base/staff?resource=", null, $h)[1], 'Requests')), 'an empty parameter filters nothing');
 
