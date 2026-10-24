@@ -409,7 +409,7 @@ alike:
 | `rsvp.promoted` | the same, after a waiting reply was moved in (`who` `waitlist`; `staff` by the `promote` action) |
 | `cms.item_saved` | `collection` (its own name, `team_members`), `created` (true for new items), `item` |
 | `cms.item_deleted` | `collection`, `item` |
-| `cms.page_saved` | `type`, `slug`, `changed` (field names), `fields` |
+| `cms.page_saved` | `type`, `slug`, `changed` (field names), `fields`; multilingual, also `lang` (the language the revision changed) |
 | `content_changed` | none (sent by `util::content_changed()`; inside a transaction, once after the commit) |
 | `mail.sent` / `mail.failed` | `to`, `subject` / and `error` (in a web request, after the answer) |
 
@@ -799,6 +799,23 @@ mock-up is stored only when the collection's table is made.
   the items with the same `author`. For real references, write a model.
 - **Page edits are versioned:** every save is a new revision. Values can be
   HTML. An empty value shows the template default.
+- **Page fields in a language** (`multilingual` on, see **i18n**): a
+  translated field (`text` printed as content, or in `@alt`, `@title`,
+  `@placeholder`, `@aria-label`, `@content`) keeps each translation in a
+  column of its own (`headline__ro`); the others (photos, links, numbers)
+  are shared, one value for every language. On `/ro/…` a page or site
+  field shows its Romanian, and the default language's value while that
+  is empty (`cms_store::localized($row, $type, $lang)`, for showing only,
+  never for a write). In development a field's first print makes its
+  translation columns. `cms_store::update_page($type, $slug, $values,
+  $allowed, $lang)` writes `$values` (named by the fields themselves,
+  `headline`) in `$lang`: a translated field into its column, and a shared
+  one is refused with `field_shared`, nothing stored; without `$lang` it
+  writes the default language, as always. Each revision keeps the
+  language it changed in `saved_lang` (`page_history` lists it), and
+  restoring one brings back the whole row, every language's translations
+  included. Off, none of this happens: no column, no `saved_lang`, the
+  event as it was.
 - **Changing fields.** A new annotation adds a column: on the next request in
   development, or with `php bin/raster schema --apply` in production.
   `schema` shows orphaned columns and suggests
@@ -2335,9 +2352,21 @@ of lists and filter pages come along; drafts and the editor don't.
     prints (`<!--raster:s 3-->…<!--raster:e 3-->`, details in
     `#raster-editor-config`), and `system/models/cms/editor/editor.js` saves
     through `POST /api/cms/editor_save_field`, `editor_save_item`,
-    `editor_delete_item`, `editor_history`, `editor_restore` and
-    `editor_upload`, with the session token. They use the same store as MCP,
-    so revisions, field checks and events are the same.
+    `editor_delete_item`, `editor_history`, `editor_restore`,
+    `editor_upload` and `editor_set_lang`, with the session token. They use the same store as MCP,
+    so revisions, field checks and events are the same. A field name with
+    `__` (a language's column) is refused.
+  - **On a multilingual site** the editor edits the page's language, the
+    one its address names: on `/ro/about` it saves the Romanian (through
+    `/ro/api/cms/…`, posting `lang`, which must be the page's), and
+    `/about` keeps its English. The dock says so ("editing: RO (falls back
+    to EN)"); a field with no Romanian yet shows the English and is
+    marked, and the Page panel says which fields are not translated yet
+    and which are the same in every language (a photo saved on `/ro/` is
+    the photo everywhere). The history says which language each revision
+    changed. The config's `lang` is the page's language, and it adds
+    `editor_lang`, `languages` and `editor_languages`; off it is as it
+    always was.
   - Its colours and fonts come from the page (body text, background, the
     first button's colour as the accent). To choose them, set
     `--raster-accent`, `--raster-on-accent`, `--raster-font`,
@@ -2346,6 +2375,13 @@ of lists and filter pages come along; drafts and the editor don't.
   - Its words are in English; `system/models/cms/editor/lang/<lang>.php`
     translates them (Romanian is included), and
     `application/i18n/<lang>/raster_editor.php` overrides any of them.
+    Which language: without `multilingual`, the page's (`?lang=`, as
+    detected). Multilingual, the editor's own, apart from the page's: the
+    one the person chose with the dock's picker (kept on the account,
+    `user.editor_lang`, which `schema --apply` adds), else the first of
+    the browser's languages it has words for, else the site's default
+    language, else English. So an English owner fixing `/ro/` gets English
+    words.
   - What the server refuses comes back as names, `problems` in the
     answer, and the editor words each as `problem_<name>` (a record's
     `check()` included): a value that isn't of its field's type is

@@ -5,7 +5,8 @@
 // fresh database, logs in as an editor and uses the editor the way a person
 // would: edit mode, typing, undo, adding an item with a photo, hiding,
 // deleting and undoing, a keyboard-only pass, Enter in a paragraph field,
-// the page panel. Screenshots go to tests/screens/.
+// the page panel, and a multilingual site's /ro/ page (RASTER_TEST_ONLY=multilingual
+// runs only that one). Screenshots go to tests/screens/.
 const { chromium } = require('playwright');
 const { spawn, execFileSync } = require('child_process');
 const fs = require('fs');
@@ -32,6 +33,67 @@ function port() { return new Promise(r => { const s = net.createServer(); s.list
 const host = page => page.locator('[data-raster-host]');
 const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 
+// The editor on a multilingual site (#200): the starter in English and
+// Romanian, written to its the_events.php for the test, with a page of two
+// fields. An English editor on /ro/ edits Romanian with English words.
+async function multilingual(browser) {
+	const app = path.join(root, 'application');
+	const view = path.join(app, 'views/default/zzml.html');
+	const events = path.join(app, 'config/the_events.php');
+	const kept = fs.readFileSync(events, 'utf8');
+	const mlEnv = Object.assign({}, env, { RASTER_APP: 'application', RASTER_DB: path.join(tmp, 'ml.sqlite'), RASTER_ENV: 'development' });
+	fs.writeFileSync(view, '<!doctype html><html><head><title>About</title></head><body><main><h1><!-- print.cms.zzml_headline -->Our story<!-- /print.cms.zzml_headline --></h1>'
+		+ '<p class="intro"><!-- print.cms.zzml_intro -->Coffee since 2001.<!-- /print.cms.zzml_intro --></p></main></body></html>');
+	fs.writeFileSync(events, (kept.startsWith('<?php') ? kept : '<?php\n') + "\nconfig::set('languages')->to(array('en', 'ro'));\nconfig::set('multilingual')->to(true);\n");
+	const p = await port();
+	const base = 'http://127.0.0.1:' + p;
+	let server = null;
+	try {
+		execFileSync('php', [path.join(root, 'bin/raster'), 'user', 'ana@site.test', '--role=editor', '--password=ana password', '--name=Ana'], { env: mlEnv });
+		server = spawn('php', ['-S', '127.0.0.1:' + p, path.join(root, 'index.php')], { cwd: root, env: mlEnv, stdio: 'ignore' });
+		await new Promise(r => setTimeout(r, 600));
+		// the first view makes the fields, and their Romanian columns
+		await fetch(base + '/zzml');
+		const context = await browser.newContext({ viewport: { width: 1280, height: 860 }, locale: 'en-GB' });
+		const page = await context.newPage();
+		const errors = [];
+		page.on('pageerror', e => errors.push(e.message));
+		await page.goto(base + '/login');
+		await page.fill('input[name=login]', 'ana@site.test');
+		await page.fill('input[name=password]', 'ana password');
+		await Promise.all([page.waitForNavigation(), page.click('form button')]);
+		await page.goto(base + '/ro/zzml');
+		await page.waitForTimeout(500);
+		check(await inShadow(page, h => h.shadowRoot.querySelector('.dock .lang').textContent) === 'editing: RO (falls back to EN)', 'the dock says the page\'s language');
+		check(await inShadow(page, h => h.shadowRoot.querySelector('.dock .pill.primary').textContent) === 'Edit', 'an English editor gets English words on /ro/');
+		check(await page.locator('h1[data-raster-untranslated]').count() === 1, 'an untranslated field is marked');
+		check(await page.locator('h1').textContent() === 'Our story', 'and shows the English');
+		// a save on /ro/ is the Romanian
+		await page.keyboard.press('e');
+		await page.waitForTimeout(300);
+		await page.locator('h1').click();
+		await page.keyboard.press('Control+A');
+		await page.keyboard.type('Povestea noastră');
+		await page.keyboard.press('Enter');
+		await page.waitForTimeout(800);
+		check((await (await fetch(base + '/ro/zzml')).text()).includes('<h1>Povestea noastră</h1>'), 'the Romanian is saved');
+		check((await (await fetch(base + '/zzml')).text()).includes('<h1>Our story</h1>'), 'the English stays');
+		check(await page.locator('h1[data-raster-untranslated]').count() === 0, 'translated now');
+		check(await page.locator('p.intro[data-raster-untranslated]').count() === 1 && await page.locator('p.intro').textContent() === 'Coffee since 2001.', 'the other field still shows English');
+		await page.screenshot({ path: path.join(screens, 'multilingual.png') });
+		// the picker: the editor's own words in Romanian
+		await Promise.all([page.waitForNavigation(), inShadow(page, h => { const s = h.shadowRoot.querySelector('.dock .langs'); s.value = 'ro'; s.dispatchEvent(new Event('change')); })]);
+		await page.waitForTimeout(500);
+		check(await inShadow(page, h => h.shadowRoot.querySelector('.dock .lang').textContent) === 'editezi: RO (dacă lipsește: EN)', 'the dock in Romanian');
+		check(errors.length === 0, 'no script errors on /ro/: ' + errors.join('; '));
+		await context.close();
+	} finally {
+		if (server) server.kill();
+		fs.writeFileSync(events, kept);
+		fs.rmSync(view, { force: true });
+	}
+}
+
 (async () => {
 	const p = await port();
 	const base = 'http://127.0.0.1:' + p;
@@ -53,6 +115,9 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 	const browser = await chromium.launch(process.env.CHROMIUM ? { executablePath: process.env.CHROMIUM } : {});
 	const errors = [];
 	try {
+		// the café, unless only the multilingual case runs
+		cafe: {
+		if (process.env.RASTER_TEST_ONLY === 'multilingual') break cafe;
 		const context = await browser.newContext({ viewport: { width: 1280, height: 860 } });
 		const page = await context.newPage();
 		page.on('pageerror', e => errors.push(e.message));
@@ -462,6 +527,8 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 		check(/Description/i.test(panel) && /not shown in the page/i.test(panel), 'the panel offers fields the page can\'t show');
 		await page.screenshot({ path: path.join(screens, 'panel.png') });
 		check(errors.length === 0, 'no script errors: ' + errors.join('; '));
+		}
+		await multilingual(browser);
 	} finally {
 		await browser.close();
 		server.kill();

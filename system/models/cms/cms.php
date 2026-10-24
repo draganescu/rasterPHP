@@ -33,6 +33,8 @@ class cms
 
 	// page rows by type, read once per request and shared by their fields
 	private $pages = array();
+	// fields whose translation columns were looked for (development)
+	private $translations = array();
 
 	// ##Naming
 	// Bean types must be lowercase letters and digits only.
@@ -383,19 +385,58 @@ class cms
 		// a stored row carries every column of its table; a new one is of the
 		// mock-up's type and starts as the mock-up
 		$example = trim(template::get('current_block'));
+		$multilingual = i18n::enabled();
+		// D7: printed here, does the field have a translation per language?
+		$attr = $multilingual ? template::get('current_attr') : null;
+		$translates = function ($field_type) use ($name, $attr) {
+			return cms_types::translates($field_type, $attr === null ? null : substr($attr, 1)) ? array($name) : array();
+		};
 		if (!array_key_exists($name, $page->getProperties())) {
 			if (database::$frozen) return false;
 			$field_type = cms_types::of_example($example);
-			cms_types::ensure($type, array($name => $field_type));
+			cms_types::ensure($type, array($name => $field_type), $multilingual ? $translates($field_type) : array());
 			$page->$name = cms_types::clean($field_type, $example, $name);
 			R::store($page);
+		} elseif ($multilingual && !database::$frozen && !isset($this->translations[$type.'.'.$name])) {
+			// a field made before the site had languages gets its
+			// translation columns the first time it prints (development)
+			$this->translations[$type.'.'.$name] = true;
+			foreach (i18n::available() as $lang) {
+				if (i18n::is_default($lang) || array_key_exists(cms_types::column($name, $lang), $page->getProperties())) continue;
+				$types = cms_types::of_table($type);
+				$wanted = $translates(isset($types[$name]) ? $types[$name] : 'text');
+				if ($wanted) cms_types::ensure($type, array(), $wanted);
+				break;
+			}
 		}
 		// read as its type, as a collection's are, so 14.5 prints as its mock-up 14.50
 		$types = cms_types::of_table($type);
-		$value = cms_types::show(isset($types[$name]) ? cms_types::read($types[$name], $page->$name) : $page->$name, $example);
+		$stored = $page->$name;
+		$mark = null;
+		if ($multilingual) {
+			// the field in the page's language, or the default language's
+			// value while it has no translation (D8); the editor's mark
+			// says which language it edits, and whether the field has a
+			// translation (shared fields are one for every language)
+			$lang = i18n::current();
+			$row = $page->getProperties();
+			$shown = cms_store::localized($row, $type, $lang);
+			$stored = $shown[$name];
+			$mark = array('lang' => $lang);
+			if (!i18n::is_default($lang)) {
+				$translated = in_array($name, cms_types::translated($type), true);
+				$column = cms_types::column($name, $lang);
+				$mark['shared'] = !$translated;
+				if ($translated) {
+					$mark['untranslated'] = !isset($row[$column]) || (string)$row[$column] === '';
+					$mark['fallback'] = (string)cms_types::show($row[$name]);
+				}
+			}
+		}
+		$value = cms_types::show(isset($types[$name]) ? cms_types::read($types[$name], $stored) : $stored, $example);
 		$value = $value === '' ? false : $value;
 		if (cms_editor::editing()) {
-			return cms_editor::field($type, $type === 'sitepage' ? 'site' : $this->slug, $name, $value, template::get('current_block'));
+			return cms_editor::field($type, $type === 'sitepage' ? 'site' : $this->slug, $name, $value, template::get('current_block'), $mark);
 		}
 		return $value;
 	}
@@ -587,7 +628,7 @@ class cms
 	// override of it, answers there.
 	static function api() {
 		return array_fill_keys(array('editor_save_field', 'editor_save_item', 'editor_delete_item', 'editor_history', 'editor_restore',
-			'editor_upload', 'editor_action', 'editor_script', 'style', 'logout'), 'visitor');
+			'editor_upload', 'editor_action', 'editor_script', 'editor_set_lang', 'style', 'logout'), 'visitor');
 	}
 
 	// ##The in-page editor (see editor.php): POST /api/cms/editor_… with csrf
@@ -599,6 +640,7 @@ class cms
 	public function editor_upload() { return cms_editor::upload(); }
 	public function editor_action() { return cms_editor::action(); }
 	public function editor_script() { return cms_editor::script(); }
+	public function editor_set_lang() { return cms_editor::set_lang(); }
 
 	function style() {
 		if (!util::param('output', false)) {
