@@ -29,6 +29,17 @@ return array(
 	// (template::unscript) and lint read the same list
 	'script_form' => template::$script_form,
 
+	// ##Names
+	// The characters each kind of name is made of, as regex character
+	// classes: model (print.<model>.method), key (what follows print. inside
+	// a render block: line2, @data-id.key, +class.state), field (a row key on
+	// its own), attribute (print.@<attribute>.x), view and res
+	// (dry.<view>.<res>). The engine's patterns are built from this list
+	// (template::$names), and lint reads it here, so the two accept the same
+	// names. dry_depth is how many levels of dry inside a res both fill in.
+	'names' => template::$names,
+	'dry_depth' => template::DRY_DEPTH,
+
 	// ##Keywords
 	// - `name`: the keyword takes a `.reference` (remove does not)
 	// - `block`: it wraps content and needs a closing tag

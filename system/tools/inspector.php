@@ -54,6 +54,12 @@ class raster_inspector {
 		return self::grammar()['references']['builtin_keys'];
 	}
 
+	// the character class of a kind of name (model, key, field, attribute,
+	// view, res), the one the engine's patterns are built from
+	static function name($kind) {
+		return self::grammar()['names'][$kind];
+	}
+
 	public $theme;
 	public $views_dir;
 	public $ext;
@@ -302,7 +308,7 @@ class raster_inspector {
 	// Splits a print/render reference into model and method. Returns false
 	// when the reference has no model part.
 	static function model_reference($ref) {
-		if (!preg_match('/^([a-z0-9_\-]+)\.(.+)$/', $ref, $m)) return false;
+		if (!preg_match('/^('.self::name('model').'+)\.(.+)$/', $ref, $m)) return false;
 		return array('model' => $m[1], 'method' => $m[2]);
 	}
 
@@ -316,10 +322,10 @@ class raster_inspector {
 		}
 		// a link to the other items sharing field values:
 		// print.@href.raster_filter@author (or @author@year for several fields)
-		if (preg_match('/^([@+])([a-zA-Z0-9_\-:]+)\.(raster_filter(@[a-z0-9_]+)+)$/', $ref, $m)) {
+		if (preg_match('/^([@+])('.self::name('attribute').'+)\.(raster_filter(@[a-z0-9_]+)+)$/', $ref, $m)) {
 			return array('key' => $m[3], 'attribute' => $m[2], 'append' => $m[1] === '+', 'builtin' => true);
 		}
-		if (preg_match('/^([@+])([a-zA-Z0-9_\-:]+)\.([A-Za-z0-9_\-]+)$/', $ref, $m)) {
+		if (preg_match('/^([@+])('.self::name('attribute').'+)\.('.self::name('field').'+)$/', $ref, $m)) {
 			return array('key' => $m[3], 'attribute' => $m[2], 'append' => $m[1] === '+', 'builtin' => in_array($m[3], self::builtin_keys()));
 		}
 		return array('key' => $ref, 'attribute' => null, 'append' => false, 'builtin' => in_array($ref, self::builtin_keys()));
@@ -651,7 +657,7 @@ class raster_inspector {
 
 	// print.@src.cms.photo: the attribute, and the model call without it
 	static function attribute_call($ref) {
-		return preg_match('/^([@+])([a-zA-Z0-9_\-:]+)\.([a-z0-9_\-]+\..+)$/', $ref, $m) ? array('attribute' => $m[2], 'append' => $m[1] === '+', 'ref' => $m[3]) : null;
+		return preg_match('/^([@+])('.self::name('attribute').'+)\.('.self::name('model').'+\..+)$/', $ref, $m) ? array('attribute' => $m[2], 'append' => $m[1] === '+', 'ref' => $m[3]) : null;
 	}
 
 	protected function lint_model_call($block, &$problems) {
@@ -672,7 +678,7 @@ class raster_inspector {
 			$problems[] = self::problem('error', $block, "{$block['raw']} is outside any render block, so it must name a model and a method: <!-- {$block['keyword']}.model.method -->");
 			return;
 		}
-		if (!preg_match('/^[a-z0-9_\-]+$/', $ref['model'])) {
+		if (!preg_match('/^'.self::name('model').'+$/', $ref['model'])) {
 			$problems[] = self::problem('error', $block, "Model names are lowercase letters, digits and underscores: '{$ref['model']}'");
 			return;
 		}
@@ -783,6 +789,11 @@ class raster_inspector {
 			if ($key['attribute'] === null) $this->lint_model_call($block, $problems);
 			return;
 		}
+		// the engine reads only keys made of these (template::$names)
+		if (!preg_match('/^'.self::name('field').'+$/', $key['key'])) {
+			$problems[] = self::problem('error', $block, "Keys inside a render block are letters, digits, _ and -: '{$key['key']}' is never printed");
+			return;
+		}
 		if ($key['attribute'] !== null) {
 			if ($block['type'] === 'self') {
 				$problems[] = self::problem('error', $block, "Attribute directives wrap the tag they change: <!-- {$block['name']} --><a {$key['attribute']}=\"...\">...</a><!-- /{$block['name']} -->");
@@ -797,7 +808,7 @@ class raster_inspector {
 	}
 
 	protected function lint_dry($block, &$problems, $theme) {
-		if (!preg_match('/^([a-z0-9_\-\/]+)\.([a-z0-9_\-]+)$/', $block['ref'], $m)) {
+		if (!preg_match('/^('.self::name('view').'+)\.('.self::name('res').'+)$/', $block['ref'], $m)) {
 			$problems[] = self::problem('error', $block, "dry takes a view and a res block: <!-- dry.layout.header /-->");
 			return;
 		}
@@ -1198,9 +1209,21 @@ class raster_inspector {
 		return $problems;
 	}
 
+	// The themes a site's pages come from: its own, and the ones routes
+	// serve views from (route('print/menu')->to('menu')->from('print')), so
+	// lint, schema, describe and MCP read every view a URL can render (#133)
+	function themes() {
+		$themes = array($this->theme);
+		foreach ($this->routes() as $route) {
+			if (in_array($route['theme'], $themes, true) || !preg_match('/^[A-Za-z0-9_\-]+$/', $route['theme'])) continue;
+			if (is_dir($this->theme_dir($route['theme']))) $themes[] = $route['theme'];
+		}
+		return $themes;
+	}
+
 	function lint($themes = null) {
 		$problems = array();
-		$themes = $themes ?: array($this->theme);
+		$themes = $themes ?: $this->themes();
 		foreach ($themes as $theme) {
 			foreach ($this->views($theme) as $view) {
 				$problems = array_merge($problems, $this->lint_file($view, $theme), $this->lint_address($view, $theme));
@@ -1344,9 +1367,9 @@ class raster_inspector {
 	// Expands dry includes the same way the engine does, so CMS tags that
 	// live in shared layouts are counted for every page that uses them.
 	function expand($html, $theme = null, $depth = 0) {
-		if ($depth > 5) return $html;
+		if ($depth >= self::grammar()['dry_depth']) return $html;
 		$self = $this;
-		return preg_replace_callback('/<!-- dry\.([a-z0-9_\-\/]+)\.([a-z0-9_\-]+) (\/?)-->(?:(.*?)<!-- \/dry\.\1\.\2 -->)?/s', function ($m) use ($self, $theme, $depth) {
+		return preg_replace_callback('/<!-- dry\.('.self::name('view').'+)\.('.self::name('res').'+) (\/?)-->(?:(.*?)<!-- \/dry\.\1\.\2 -->)?/s', function ($m) use ($self, $theme, $depth) {
 			$file = $self->theme_dir($theme).'/'.$m[1].$self->ext;
 			if (!file_exists($file)) return '';
 			$source = file_get_contents($file);
@@ -1357,14 +1380,16 @@ class raster_inspector {
 		}, $html);
 	}
 
-	// The URL path the CMS uses to identify the page a view renders
+	// The URL path the CMS uses to identify the page a view renders: the
+	// one cms::slug_for_uri() gives the view's URL, so schema, describe and
+	// MCP name the table the page reads. An _item view is its collection's
+	// item page, wherever it is.
 	function slug_for_view($view) {
 		$name = substr($view, 0, -strlen($this->ext));
-		if ($name === config::get('default_view', 'index')) return 'home';
 		if (preg_match('/^(?:(.*)\/)?([a-z0-9_]+)_item$/', $name, $m)) {
 			return '/'.$m[2].'/'.$m[2].'_item';
 		}
-		return '/'.$name;
+		return cms::slug_for_uri('/'.$name);
 	}
 
 	function url_for_view($view) {
@@ -1429,7 +1454,14 @@ class raster_inspector {
 		// parameters (/specials/day/friday)
 		foreach ($this->routes() as $route) {
 			$slug = cms::route_slug($route['pattern']);
-			if ($slug === null || $route['theme'] !== $theme) continue;
+			if ($slug === null) continue;
+			// a route to a view of another theme (->from('print')) is a page
+			// of this site: its fields, and its collections, are read from
+			// that theme's view (#133)
+			if ($route['theme'] !== $theme) {
+				if ($theme === $this->theme) $this->routed_page($route, $slug, $pages, $collections, $site, $reserved);
+				continue;
+			}
 			foreach ($pages as $page) {
 				if ($page['view'] !== $route['view'].$this->ext || !$page['fields']) continue;
 				$pages[] = array('view' => $page['view'], 'url' => $slug, 'slug' => $slug, 'type' => cms::page_type($slug), 'fields' => $page['fields']);
@@ -1460,6 +1492,24 @@ class raster_inspector {
 			array_unshift($pages, array('view' => '*', 'url' => 'site', 'slug' => 'site', 'type' => 'sitepage', 'fields' => $site));
 		}
 		return array('pages' => $pages, 'collections' => $collections);
+	}
+
+	// the page a literal route makes of a view in another theme
+	protected function routed_page($route, $slug, &$pages, &$collections, &$site, $reserved) {
+		if (!in_array($route['theme'], $this->themes(), true)) return;
+		$view = $route['view'].$this->ext;
+		$file = $this->theme_dir($route['theme']).'/'.$view;
+		if (preg_match('#(^|/)_#', $view) || !is_file($file)) return;
+		list($blocks) = self::blocks($this->expand(file_get_contents($file), $route['theme']));
+		$fields = array();
+		$this->collect_content($blocks, $fields, $collections, $route['theme'].'/'.$view, $reserved);
+		foreach ($fields as $name => $field) {
+			if (strpos($name, 'site_') !== 0) continue;
+			if (!isset($site[$name])) $site[$name] = $field;
+			unset($fields[$name]);
+		}
+		if (!$fields) return;
+		$pages[] = array('view' => $view, 'theme' => $route['theme'], 'url' => $slug, 'slug' => $slug, 'type' => cms::page_type($slug), 'fields' => $fields);
 	}
 
 	// the fields a markup collection has in a theme's views, from the

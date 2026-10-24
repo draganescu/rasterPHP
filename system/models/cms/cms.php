@@ -72,7 +72,9 @@ class cms
 
 	// The slug identifies which page's content a URL shows. Pagination and
 	// filter segments are not part of it, so /news/news_page/2 and
-	// /news/news_items/tag/x show the same page fields as /news.
+	// /news/news_items/tag/x show the same page fields as /news. Only
+	// segments with something after them are those: /landing_page is the
+	// view landing_page.html, a page of its own (#132).
 	// Item URLs (/news/news_item/3) share one slug per collection.
 	// A URL a literal route matched is that route's page, so parameters
 	// don't make pages: /blog/post/id/7 shows the fields of /blog/post.
@@ -81,7 +83,7 @@ class cms
 		if ($slug === '/' || $slug === '/'.config::get('default_view', 'index')) return 'home';
 		$routed = cms::route_slug($route);
 		if ($routed !== null) return $routed;
-		if (preg_match('#^(/.*?)?/([a-z0-9_]+)_(page|items)(/.*)?$#', $slug, $m)) {
+		if (preg_match('#^(/.*?)?/([a-z0-9_]+)_(page|items)(/.+)$#', $slug, $m)) {
 			$slug = $m[1] !== '' ? $m[1] : '/'.$m[2];
 		} elseif (preg_match('#^(?:/.*?)?/([a-z0-9_]+)_item(/.*)?$#', $slug, $m)) {
 			// an item shown by the collection's own view (no news_item.html)

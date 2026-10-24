@@ -28,7 +28,9 @@ Runs the site with PHP's built-in web server. For development only; see [Deployi
 php bin/raster lint [--fix] [--json] [--theme=name] [--all-themes]
 ```
 
-Checks every view of the theme: annotation spelling, blocks that aren't closed or don't nest, models and methods that don't exist (with the nearest real name), the number of arguments, reserved CMS names, attributes an `@` annotation sets that the tag doesn't have, `dry` fragments that don't exist, forms nobody handles, alerts nobody raises, validation blocks that can never show, routes to missing views, event bindings to missing methods, and named SQL queries that don't exist.
+Checks every view of the site's theme, and of every theme a route serves views from (`->from('print')`): annotation spelling, blocks that aren't closed or don't nest, models and methods that don't exist (with the nearest real name), the number of arguments, reserved CMS names, attributes an `@` annotation sets that the tag doesn't have, `dry` fragments that don't exist, forms nobody handles, alerts nobody raises, validation blocks that can never show, routes to missing views, event bindings to missing methods, and named SQL queries that don't exist.
+
+`--theme=name` checks that one theme alone, `--all-themes` every folder under `views/`.
 
 Problems are **errors** (the page won't work) or **warnings** (probably a mistake). Exit code 1 means at least one error.
 

@@ -8034,6 +8034,221 @@ test('a collection emptied by deleting its items stays empty (#91)', function ()
 	}
 });
 
+// ## P0.A: lint, schema and the engine agree (#28 #36 #132 #133)
+
+test('P0.A names: lint reads the engine\'s character classes (#28)', function () {
+	$grammar = raster_inspector::grammar();
+	same(template::$names, $grammar['names']);
+	same(template::DRY_DEPTH, $grammar['dry_depth']);
+	foreach (array('model', 'key', 'field', 'attribute', 'view', 'res') as $kind) same(template::$names[$kind], raster_inspector::name($kind), $kind);
+	// each kind takes digits and dashes
+	foreach (array('model' => 'zz-p0a2', 'key' => 'line-2', 'field' => 'line-2', 'attribute' => 'data-x2', 'view' => '_p0a-28b2/nav-2', 'res' => 'nav-2') as $kind => $name) {
+		check((bool)preg_match('/^'.template::$names[$kind].'+$/', $name), "$kind: $name");
+	}
+	// a key inside a render block: the attribute forms and colons too
+	foreach (array('line2', '@data-x.key', '@aria-label.key', '+class.state-2', '@xml:lang.lang2') as $key) {
+		check((bool)preg_match('/^'.template::$names['key'].'+$/', $key), $key);
+	}
+	same(array('key' => 'line-2', 'attribute' => 'data-x2', 'append' => false, 'builtin' => false), raster_inspector::data_key('@data-x2.line-2'));
+	same(array('model' => 'zzp0a2', 'method' => 'rows'), raster_inspector::model_reference('zzp0a2.rows'));
+});
+
+test('P0.A names: row keys and attributes with digits and dashes print, nested too (#28)', function () {
+	$app = APPBASE.config::get('models_path', 'models');
+	$theme = APPBASE.config::get('views_path', 'views').'/'.config::get('theme', 'default');
+	temp_model("$app/zzp0a2", array('zzp0a2.php' => "<?php\nclass zzp0a2\n{\n\tfunction rows() {\n\t\treturn array(array('line2' => 'L2', 'line-3' => 'L3', 'kids-2' => array(array('line2' => 'K2', 'line-3' => 'K3'))));\n\t}\n}\n"));
+	test_fixture("$theme/zzp0arows.html");
+	file_put_contents("$theme/zzp0arows.html", '<html><head><title>Rows</title></head><body><ul><!-- render.zzp0a2.rows --><li>'
+		.'<!-- print.line2 -->m2<!-- /print.line2 --> <!-- print.line-3 -->m3<!-- /print.line-3 -->'
+		.'<!-- print.@data-x.line2 --><b data-x="mock">b</b><!-- /print.@data-x.line2 -->'
+		.'<!-- print.@aria-label.line-3 --><i aria-label="mock">i</i><!-- /print.@aria-label.line-3 -->'
+		.'<!-- print.@xml:lang.line2 --><q xml:lang="en">q</q><!-- /print.@xml:lang.line2 -->'
+		.'<!-- print.+class.line-3 --><s class="a">s</s><!-- /print.+class.line-3 -->'
+		.'<!-- print.kids-2 --><em><!-- print.line2 -->k2<!-- /print.line2 -->|<!-- print.@data-x.line-3 --><u data-x="mock">u</u><!-- /print.@data-x.line-3 --></em><!-- /print.kids-2 -->'
+		.'</li><!-- /render.zzp0a2.rows --></ul></body></html>');
+	controller::forget_models();
+	try {
+		same(array(), (new raster_inspector())->lint_file('zzp0arows.html'), 'lint passes it');
+		$page = contact_render('/zzp0arows');
+		check(strpos($page, '[exit 0]') !== false, $page);
+		check(strpos($page, '<li>L2 L3<b data-x="L2">b</b><i aria-label="L3">i</i><q xml:lang="L2">q</q><s class="a L3">s</s><em>K2|<u data-x="K3">u</u></em></li>') !== false, 'every key and attribute set: '.$page);
+		check(strpos($page, 'mock') === false && strpos($page, '<!-- print.') === false, 'no mock-up and no tags left: '.$page);
+	} finally {
+		@unlink("$theme/zzp0arows.html");
+		remove_dir("$app/zzp0a2");
+		controller::forget_models();
+	}
+});
+
+test('P0.A names: lint reports a row key the engine never prints (#28)', function () {
+	check(has_problem(lint_html('<!-- render.cms.zzp0akeys --><p><!-- print.na!me -->x<!-- /print.na!me --></p><!-- /render.cms.zzp0akeys -->'), "'na!me' is never printed"));
+	same(array(), lint_html('<!-- render.cms.zzp0akeys --><p><!-- print.name2 -->x<!-- /print.name2 --></p><!-- /render.cms.zzp0akeys -->'));
+});
+
+test('P0.A names: dry and res names with digits and dashes insert their fragment (#28)', function () {
+	$theme = APPBASE.config::get('views_path', 'views').'/'.config::get('theme', 'default');
+	test_fixture("$theme/_zzp0a28b2.html");
+	test_fixture("$theme/zzp0adry.html");
+	file_put_contents("$theme/_zzp0a28b2.html", '<!-- res.nav2 --><nav>Second nav</nav><!-- /res.nav2 --><!-- res.side-3 --><aside>Side three</aside><!-- /res.side-3 -->');
+	file_put_contents("$theme/zzp0adry.html", '<html><head><title>Dry</title></head><body><!-- dry._zzp0a28b2.nav2 /--><!-- dry._zzp0a28b2.side-3 /--><!-- res.own-2 --><p>Own</p><!-- /res.own-2 --></body></html>');
+	try {
+		same(array(), (new raster_inspector())->lint_file('zzp0adry.html'), 'lint passes it');
+		$page = contact_render('/zzp0adry');
+		check(strpos($page, '<body><nav>Second nav</nav><aside>Side three</aside><p>Own</p></body>') !== false, 'both fragments, and the res tags gone: '.$page);
+	} finally {
+		@unlink("$theme/_zzp0a28b2.html");
+		@unlink("$theme/zzp0adry.html");
+	}
+});
+
+test('P0.A nested dry: the page shows the field lint and schema list, five levels deep (#36)', function () {
+	$theme = APPBASE.config::get('views_path', 'views').'/'.config::get('theme', 'default');
+	foreach (array('_zzp0aouter.html', '_zzp0ainner.html', '_zzp0achain.html', 'zzp0anest.html', 'zzp0achain.html') as $view) test_fixture("$theme/$view");
+	file_put_contents("$theme/_zzp0aouter.html", '<!-- res.box --><div class="box"><!-- dry._zzp0ainner.deep /--></div><!-- /res.box -->');
+	file_put_contents("$theme/_zzp0ainner.html", '<!-- res.deep --><p><!-- print.cms.zz_deep_field -->Deep text<!-- /print.cms.zz_deep_field --></p><!-- /res.deep -->');
+	file_put_contents("$theme/zzp0anest.html", '<html><head><title>Nest</title></head><body><!-- dry._zzp0aouter.box /--></body></html>');
+	// six levels: the sixth stays a comment, in the page and in the content model
+	$chain = '';
+	for ($i = 1; $i <= 6; $i++) $chain .= "<!-- res.l$i --><i><!-- print.cms.zz_l$i -->level $i<!-- /print.cms.zz_l$i --></i>".($i < 6 ? '<!-- dry._zzp0achain.l'.($i + 1).' /-->' : '')."<!-- /res.l$i -->";
+	file_put_contents("$theme/_zzp0achain.html", $chain);
+	file_put_contents("$theme/zzp0achain.html", '<html><head><title>Chain</title></head><body><!-- dry._zzp0achain.l1 /--></body></html>');
+	try {
+		$inspector = new raster_inspector();
+		same(array(), $inspector->lint_file('zzp0anest.html'), 'lint passes it');
+		$fields = array();
+		foreach ($inspector->content_model()['pages'] as $page) $fields[$page['view']] = array_keys($page['fields']);
+		same(array('zz_deep_field'), $fields['zzp0anest.html'], 'schema lists the field');
+		same(array('zz_l1', 'zz_l2', 'zz_l3', 'zz_l4', 'zz_l5'), $fields['zzp0achain.html'], 'five levels');
+		$page = contact_render('/zzp0anest');
+		check(strpos($page, '<div class="box"><p>Deep text</p></div>') !== false, 'the page shows it: '.$page);
+		check(strpos($page, 'dry.') === false && strpos($page, 'res.') === false, 'no tags left: '.$page);
+		$page = contact_render('/zzp0achain');
+		check(strpos($page, '<i>level 1</i><i>level 2</i><i>level 3</i><i>level 4</i><i>level 5</i><!-- dry._zzp0achain.l6 /-->') !== false, 'five levels and the sixth as a comment: '.$page);
+		// and the editor's MCP sees the same field
+		same('Deep text', mcp_call('get_page', array('page' => '/zzp0anest'))['structuredContent']['fields']['zz_deep_field']);
+	} finally {
+		foreach (array('_zzp0aouter.html', '_zzp0ainner.html', '_zzp0achain.html', 'zzp0anest.html', 'zzp0achain.html') as $view) @unlink("$theme/$view");
+		cms_store::connect();
+		foreach (array('/zzp0anest', '/zzp0achain') as $slug) R::exec('DROP TABLE IF EXISTS '.cms::page_type($slug));
+	}
+});
+
+test('P0.A one level of dry renders as it did: no second pass without a dry in the fragment', function () {
+	$theme = APPBASE.config::get('views_path', 'views').'/'.config::get('theme', 'default');
+	test_fixture("$theme/_zzpaone.html");
+	test_fixture("$theme/zzpaone.html");
+	// a res inside the fragment kept its marks in 2.2.45, and still does
+	file_put_contents("$theme/_zzpaone.html", '<!-- res.outer --><div><!-- res.inner --><b>x</b><!-- /res.inner --></div><!-- /res.outer -->');
+	file_put_contents("$theme/zzpaone.html", '<html><head><title>One</title></head><body><!-- dry._zzpaone.outer /--></body></html>');
+	try {
+		$page = contact_render('/zzpaone');
+		check(strpos($page, '<body><div><!-- res.inner --><b>x</b><!-- /res.inner --></div></body>') !== false, $page);
+	} finally {
+		@unlink("$theme/_zzpaone.html");
+		@unlink("$theme/zzpaone.html");
+	}
+});
+
+test('P0.A slugs: _page and _items are list segments only with something after them (#132)', function () {
+	same('/landing_page', cms::slug_for_uri('/landing_page'));
+	same('/landing_items', cms::slug_for_uri('/landing_items/'));
+	same('/docs/news_page', cms::slug_for_uri('/docs/news_page'));
+	same('/news', cms::slug_for_uri('/news/news_page/2'));
+	same('/news', cms::slug_for_uri('/news/news_items/tag/x'));
+	same('/news', cms::slug_for_uri('/news_page/2'));
+	same('/landing_page', cms::slug_for_uri('/landing_page/landing_page/2'));
+	$inspector = new raster_inspector();
+	foreach (array('landing_page.html' => '/landing_page', 'landing_items.html' => '/landing_items', 'index.html' => '/', 'about.html' => '/about', 'docs/setup.html' => '/docs/setup') as $view => $url) {
+		same(cms::slug_for_uri($url), $inspector->slug_for_view($view), $view);
+	}
+	same('/news/news_item', $inspector->slug_for_view('news_item.html'));
+});
+
+test('P0.A landing.html and landing_page.html keep their own values, and MCP edits the right one (#132)', function () use ($base) {
+	$theme = APPBASE.config::get('views_path', 'views').'/'.config::get('theme', 'default');
+	test_fixture("$theme/zzland.html");
+	test_fixture("$theme/zzland_page.html");
+	file_put_contents("$theme/zzland.html", '<html><head><title>Landing</title></head><body><p><!-- print.cms.zz_pitch -->Come for the coffee<!-- /print.cms.zz_pitch --></p></body></html>');
+	file_put_contents("$theme/zzland_page.html", '<html><head><title>Landing page</title></head><body><p><!-- print.cms.zz_pitch -->Stay for the cake<!-- /print.cms.zz_pitch --></p></body></html>');
+	try {
+		$pages = array();
+		foreach ((new raster_inspector())->content_model()['pages'] as $page) $pages[$page['view']] = $page;
+		same(cms::page_type(cms::slug_for_uri('/zzland_page')), $pages['zzland_page.html']['type'], 'schema names the table the page reads');
+		check($pages['zzland_page.html']['type'] !== $pages['zzland.html']['type'], 'two tables');
+		check(strpos(http('GET', "$base/zzland")[1], '<p>Come for the coffee</p>') !== false, '/zzland');
+		check(strpos(http('GET', "$base/zzland_page")[1], '<p>Stay for the cake</p>') !== false, '/zzland_page');
+		$saved = mcp_call('update_page', array('page' => '/zzland_page', 'fields' => array('zz_pitch' => 'Edited by the agent')));
+		same('Edited by the agent', $saved['structuredContent']['fields']['zz_pitch']);
+		check(strpos(http('GET', "$base/zzland_page")[1], '<p>Edited by the agent</p>') !== false, 'the edit shows');
+		check(strpos(http('GET', "$base/zzland")[1], '<p>Come for the coffee</p>') !== false, 'the other page keeps its own');
+		same('Come for the coffee', mcp_call('get_page', array('page' => '/zzland'))['structuredContent']['fields']['zz_pitch']);
+	} finally {
+		@unlink("$theme/zzland.html");
+		@unlink("$theme/zzland_page.html");
+		cms_store::connect();
+		foreach (array('/zzland', '/zzland_page') as $slug) R::exec('DROP TABLE IF EXISTS '.cms::page_type($slug));
+	}
+});
+
+test('P0.A a routed view of another theme is linted, gets its table and MCP edits it (#133)', function () use ($root, $base) {
+	$views = APPBASE.config::get('views_path', 'views');
+	$routes = APPBASE.'config/the_routes.php';
+	$original = file_get_contents($routes);
+	test_fixture("$views/zzp0aprint");
+	@mkdir("$views/zzp0aprint");
+	$view = "$views/zzp0aprint/zzmenu.html";
+	$good = '<html><head><title>Print</title></head><body><h1><!-- print.cms.zz_print_title -->Print title<!-- /print.cms.zz_print_title --></h1></body></html>';
+	file_put_contents($view, str_replace('</h1>', '</h1><!-- print.site.zz_no_such_thing /-->', $good));
+	file_put_contents($routes, $original."\ncontroller::route('zzp0aprint/menu')->to('zzmenu')->from('zzp0aprint');\n");
+	$db = test_db(sys_get_temp_dir().'/raster-p0a-routed-'.getmypid().'.sqlite');
+	$raster = function ($args, $env = '') use ($root, $db) {
+		exec(trim($env.' RASTER_DB='.escapeshellarg($db)).' '.php_cmd().' '.escapeshellarg("$root/bin/raster").' '.$args.' 2>&1', $out, $code);
+		return array($code, implode("\n", $out));
+	};
+	try {
+		// lint, MCP lint_templates and describe read the routed theme by default
+		list($code, $out) = $raster('lint');
+		same(1, $code, $out);
+		check(strpos($out, 'zzp0aprint/zzmenu.html') !== false && strpos($out, "no public method 'zz_no_such_thing'") !== false, $out);
+		check(strpos($out, "themes 'default', 'zzp0aprint'") !== false, $out);
+		check(mcp_call('lint_templates')['structuredContent']['errors'] > 0, 'lint_templates');
+		list(, $out) = $raster('describe --json --sections=lint');
+		check(json_decode($out, true)['lint']['errors'] > 0, 'describe: '.$out);
+		// --theme is that theme alone
+		same(0, $raster('lint --theme=default')[0]);
+		file_put_contents($view, $good);
+		same(0, $raster('lint')[0], 'clean once fixed');
+		// schema knows the page, and --apply makes its table in production
+		$table = cms::page_type('/zzp0aprint/menu');
+		list($code, $out) = $raster('schema --apply', 'RASTER_ENV=production');
+		same(0, $code, $out);
+		list($code, $out) = $raster('schema --json', 'RASTER_ENV=production');
+		$status = json_decode($out, true);
+		$tables = array();
+		foreach ($status['tables'] as $t) $tables[$t['table']] = $t;
+		check(isset($tables[$table]) && $tables[$table]['exists'], "$table: ".$out);
+		check(!in_array($table, $status['unused_tables'], true), 'not unused');
+		same(0, $raster('schema --check', 'RASTER_ENV=production')[0], 'no drift');
+		check(test_pdo($db)->query("SELECT COUNT(*) FROM $table") !== false, 'the table is there');
+		list(, $out) = $raster('describe --json --sections=pages');
+		$described = array();
+		foreach (json_decode($out, true)['pages'] as $page) $described[$page['url']] = $page;
+		same('zzp0aprint', $described['/zzp0aprint/menu']['theme']);
+		same($table, $described['/zzp0aprint/menu']['table']);
+		// MCP reads and edits it, and the page shows the edit
+		same('Print title', mcp_call('get_page', array('page' => '/zzp0aprint/menu'))['structuredContent']['fields']['zz_print_title']);
+		same('Printed menu', mcp_call('update_page', array('page' => '/zzp0aprint/menu', 'fields' => array('zz_print_title' => 'Printed menu')))['structuredContent']['fields']['zz_print_title']);
+		check(strpos(http('GET', "$base/zzp0aprint/menu")[1], '<h1>Printed menu</h1>') !== false, 'the page shows it');
+	} finally {
+		file_put_contents($routes, $original);
+		@unlink($view);
+		@rmdir("$views/zzp0aprint");
+		cms_store::connect();
+		R::exec('DROP TABLE IF EXISTS '.cms::page_type('/zzp0aprint/menu'));
+		if (strpos($db, 'mysql://') !== 0) array_map('unlink', glob("$db*") ?: array());
+	}
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";
 foreach ($skipped as $skip) echo "  - $skip\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";
