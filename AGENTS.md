@@ -2067,9 +2067,11 @@ URL alone says the content's language, so one URL is always one language.
   and `/ro` answers 301 to it. `/ro/menu/` answers 301 to `/ro/menu` (the
   one-address rule), `/en/menu` (the default's code) 301 to `/menu`, and
   `?lang=ro` 301 to the same page in that language (`/ro/menu`, the rest of
-  the query kept). A host listed in `domain_language` (exactly, port aside)
-  is that language and takes no prefix; there `?lang=` for another language
-  goes to that language's domain, or to the site's address (`RASTER_URL`).
+  the query kept; `ro-RO` names `ro`). A host listed in `domain_language`
+  (exactly, port aside) is that language and takes no prefix. One language
+  has one address: on the site's address `/ro/menu` answers 301 to
+  `example.ro/menu` when `ro` has its own domain, and `?lang=` goes to a
+  language's domain, or from one to the site's address (`RASTER_URL`).
   The cookie and `Accept-Language` don't choose the content, and no `lang`
   cookie is set.
 - **One place.** `config::initialize()` takes the prefix off, after the
@@ -2083,8 +2085,8 @@ URL alone says the content's language, so one URL is always one language.
   so every link Raster builds, in pages and in emails rendered there, keeps
   the language.
 - **Links.** On a `/ro/` page, links by file name (`href="menu.html"`) and
-  hand-written root links to pages (`href="/menu"`, `action="/contact"`)
-  become `…/ro/menu`. Links to files are left alone: anything with an
+  hand-written root links to pages (`href="/menu"`, `action="/contact"`,
+  `formaction`) become `…/ro/menu`, and `/index.php/menu` the same. Links to files are left alone: anything with an
   extension (`/menu.pdf`, `/news.rss`), under the app's folder (the theme),
   `media/` or `system/`, and any path that is a file. A root link outside
   the site's folder, or that already names a language (`/ro/menu`), keeps

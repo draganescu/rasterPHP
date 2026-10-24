@@ -8867,8 +8867,8 @@ function p1b_site($settings, $fn) {
 		'zzp1b_about' => '<!doctype html><html><head><title>About</title></head><body>'
 			.'<h1><!-- print.i18n.zzp1b(\'hello\') -->Hello<!-- /print.i18n.zzp1b(\'hello\') --></h1>'
 			.'<a href="index.html">Home</a> <a href="zzp1b_menu.html">Menu</a> <a href="/zzp1b_menu">Root</a> <a href="/">Root home</a>'
-			.' <a href="/zzp1b_menu?x=1#top">Query</a> <a href="/ro/zzp1b_menu">Named</a> <a data-href="/zzp1b_menu">Data</a>'
-			.'<form method="post" action="/zzp1b_about"><button>Go</button></form>'
+			.' <a href="/zzp1b_menu?x=1#top">Query</a> <a href="/ro/zzp1b_menu">Named</a> <a data-href="/zzp1b_menu">Data</a> <a href="/index.php/zzp1b_menu">Index</a>'
+			.'<form method="post" action="/zzp1b_about"><button>Go</button><button formaction="/zzp1b_menu">Other</button></form>'
 			.'<a href="/media/x.jpg">Photo</a> <a href="/application/views/default/style.css">CSS</a> <a href="/system/x">Sys</a>'
 			.' <a href="/bin/raster">File</a> <a href="/zzp1b_menu.pdf">PDF</a> <a href="//cdn.example/x">CDN</a> <a href="https://example.com/about">Out</a>'
 			.'</body></html>',
@@ -8877,7 +8877,7 @@ function p1b_site($settings, $fn) {
 			.'<a href="zzp1b_about.html">About</a> <a href="/preview/p1b42/zzp1b_about">In the folder</a> <a href="/zzp1b_about">Outside</a></body></html>',
 		'zzp1b_staff' => '<!doctype html><html><head><title>Rota</title></head><body><p>Rota</p></body></html>',
 		'_email/zzp1b_note' => '<!doctype html><html><head><title>Note</title></head><body>'
-			.'<a href="/zzp1b_menu">Root</a> <a href="zzp1b_menu.html">Menu</a> <a href="/media/x.jpg">Photo</a></body></html>',
+			.'<a href="/zzp1b_menu">Root</a> <a href="zzp1b_menu.html">Menu</a> <a href="/media/x.jpg">Photo</a> <a href="/index.php/zzp1b_menu">Index</a></body></html>',
 	);
 	foreach ($views as $name => $html) {
 		test_fixture("$theme/$name.html");
@@ -8949,6 +8949,10 @@ test('P1.B: /ro/ URLs: the prefix is taken off, /ro → /ro/, /ro/menu/ → /ro/
 		same("301 $base/zzp1b_menu", $redirect('/ro/zzp1b_menu?lang=en'));
 		same("301 $base/ro/", $redirect('/?lang=ro'));
 		same("301 $base/ro/zzp1b_menu", $redirect('/ro/zzp1b_menu/?lang=RO'));
+		same("301 $base/ro/zzp1b_menu", $redirect('/zzp1b_menu?lang=ro-RO'));
+		// an address that looks like another site's stays on this one
+		check(strpos($redirect('//evil.example/x?lang=ro'), "301 $base/ro/") === 0, 'open redirect');
+		check(strpos($redirect('/ro//evil.example?lang=en'), "301 $base/") === 0, 'open redirect');
 		// a language the site doesn't have is no prefix and no redirect
 		same(404, http('GET', "$base/de/zzp1b_menu")[0]);
 		same(200, http('GET', "$base/ro/zzp1b_menu?lang=xx")[0]);
@@ -8973,7 +8977,7 @@ test('P1.B: /ro/about renders the Romanian template text, and every link carries
 		// links to pages, by file name and by root path, get the language's address
 		foreach (array('<a href="'.$base.'/ro/">Home</a>', '<a href="'.$base.'/ro/zzp1b_menu">Menu</a>', '<a href="'.$base.'/ro/zzp1b_menu">Root</a>',
 			'<a href="'.$base.'/ro/">Root home</a>', '<a href="'.$base.'/ro/zzp1b_menu?x=1#top">Query</a>', '<a href="'.$base.'/ro/zzp1b_menu">Named</a>',
-			'action="'.$base.'/ro/zzp1b_about"') as $link) {
+			'action="'.$base.'/ro/zzp1b_about"', '<a href="'.$base.'/ro/zzp1b_menu">Index</a>', 'formaction="'.$base.'/ro/zzp1b_menu"') as $link) {
 			check(strpos($body, $link) !== false, "missing $link");
 		}
 		// links to files keep theirs
@@ -9015,7 +9019,12 @@ test('P1.B: an email rendered in a language: every page link carries its prefix,
 			same($base, config::get('link_uri'), 'with() puts link_uri back');
 			$html = i18n::with('en', function () { return controller::render_view('_email/zzp1b_note'); });
 			check(strpos($html, 'href="'.$base.'zzp1b_menu">Menu') !== false && strpos($html, '/ro/') === false, $html);
+			// without rewrites the index file is in link_uri once, not twice
+			config::set('link_base')->to($base.'index.php/');
+			$html = i18n::with('ro', function () { return controller::render_view('_email/zzp1b_note'); });
+			check(strpos($html, 'href="'.$base.'index.php/ro/zzp1b_menu">Index') !== false, $html);
 		} finally {
+			config::set('link_base')->to($base);
 			config::set('languages')->to($was[0]);
 			config::set('multilingual')->to($was[1]);
 		}
@@ -9029,6 +9038,15 @@ test('P1.B: protected /ro/ pages: /ro/staff goes to /ro/login and back, and stay
 		same("$base/ro/login?next=%2Fzzp1b_staff", location($headers));
 		// in other letter case it is not the prefix, and no page
 		same(404, http('GET', "$base/RO/zzp1b_staff")[0]);
+		// other spellings of the same path stay protected, or are no page
+		foreach (array('/%72o/zzp1b_staff', '/ro%2Fzzp1b_staff', '/ro//zzp1b_staff', '/ro/zzp1b_staff/') as $path) {
+			list($status, , $headers) = http('GET', $base.$path);
+			check(in_array($status, array(301, 303), true) && strpos((string)location($headers), "$base/ro/") === 0, "$path: $status ".location($headers));
+		}
+		foreach (array('/ro/zzp1b_staff%0A', '/ro/zzp1b_staff%00', '/ro/../zzp1b_staff', '/ro/./zzp1b_staff') as $path) {
+			list($status, $body) = http('GET', $base.$path);
+			check($status !== 200 && strpos((string)$body, 'Rota') === false, "$path answers $status");
+		}
 		cms_store::connect();
 		authentication::create_user('zzp1b-editor@example.test', 'a long password', 'editor', 'Ed');
 		authentication::create_user('zzp1b-member@example.test', 'a long password', 'member', 'Mo');
@@ -9123,6 +9141,9 @@ test('P1.B: a domain_language host is its language, with no prefix', function ()
 			check(strpos($body, '<h1>Bună ziua</h1>') !== false, 'Romanian');
 			check(strpos($body, '<a href="http://zzp1b-ro.test:'.$port.'/zzp1b_menu">Menu</a>') !== false && strpos($body, '<a href="/zzp1b_menu">Root</a>') !== false, 'links on its own host, no prefix');
 			same(404, http('GET', "http://127.0.0.1:$port/ro/zzp1b_about", null, $ro)[0], 'no prefix on that host');
+			// one language, one address: /ro/ on the site's address goes to the language's domain
+			list($status, , $headers) = http('GET', "http://127.0.0.1:$port/ro/zzp1b_about?x=1");
+			same("301 http://zzp1b-ro.test/zzp1b_about?x=1", $status.' '.location($headers));
 			list($status, , $headers) = http('GET', "http://127.0.0.1:$port/zzp1b_about?lang=en", null, $ro);
 			same("301 http://127.0.0.1:$port/zzp1b_about", $status.' '.location($headers), 'English is at the site address');
 			list($status, , $headers) = http('GET', "http://127.0.0.1:$port/zzp1b_about?lang=ro", null, $ro);
@@ -9131,7 +9152,7 @@ test('P1.B: a domain_language host is its language, with no prefix', function ()
 			list(, $body, $headers) = http('GET', "http://127.0.0.1:$port/zzp1b_about", null, array("Host: www.zzp1b-ro.test:$port"));
 			same('en', p1b_header($headers, 'Content-Language'));
 			list($status, , $headers) = http('GET', "http://127.0.0.1:$port/zzp1b_about?lang=ro");
-			same("301 http://127.0.0.1:$port/ro/zzp1b_about", $status.' '.location($headers));
+			same("301 http://zzp1b-ro.test/zzp1b_about", $status.' '.location($headers));
 		});
 	});
 });
