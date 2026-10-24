@@ -9773,6 +9773,29 @@ test('P1.A: doctor fails on multilingual without two languages and on a code it 
 	same(array('ok Multilingual: en, ro'), $titles(array('multilingual' => true, 'languages' => array('en', 'ro'), 'domain_language' => array('example.com' => 'en', 'example.ro' => 'ro'), 'site_url' => null)));
 });
 
+// ## P2.D: models carry no page words (#127)
+
+test('P2.D: the starter\'s nav: site::nav() gives each link its address and state, the layout its words (#127)', function () use ($base, $root, $p1b_on) {
+	$model = file_get_contents("$root/application/models/site/site.php");
+	foreach (array("'Home'", "'News'", "'About'", "'label'") as $word) check(strpos($model, $word) === false, "site.php still has $word");
+	require_once "$root/application/models/site/site.php";
+	same(array(array(
+		'home' => array(array('url' => rtrim(config::get('link_uri'), '/').'/', 'state' => '')),
+		'news' => array(array('url' => rtrim(config::get('link_uri'), '/').'/news', 'state' => '')),
+		'about' => array(array('url' => rtrim(config::get('link_uri'), '/').'/about', 'state' => '')),
+	)), with_settings(array('uri_string' => 'nowhere'), function () { return (new site())->nav(); }));
+	$nav = function ($body) {
+		preg_match_all('#<a class="nav-link[^"]*" href="[^"]*">(Home|News|About)</a>#', $body, $m);
+		return implode("\n", $m[0]);
+	};
+	same('<a class="nav-link active" href="'.$base.'/">Home</a>'."\n".'<a class="nav-link" href="'.$base.'/news">News</a>'."\n".'<a class="nav-link" href="'.$base.'/about">About</a>', $nav(http('GET', "$base/")[1]));
+	same('<a class="nav-link" href="'.$base.'/">Home</a>'."\n".'<a class="nav-link active" href="'.$base.'/news">News</a>'."\n".'<a class="nav-link" href="'.$base.'/about">About</a>', $nav(http('GET', "$base/news")[1]));
+	// multilingual, the links keep the page's language
+	p1b_site($p1b_on, function () use ($base, $nav) {
+		same('<a class="nav-link" href="'.$base.'/ro/">Home</a>'."\n".'<a class="nav-link" href="'.$base.'/ro/news">News</a>'."\n".'<a class="nav-link active" href="'.$base.'/ro/about">About</a>', $nav(http('GET', "$base/ro/about")[1]));
+	});
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";
 foreach ($skipped as $skip) echo "  - $skip\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";

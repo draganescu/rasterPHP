@@ -228,10 +228,16 @@ In development, emails are not really sent. Each one is saved as a `.eml` file i
 
 ## Step 8: add the page to the navigation
 
-The starter site builds its menu in `application/models/site/site.php`. Add a line to the `$links` array in `nav()`:
+The starter site's menu is `render.site.nav` in `_layout.html`. The model, `nav()` in `application/models/site/site.php`, knows each link's address and which one is the page you're on; the words are in the view. Add the address to the `$links` array in `nav()`:
 
 ```php
-array('label' => 'Team', 'url' => '/team'),
+$links = array('home' => '/', 'news' => '/news', 'about' => '/about', 'team' => '/team');
+```
+
+and its link in `_layout.html`, inside `render.site.nav`, after the About one:
+
+```html
+<!-- print.team --><!-- print.+class.state --><!-- print.@href.url --><a class="nav-link" href="team.html">Team</a><!-- /print.@href.url --><!-- /print.+class.state --><!-- /print.team -->
 ```
 
 ## Step 9: check everything

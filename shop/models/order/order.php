@@ -336,7 +336,8 @@ class order
 			'number' => $order['number'], 'name' => $order['name'], 'items' => implode(', ', $items),
 			'total' => cart::money(cart::cents($order['total'])),
 			'address' => trim($order['address'].', '.$order['postcode'].' '.$order['city'].', '.$order['country'], ', '),
-			'payment' => $order['payment'] === 'card' ? 'paid by card' : 'to be paid on delivery',
+			// print.if flags: the view words how it is paid
+			'by_card' => $order['payment'] === 'card', 'on_delivery' => $order['payment'] !== 'card',
 		);
 	}
 

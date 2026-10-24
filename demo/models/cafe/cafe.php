@@ -11,13 +11,15 @@ class cafe
 
 	// ##Pages
 
-	// opening hours: day, time, state (open or closed)
+	// opening hours: day, time, state (open or closed), from the about
+	// page's render.cms.hours list, which editors change; hours.txt, the lab
+	// and /api/cafe/hours read it here (models/cafe/sql/hours.sql)
 	function hours() {
-		return array(
-			array('day' => 'Monday', 'time' => 'closed', 'state' => 'closed'),
-			array('day' => 'Tuesday to Friday', 'time' => '8:00 to 18:00', 'state' => 'open'),
-			array('day' => 'Weekend', 'time' => '9:00 to 16:00', 'state' => 'open'),
-		);
+		try {
+			return database::instance('cafe')->hours();
+		} catch (Exception $e) {
+			return array();
+		}
 	}
 
 	// dishes in a category, counted with an SQL file (models/cafe/sql/count_category.sql)

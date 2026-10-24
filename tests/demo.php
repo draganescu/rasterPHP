@@ -1319,7 +1319,7 @@ test('M4', 'every MCP tool', function () use ($base) {
 	$urls = array_map(function ($p) { return $p['url']; }, $overview['pages']);
 	foreach (array('site', '/', '/about', '/menu', '/docs/setup') as $url) check(in_array($url, $urls), "overview lacks $url");
 	$collections = array_map(function ($c) { return $c['name']; }, $overview['collections']);
-	same(array('booking', 'bookingclosed', 'bookinghours', 'bookingresource', 'bookingservice', 'contactmessage', 'events', 'faq', 'journal', 'menu', 'rsvp'), $collections);
+	same(array('booking', 'bookingclosed', 'bookinghours', 'bookingresource', 'bookingservice', 'contactmessage', 'events', 'faq', 'hours', 'journal', 'menu', 'rsvp'), $collections);
 	same('About us', mcp($base, 'get_page', array('page' => '/about'))['fields']['heading']);
 	$item = mcp($base, 'create_item', array('collection' => 'journal', 'fields' => array('title' => 'MCP post', 'author' => 'Agent')));
 	same('Agent', mcp($base, 'get_item', array('collection' => 'journal', 'id' => $item['id']))['author']);
@@ -1356,7 +1356,7 @@ test('M10', 'describe: the site in one call', function () use ($base) {
 	same('cafe', $all['site']['theme']);
 	check(in_array('/menu', array_map(function ($p) { return $p['url']; }, $all['pages'])), 'the pages are there');
 	$names = array_map(function ($c) { return $c['name']; }, $all['collections']);
-	same(array('booking', 'bookingclosed', 'bookinghours', 'bookingresource', 'bookingservice', 'contactmessage', 'events', 'faq', 'journal', 'menu', 'rsvp'), $names);
+	same(array('booking', 'bookingclosed', 'bookinghours', 'bookingresource', 'bookingservice', 'contactmessage', 'events', 'faq', 'hours', 'journal', 'menu', 'rsvp'), $names);
 	same(4, $all['collections'][array_search('menu', $names)]['page_size'], 'menu_page_size');
 	same(50, $all['collections'][array_search('booking', $names)]['page_size'], 'booking_page_size');
 	same(0, $all['lint']['errors']);
@@ -5151,6 +5151,30 @@ test('N9', 'P1.D export: the site\'s address comes from site_url when --url and 
 	has(file_get_contents("$out/index.html"), 'href="https://cafe.example/shop/menu"');
 	list($code, $output) = raster(array('export', $out, '--url=https://other.example/'), array('RASTER_URL' => '', 'CAFE_SITE_URL' => 'https://cafe.example/shop/'));
 	has($output, 'linked to https://other.example/', '--url wins');
+});
+
+// ## P2.D: models carry no page words (#127)
+
+test(array('A2', 'E3'), 'P2.D: the opening hours are the about page\'s hours list; the café model only reads them (#127)', function () use ($base, $root) {
+	$about = http('GET', "$base/about")[1];
+	has($about, '<tr class="closed"><td>Monday</td><td>closed</td></tr>');
+	has($about, '<tr class="open"><td>Tuesday to Friday</td><td>8:00 to 18:00</td></tr>');
+	has($about, '<tr class="open"><td>Weekend</td><td>9:00 to 16:00</td></tr>');
+	$model = file_get_contents("$root/demo/models/cafe/cafe.php");
+	foreach (array('Monday', 'Tuesday', 'Weekend', "'closed'", '8:00') as $word) lacks($model, $word, 'the words are the content\'s');
+	// an editor's change shows on the page, in hours.txt and at /api/cafe/hours
+	$monday = null;
+	foreach (mcp($base, 'list_items', array('collection' => 'hours'))['items'] as $row) if ($row['day'] === 'Monday') $monday = $row;
+	check($monday !== null, 'Monday is an item of the hours list');
+	try {
+		mcp($base, 'update_item', array('collection' => 'hours', 'id' => $monday['id'], 'fields' => array('time' => '10:00 to 14:00', 'state' => 'open')));
+		has(http('GET', "$base/about")[1], '<tr class="open"><td>Monday</td><td>10:00 to 14:00</td></tr>');
+		has(http('GET', "$base/hours.txt")[1], "Monday: 10:00 to 14:00\nTuesday to Friday: 8:00 to 18:00");
+		same(array('day' => 'Monday', 'time' => '10:00 to 14:00', 'state' => 'open'), json_decode(http('GET', "$base/api/cafe/hours")[1], true)[0]);
+	} finally {
+		mcp($base, 'update_item', array('collection' => 'hours', 'id' => $monday['id'], 'fields' => array('time' => 'closed', 'state' => 'closed')));
+	}
+	has(http('GET', "$base/hours.txt")[1], "Monday: closed\n");
 });
 
 // ## No PHP warnings, notices or deprecations on any request
