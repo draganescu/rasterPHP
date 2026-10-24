@@ -3,6 +3,16 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.50
+
+Nothing for sites to do. Every view's `<html>` tag in the starter, the demo and the shop now prints its language and direction; a site's own views keep theirs until it changes them.
+
+- **`<html lang dir>` follows the page's language** (#138). `print.i18n.dir` gives `rtl` for languages written right to left (Arabic, Hebrew, Persian, Urdu, …), else `ltr`. The bundled views wrap their tag as `<!-- print.@lang.i18n.language --><!-- print.@dir.i18n.dir --><html lang="en" dir="ltr">…`, so the mock-up still reads `lang="en"` and a site without languages prints the same page, now with `dir="ltr"`. Emails keep `lang="en"` as written for now.
+- **Multilingual pages say where their other languages are**: in `<head>`, after the `<base>`, a `<link rel="canonical">`, one `<link rel="alternate" hreflang="xx">` per language and `hreflang="x-default"`, from `i18n::alternates()`. None on a 404 or on a URL with a query; a page that writes its own keeps them. The switcher's rows (`render.i18n.languages`) gain `url` (the language's own address in multilingual mode, `?lang=` otherwise) and `current`, and the starter's `_layout.html` shows it when the site has more than one language (`if.languages`).
+- **The `<base>` goes after any `<head …>` tag** (#117), with attributes (`<head prefix="og: …">`) or in capitals, never into a `<head>` inside a comment or a script; `//host/…` links are left as written. `lint` warns about `href="#…"` and `href="?…"`, which open the theme folder: write `about.html#…`. The `#anchor` part of #117 stays open.
+- **Static export crawls each language from its own address** (#200): `/ro/` is written to `ro/index.html`, links already carry the prefix, every language gets its own `404.html`, and a language with its own domain is fetched there. Template-only and one-language exports are as before. It warns when a multilingual export has no absolute address.
+- **`raster export` reads `site_url`** when neither `--url` nor `RASTER_URL` is set (#137).
+
 ## 2.2.49
 
 Nothing for most sites to do. Two things `doctor` may now say:

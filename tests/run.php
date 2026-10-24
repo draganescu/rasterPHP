@@ -9245,6 +9245,9 @@ test('P1.C: in multilingual mode <head> gets the canonical link, one hreflang pe
 	$_GET = array('page' => '2');
 	try {
 		same('', with_settings(p1c_on(), $links), '?page=2');
+		// a tracking parameter is the same page: the links stay
+		$_GET = array('utm_source' => 'newsletter', 'fbclid' => 'x');
+		check(strpos(with_settings(p1c_on(), $links), 'rel="canonical"') !== false, '?utm_source keeps the canonical');
 	} finally {
 		$_GET = $get;
 	}
