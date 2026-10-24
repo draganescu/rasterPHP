@@ -75,7 +75,7 @@ This works on every URL, including `/docs/setup` and `/news/news_item/3`, becaus
 <script>var BASE = "http://localhost:8000/"</script>
 ```
 
-It also defines a JavaScript variable, `BASE`, holding the site's root address, for scripts that need to build URLs.
+It also defines a JavaScript variable, `BASE`, holding the site's root address, for scripts that need to build URLs. On a multilingual site it is the address of the page's language (`http://localhost:8000/ro/` on a Romanian page), so a link a script builds stays in that language; `/ro/api/…` answers as `/api/…` does.
 
 Two things follow from the `<base>` tag:
 

@@ -8920,6 +8920,9 @@ function p1b_header($headers, $name) {
 }
 // every link to a page of the site starts with $prefix (theme files aside)
 function p1b_links_carry($body, $base, $prefix, $what) {
+	// a link with hreflang names another language on purpose: the <head>
+	// alternates and the switcher (P1.C)
+	$body = preg_replace('/<(a|link)\b[^>]*\shreflang=[^>]*>/i', '', $body);
 	preg_match_all('#(?:href|action)=["\']('.preg_quote($base, '#').'[^"\']*)["\']#', $body, $m);
 	check(count($m[1]) > 0, "$what has no links");
 	foreach ($m[1] as $url) {
@@ -9176,7 +9179,7 @@ test('P1.B: off is identical: no prefix, no header, no redirect, same cache key 
 		check(raster_cache::key() !== $default, 'a key per language');
 	} finally {
 		config::set('languages')->to($was);
-		config::set('multilingual')->to(null);
+		config::set('multilingual')->to(false);
 		config::set('url_language')->to('');
 	}
 });
@@ -9325,6 +9328,322 @@ test('P1.C: lint warns on href="#…" and href="?…", which leave the page (anc
 	check(has_problem($inspector->lint_source('<a href="#team">Team</a>', 'application/views/default/docs/setup.html'), 'Write href="docs/setup.html#team"'), 'the view\'s own name');
 	// emails have no <base>
 	same(array(), $inspector->lint_source('<a href="#x">x</a>', 'application/views/default/_email/welcome.html'));
+});
+
+test('P1.C: a /ro/ page links to the other languages from <head> and the switcher, and BASE is its language\'s address, where /api answers too', function () use ($base, $p1b_on) {
+	p1b_site($p1b_on, function () use ($base) {
+		list($status, $body) = http('GET', "$base/ro/zzp1b_about");
+		same(200, $status);
+		check(strpos($body, "<link rel=\"canonical\" href=\"$base/ro/zzp1b_about\">\n<link rel=\"alternate\" hreflang=\"en\" href=\"$base/zzp1b_about\">\n<link rel=\"alternate\" hreflang=\"ro\" href=\"$base/ro/zzp1b_about\">\n<link rel=\"alternate\" hreflang=\"x-default\" href=\"$base/zzp1b_about\">") !== false, $body);
+		check(strpos($body, '<script>var BASE = "'.$base.'/ro/"</script>') !== false, $body);
+		// the starter: <html lang>, the switcher's rows, and the editor's API under /ro/
+		list(, $about) = http('GET', "$base/ro/about");
+		check(strpos($about, '<html lang="ro" dir="ltr">') !== false, $about);
+		check(strpos($about, '<a class="nav-link" href="'.$base.'/about" hreflang="en">en</a>') !== false && strpos($about, '<a class="nav-link active" href="'.$base.'/ro/about" hreflang="ro">ro</a>') !== false, $about);
+		$plain = http('GET', "$base/api/cms/style");
+		$ro = http('GET', "$base/ro/api/cms/style");
+		// the same answer, with its own address in the language (/ro/api/cms/style/output/true)
+		same(array($plain[0], $plain[1]), array($ro[0], str_replace('\\/ro\\/', '\\/', $ro[1])), 'BASE + api/… answers as /api/… does');
+		// the default language: canonical is its own address, BASE the site's
+		list(, $en) = http('GET', "$base/zzp1b_about");
+		check(strpos($en, "<link rel=\"canonical\" href=\"$base/zzp1b_about\">") !== false && strpos($en, '<script>var BASE = "'.$base.'/"</script>') !== false, $en);
+	});
+});
+
+// ## P1.A: the language API, the switch, doctor
+
+// the i18n model's state for one request, put back afterwards: what
+// detect() picked, and the request's $_GET, $_COOKIE and Accept-Language
+function p1a_request($settings, $request, $fn) {
+	$detected = new ReflectionProperty('i18n', 'detected');
+	$detected->setAccessible(true);
+	$kept = array($_GET, $_COOKIE, isset($_SERVER['HTTP_ACCEPT_LANGUAGE']) ? $_SERVER['HTTP_ACCEPT_LANGUAGE'] : null, $detected->getValue());
+	$request += array('get' => array(), 'cookie' => array(), 'accept' => null);
+	$_GET = $request['get'];
+	$_COOKIE = $request['cookie'];
+	if ($request['accept'] === null) unset($_SERVER['HTTP_ACCEPT_LANGUAGE']); else $_SERVER['HTTP_ACCEPT_LANGUAGE'] = $request['accept'];
+	$detected->setValue(null, null);
+	$settings += array('multilingual' => false, 'languages' => null, 'domain_language' => null, 'url_language' => null, 'link_base' => null, 'host' => config::get('host'), 'link_uri' => config::get('link_uri'), 'uri_string' => config::get('uri_string'), 'site_url' => null);
+	try {
+		return with_settings($settings, $fn);
+	} finally {
+		list($_GET, $_COOKIE, $accept) = $kept;
+		if ($accept === null) unset($_SERVER['HTTP_ACCEPT_LANGUAGE']); else $_SERVER['HTTP_ACCEPT_LANGUAGE'] = $accept;
+		$detected->setValue(null, $kept[3]);
+	}
+}
+
+test('P1.A: off, the language API gives the one-language answer', function () {
+	p1a_request(array(), array('get' => array('lang' => 'ro')), function () {
+		same(false, i18n::enabled());
+		same(array(), i18n::available());
+		same('', i18n::default_language());
+		same('', i18n::current());
+		same('', i18n::detect());
+		same(true, i18n::is_default());
+		same('', i18n::suffix());
+		same('', i18n::suffix('ro'));
+		same('', i18n::prefix('ro'));
+		same('ltr', i18n::dir());
+		same('', i18n::date_order(), 'dates are read as before without languages (D14)');
+		same(array(), i18n::alternates());
+		same(false, (new i18n())->language());
+	});
+	// multilingual alone, or with one language, is off (D1)
+	foreach (array(null, array('ro'), array('en', 'not a code')) as $languages) {
+		p1a_request(array('multilingual' => true, 'languages' => $languages), array(), function () use ($languages) {
+			same(false, i18n::enabled(), json_encode($languages));
+			same('', i18n::prefix('ro'));
+			same('', i18n::suffix('ro'));
+		});
+	}
+});
+
+test('P1.A: off, detect() picks as in 2.2.45: ?lang=, the domain, the cookie, the browser, the default', function () {
+	$settings = array('languages' => array('en', 'ro', 'pt-BR'), 'domain_language' => array('example.ro' => 'ro'), 'host' => 'example.com');
+	$cases = array(
+		array(array(), 'en'),
+		array(array('get' => array('lang' => 'ro')), 'ro'),
+		array(array('get' => array('lang' => 'RO-ro')), 'ro'),
+		array(array('get' => array('lang' => 'pt-br')), 'pt-BR'),
+		array(array('get' => array('lang' => 'de'), 'cookie' => array('lang' => 'ro')), 'ro'),
+		array(array('cookie' => array('lang' => 'ro'), 'accept' => 'en'), 'ro'),
+		array(array('accept' => 'de-DE,ro;q=0.9,en;q=0.8'), 'ro'),
+		// a region is matched whole, or by a listed two-letter code
+		array(array('accept' => 'pt-PT'), 'en'),
+		array(array('accept' => 'ro-MD'), 'ro'),
+		array(array('accept' => 'de'), 'en'),
+	);
+	foreach ($cases as $case) {
+		list($request, $expected) = $case;
+		p1a_request($settings, $request, function () use ($expected, $request) {
+			same($expected, i18n::detect(), json_encode($request));
+			same($expected, i18n::current(), 'current() is detect() when off');
+			same($expected, (new i18n())->language());
+			// template-only: no columns and no addresses of its own
+			same('', i18n::suffix());
+			same('', i18n::prefix());
+		});
+	}
+	// the domain wins over the cookie, a subdomain too
+	foreach (array('example.ro', 'www.example.ro:8080') as $host) {
+		p1a_request(array('host' => $host) + $settings, array('cookie' => array('lang' => 'en')), function () use ($host) {
+			same('ro', i18n::detect(), $host);
+		});
+	}
+	// a cookie of its own name
+	p1a_request($settings + array('language_cookie' => 'cafe_lang'), array('cookie' => array('lang' => 'ro', 'cafe_lang' => 'pt-br')), function () {
+		same('pt-BR', i18n::detect());
+	});
+	p1a_request($settings, array(), function () {
+		same('en', i18n::default_language());
+		same(true, i18n::is_default());
+		same(false, i18n::is_default('ro'));
+		same(true, i18n::is_default('EN'));
+		same('dmy', i18n::date_order());
+		same('mdy', i18n::date_order('en-US'));
+		same('dmy', i18n::date_order('ro'));
+	});
+});
+
+test('P1.A: multilingual, the address picks the language and names its column and prefix', function () {
+	$settings = array('multilingual' => true, 'languages' => array('en', 'ro', 'pt-BR', 'id'), 'link_base' => 'https://example.com/', 'link_uri' => 'https://example.com/ro/', 'host' => 'example.com', 'uri_string' => '/menu?x=1');
+	p1a_request($settings + array('url_language' => 'ro'), array('get' => array('lang' => 'en'), 'cookie' => array('lang' => 'en'), 'accept' => 'en'), function () {
+		same(true, i18n::enabled());
+		same('ro', i18n::current(), 'neither ?lang=, the cookie nor the browser choose (D4)');
+		same('ro', i18n::detect(), 'detect() is current()');
+		same(false, i18n::is_default());
+		same('__ro', i18n::suffix());
+		same('', i18n::suffix('en'));
+		same('__pt_br', i18n::suffix('pt-BR'));
+		same('__id', i18n::suffix('id'));
+		same('ro/', i18n::prefix());
+		same('pt-br/', i18n::prefix('pt-BR'));
+		same('', i18n::prefix('en'));
+		same(array(
+			array('lang' => 'en', 'url' => 'https://example.com/menu'),
+			array('lang' => 'ro', 'url' => 'https://example.com/ro/menu'),
+			array('lang' => 'pt-BR', 'url' => 'https://example.com/pt-br/menu'),
+			array('lang' => 'id', 'url' => 'https://example.com/id/menu'),
+		), i18n::alternates());
+		same('https://example.com/ro/', i18n::alternates('')[1]['url'], 'a home page is /ro/ (D5)');
+		same('https://example.com/ro/news/news_item/x', i18n::alternates('/news/news_item/x')[1]['url']);
+		same('ro', (new i18n())->language());
+	});
+	// no language in the address is the default; an unknown one too
+	foreach (array('', 'de', null) as $url_language) {
+		p1a_request($settings + array('url_language' => $url_language), array('get' => array('lang' => 'ro')), function () use ($url_language) {
+			same('en', i18n::current(), var_export($url_language, true));
+			same(true, i18n::is_default());
+			same('', i18n::suffix());
+			same('', i18n::prefix());
+		});
+	}
+	p1a_request($settings + array('url_language' => 'RO'), array(), function () {
+		same('ro', i18n::current(), 'as the site lists it');
+	});
+});
+
+test('P1.A: multilingual, a domain_language host is its language\'s address', function () {
+	$settings = array('multilingual' => true, 'languages' => array('en', 'ro', 'de'), 'domain_language' => array('example.ro' => 'ro'), 'site_url' => 'https://example.com/', 'uri_string' => '/menu', 'protocol' => 'https');
+	// on the main host the Romanian pages are on their own domain, though /ro/ answers too
+	p1a_request($settings + array('host' => 'example.com', 'link_base' => 'https://example.com/', 'link_uri' => 'https://example.com/'), array(), function () {
+		same('ro/', i18n::prefix('ro'), 'link_uri on /ro/ here keeps the prefix');
+		same(array(
+			array('lang' => 'en', 'url' => 'https://example.com/menu'),
+			array('lang' => 'ro', 'url' => 'https://example.ro/menu'),
+			array('lang' => 'de', 'url' => 'https://example.com/de/menu'),
+		), i18n::alternates());
+		same('https://example.ro/', i18n::with('ro', function () { return config::get('link_uri'); }));
+		same('https://example.com/de/', i18n::with('de', function () { return config::get('link_uri'); }));
+	});
+	// on the Romanian host the others are on the site's address, with its
+	// folder and index file
+	p1a_request($settings + array('host' => 'example.ro:8443', 'url_language' => 'ro', 'rewrite' => false, 'link_base' => 'https://example.ro:8443/shop/index.php/', 'link_uri' => 'https://example.ro:8443/shop/index.php/'), array(), function () {
+		same('ro', i18n::current());
+		same('', i18n::prefix(), 'no prefix on its own host');
+		same(array(
+			array('lang' => 'en', 'url' => 'https://example.com/shop/index.php/menu'),
+			array('lang' => 'ro', 'url' => 'https://example.ro:8443/shop/index.php/menu'),
+			array('lang' => 'de', 'url' => 'https://example.com/shop/index.php/de/menu'),
+		), i18n::alternates());
+		same('https://example.com/shop/index.php/', i18n::with('en', function () { return config::get('link_uri'); }));
+		same('https://example.ro:8443/shop/index.php/', i18n::with('ro', function () { return config::get('link_uri'); }));
+		same('https://example.ro:8443/shop/index.php/', config::get('link_uri'));
+	});
+	// a language on its own domain from another language's domain
+	p1a_request(array('domain_language' => array('example.ro' => 'ro', 'example.de' => 'de'), 'host' => 'example.de', 'url_language' => 'de', 'link_base' => 'https://example.de/', 'link_uri' => 'https://example.de/') + $settings, array(), function () {
+		same(array('https://example.com/menu', 'https://example.ro/menu', 'https://example.de/menu'), array_column(i18n::alternates(), 'url'));
+	});
+});
+
+test('P1.A: i18n::with() runs in a language, nests, and puts everything back, also after an exception', function () {
+	$settings = array('multilingual' => true, 'languages' => array('en', 'ro', 'fr'), 'link_base' => 'https://example.com/', 'link_uri' => 'https://example.com/', 'host' => 'example.com', 'url_language' => '');
+	p1a_request($settings, array(), function () {
+		$seen = array();
+		$result = i18n::with('ro', function () use (&$seen) {
+			$seen[] = array(i18n::current(), i18n::detect(), i18n::suffix(), i18n::prefix(), config::get('link_uri'));
+			$inner = i18n::with('fr', function () use (&$seen) {
+				$seen[] = array(i18n::current(), i18n::detect(), i18n::suffix(), i18n::prefix(), config::get('link_uri'));
+				return 'inner';
+			});
+			$seen[] = array(i18n::current(), i18n::detect(), i18n::suffix(), i18n::prefix(), config::get('link_uri'));
+			return $inner.' outer';
+		});
+		same('inner outer', $result);
+		same(array(
+			array('ro', 'ro', '__ro', 'ro/', 'https://example.com/ro/'),
+			array('fr', 'fr', '__fr', 'fr/', 'https://example.com/fr/'),
+			array('ro', 'ro', '__ro', 'ro/', 'https://example.com/ro/'),
+		), $seen);
+		same('en', i18n::current());
+		same('https://example.com/', config::get('link_uri'));
+		// the default, by name or as a language the site doesn't list
+		same(array('en', 'https://example.com/'), i18n::with('EN', function () { return array(i18n::current(), config::get('link_uri')); }));
+		same(array('en', 'https://example.com/'), i18n::with('de', function () { return array(i18n::current(), config::get('link_uri')); }));
+		same('ro', i18n::with('ro-RO', function () { return i18n::current(); }));
+		try {
+			i18n::with('ro', function () {
+				i18n::with('fr', function () { throw new RuntimeException('boom'); });
+			});
+			check(false, 'the exception goes through');
+		} catch (RuntimeException $e) {
+			same('boom', $e->getMessage());
+		}
+		same('en', i18n::current(), 'put back after the exception');
+		same('https://example.com/', config::get('link_uri'));
+	});
+	// off: the language changes, the links don't
+	p1a_request(array('languages' => array('en', 'ro')), array('cookie' => array('lang' => 'en')), function () {
+		$link = config::get('link_uri');
+		same(array('ro', 'ro', '', '', $link), i18n::with('ro', function () { return array(i18n::current(), i18n::detect(), i18n::suffix(), i18n::prefix(), config::get('link_uri')); }));
+		same('en', i18n::detect(), 'and detect() answers as before afterwards');
+	});
+	p1a_request(array(), array(), function () {
+		same('', i18n::with('ro', function () { return i18n::current(); }), 'no languages: nothing to run in');
+	});
+});
+
+test('P1.A: dir() names the right-to-left languages', function () {
+	foreach (array('ar', 'he', 'he-IL', 'fa', 'ur', 'yi', 'ckb', 'AR-eg') as $lang) same('rtl', i18n::dir($lang), $lang);
+	foreach (array('en', 'ro', 'pt-br', 'id', '', 'arn') as $lang) same('ltr', i18n::dir($lang), $lang);
+	p1a_request(array('multilingual' => true, 'languages' => array('en', 'ar'), 'url_language' => 'ar'), array(), function () {
+		same('rtl', i18n::dir());
+	});
+});
+
+test('P1.A: dictionaries in the current language, and the older $lang form', function () use ($root) {
+	$dir = APPBASE.'i18n';
+	$made = !is_dir($dir);
+	test_fixture("$dir/zz");
+	@mkdir("$dir/zz", 0775, true);
+	file_put_contents("$dir/zz/zzp1a.php", "<?php\nreturn array('hello' => 'Zalut');\n");
+	file_put_contents("$dir/zz/zzp1aold.php", "<?php\n\$lang = array('hello' => 'Zold');\n");
+	try {
+		$fresh = function () { return new i18n(); };
+		// template-only: ?lang= picks it
+		p1a_request(array('languages' => array('en', 'zz')), array('get' => array('lang' => 'zz')), function () use ($fresh) {
+			same('Zalut', $fresh()->zzp1a('hello'));
+			same('Zold', $fresh()->zzp1aold('hello'), 'the older form still works until 3.0.0');
+			same(false, $fresh()->zzp1a('missing'));
+		});
+		p1a_request(array('languages' => array('en', 'zz')), array(), function () use ($fresh) {
+			same(false, $fresh()->zzp1a('hello'), 'the default language keeps the template text');
+			same('Zalut', i18n::with('zz', function () use ($fresh) { return $fresh()->zzp1a('hello'); }), 'with() renders in its language');
+		});
+		// multilingual: the address picks it, ?lang= doesn't
+		p1a_request(array('multilingual' => true, 'languages' => array('en', 'zz'), 'url_language' => 'zz'), array('get' => array('lang' => 'en')), function () use ($fresh) {
+			same('Zalut', $fresh()->zzp1a('hello'));
+		});
+		p1a_request(array('multilingual' => true, 'languages' => array('en', 'zz'), 'url_language' => ''), array('get' => array('lang' => 'zz')), function () use ($fresh) {
+			same(false, $fresh()->zzp1a('hello'));
+		});
+		// the deprecation finds the older form, and only it
+		$found = array_column(array_filter(raster_project::deprecations($root, 'application'), function ($d) { return $d['id'] === 'i18n-lang-variable'; }), 'file');
+		same(array('application/i18n/zz/zzp1aold.php'), $found);
+	} finally {
+		remove_dir("$dir/zz");
+		if ($made) @rmdir($dir);
+	}
+});
+
+test('P1.A: off, the page cache key is the one 2.2.45 made', function () {
+	$key = function ($language) { return sha1(config::get('protocol').'://'.config::get('host').'|'.config::get('uri_string').'|'.$language); };
+	p1a_request(array(), array('get' => array('lang' => 'ro')), function () use ($key) {
+		same($key(''), raster_cache::key(), 'no languages');
+	});
+	p1a_request(array('languages' => array('en', 'ro')), array('cookie' => array('lang' => 'ro')), function () use ($key) {
+		same($key('ro'), raster_cache::key(), 'template-only: one copy per language, as detected');
+	});
+	p1a_request(array('languages' => array('en', 'ro')), array(), function () use ($key) {
+		same($key('en'), raster_cache::key());
+	});
+});
+
+test('P1.A: describe lists the multilingual setting, off by default', function () {
+	require_once BASE.'tools/describe.php';
+	$settings = raster_describe::site(array('settings'))['settings'];
+	check(array_key_exists('multilingual', $settings), 'listed');
+	same(false, $settings['multilingual']);
+});
+
+test('P1.A: doctor fails on multilingual without two languages and on a code it can\'t read', function () use ($root) {
+	$titles = function ($settings) use ($root) {
+		return with_settings($settings, function () use ($root) {
+			$found = array();
+			foreach (raster_project::doctor($root, 'application', 'development') as $c) {
+				if (preg_match('/language|multilingual/i', $c['title'])) $found[] = $c['status'].' '.$c['title'];
+			}
+			return $found;
+		});
+	};
+	same(array(), $titles(array('multilingual' => false, 'languages' => null)), 'nothing to say without languages');
+	same(array('fail multilingual is on with fewer than two languages'), $titles(array('multilingual' => true, 'languages' => array('ro'))));
+	same(array('fail multilingual is on with fewer than two languages'), $titles(array('multilingual' => true, 'languages' => null)));
+	same(array('ok Multilingual: en, ro'), $titles(array('multilingual' => true, 'languages' => array('en', 'ro'))));
+	same(array("fail Language code(s) Raster can't read: 'en_US', 'Romanian'", 'fail multilingual is on with fewer than two languages'),
+		$titles(array('multilingual' => true, 'languages' => array('en_US', 'ro'), 'domain_language' => array('example.ro' => 'Romanian'))));
+	same(array(), $titles(array('multilingual' => false, 'languages' => array('en', 'pt-br'), 'domain_language' => array('example.ro' => 'pt-br'))));
 });
 
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";

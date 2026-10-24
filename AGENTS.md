@@ -101,6 +101,9 @@ media/                        uploads from the CMS
   (`anchor_link`), except on a link a `print.@href` sets. A link to another
   site without its scheme (`href="//cdn.example.com/guide.html"`) is left
   as written.
+  Next to it a script sets `BASE`, the site's address for scripts; on a
+  multilingual site the address of the page's language (`/ro/`), where
+  `/api` answers too.
 - **Asset versions.** A relative URL to a real file in the theme
   (`href="style.css"`, `src`, `srcset`, `poster`) gets `?v=<version>`, made
   from the file's time and size, so it changes when the file does
@@ -2026,11 +2029,23 @@ use `'model.method'`: `method(true)` returns
 
 **i18n**: the template's text is the default language.
 - Translations: `print.i18n.home('welcome')` looks up `application/i18n/<lang>/home.php`,
-  which returns an array of key => text.
-- Settings: `config::set('languages')->to(array('en', 'ro'))` and
-  `domain_language`.
-- The language comes from `?lang=` (remembered in a cookie), the domain, the
-  cookie, then the browser.
+  which returns an array of key => text. A dictionary that sets `$lang`
+  instead of returning it still works until 3.0.0 (`doctor` warns, and
+  `raster upgrade` adds `return $lang;`).
+- Settings: `config::set('languages')->to(array('en', 'ro'))` (codes such
+  as `en`, `ro`, `pt-br`; the first is the default; `doctor` fails on one
+  it can't read, which is skipped), `domain_language`, and the switch
+  `config::set('multilingual')->to(true)`, off by default. Multilingual
+  needs two or more languages: with fewer, `doctor` fails and the site
+  behaves as off.
+- Multilingual, each language has its own addresses (`/ro/menu`) and the
+  address alone picks it: an exact `domain_language` host, else the
+  `/<lang>/` prefix, else the default.
+- Without `multilingual` (template-only translation, deprecated since
+  2.2.49, removed in 3.0.0; `doctor` warns on two or more languages and
+  suggests the switch; one language, `array('ro')`, is fine) only the
+  template's words are translated, and the language comes from `?lang=`
+  (remembered in a cookie), the domain, the cookie, then the browser.
 - `print.i18n.language` gives the current language (`false` when the site
   has no `languages`, so the mock-up's value stays), and `print.i18n.dir`
   `rtl` for a language written right to left (Arabic, Hebrew, Persian,
@@ -2039,17 +2054,40 @@ use `'model.method'`: `method(true)` returns
   `<!-- print.@lang.i18n.language --><!-- print.@dir.i18n.dir --><html lang="en" dir="ltr"><!-- /print.@dir.i18n.dir --><!-- /print.@lang.i18n.language -->`.
 - `render.i18n.languages` gives a switcher with `code`, `url` (this page in
   that language), `state` (`active` for the current one) and `current`
-  (true for it). With `multilingual` on, `url` is the language's own
-  address (`/ro/menu`, from `i18n::alternates()`); otherwise it is the page
-  with `?lang=xx`. The flag `if.languages` is true when the site has more
-  than one language: the starter's `_layout.html` shows its switcher inside
+  (true for it). Multilingual, `url` is the language's own address
+  (`/ro/menu`, from `i18n::alternates()`); otherwise it is the page with
+  `?lang=xx`. The flag `if.languages` is true when the site has more than
+  one language: the starter's `_layout.html` shows its switcher inside
   `print.if.languages`.
-- With `multilingual` on, Raster also puts into `<head>`, after the
-  `<base>`: `<link rel="canonical">` (the page in its own language), one
+- Multilingual, Raster also puts into `<head>`, after the `<base>`:
+  `<link rel="canonical">` (the page in its own language), one
   `<link rel="alternate" hreflang="xx">` per language, and
   `hreflang="x-default"` (the default language's address). A page that
   writes its own canonical or hreflang links keeps them instead. Off,
   nothing is added.
+- **The language API.** Every model, a site's own too, reads language
+  state through these static calls, never `config::get('languages')`.
+  With multilingual off they give the one-language answer, so callers
+  need no special case:
+
+  | Call | Gives |
+  |---|---|
+  | `i18n::enabled()` | `multilingual` is on and there are two or more languages |
+  | `i18n::available()` | the languages, the ones Raster can read |
+  | `i18n::default_language()` | the first, or `''` when `languages` is unset |
+  | `i18n::current()` | this request's language: multilingual, the address's; otherwise what `?lang=`, the cookie and the browser pick (`i18n::detect()`, kept) |
+  | `i18n::is_default($lang = null)` | whether it is the default language |
+  | `i18n::suffix($lang = null)` | a translation column's suffix: `''` when off and for the default, else `__ro`, `__pt_br` |
+  | `i18n::prefix($lang = null)` | the address prefix on this host: `''` when off, for the default and on the language's own domain, else `ro/` |
+  | `i18n::with($lang, $fn)` | runs `$fn` with `current()` set to `$lang` (one the site doesn't list runs in the default) and, multilingual, `link_uri` set to that language's address; puts both back, even when `$fn` throws, nests, and returns what `$fn` returned |
+  | `i18n::dir($lang = null)` | `rtl` for Arabic, Hebrew, Persian, Urdu and the other right-to-left languages, else `ltr` |
+  | `i18n::date_order($lang = null)` | how dates are typed: `''` without languages, `mdy` for `en-us`, `dmy` for the rest (`Y-m-d` is always read) |
+  | `i18n::alternates($path = null)` | the page (or `$path`) in every language: rows of `lang` and `url`, a language with its own `domain_language` host at that host |
+
+  `$lang` left out is `current()`. Raster calls these on the bundled
+  class, from the page cache before any model loads too, so a site's
+  `the_i18n` can't change them; it changes only what templates print
+  through `print.i18n` and `render.i18n`.
 
 **Multilingual URLs** (`multilingual` on, with two or more `languages`): the
 URL alone says the content's language, so one URL is always one language.
@@ -2389,7 +2427,8 @@ of lists and filter pages come along; drafts and the editor don't.
   models send: newsletter and authentication send through
   `controller::model_class('mail')`, so a `the_mail` changes every email
   Raster sends. Other static calls between models (`newsletter::subscribe`,
-  `i18n::detect`, `authentication::` helpers) go to the bundled class.
+  `authentication::` helpers) go to the bundled class, and so does the
+  language API (`i18n::current()` and the rest), which can't be overridden.
   A helper file in the override's folder (`the_cms/store.php`) is found
   before the bundled one, and so is a query in its `sql/` folder
   (`the_newsletter/sql/confirmed_count.sql`).
@@ -2492,7 +2531,8 @@ Set in `config/the_app.php` with `config::set('name')->to(value)`.
 | `newsletter_double_opt_in` | true | false subscribes without a confirmation |
 | `newsletter_confirm_page`, `newsletter_unsubscribe_page` | `newsletter-confirm`, `newsletter-unsubscribe` | |
 | `mail`, `mail_from` | see `RASTER_MAIL` | transport and sender |
-| `languages`, `domain_language`, `language_cookie` | none, none, `lang` | |
+| `multilingual` | false | one address per language (`/ro/menu`) for the `languages`, which need to be two or more (see **i18n**) |
+| `languages`, `domain_language`, `language_cookie` | none, none, `lang` | the languages, the first the default; a host that is one language's; the cookie template-only translation remembers the choice in |
 | `page_cache`, `page_cache_ttl`, `page_cache_skip` | on in production, 3600, none | |
 | `asset_versions` | true | false leaves theme asset URLs as they are written |
 | `mcp_token` | none | same as `RASTER_MCP_TOKEN` |
@@ -2579,7 +2619,8 @@ stamp check, so people with a page open send it again.
   `system/private_paths.php`, uses of deprecated features
   (`system/tools/deprecations.php`, minus the ones config `allow_deprecated`
   says are on purpose), a `data/secret` the user running it can't read or
-  that isn't a key,
+  that isn't a key, a language code it can't read and `multilingual` with
+  fewer than two languages,
   and, in production, one address that sent one form many different
   emails today (many people share it), the site address, mail, tokens,
   whether PHP shows errors (`display_errors`) and whether PHP takes the
