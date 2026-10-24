@@ -37,8 +37,105 @@ class i18n
 		return (string)config::get('language_cookie', 'lang');
 	}
 
+	// ##The language API (#200)
+	// Every model reads language state through these, never through
+	// config::get('languages'). With multilingual off they give the
+	// one-language answer: enabled() false, the suffix and prefix empty.
+	// config::initialize() sets `url_language` (the language the URL names,
+	// '' when off) and `link_base` (link_uri without the language prefix).
+
+	protected static $current = null;
+
+	// multilingual is on and there are two or more languages (D1)
+	static function enabled() {
+		return (bool)config::get('multilingual', false) && count(self::available()) >= 2;
+	}
+
+	// the first language, or '' when languages is unset
+	static function default_language() {
+		$languages = self::available();
+		return $languages ? $languages[0] : '';
+	}
+
+	// this request's content language: the URL's when multilingual (D4),
+	// otherwise what detect() picks
+	static function current() {
+		if (self::$current !== null) return self::$current;
+		if (!self::enabled()) return self::detect();
+		$language = (string)config::get('url_language');
+		return $language !== '' ? $language : self::default_language();
+	}
+
+	static function is_default($lang = null) {
+		$lang = $lang === null ? self::current() : (string)$lang;
+		return strtolower($lang) === strtolower(self::default_language());
+	}
+
+	// the column suffix of a translation (D3): '' for the default language,
+	// '__ro', '__pt_br', '__id'
+	static function suffix($lang = null) {
+		$lang = $lang === null ? self::current() : (string)$lang;
+		if ($lang === '' || self::is_default($lang)) return '';
+		return '__'.strtolower(str_replace('-', '_', $lang));
+	}
+
+	// the URL prefix of a language: '' for the default language, off, or a
+	// language on its own domain (domain_language), else 'ro/'
+	static function prefix($lang = null) {
+		if (!self::enabled()) return '';
+		$lang = $lang === null ? self::current() : (string)$lang;
+		if ($lang === '' || self::is_default($lang)) return '';
+		$host = preg_replace('/:\d+$/', '', (string)config::get('host'));
+		$domains = array_change_key_case((array)config::get('domain_language', array()));
+		if (isset($domains[$host]) && strtolower($domains[$host]) === strtolower($lang)) return '';
+		return strtolower($lang).'/';
+	}
+
+	// runs $fn with current() set to $lang and link_uri set to that
+	// language's address, puts both back, and returns what $fn returned
+	static function with($lang, $fn) {
+		$current = self::$current;
+		$link = config::get('link_uri');
+		self::$current = (string)$lang;
+		if (self::enabled() && config::get('link_base')) config::set('link_uri')->to(config::get('link_base').self::prefix($lang));
+		try {
+			return $fn();
+		} finally {
+			self::$current = $current;
+			config::set('link_uri')->to($link);
+		}
+	}
+
+	// 'rtl' for languages written right to left, else 'ltr'
+	static function dir($lang = null) {
+		$lang = $lang === null ? self::current() : (string)$lang;
+		$base = strtolower(strtok($lang, '-'));
+		return in_array($base, array('ar', 'arc', 'ckb', 'dv', 'fa', 'he', 'ps', 'sd', 'ug', 'ur', 'yi'), true) ? 'rtl' : 'ltr';
+	}
+
+	// the order dates are typed in (D14): '' without languages, 'mdy' for
+	// en-us, 'dmy' for every other language; Y-m-d is always read
+	static function date_order($lang = null) {
+		if (!self::available()) return '';
+		$lang = $lang === null ? self::current() : (string)$lang;
+		return strtolower($lang) === 'en-us' ? 'mdy' : 'dmy';
+	}
+
+	// the current page (or $path) in every language: rows of lang and url,
+	// for the switcher, hreflang and the sitemap
+	static function alternates($path = null) {
+		$path = $path === null ? ltrim(strtok((string)config::get('uri_string'), '?'), '/') : ltrim((string)$path, '/');
+		$base = config::get('link_base') ?: config::get('link_uri');
+		$rows = array();
+		foreach (self::available() as $code) {
+			$rows[] = array('lang' => $code, 'url' => $base.self::prefix($code).$path);
+		}
+		return $rows;
+	}
+
 	// the language of this request
 	static function detect() {
+		if (self::enabled()) return self::current();
 		if (self::$detected !== null) return self::$detected;
 		$languages = self::available();
 		if (!$languages) return self::$detected = '';
