@@ -583,7 +583,8 @@ switch ($command) {
 			if (isset($options['clean'])) exec('rm -rf '.escapeshellarg($target));
 		}
 		if (!is_dir($target)) mkdir($target, 0775, true);
-		$url = isset($options['url']) && is_string($options['url']) ? $options['url'] : (getenv('RASTER_URL') ?: '/');
+		// the site's address: --url, RASTER_URL, then site_url (#137)
+		$url = isset($options['url']) && is_string($options['url']) ? $options['url'] : (getenv('RASTER_URL') ?: (config::get('site_url') ?: '/'));
 		$export = new raster_export($root, realpath($target), $url);
 		foreach ((array)(isset($options['skip']) ? $options['skip'] : array()) as $skip) if (is_string($skip)) $export->skip[] = $skip;
 		$export->run();
