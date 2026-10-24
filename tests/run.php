@@ -9204,6 +9204,10 @@ function p1a_request($settings, $request, $fn) {
 	}
 }
 
+function p1a_with_uri($uri, $fn) {
+	return with_settings(array('uri_string' => $uri), $fn);
+}
+
 test('P1.A: off, the language API gives the one-language answer', function () {
 	p1a_request(array(), array('get' => array('lang' => 'ro')), function () {
 		same(false, i18n::enabled());
@@ -9299,6 +9303,9 @@ test('P1.A: multilingual, the address picks the language and names its column an
 		), i18n::alternates());
 		same('https://example.com/ro/', i18n::alternates('')[1]['url'], 'a home page is /ro/ (D5)');
 		same('https://example.com/ro/news/news_item/x', i18n::alternates('/news/news_item/x')[1]['url']);
+		// each segment encoded, as the one-address redirect writes it
+		same('https://example.com/ro/caf%C3%A9/a%20b%3F', i18n::alternates('/café/a b?')[1]['url']);
+		same('https://example.com/ro/meniu/ciorb%C4%83', p1a_with_uri('/meniu/ciorbă', function () { return i18n::alternates()[1]['url']; }));
 		same('ro', (new i18n())->language());
 	});
 	// no language in the address is the default; an unknown one too
@@ -9341,6 +9348,16 @@ test('P1.A: multilingual, a domain_language host is its language\'s address', fu
 		same('https://example.com/shop/index.php/', i18n::with('en', function () { return config::get('link_uri'); }));
 		same('https://example.ro:8443/shop/index.php/', i18n::with('ro', function () { return config::get('link_uri'); }));
 		same('https://example.ro:8443/shop/index.php/', config::get('link_uri'));
+	});
+	// on the Romanian host with no site address the others have none: left
+	// out, and with() keeps the links where they are
+	p1a_request(array('site_url' => null, 'host' => 'example.ro', 'url_language' => 'ro', 'link_base' => 'https://example.ro/', 'link_uri' => 'https://example.ro/') + $settings, array(), function () {
+		same(array(array('lang' => 'ro', 'url' => 'https://example.ro/menu')), i18n::alternates());
+		same(array('en', 'https://example.ro/'), i18n::with('en', function () { return array(i18n::current(), config::get('link_uri')); }));
+	});
+	// a site address that is itself a language's domain doesn't count
+	p1a_request(array('site_url' => 'https://example.ro/', 'host' => 'example.ro', 'url_language' => 'ro', 'link_base' => 'https://example.ro/', 'link_uri' => 'https://example.ro/') + $settings, array(), function () {
+		same(array('ro'), array_column(i18n::alternates(), 'lang'));
 	});
 	// a language on its own domain from another language's domain
 	p1a_request(array('domain_language' => array('example.ro' => 'ro', 'example.de' => 'de'), 'host' => 'example.de', 'url_language' => 'de', 'link_base' => 'https://example.de/', 'link_uri' => 'https://example.de/') + $settings, array(), function () {
@@ -9475,6 +9492,10 @@ test('P1.A: doctor fails on multilingual without two languages and on a code it 
 	same(array("fail Language code(s) Raster can't read: 'en_US', 'Romanian'", 'fail multilingual is on with fewer than two languages'),
 		$titles(array('multilingual' => true, 'languages' => array('en_US', 'ro'), 'domain_language' => array('example.ro' => 'Romanian'))));
 	same(array(), $titles(array('multilingual' => false, 'languages' => array('en', 'pt-br'), 'domain_language' => array('example.ro' => 'pt-br'))));
+	// a language's own domain needs the site's address to link the others on
+	same(array('ok Multilingual: en, ro', "fail domain_language needs the site's address"), $titles(array('multilingual' => true, 'languages' => array('en', 'ro'), 'domain_language' => array('example.ro' => 'ro'), 'site_url' => null)));
+	same(array('ok Multilingual: en, ro', "fail domain_language needs the site's address"), $titles(array('multilingual' => true, 'languages' => array('en', 'ro'), 'domain_language' => array('example.ro' => 'ro'), 'site_url' => 'https://example.ro/')));
+	same(array('ok Multilingual: en, ro'), $titles(array('multilingual' => true, 'languages' => array('en', 'ro'), 'domain_language' => array('example.ro' => 'ro'), 'site_url' => 'https://example.com/')));
 });
 
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";

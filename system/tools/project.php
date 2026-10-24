@@ -351,6 +351,11 @@ class raster_project
 		$rules = include $root.'/system/tools/deprecations.php';
 		$app_dir = $root.'/'.$app;
 		$iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($app_dir, FilesystemIterator::SKIP_DOTS));
+		// a rule with `when` counts only while it says the site uses it
+		foreach ($rules as $id => $rule) {
+			if (isset($rule['when']) && !call_user_func($rule['when'])) unset($rules[$id]);
+		}
+		$hits = array();
 		foreach ($iterator as $file) {
 			if (!$file->isFile() || !preg_match('/\.(php|html|rss|atom|xml|json|txt|sql)$/', $file->getFilename())) continue;
 			$relative = substr($file->getPathname(), strlen($app_dir) + 1);
@@ -359,6 +364,7 @@ class raster_project
 			foreach ($rules as $id => $rule) {
 				if (isset($rule['in']) && !preg_match($rule['in'], $relative)) continue;
 				if (!preg_match_all($rule['pattern'], $source, $matches, PREG_OFFSET_CAPTURE)) continue;
+				$hits[$id] = true;
 				foreach ($matches[0] as $match) {
 					$found[] = array(
 						'file' => $app.'/'.$relative,
@@ -368,6 +374,13 @@ class raster_project
 						'allowed' => self::deprecation_allowed($allowed, $id, $relative),
 					);
 				}
+			}
+		}
+		// a `when` rule its pattern can't place (the setting is made in
+		// code) still counts, at the app's config
+		foreach ($rules as $id => $rule) {
+			if (isset($rule['when']) && empty($hits[$id])) {
+				$found[] = array('file' => $app.'/config', 'line' => 0, 'id' => $id, 'message' => $rule['message'].' (deprecated in '.$rule['since'].', removed in '.$rule['removed_in'].')', 'allowed' => self::deprecation_allowed($allowed, $id, 'config'));
 			}
 		}
 		usort($found, function ($a, $b) { return strcmp($a['file'], $b['file']) ?: $a['line'] - $b['line']; });
@@ -526,7 +539,7 @@ class raster_project
 		if ($flagged) {
 			$groups = array();
 			foreach ($flagged as $d) {
-				$groups[$d['message']][] = "{$d['file']}:{$d['line']}";
+				$groups[$d['message']][] = $d['line'] ? "{$d['file']}:{$d['line']}" : $d['file'];
 			}
 			$lines = array();
 			foreach ($groups as $message => $places) $lines[] = $message."\n  ".implode("\n  ", $places);
@@ -546,6 +559,13 @@ class raster_project
 			$add('fail', 'multilingual is on with fewer than two languages', "The site behaves as if it were off. List two or more, the default first:\nconfig::set('languages')->to(array('en', 'ro'))");
 		} elseif (i18n::enabled()) {
 			$add('ok', 'Multilingual: '.implode(', ', i18n::available()));
+			// on a language's own domain the other languages are linked on
+			// the site's address, which must be a host that takes prefixes
+			$domains = array_change_key_case((array)config::get('domain_language', array()));
+			$site = parse_url((string)(getenv('RASTER_URL') ?: config::get('site_url')));
+			if ($domains && (empty($site['host']) || isset($domains[strtolower($site['host'])]))) {
+				$add('fail', 'domain_language needs the site\'s address', "On a language's own domain Raster can't link to the other languages.\nSet RASTER_URL (or config site_url) to the address that takes the /ro/ prefixes, a host not in domain_language");
+			}
 		}
 
 		// the time zone today and scheduled items follow

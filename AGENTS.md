@@ -2053,7 +2053,7 @@ use `'model.method'`: `method(true)` returns
   | `i18n::with($lang, $fn)` | runs `$fn` with `current()` set to `$lang` (one the site doesn't list runs in the default) and, multilingual, `link_uri` set to that language's address; puts both back, even when `$fn` throws, nests, and returns what `$fn` returned |
   | `i18n::dir($lang = null)` | `rtl` for Arabic, Hebrew, Persian, Urdu and the other right-to-left languages, else `ltr` |
   | `i18n::date_order($lang = null)` | how dates are typed: `''` without languages, `mdy` for `en-us`, `dmy` for the rest (`Y-m-d` is always read) |
-  | `i18n::alternates($path = null)` | the page (or `$path`) in every language: rows of `lang` and `url`, a language with its own `domain_language` host at that host |
+  | `i18n::alternates($path = null)` | the page (or `$path`, as it reads) in every language: rows of `lang` and `url`, each path segment encoded; a language with its own `domain_language` host is at that host, and from such a host the others are on the site's address (`RASTER_URL`, `site_url`), or left out without one (`doctor` fails on that) |
 
   `$lang` left out is `current()`. Raster calls these on the bundled
   class, from the page cache before any model loads too, so a site's
@@ -2583,8 +2583,9 @@ stamp check, so people with a page open send it again.
   `system/private_paths.php`, uses of deprecated features
   (`system/tools/deprecations.php`, minus the ones config `allow_deprecated`
   says are on purpose), a `data/secret` the user running it can't read or
-  that isn't a key, a language code it can't read and `multilingual` with
-  fewer than two languages,
+  that isn't a key, a language code it can't read, `multilingual` with
+  fewer than two languages and, multilingual, a `domain_language` without
+  a site address (`RASTER_URL`, `site_url`) on a host of no language,
   and, in production, one address that sent one form many different
   emails today (many people share it), the site address, mail, tokens,
   whether PHP shows errors (`display_errors`) and whether PHP takes the

@@ -625,6 +625,25 @@ test('P1.A: doctor on languages: multilingual needs two, codes it can\'t read, t
 	same(0, $code, $out);
 	lacks($out, 'deprecated');
 	lacks($out, 'multilingual');
+	// the running config decides, not one file's text
+	$routes = "$site/application/config/the_routes.php";
+	$kept = file_get_contents($routes);
+	file_put_contents($routes, $kept."\nconfig::set('multilingual')->to(TRUE);\n");
+	list($code, $out) = $doctor("config::set('languages')->to(array('en', 'ro'));");
+	file_put_contents($routes, $kept);
+	lacks($out, 'deprecated', 'multilingual set in another file');
+	has($out, '✓ Multilingual: en, ro');
+	list($code, $out) = $doctor("// config::set('languages')->to(array('en', 'ro'));");
+	lacks($out, 'deprecated', 'a line in a comment');
+	list($code, $out) = $doctor("config::set('languages')->to(['en', 'ro']);\nconfig::set('multilingual')->to(TRUE);");
+	lacks($out, 'deprecated', 'TRUE');
+	list($code, $out) = $doctor("config::set('languages')->to(['en', 'ro']);");
+	has($out, '(deprecated in 2.2.49, removed in 3.0.0)', 'a [] list');
+	list($code, $out) = $doctor("\$codes = array('en', 'ro');\nconfig::set(\"languages\")->to(\$codes);");
+	has($out, '(deprecated in 2.2.49, removed in 3.0.0)', 'set from a variable');
+	list($code, $out) = $doctor("\$set = 'config::set';\nconfig::instance()->languages = array('en', 'ro');");
+	has($out, "translates only the template's words", 'set without config::set: the app\'s config is named');
+	has($out, "\n      application/config\n");
 	// a site that keeps it on purpose
 	list($code, $out) = $doctor("config::set('languages')->to(array('en', 'ro'));\nconfig::set('allow_deprecated')->to(array('template-only-languages' => true));");
 	same(0, $code, $out);
@@ -646,6 +665,8 @@ test('P1.A: a dictionary that sets $lang gets a doctor warning and returns it af
 	$current = "$site/application/i18n/ro/footer.php";
 	file_put_contents($current, "<?php\n// \$lang = array() was the old way\nreturn array('rights' => 'Toate drepturile rezervate');\n");
 	$footer = file_get_contents($current);
+	$text = "$site/application/i18n/ro/legal.php";
+	file_put_contents($text, "<?php\n\$lang = array('terms' => 'Termeni');\n?>\n<!-- kept as written -->\n");
 	list($code, $out) = raster($site, array('doctor'));
 	has($out, 'a dictionary that sets $lang instead of returning it');
 	has($out, 'application/i18n/ro/home.php:2');
@@ -661,6 +682,12 @@ test('P1.A: a dictionary that sets $lang gets a doctor warning and returns it af
 	same($footer, file_get_contents($current), 'a dictionary that returns is left alone');
 	same(array('welcome' => 'Bine ați venit', 'return' => 'Înapoi'), (function ($file) { return include $file; })($old));
 	same(array('soup' => 'Supă', 'tea' => 'Ceai'), (function ($file) { return include $file; })($parts));
+	// text after the closing tag is still printed, and the array returned
+	same("<?php\n\$lang = array('terms' => 'Termeni');\n?>\n<!-- kept as written -->\n<?php return \$lang;\n", file_get_contents($text));
+	ob_start();
+	$terms = (function ($file) { return include $file; })($text);
+	same("<!-- kept as written -->\n", ob_get_clean());
+	same(array('terms' => 'Termeni'), $terms);
 	list($code, $out) = raster($site, array('doctor'));
 	lacks($out, 'sets $lang');
 	file_put_contents("$site/application/config/raster-version", "2.2.48\n");

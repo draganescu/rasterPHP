@@ -2,7 +2,10 @@
 // Things that still work but will be removed. `raster doctor` looks for
 // them in each app's views, models and config (`in` limits the files, as a
 // pattern over the path inside the app folder). `raster upgrade` fixes the
-// ones it can; the message says what to do for the rest.
+// ones it can; the message says what to do for the rest. A rule with
+// `when` (a function of the running config) counts only while it returns
+// true, and then its pattern only says where; with no line it finds, the
+// use is the app's config.
 //
 // When you deprecate something: add it here with the version it was
 // deprecated in and the version that removes it (at least one minor
@@ -32,12 +35,13 @@ return array(
 	),
 	// two or more languages without multilingual: the template's words are
 	// translated, the content and the addresses are not (#200 D2). The
-	// file that lists them and doesn't turn multilingual on is the use.
+	// running config decides (`when`); the pattern only points at the line.
 	'template-only-languages' => array(
 		'since' => '2.2.49',
 		'removed_in' => '3.0.0',
 		'in' => '#^config/#',
-		'pattern' => '/\A(?![\s\S]*config::set\(\s*[\'"]multilingual[\'"]\s*\)\s*->\s*to\(\s*true\b)[\s\S]*?\Kconfig::set\(\s*[\'"]languages[\'"]\s*\)\s*->\s*to\(\s*array\(\s*[\'"][^\'"]*[\'"]\s*,\s*[\'"]/',
+		'when' => function () { return class_exists('i18n') && count(i18n::available()) >= 2 && !config::get('multilingual'); },
+		'pattern' => '/^[ \t]*config::set\(\s*[\'"]languages[\'"]\s*\)/m',
 		'message' => 'languages without multilingual translates only the template\'s words, picked by ?lang= and a cookie; add config::set(\'multilingual\')->to(true) for one address per language (/ro/menu) and translatable content, then php bin/raster schema --apply',
 	),
 	// a dictionary in i18n/<lang>/ that sets $lang instead of returning
@@ -46,7 +50,7 @@ return array(
 		'since' => '2.2.49',
 		'removed_in' => '3.0.0',
 		'in' => '#^i18n/#',
-		'pattern' => '/\A(?![\s\S]*^\s*return\b)[\s\S]*?\K\$lang\b\s*(?:\[[^\]]*\]\s*)?=(?!=)/m',
+		'pattern' => '/\A(?![\s\S]*^\s*(?:<\?php\s+)?return\b)[\s\S]*?\K\$lang\b\s*(?:\[[^\]]*\]\s*)?=(?!=)/m',
 		'message' => 'a dictionary that sets $lang instead of returning it: write return array(\'key\' => \'text\'); (`raster upgrade` adds return $lang; at the end)',
 	),
 );
