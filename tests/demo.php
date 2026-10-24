@@ -1110,21 +1110,21 @@ test(array('E21', 'E29', 'C44'), 'pictures: upload, page and item photos, empty 
 	same(400, $status);
 	same(array('upload_not_a_picture'), json_decode($response, true)['problems'], 'a named refusal the editor words');
 	// a page field in an attribute: <!-- print.@src.cms.photo -->
-	http('POST', "$base/api/cms/editor_save_field", array('csrf' => $token, 'type' => 'aboutpage', 'slug' => '/about', 'field' => 'photo', 'value' => $upload['url']), $h);
+	http('POST', "$base/api/cms/editor_save_field", array('lang' => 'en', 'csrf' => $token, 'type' => 'aboutpage', 'slug' => '/about', 'field' => 'photo', 'value' => $upload['url']), $h);
 	has(http('GET', "$base/about")[1], '<img class="photo wide" src="'.$upload['url'].'" alt="The café from across the street">');
 	same($upload['url'], mcp($base, 'get_page', array('page' => '/about'))['fields']['photo'], 'MCP knows the field');
 	// saved while the site ran under another folder (a builder's preview), then moved
 	$file = '/media/'.basename($upload['url']);
-	http('POST', "$base/api/cms/editor_save_field", array('csrf' => $token, 'type' => 'aboutpage', 'slug' => '/about', 'field' => 'photo', 'value' => '/preview/abc'.$file), $h);
+	http('POST', "$base/api/cms/editor_save_field", array('lang' => 'en', 'csrf' => $token, 'type' => 'aboutpage', 'slug' => '/about', 'field' => 'photo', 'value' => '/preview/abc'.$file), $h);
 	has(http('GET', "$base/about")[1], '<img class="photo wide" src="'.$file.'"', 'a picture saved under another folder shows under this one');
-	http('POST', "$base/api/cms/editor_save_field", array('csrf' => $token, 'type' => 'aboutpage', 'slug' => '/about', 'field' => 'photo', 'value' => ''), $h);
+	http('POST', "$base/api/cms/editor_save_field", array('lang' => 'en', 'csrf' => $token, 'type' => 'aboutpage', 'slug' => '/about', 'field' => 'photo', 'value' => ''), $h);
 	has(http('GET', "$base/about")[1], '<img class="photo wide" src="img/about.jpg?v=', 'empty shows the template\'s picture');
 	// an item photo
 	$item = null;
 	foreach (mcp($base, 'list_items', array('collection' => 'menu', 'limit' => 100))['items'] as $row) if ($row['name'] === 'Americano') $item = $row;
-	http('POST', "$base/api/cms/editor_save_item", array('csrf' => $token, 'collection' => 'menu', 'id' => $item['id'], 'fields' => array('photo' => $upload['url'])), $h);
+	http('POST', "$base/api/cms/editor_save_item", array('lang' => 'en', 'csrf' => $token, 'collection' => 'menu', 'id' => $item['id'], 'fields' => array('photo' => $upload['url'])), $h);
 	has(http('GET', "$base/menu/menu_item/americano")[1], '<img class="photo wide" src="'.$upload['url'].'"');
-	http('POST', "$base/api/cms/editor_save_item", array('csrf' => $token, 'collection' => 'menu', 'id' => $item['id'], 'fields' => array('photo' => '')), $h);
+	http('POST', "$base/api/cms/editor_save_item", array('lang' => 'en', 'csrf' => $token, 'collection' => 'menu', 'id' => $item['id'], 'fields' => array('photo' => '')), $h);
 	has(http('GET', "$base/menu/menu_item/americano")[1], '<img class="photo wide" src="img/menu/flat-white.jpg?v=', 'empty keeps the mock-up');
 });
 
@@ -2417,9 +2417,9 @@ test('R3', 'check() runs on every write: the form, the editor, MCP and the model
 	$staff = login($base, 'staff@cafe.test', 'staff password');
 	$h = array("Cookie: $staff");
 	$token = token_in(http('GET', "$base/staff", null, $h)[1]);
-	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'booking', 'id' => $group->id, 'fields' => array('people' => '8', 'name' => 'Group 0 (8)'), 'csrf' => $token), $h);
+	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'booking', 'id' => $group->id, 'fields' => array('people' => '8', 'name' => 'Group 0 (8)'), 'lang' => 'en', 'csrf' => $token), $h);
 	same(200, $status, 'the booking itself is not counted twice');
-	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'booking', 'id' => 0, 'fields' => array('name' => 'Phone booking', 'date' => $day, 'time' => '19:00', 'resource' => 'dining-room', 'people' => '6'), 'csrf' => $token), $h);
+	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'booking', 'id' => 0, 'fields' => array('name' => 'Phone booking', 'date' => $day, 'time' => '19:00', 'resource' => 'dining-room', 'people' => '6'), 'lang' => 'en', 'csrf' => $token), $h);
 	same(422, $status);
 	same(array('fully_booked'), json_decode($body, true)['problems']);
 	$refused = json_decode(http('POST', "$base/mcp", json_encode(array('jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => array('name' => 'create_item', 'arguments' => array('collection' => 'booking', 'fields' => array('name' => 'Agent', 'date' => $day, 'time' => '19:00', 'resource' => 'dining-room', 'people' => '6'))))), array('Authorization: Bearer demo-token', 'Content-Type: application/json'))[1], true)['result'];
@@ -2469,19 +2469,19 @@ test(array('R6', 'R8'), 'readonly fields and actions: buttons for the roles allo
 	list(, $field) = mark_of($config, 'item_field', function ($m) use ($id) { return $m['item'] === (int)$id && $m['field'] === 'status'; });
 	same(true, $field['readonly'], 'the status is marked readonly: shown, updated by actions, never editable');
 	$token = token_in($page);
-	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'booking', 'id' => $booking->id, 'fields' => array('status' => 'confirmed'), 'csrf' => $token), $h);
+	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'booking', 'id' => $booking->id, 'fields' => array('status' => 'confirmed'), 'lang' => 'en', 'csrf' => $token), $h);
 	same(400, $status);
 	has(json_decode($body, true)['error'], "'status' can't be changed here");
 	$before = count(mails());
-	list($status, $body) = http('POST', "$base/api/cms/editor_action", array('collection' => 'booking', 'id' => $booking->id, 'action' => 'confirm', 'csrf' => $token), $h);
+	list($status, $body) = http('POST', "$base/api/cms/editor_action", array('collection' => 'booking', 'id' => $booking->id, 'action' => 'confirm', 'lang' => 'en', 'csrf' => $token), $h);
 	same(200, $status);
 	same('confirmed', json_decode($body, true)['status']);
 	same(array('Your booking is confirmed'), array_column(array_slice(mails(), $before), 'subject'), 'the guest is told, with a new link');
-	list($status, $body) = http('POST', "$base/api/cms/editor_action", array('collection' => 'booking', 'id' => $booking->id, 'action' => 'refund', 'csrf' => $token), $h);
+	list($status, $body) = http('POST', "$base/api/cms/editor_action", array('collection' => 'booking', 'id' => $booking->id, 'action' => 'refund', 'lang' => 'en', 'csrf' => $token), $h);
 	same(400, $status);
 	has(json_decode($body, true)['error'], 'no action');
 	same('cancelled', mcp($base, 'run_action', array('collection' => 'booking', 'id' => (int)$booking->id, 'action' => 'cancel'))['status']);
-	list($status, $body) = http('POST', "$base/api/cms/editor_action", array('collection' => 'booking', 'id' => $booking->id, 'action' => 'confirm', 'csrf' => $token), $h);
+	list($status, $body) = http('POST', "$base/api/cms/editor_action", array('collection' => 'booking', 'id' => $booking->id, 'action' => 'confirm', 'lang' => 'en', 'csrf' => $token), $h);
 	same(422, $status);
 	same(array('already_cancelled'), json_decode($body, true)['problems']);
 	$member = login($base, 'maria@example.com', 'reset password');
@@ -3128,17 +3128,17 @@ test('T2', 'values are stored as their type, whoever writes them, or refused nam
 	$staff = login($base, 'staff@cafe.test', 'staff password');
 	$h = array("Cookie: $staff");
 	$token = token_in(http('GET', "$base/menu", null, $h)[1]);
-	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'menu', 'id' => 0, 'fields' => array('name' => 'Typed tart', 'price' => ' 9.5 ', 'category' => 'cakes'), 'csrf' => $token), $h);
+	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'menu', 'id' => 0, 'fields' => array('name' => 'Typed tart', 'price' => ' 9.5 ', 'category' => 'cakes'), 'lang' => 'en', 'csrf' => $token), $h);
 	same(200, $status);
 	$tart = json_decode($body, true);
 	same(array('9.5', '1'), array($tart['price'], $tart['enabled']));
 	same(9.5, cms_store::get_item('menudata', $tart['id'])['price'], 'stored as a number');
-	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'menu', 'id' => $tart['id'], 'fields' => array('price' => 'nine'), 'csrf' => $token), $h);
+	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'menu', 'id' => $tart['id'], 'fields' => array('price' => 'nine'), 'lang' => 'en', 'csrf' => $token), $h);
 	same(400, $status);
 	same(array('type_number'), json_decode($body, true)['problems'], 'a name the editor words: '.$body);
 	same('price', json_decode($body, true)['field']);
 	// with the mock-ups from the item's mark, it comes back as the page prints it
-	list(, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'menu', 'id' => $tart['id'], 'fields' => array('price' => '9.5'), 'examples' => array('price' => '14.50'), 'csrf' => $token), $h);
+	list(, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'menu', 'id' => $tart['id'], 'fields' => array('price' => '9.5'), 'examples' => array('price' => '14.50'), 'lang' => 'en', 'csrf' => $token), $h);
 	same('9.50', json_decode($body, true)['price']);
 	has(http('GET', "$base/menu", null, $h)[1], '"examples":{', 'item marks carry their mock-ups');
 	mcp($base, 'delete_item', array('collection' => 'events', 'id' => $gig['id']));
@@ -4341,19 +4341,19 @@ test(array('P4', 'R8'), 'the staff page from the recipe: counts, requests, an ag
 	$token = token_in($page);
 	$day = next_open('sun', 2);
 	$before = count(mails());
-	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'booking', 'id' => 0, 'fields' => array('name' => 'Phoned in', 'email' => 'phoned@example.com', 'date' => $day, 'time' => '21:00', 'resource' => 'dining-room', 'people' => '4'), 'csrf' => $token), $h);
+	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'booking', 'id' => 0, 'fields' => array('name' => 'Phoned in', 'email' => 'phoned@example.com', 'date' => $day, 'time' => '21:00', 'resource' => 'dining-room', 'people' => '4'), 'lang' => 'en', 'csrf' => $token), $h);
 	same(200, $status, $body);
 	$phoned = json_decode($body, true);
 	same(array('requested', '23:00'), array($phoned['status'], $phoned['ends']));
 	same(array('phoned@example.com'), array_column(array_slice(mails(), $before), 'to'), 'the guest gets their request and link; staff aren\'t emailed about their own');
 	check(link_token(mail_to('phoned@example.com')) !== null, 'with the link');
 	// an action in place
-	list($status, $body) = http('POST', "$base/api/cms/editor_action", array('collection' => 'booking', 'id' => $phoned['id'], 'action' => 'confirm', 'csrf' => $token), $h);
+	list($status, $body) = http('POST', "$base/api/cms/editor_action", array('collection' => 'booking', 'id' => $phoned['id'], 'action' => 'confirm', 'lang' => 'en', 'csrf' => $token), $h);
 	same(200, $status);
 	same('confirmed', json_decode($body, true)['status']);
 	same('Your booking is confirmed', mail_to('phoned@example.com')['subject']);
 	// moving it in the page keeps it confirmed and tells the guest
-	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'booking', 'id' => $phoned['id'], 'fields' => array('time' => '19:00'), 'csrf' => $token), $h);
+	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'booking', 'id' => $phoned['id'], 'fields' => array('time' => '19:00'), 'lang' => 'en', 'csrf' => $token), $h);
 	same(200, $status, $body);
 	same(array('confirmed', '21:00'), array(json_decode($body, true)['status'], json_decode($body, true)['ends']));
 	same('Your booking has moved', mail_to('phoned@example.com')['subject']);
@@ -4725,7 +4725,7 @@ test('Q4', 'a link-stuffed message is kept aside as spam, and staff can say it w
 	$page = http('GET', "$base/staff", null, $h)[1];
 	has(staff_section($page, 'Spam'), 'cheap watches', 'in the Spam list');
 	lacks(staff_section($page, 'New'), 'cheap watches');
-	list($status, $body) = http('POST', "$base/api/cms/editor_action", array('collection' => 'contactmessage', 'id' => $id, 'action' => 'not_spam', 'csrf' => token_in($page)), $h);
+	list($status, $body) = http('POST', "$base/api/cms/editor_action", array('collection' => 'contactmessage', 'id' => $id, 'action' => 'not_spam', 'lang' => 'en', 'csrf' => token_in($page)), $h);
 	same(200, $status, $body);
 	same('new', json_decode($body, true)['status']);
 	same($before, count(mails()), 'marking it not spam mails nobody');
@@ -4957,17 +4957,17 @@ test('S6', 'the staff page: counts, waitlist, attention, a phone reply', functio
 	// a phone reply from the card: full, so it waits, and promote can't make room
 	$token = token_in($page);
 	$before = count(mails());
-	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'rsvp', 'id' => 0, 'fields' => array('name' => 'Phoned in', 'event' => (string)$poetry['id'], 'answer' => 'yes', 'people' => '1'), 'csrf' => $token), $h);
+	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'rsvp', 'id' => 0, 'fields' => array('name' => 'Phoned in', 'event' => (string)$poetry['id'], 'answer' => 'yes', 'people' => '1'), 'lang' => 'en', 'csrf' => $token), $h);
 	same(200, $status, $body);
 	$phoned = json_decode($body, true);
 	same('waiting', $phoned['status'], 'staff never go over places');
-	list($status, $body) = http('POST', "$base/api/cms/editor_action", array('collection' => 'rsvp', 'id' => $phoned['id'], 'action' => 'promote', 'csrf' => $token), $h);
+	list($status, $body) = http('POST', "$base/api/cms/editor_action", array('collection' => 'rsvp', 'id' => $phoned['id'], 'action' => 'promote', 'lang' => 'en', 'csrf' => $token), $h);
 	same(422, $status, $body);
 	same(array('not_enough_places'), json_decode($body, true)['problems']);
 	has(file_get_contents(dirname(__DIR__).'/demo/i18n/en/raster_editor.php'), "'problem_not_enough_places'", 'in the café\'s words');
 	$until = $poetry['rsvp_until'];
 	$save = function ($fields) use ($base, $h, $token, $poetry) {
-		list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'events', 'id' => $poetry['id'], 'fields' => $fields, 'csrf' => $token), $h);
+		list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'events', 'id' => $poetry['id'], 'fields' => $fields, 'lang' => 'en', 'csrf' => $token), $h);
 		same(200, $status, $body);
 	};
 	try {
@@ -4975,7 +4975,7 @@ test('S6', 'the staff page: counts, waitlist, attention, a phone reply', functio
 		$save(array('rsvp_until' => date('Y-m-d H:i', time() - 3600)));
 		$save(array('places' => '5'));
 		same('waiting', reply_row_by_id($phoned['id'])['status']);
-		list($status, $body) = http('POST', "$base/api/cms/editor_action", array('collection' => 'rsvp', 'id' => $phoned['id'], 'action' => 'promote', 'csrf' => $token), $h);
+		list($status, $body) = http('POST', "$base/api/cms/editor_action", array('collection' => 'rsvp', 'id' => $phoned['id'], 'action' => 'promote', 'lang' => 'en', 'csrf' => $token), $h);
 		same(200, $status, $body);
 		same('going', json_decode($body, true)['status'], 'promoted out of turn');
 		// places lowered under the people going: nobody moved, nobody emailed, all flagged
@@ -5195,17 +5195,17 @@ test(array('B4', 'O1'), 'P3.C: the sitemap lists the FAQ, which has no item view
 	$body = http('GET', "$base/sitemap.xml")[1];
 	has($body, "<loc>$base/faq/faq_item/is-there-wifi</loc>");
 	has($body, "<loc>$base/menu/menu_item/flat-white</loc>");
-	// one language: no alternates
-	lacks($body, 'xhtml:link');
+	// the café is multilingual: each address with its alternates (J14)
+	has($body, 'hreflang="ro" href="'.$base.'/ro/faq"');
 	// the page's date is its newest revision's
 	same(200, http('GET', "$base/about")[0]);
 	cms_store::connect();
 	$type = cms::page_type('/about');
 	R::exec("UPDATE $type SET updated_at = '2025-01-02 10:00:00'");
 	util::content_changed();
-	has(http('GET', "$base/sitemap.xml")[1], "<url><loc>$base/about</loc><lastmod>2025-01-02</lastmod></url>");
+	has(http('GET', "$base/sitemap.xml")[1], "<url><loc>$base/about</loc><lastmod>2025-01-02</lastmod>");
 	cms_store::update_page($type, '/about', array(), array());
-	has(http('GET', "$base/sitemap.xml")[1], "<url><loc>$base/about</loc><lastmod>".date('Y-m-d').'</lastmod></url>');
+	has(http('GET', "$base/sitemap.xml")[1], "<url><loc>$base/about</loc><lastmod>".date('Y-m-d').'</lastmod>');
 });
 test('N9', 'P3.C export: a multilingual site is written at its Romanian item slugs (needs P3.A and P3.B)', function () use ($root, $tmp, $base) {
 	$config = "$root/demo/config/the_app.php";
