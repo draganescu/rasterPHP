@@ -213,6 +213,8 @@ class cms_editor {
 	// follow the browser again)
 	static function set_lang() {
 		cms::require_admin(true);
+		// a multilingual site's choice only: off the account has no such column
+		if (!i18n::enabled()) return self::refused(new cms_refused(array('not_multilingual')));
 		$lang = util::post('lang');
 		if (is_array($lang)) return self::fail("'lang' takes one value");
 		$lang = strtolower((string)$lang);

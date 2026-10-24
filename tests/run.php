@@ -10696,6 +10696,12 @@ test('P2.B: off, the editor\'s config JSON is byte for byte what it was, and sav
 			same('Again', R::getCell('SELECT zzp2b_off FROM zzp2boffpage ORDER BY id DESC LIMIT 1'), 'a language is ignored off');
 			same(array('type', 'slug', 'changed', 'fields'), array_keys($GLOBALS['p2b_events'][0]));
 			same(array('revision', 'updated_at', 'fields'), array_keys(cms_store::page_history('zzp2boffpage')[0]));
+			// editor_set_lang is a multilingual site's: off it changes nothing
+			$had = array_key_exists('editor_lang', cms_store::columns('user'));
+			list($status, $body) = form_post("$base/api/cms/editor_set_lang", array('lang' => 'ro', 'csrf' => $config['csrf']), array("Cookie: $editor"));
+			same(array(422, array('not_multilingual')), array($status, json_decode($body, true)['problems']), $body);
+			if (!$had) check(!array_key_exists('editor_lang', cms_store::columns('user')), 'no editor_lang column');
+			else same('', (string)R::getCell('SELECT editor_lang FROM user WHERE email = ?', array('zzp2b-off@example.test')), 'nothing stored');
 			// the account's editor_lang is a multilingual site's column only:
 			// off, schema --check asks nothing new of an existing database
 			check(!array_key_exists('editor_lang', authentication::schema()['user']), 'off: no editor_lang');
