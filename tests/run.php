@@ -10189,6 +10189,37 @@ test('P2.A: the starter linted multilingual: warnings only, a few per view', fun
 	foreach ($on as $p) check(strpos($p['file'], '_email/') === false || strpos($p['message'], 'the same in every language') === false, 'no email: '.$p['file']);
 });
 
+test('P2.A: schema --rename moves a field\'s translation columns with it', function () {
+	cms_store::connect();
+	$schema = new raster_schema();
+	try {
+		R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS zzp2arenamepage');
+		cms_store::forget();
+		with_settings(p2a_on(array('en', 'ro', 'pt-br')), function () {
+			cms_types::ensure('zzp2arenamepage', array('slug' => 'text', 'headline' => 'text', 'title__pt_br' => 'text'), array('headline'));
+		});
+		R::getDatabaseAdapter()->exec("INSERT INTO zzp2arenamepage (slug, headline, headline__ro, headline__pt_br) VALUES ('/zz', 'Hello', 'Salut', 'Olá')");
+		// title__pt_br is there already: that one is a move
+		$columns = p2a_columns('zzp2arenamepage');
+		same('would rename zzp2arenamepage.headline to title (and headline__ro to title__ro, headline__pt_br into title__pt_br)', $schema->rename('zzp2arenamepage', 'headline', 'title', true));
+		same($columns, p2a_columns('zzp2arenamepage'), '--dry-run changes nothing');
+		// off: kept translations move too
+		same('renamed zzp2arenamepage.headline to title (and headline__ro to title__ro, headline__pt_br into title__pt_br)', $schema->rename('zzp2arenamepage', 'headline', 'title'));
+		$now = p2a_columns('zzp2arenamepage');
+		sort($now);
+		same(array('id', 'slug', 'title', 'title__pt_br', 'title__ro'), $now);
+		$row = R::getRow('SELECT * FROM zzp2arenamepage');
+		same(array('Hello', 'Salut', 'Olá'), array($row['title'], $row['title__ro'], $row['title__pt_br']));
+		// on: the same
+		same('renamed zzp2arenamepage.title to name (and title__pt_br to name__pt_br, title__ro to name__ro)', with_settings(p2a_on(array('en', 'ro', 'pt-br')), function () use ($schema) { return $schema->rename('zzp2arenamepage', 'title', 'name'); }));
+		// a field without translations reads as before
+		same('renamed zzp2arenamepage.slug to slug2', $schema->rename('zzp2arenamepage', 'slug', 'slug2'));
+	} finally {
+		R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS zzp2arenamepage');
+		cms_store::forget();
+	}
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";
 foreach ($skipped as $skip) echo "  - $skip\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";

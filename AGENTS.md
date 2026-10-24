@@ -848,6 +848,8 @@ mock-up is stored only when the collection's table is made.
     (`translations` in `--json`, there when multilingual is on or some are
     kept), never orphans, never drift, never suggested for `--drop` or
     `--rename`. Turning multilingual on again brings them back.
+  - `--rename=table.old:new` moves the field's translation columns with it
+    (`old__ro` to `new__ro`, kept ones too), and `--dry-run` lists them.
 
 ## Records: types a model declares
 

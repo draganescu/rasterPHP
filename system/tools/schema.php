@@ -330,24 +330,41 @@ class raster_schema {
 		return $changes;
 	}
 
-	// with $dry_run, both check everything and say what they would do
+	// with $dry_run, both check everything and say what they would do. A
+	// field's translation columns go with it: headline__ro to title__ro,
+	// whether multilingual is on or they are kept translations
 	function rename($table, $from, $to, $dry_run = false) {
 		foreach (array($table, $from, $to) as $name) {
 			if (!preg_match('/^[a-z0-9_]+$/', $name)) throw new InvalidArgumentException("Invalid name '$name'");
 		}
 		cms_store::connect();
 		if (!array_key_exists($from, cms_store::columns($table))) throw new InvalidArgumentException("$table has no column $from");
-		if (!array_key_exists($to, cms_store::columns($table))) {
-			if ($dry_run) return "would rename $table.$from to $to";
-			R::exec("ALTER TABLE `$table` RENAME COLUMN `$from` TO `$to`");
-			return "renamed $table.$from to $to";
+		$said = $this->rename_column($table, $from, $to, $dry_run);
+		$also = array();
+		foreach (array_keys(cms_store::columns($table)) as $column) {
+			if (self::translation_of($column) !== $from) continue;
+			$suffix = substr($column, strlen($from));
+			$also[] = $this->rename_column($table, $column, $to.$suffix, $dry_run, false);
 		}
-		// the new column already exists (created with the template default by a
-		// request in development): move the content over, then drop the old one
-		if ($dry_run) return "would move $table.$from into $to";
+		cms_store::forget();
+		return $said.($also ? ' (and '.implode(', ', $also).')' : '');
+	}
+
+	// one column renamed, or moved into one that exists already (created
+	// with the template default by a request in development): the content
+	// goes over, then the old one is dropped
+	protected function rename_column($table, $from, $to, $dry_run, $named = true) {
+		$what = $named ? "$table.$from" : $from;
+		cms_store::forget();
+		if (!array_key_exists($to, cms_store::columns($table))) {
+			if ($dry_run) return ($named ? 'would rename ' : '')."$what to $to";
+			R::exec("ALTER TABLE `$table` RENAME COLUMN `$from` TO `$to`");
+			return ($named ? 'renamed ' : '')."$what to $to";
+		}
+		if ($dry_run) return ($named ? 'would move ' : '')."$what into $to";
 		R::exec("UPDATE `$table` SET `$to` = `$from` WHERE `$from` IS NOT NULL");
 		R::exec("ALTER TABLE `$table` DROP COLUMN `$from`");
-		return "moved $table.$from into $to";
+		return ($named ? 'moved ' : '')."$what into $to";
 	}
 
 	function drop($table, $column = null, $force = false, $dry_run = false) {
