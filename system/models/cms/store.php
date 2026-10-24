@@ -14,7 +14,7 @@ require_once __DIR__.'/records.php';
 class cms_store {
 
 	// columns RedBean or Raster manage, never edited as content
-	static $system_fields = array('id', 'slug', 'updated_at', 'enabled', 'published_at');
+	static $system_fields = array('id', 'slug', 'updated_at', 'enabled', 'published_at', 'saved_lang');
 
 	// ##Slugs, drafts and order
 
