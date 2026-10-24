@@ -135,6 +135,17 @@ class i18n
 		return strtolower($lang) === 'en-us' ? 'mdy' : 'dmy';
 	}
 
+	// The language a stored row is for (#200 D13): its `lang` when that is
+	// one of the site's languages, else the default language (rows from
+	// before the column, '' or a code the site dropped), '' when languages
+	// is unset. $row is an array, a bean or null. Senders pass it to
+	// mail::send_view, so a staff action mails the guest in theirs.
+	static function of($row) {
+		$lang = is_array($row) ? (isset($row['lang']) ? $row['lang'] : null) : (is_object($row) && isset($row->lang) ? $row->lang : null);
+		$known = is_string($lang) ? self::known($lang) : null;
+		return $known !== null ? $known : self::default_language();
+	}
+
 	// the current page (or $path, as it reads, not encoded) in every
 	// language that has an address: rows of lang and url, each segment
 	// encoded as the one-address redirect writes it, for the switcher,

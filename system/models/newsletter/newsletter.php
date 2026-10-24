@@ -35,7 +35,7 @@ class newsletter
 
 	// the tables this model uses, for `raster schema --apply`
 	static function schema() {
-		return array(
+		$tables = array(
 			// confirm_sent_at: when the confirmation was last mailed, so signing up
 			// again at once mails nothing
 			'subscriber' => array('email' => '', 'name' => '', 'status' => '', 'token' => '', 'source' => '', 'created_at' => '', 'confirmed_at' => '', 'unsubscribed_at' => '', 'confirm_sent_at' => ''),
@@ -44,6 +44,9 @@ class newsletter
 			// one row per address an issue was handed over to
 			'newsletterdelivery' => array('issue' => 0, 'email' => '', 'sent_at' => ''),
 		);
+		// the language a subscriber reads, only a multilingual site's (#200 D13)
+		if (i18n::enabled()) $tables['subscriber']['lang'] = '';
+		return $tables;
 	}
 
 	// what a site using the newsletter needs: the confirmation email's view,
@@ -268,8 +271,11 @@ class newsletter
 	}
 
 	// the confirmed subscribers an issue has not reached yet (all of them for
-	// null), as rows (sql/unreached_subscribers.sql)
-	static function recipients($issue) {
+	// null), as rows (sql/unreached_subscribers.sql). $lang: on a
+	// multilingual site, only those who read that language (i18n::of: a
+	// subscriber with none reads the default); null, or off, all of them
+	// (#200; P4.B).
+	static function recipients($issue, $lang = null) {
 		if (!$issue || !$issue->id || !cms_store::table_exists('newsletterdelivery')) return self::subscribers();
 		if (!self::table_ready()) return array();
 		return database::instance('newsletter')->unreached_subscribers((int)$issue->id);
@@ -283,7 +289,9 @@ class newsletter
 	// recipients counts every address it reached.
 	// A mail handed over just as the process is killed is not noted yet, so
 	// that one reader may get it twice.
-	static function send_issue($url, $html, $subject, $again = false) {
+	// $lang: the language $html is in, sent to recipients($issue, $lang)
+	// only; null, or off, to everyone (P4.B).
+	static function send_issue($url, $html, $subject, $again = false, $lang = null) {
 		self::connect();
 		self::$sent = 0;
 		self::$failures = array();

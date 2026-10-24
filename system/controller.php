@@ -450,8 +450,10 @@ class controller {
 	}
 
 	// Renders a view into a string without touching the page being built,
-	// used for emails. $vars are available as print.self.name.
-	static function render_view($view, $vars = array(), $format = 'html') {
+	// used for emails. $vars are available as print.self.name. $lang: on a
+	// multilingual site it renders in that language (i18n::with); null, or
+	// off, in the request's own (#200 D13; P4.A).
+	static function render_view($view, $vars = array(), $format = 'html', $lang = null) {
 		$path = file_exists($view) ? $view : controller::build_view_path($view);
 		if (!file_exists($path)) throw new RuntimeException("View not found: $view");
 		$previous = template::swap(null);

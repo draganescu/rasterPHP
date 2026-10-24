@@ -125,8 +125,12 @@ class authentication
 			'created_at' => '', 'last_login' => '', 'failed_count' => 0, 'failed_at' => '',
 			'reset_hash' => '', 'reset_expires' => '', 'login_hash' => '', 'login_expires' => '',
 		);
-		// the editor's own language (D9), only a multilingual site's
-		if (i18n::enabled()) $user['editor_lang'] = '';
+		// the editor's own language (D9) and the language the account's
+		// email goes out in (D13), only a multilingual site's
+		if (i18n::enabled()) {
+			$user['editor_lang'] = '';
+			$user['lang'] = '';
+		}
 		return array('user' => $user);
 	}
 

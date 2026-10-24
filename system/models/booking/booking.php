@@ -96,7 +96,7 @@ class booking
 	static $managed = array();
 
 	static function types() {
-		return array(
+		$types = array(
 			'bookingresource' => array(
 				'fields' => array('name' => '', 'people' => 0, 'bookings' => 0, 'active' => true),
 			),
@@ -129,6 +129,14 @@ class booking
 				'actions' => array('confirm' => 'editor', 'decline' => 'editor', 'cancel' => 'editor'),
 			),
 		);
+		// the guest's language, which their emails go out in: only a
+		// multilingual site's; staff and agents see it, and only the
+		// model writes it (#200 D13)
+		if (i18n::enabled()) {
+			$types['booking']['fields']['lang'] = '';
+			$types['booking']['readonly'][] = 'lang';
+		}
+		return $types;
 	}
 
 	// every write of the setup changes the slots, so what was read of it is

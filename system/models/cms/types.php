@@ -304,7 +304,7 @@ class cms_types {
 				break;
 			case 'date':
 			case 'datetime':
-				$time = self::timestamp($value);
+				$time = self::parse_date($value);
 				if ($time !== null) return date($type === 'date' ? 'Y-m-d' : 'Y-m-d H:i:s', $time);
 				break;
 			case 'time':
@@ -315,6 +315,15 @@ class cms_types {
 				break;
 		}
 		throw new cms_type_error($field, $type);
+	}
+
+	// What a typed date (or date and time) means, as a Unix time, or null:
+	// in the order $lang's people write dates (i18n::date_order, #135 D14),
+	// so 5/10/2026 is 5 October on a site in Romanian. $lang null means
+	// i18n::current(). Without languages, read as timestamp() reads it,
+	// as always. Y-m-d is read in every language. (P4.B's body.)
+	static function parse_date($value, $lang = null) {
+		return self::timestamp($value);
 	}
 
 	// What strtotime makes of a date or time, when there is one in it. PHP

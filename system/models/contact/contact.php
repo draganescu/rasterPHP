@@ -53,7 +53,7 @@ class contact
 	static $writing = false;
 
 	static function types() {
-		return array(
+		$types = array(
 			'contactmessage' => array(
 				// title first: the slug is made from it, never from the email
 				'fields' => array(
@@ -70,6 +70,14 @@ class contact
 				'actions' => array('done' => 'editor', 'spam' => 'editor', 'not_spam' => 'editor'),
 			),
 		);
+		// the language the sender wrote in, for staff's email: only a
+		// multilingual site's; staff and agents see it, and only the
+		// model writes it (#200 D13)
+		if (i18n::enabled()) {
+			$types['contactmessage']['fields']['lang'] = '';
+			$types['contactmessage']['readonly'][] = 'lang';
+		}
+		return $types;
 	}
 
 	// A new message's title is when it came. One a visitor sent on the form

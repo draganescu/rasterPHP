@@ -114,7 +114,7 @@ class rsvp
 	static $made = array();
 
 	static function types() {
-		return array(
+		$types = array(
 			'rsvp' => array(
 				// name first: the slug is made from it, never from the email
 				'fields' => array(
@@ -135,6 +135,14 @@ class rsvp
 				'actions' => array('promote' => 'editor'),
 			),
 		);
+		// the guest's language, which their emails go out in: only a
+		// multilingual site's; staff and agents see it, and only the
+		// model writes it (#200 D13)
+		if (i18n::enabled()) {
+			$types['rsvp']['fields']['lang'] = '';
+			$types['rsvp']['readonly'][] = 'lang';
+		}
+		return $types;
 	}
 
 	// ##Replies

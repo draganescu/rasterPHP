@@ -85,8 +85,11 @@ class mail
 	}
 
 	// Renders a view and sends it. Returns true when it was handed over (or,
-	// in a web request, kept to send after the answer).
-	static function send_view($view, $to, $vars = array(), $headers = array()) {
+	// in a web request, kept to send after the answer). $lang is the
+	// recipient's language (i18n::of($row) of the row the mail is about):
+	// on a multilingual site the view, its links and its <title> are in it
+	// (#200 D13; P4.A). Null, or off: the request's own, as always.
+	static function send_view($view, $to, $vars = array(), $headers = array(), $lang = null) {
 		if (!util::trusted_links()) {
 			static::$last_error = 'Set RASTER_URL (or config site_url) to the site address before sending email from the site';
 			log::error('Mail: '.static::$last_error);
@@ -96,6 +99,16 @@ class mail
 		$subject = preg_match('/<title>(.*?)<\/title>/is', $html, $m) ? html_entity_decode(trim(strip_tags($m[1])), ENT_QUOTES) : static::site_name();
 		// static: a site's the_mail sends it, when it has one
 		return static::send($to, $subject, $html, null, $headers);
+	}
+
+	// Runs $fn in $lang: inside i18n::with() on a multilingual site, so what
+	// it renders and the links it makes (util::url) are that language's;
+	// with $lang null, or off, it just runs $fn, so a site without
+	// multilingual reads its language as it always did. A sender builds its
+	// vars (manage_url, names) and calls send_view inside it.
+	static function in_language($lang, $fn) {
+		if ($lang === null || !i18n::enabled()) return $fn();
+		return i18n::with($lang, $fn);
 	}
 
 	// the subject of a view without a <title>: the site's name (the

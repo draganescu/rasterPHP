@@ -28,7 +28,7 @@ class order
 	const HOLD_MINUTES = 60;
 
 	static function types() {
-		return array('order' => array(
+		$types = array('order' => array(
 			'fields' => array(
 				'number' => '', 'email' => '', 'name' => '', 'address' => '', 'city' => '', 'postcode' => '', 'country' => '',
 				'lines' => array(), 'total' => '0.00', 'currency' => '', 'status' => 'unpaid',
@@ -48,6 +48,14 @@ class order
 			'hidden' => array('provider_ref', 'provider_url'),
 			'actions' => array('ship' => 'editor', 'mark_paid' => 'editor', 'cancel' => 'editor', 'refund' => 'admin'),
 		));
+		// the buyer's language, which their emails go out in: only a
+		// multilingual site's; staff and agents see it, and only the
+		// model writes it (#200 D13)
+		if (i18n::enabled()) {
+			$types['order']['fields']['lang'] = '';
+			$types['order']['readonly'][] = 'lang';
+		}
+		return $types;
 	}
 
 	// Every change to an order passes here, from the checkout, the studio's

@@ -11248,6 +11248,134 @@ test('P2.D: newsletter\'s fixed queries are sql/ files and show in vocabulary (#
 	check(strpos(file_get_contents("$root/system/models/newsletter/newsletter.php"), "R::find('subscriber'") === false, 'no confirmed-subscriber SQL left in newsletter.php');
 });
 
+// ## P4 kickoff: the contracts the P4 packages code against
+
+// the settings a P4 off test runs under: every way multilingual is off
+function p4_off_settings() {
+	return array(
+		'off' => array('multilingual' => false, 'languages' => array()),
+		'languages, switch off' => array('multilingual' => false, 'languages' => array('en', 'ro')),
+		'one language' => array('multilingual' => true, 'languages' => array('en')),
+	);
+}
+// a sent mail with what changes every time (date, id, boundary) taken out
+function p4_mail_shape($raw) {
+	$raw = preg_replace('/^(Date|Message-ID): .*$/m', '$1: x', $raw);
+	$raw = preg_replace('/raster-[0-9a-f]{16}/', 'raster-x', $raw);
+	return $raw;
+}
+
+test('P4 kickoff: off, send_view and render_view with a language send and render what they always did', function () use ($root) {
+	$dir = "$root/application/views/default/_email";
+	test_fixture("$dir/zzp4kick.html");
+	file_put_contents("$dir/zzp4kick.html", '<!doctype html><html><head><title>Your table</title></head><body><p>Hi <!-- print.self.name -->there<!-- /print.self.name --></p>'
+		.'<a href="/zzp4kick_menu">Menu</a> <a href="https://example.com/x">Out</a></body></html>');
+	try {
+		foreach (p4_off_settings() as $what => $setting) {
+			with_settings($setting, function () use ($what) {
+				$html = controller::render_view('_email/zzp4kick', array('name' => 'Ana'));
+				foreach (array('en', 'ro', '') as $lang) {
+					same($html, controller::render_view('_email/zzp4kick', array('name' => 'Ana'), 'html', $lang), "$what: render_view in '$lang'");
+				}
+				same(true, mail::send_view('_email/zzp4kick', 'ana@example.test', array('name' => 'Ana')));
+				$plain = p4_mail_shape(last_mail()['raw']);
+				foreach (array('en', 'ro') as $lang) {
+					same(true, mail::send_view('_email/zzp4kick', 'ana@example.test', array('name' => 'Ana'), array(), $lang));
+					same($plain, p4_mail_shape(last_mail()['raw']), "$what: send_view in $lang");
+				}
+				// in_language just runs the function: the request's language and links stay
+				$current = i18n::current();
+				$link = config::get('link_uri');
+				same(array($current, $link), mail::in_language('ro', function () { return array(i18n::current(), config::get('link_uri')); }), "$what: in_language");
+				same('x', mail::in_language(null, function () { return 'x'; }));
+			});
+		}
+		// on, a mail with no language is the request's, as before
+		with_settings(array('multilingual' => true, 'languages' => array('en', 'ro')), function () {
+			same(array('ro', 'en'), array(mail::in_language('ro', function () { return i18n::current(); }), i18n::current()), 'on: in_language runs in the language, then restores it');
+			same(i18n::current(), mail::in_language(null, function () { return i18n::current(); }));
+		});
+	} finally {
+		@unlink("$dir/zzp4kick.html");
+	}
+});
+
+test('P4 kickoff: i18n::of names the language a row is for, the default for rows without one', function () {
+	cms_store::connect();
+	with_settings(array('multilingual' => true, 'languages' => array('en', 'ro', 'pt-br')), function () {
+		same('ro', i18n::of(array('lang' => 'ro')));
+		same('ro', i18n::of(array('lang' => 'RO')));
+		same('pt-br', i18n::of(array('lang' => 'pt-br')));
+		same('en', i18n::of(array('lang' => '')), 'a row from before the column');
+		same('en', i18n::of(array('name' => 'Ana')), 'no column');
+		same('en', i18n::of(array('lang' => 'fr')), 'a language the site dropped');
+		same('en', i18n::of(null));
+		$bean = R::dispense('zzp4kick');
+		$bean->lang = 'ro';
+		same('ro', i18n::of($bean), 'a bean');
+		same('en', i18n::of(R::dispense('zzp4kick')), 'a bean without one');
+	});
+	with_settings(array('multilingual' => false, 'languages' => array()), function () {
+		same('', i18n::of(array('lang' => 'ro')), 'no languages: none');
+	});
+});
+
+test('P4 kickoff: the lang columns are declared on a multilingual site only, so off schema asks nothing new (D13)', function () use ($root) {
+	if (!class_exists('order')) require_once "$root/shop/models/order/order.php";
+	$records = array('booking' => array('booking', 'booking'), 'rsvp' => array('rsvp', 'rsvp'), 'contact' => array('contact', 'contactmessage'), 'order' => array('order', 'order'));
+	$declared = function () use ($records) {
+		$found = array(
+			'user' => array_key_exists('lang', authentication::schema()['user']),
+			'subscriber' => array_key_exists('lang', newsletter::schema()['subscriber']),
+		);
+		foreach ($records as list($class, $type)) {
+			$types = call_user_func(array($class, 'types'));
+			$found[$type] = array_key_exists('lang', $types[$type]['fields']);
+			// the model writes it; staff and agents see it, and it is in the events' payloads
+			if ($found[$type]) check(in_array('lang', $types[$type]['readonly'], true), "$type: lang is readonly");
+		}
+		return $found;
+	};
+	$none = array('user' => false, 'subscriber' => false, 'booking' => false, 'rsvp' => false, 'contactmessage' => false, 'order' => false);
+	foreach (p4_off_settings() as $what => $setting) {
+		same($none, with_settings($setting, $declared), $what);
+	}
+	same(array_map(function () { return true; }, $none), with_settings(array('multilingual' => true, 'languages' => array('en', 'ro')), $declared), 'on');
+	// off, schema status of this database names no lang column as missing
+	$status = with_settings(array('multilingual' => false, 'languages' => array('en', 'ro')), function () {
+		cms_records::forget();
+		try {
+			return (new raster_schema())->status();
+		} finally {
+			cms_records::forget();
+		}
+	});
+	foreach (array_merge($status['tables'], $status['system_tables']) as $table) {
+		check(!in_array('lang', $table['missing'], true), $table['table'].' asks for lang off');
+	}
+});
+
+test('P4 kickoff: without languages, dates are read as they always were, through parse_date (#135)', function () {
+	with_settings(array('multilingual' => false, 'languages' => array()), function () {
+		foreach (array('5/10/2026', '2026-10-05', '5.10.2026', '10 May 2026', 'today', '5/10/2026 19:30') as $typed) {
+			same(strtotime($typed), cms_types::parse_date($typed), $typed);
+			same(strtotime($typed), cms_types::parse_date($typed, 'ro'), "$typed in ro");
+		}
+		same(null, cms_types::parse_date('31/02/2026'));
+		same('2026-05-10', cms_types::clean('date', '5/10/2026', 'when'), 'the American reading, as before');
+		same('2026-05-10 19:30:00', cms_types::clean('datetime', '5/10/2026 19:30', 'when'));
+	});
+});
+
+test('P4 kickoff: off, newsletter recipients in a language are everyone, as before', function () {
+	foreach (p4_off_settings() as $what => $setting) {
+		with_settings($setting, function () use ($what) {
+			same(newsletter::recipients(null), newsletter::recipients(null, 'ro'), $what);
+			same(newsletter::recipients(null), newsletter::recipients(null, 'en'), $what);
+		});
+	}
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";
 foreach ($skipped as $skip) echo "  - $skip\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";
