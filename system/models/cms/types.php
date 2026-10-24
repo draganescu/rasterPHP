@@ -166,6 +166,8 @@ class cms_types {
 					if ($column === $field || array_key_exists($column, $now)) continue;
 					R::getDatabaseAdapter()->exec("ALTER TABLE `$table` ADD `$column` ".self::sql($type));
 					$now[$column] = $type;
+					// each language's slug is looked up as the slug is
+					if ($field === 'slug') self::index_slug($table, $column);
 				}
 			}
 		}

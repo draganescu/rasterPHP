@@ -724,6 +724,9 @@ mock-up is stored only when the collection's table is made.
     there's no such item, the response is a 404. A
     number is a slug first: an item titled `1984` opens at
     `/news/news_item/1984`, and a number no item has as its slug is an id.
+    Multilingual, an item also has a slug per language (`slug__ro`, see
+    **Multilingual sites**), and an item URL with another language's slug
+    or an old one answers 301 to the right one.
   - `/news/news_page/2` is page 2. The page size comes from `news_page_size` or
     `raster_page_size` (10).
   - `/news/news_items/tag/php` lists the items where `tag` is `php`.
@@ -2239,6 +2242,39 @@ output as a one-language site.
   columns; in production `schema --apply` does (`--check` counts a missing
   one). Turning multilingual off keeps them: `schema` lists them as kept
   translations, never as unused, and never drops them.
+- **Item addresses.** An item's slug in a translation language is in
+  `slug__ro` (a text column per language, made with the slug's other
+  translation columns, each with its own index; `schema --apply` adds a
+  missing one). Raster makes it from the translated `title`, `headline`
+  or `name` (`title__ro`) on the first save that has one
+  (`cms_store::slug_source($values, $skip, $lang)`); an item with no
+  translated title, or the same words in both, has none, and its
+  Romanian address is its default slug: `/ro/menu/menu_item/flat-white`
+  until it is `/ro/menu/menu_item/cafea-cu-lapte`. Like the default slug,
+  it stays when the title changes; a new one is written as `slug` with
+  `lang`. A Romanian slug is unique among the Romanian addresses
+  (`cms_store::unique_slug($type, $text, $id, $lang)`): other items'
+  `slug__ro`, or their `slug` where they have none. The default slug is
+  unique among the default slugs, as always; should it later equal
+  another item's Romanian slug, `/ro/` shows the item whose Romanian slug
+  it is. Every slug an item gets, in every language, is kept in the table
+  `slughistory` (`type`, `item`, `lang`, `slug`, `created_at`;
+  `cms_store::record_slug()`), with the one it had before when it
+  changes, and is never deleted. An item URL whose slug is another
+  language's (`/ro/menu/menu_item/flat-white` once there is a Romanian
+  one) or one the item had (a renamed slug) answers **301** to the
+  item's address in the URL's language, query kept, with no body and not
+  cached (`cms_store::resolve_slug()`, answered in `cms::route()` before
+  anything prints); a slug an item has now wins over one another item
+  had, a number no item has as its slug is still an id, and drafts and
+  private records redirect only for whoever may see them. GET and HEAD
+  only. `i18n::alternates()` (the switcher, `hreflang`) spells an item
+  page with each language's slug (`cms::path_in($path, $lang)`), and
+  `cms::item_alternates($name, $row)` gives an item's addresses from its
+  row with no query. The table is made on the first save in development
+  and by `schema --apply` (listed with the system tables) only while
+  multilingual is on. Off, there is no `slug__ro`, no history and no 301:
+  a renamed item's old address is a 404, as it always was.
 - **Fallback.** An empty translation shows the default language's value
   when the page is shown (`cms_store::localized($row, $type, $lang)`, for
   display only); nothing is copied. A new language starts as the default

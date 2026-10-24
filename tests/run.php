@@ -10151,6 +10151,8 @@ function p2a_undo($changes, $tables = array()) {
 	foreach ($changes as $change) {
 		if (!preg_match('/^added ([a-z0-9_]+)\.([a-z0-9_]+)$/', $change, $m) || in_array($m[1], $tables, true)) continue;
 		cms_store::forget();
+		// a slug column per language has an index, which SQLite drops first (P3.B)
+		if (strpos($m[2], 'slug__') === 0 && R::getDatabaseAdapter()->getDatabase()->getDatabaseType() !== 'mysql') R::getDatabaseAdapter()->exec("DROP INDEX IF EXISTS `{$m[1]}_{$m[2]}`");
 		if (array_key_exists($m[2], cms_store::columns($m[1]))) R::getDatabaseAdapter()->exec("ALTER TABLE `{$m[1]}` DROP COLUMN `{$m[2]}`");
 	}
 	foreach ($tables as $table) R::getDatabaseAdapter()->exec("DROP TABLE IF EXISTS `$table`");
@@ -11079,6 +11081,320 @@ test('P3 kickoff: off, list_where and index_slug send the SQL they always did', 
 	} finally {
 		$adapter->exec('DROP TABLE IF EXISTS zzp3kickdata');
 		cms_store::forget();
+	}
+});
+
+// ## P3.B: translated slugs and their redirects (#138)
+
+// a menu table for the P3.B tests, multilingual (en, ro): name and its
+// Romanian, slug and slug__ro; dropped again, with slughistory, by p3b_drop
+function p3b_table($table = 'zzp3bmenudata') {
+	cms_store::connect();
+	p3b_drop($table);
+	with_settings(p2a_on(), function () use ($table) {
+		cms_types::ensure($table, array('name' => 'text', 'slug' => 'text', 'enabled' => 'bool', 'published_at' => 'datetime', 'updated_at' => 'datetime'), array('name', 'slug'));
+	});
+}
+function p3b_drop($table = 'zzp3bmenudata') {
+	cms_store::connect();
+	R::getDatabaseAdapter()->exec("DROP TABLE IF EXISTS `$table`");
+	R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS slughistory');
+	cms_store::forget();
+}
+// does $table have an index named $name?
+function p3b_indexed($table, $name) {
+	$adapter = R::getDatabaseAdapter();
+	if ($adapter->getDatabase()->getDatabaseType() !== 'mysql') return (bool)$adapter->getCell("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?", array($name));
+	return (bool)$adapter->getCell('SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?', array($table, $name));
+}
+function p3b_save($id, $values, $table = 'zzp3bmenudata') {
+	return with_settings(p2a_on(), function () use ($id, $values, $table) {
+		return cms_store::save_item($table, $id, $values, array_keys($values));
+	});
+}
+
+test('P3.B: off, and in the default language, slugs send the SQL they always did and keep no history', function () {
+	p3b_drop();
+	cms_types::ensure('zzp3bmenudata', array('name' => 'text', 'slug' => 'text', 'enabled' => 'bool', 'published_at' => 'datetime', 'updated_at' => 'datetime'));
+	try {
+		$settings = array(
+			'off' => array('multilingual' => false, 'languages' => array()),
+			'languages, switch off' => array('multilingual' => false, 'languages' => array('en', 'ro')),
+			'one language' => array('multilingual' => true, 'languages' => array('en')),
+		);
+		$item = null;
+		foreach ($settings as $what => $setting) {
+			with_settings($setting, function () use ($what, &$item) {
+				cms_store::forget();
+				$plain = p2a_sql(function () { same('flat-white', cms_store::unique_slug('zzp3bmenudata', 'Flat white', 0)); });
+				foreach (array('en', 'ro') as $lang) {
+					same($plain, p2a_sql(function () use ($lang) { same('flat-white', cms_store::unique_slug('zzp3bmenudata', 'Flat white', 0, $lang)); }), "$what, unique_slug in $lang");
+					same('Flat white', cms_store::slug_source(array('name' => 'Flat white', 'name__ro' => 'Cafea cu lapte'), array(), $lang), "$what, slug_source in $lang");
+				}
+				same(array(), p2a_sql(function () {
+					same(false, cms_store::record_slug('zzp3bmenudata', 1, 'flat-white', 'ro'));
+					same(null, cms_store::resolve_slug('zzp3bmenudata', 'flat-white', 'ro'));
+					same(null, cms_store::slug_item('zzp3bmenudata', 'flat-white', 'ro'));
+					same('zzp3bmenu/zzp3bmenu_item/flat-white', cms::path_in('zzp3bmenu/zzp3bmenu_item/flat-white', 'ro'));
+				}), "$what: no query");
+				// a save and a rename: no slug__ro written, no slughistory, no query naming either
+				$log = p2a_sql(function () use (&$item) {
+					$item = cms_store::save_item('zzp3bmenudata', 0, array('name' => 'Flat white'), array('name'));
+					$item = cms_store::save_item('zzp3bmenudata', $item['id'], array('slug' => 'flat-white-coffee'), array());
+				});
+				same('flat-white-coffee', $item['slug'], $what);
+				check(!preg_grep('/slughistory|slug__|name__/', $log), "$what: ".implode(' | ', preg_grep('/slughistory|slug__|name__/', $log)));
+				same(array('id', 'name', 'slug', 'enabled', 'published_at', 'updated_at'), p2a_columns('zzp3bmenudata'), "$what: no column added");
+				same(false, cms_store::table_exists('slughistory'), "$what: no slughistory");
+				$schema = new raster_schema();
+				check(!isset($schema->system_tables()['slughistory']), "$what: schema lists no slughistory");
+				R::exec('DELETE FROM zzp3bmenudata');
+			});
+		}
+		// on, the default language is today's SQL too
+		with_settings(p2a_on(), function () {
+			cms_store::forget();
+			$plain = p2a_sql(function () { cms_store::unique_slug('zzp3bmenudata', 'Flat white', 0); });
+			same($plain, p2a_sql(function () { cms_store::unique_slug('zzp3bmenudata', 'Flat white', 0, 'en'); }), 'on, unique_slug in en');
+			same('Flat white', cms_store::slug_source(array('name' => 'Flat white', 'name__ro' => 'Cafea cu lapte'), array(), 'en'));
+			same('Cafea cu lapte', cms_store::slug_source(array('name' => 'Flat white', 'name__ro' => 'Cafea cu lapte'), array(), 'ro'));
+			// a hidden field is never a slug, in any language
+			same('Latte', cms_store::slug_source(array('name' => 'Flat white', 'name__ro' => 'Cafea cu lapte', 'dish' => 'Latte'), array('name'), 'ro'));
+		});
+	} finally {
+		p3b_drop();
+	}
+});
+
+test('P3.B: slug__ro is made from the translated title, indexed, and unique within its language', function () {
+	p3b_table();
+	try {
+		check(array_key_exists('slug__ro', cms_store::columns('zzp3bmenudata')), 'slug__ro made by ensure');
+		check(p3b_indexed('zzp3bmenudata', 'zzp3bmenudata_slug__ro'), 'slug__ro has its own index');
+		check(p3b_indexed('zzp3bmenudata', 'zzp3bmenudata_slug'), 'slug keeps its own');
+		$flat = p3b_save(0, array('name' => 'Flat white', 'name__ro' => 'Cafea cu lapte'));
+		same(array('flat-white', 'cafea-cu-lapte'), array($flat['slug'], $flat['slug__ro']));
+		// no Romanian title: no Romanian slug, the default one is its /ro/ address
+		$espresso = p3b_save(0, array('name' => 'Espresso'));
+		same(array('espresso', ''), array($espresso['slug'], isset($espresso['slug__ro']) ? $espresso['slug__ro'] : ''));
+		// the same words in both: nothing to make
+		$latte = p3b_save(0, array('name' => 'Latte', 'name__ro' => 'Latte'));
+		same(array('latte', ''), array($latte['slug'], isset($latte['slug__ro']) ? $latte['slug__ro'] : ''));
+		with_settings(p2a_on(), function () use ($espresso) {
+			// taken in Romanian: cafea-cu-lapte by flat white's own, espresso
+			// by the item that is at its default slug in Romanian
+			same('cafea-cu-lapte-2', cms_store::unique_slug('zzp3bmenudata', 'Cafea cu lapte', 0, 'ro'));
+			same('espresso-2', cms_store::unique_slug('zzp3bmenudata', 'Espresso', 0, 'ro'));
+			same('espresso', cms_store::unique_slug('zzp3bmenudata', 'Espresso', $espresso['id'], 'ro'), 'its own is free to it');
+			// the default language looks at slug alone, as it always did
+			same('cafea-cu-lapte', cms_store::unique_slug('zzp3bmenudata', 'Cafea cu lapte', 0));
+			same('flat-white-2', cms_store::unique_slug('zzp3bmenudata', 'Flat white', 0));
+			same('flat-white', cms_store::unique_slug('zzp3bmenudata', 'Flat white', 0, 'ro'), "free in Romanian: flat white's is cafea-cu-lapte there");
+		});
+		// a second Cafea cu lapte gets its own Romanian slug
+		$second = p3b_save(0, array('name' => 'White coffee', 'name__ro' => 'Cafea cu lapte'));
+		same('cafea-cu-lapte-2', $second['slug__ro']);
+		// a slug once made stays when the title changes
+		$flat = p3b_save($flat['id'], array('name__ro' => 'Cafea cu lapte mare'));
+		same('cafea-cu-lapte', $flat['slug__ro']);
+	} finally {
+		p3b_drop();
+	}
+});
+
+test('P3.B: slughistory keeps every slug an item had, per language; resolve_slug says where it is now', function () {
+	p3b_table();
+	try {
+		$flat = p3b_save(0, array('name' => 'Flat white', 'name__ro' => 'Cafea cu lapte'));
+		$espresso = p3b_save(0, array('name' => 'Espresso'));
+		with_settings(p2a_on(), function () use ($flat, $espresso) {
+			same(array(array('lang' => 'en', 'slug' => 'flat-white'), array('lang' => 'ro', 'slug' => 'cafea-cu-lapte')),
+				R::getAll("SELECT lang, slug FROM slughistory WHERE `type` = 'zzp3bmenudata' AND item = ? ORDER BY id", array($flat['id'])));
+			same(false, cms_store::record_slug('zzp3bmenudata', $flat['id'], 'flat-white', 'en'), 'once');
+			same(false, cms_store::record_slug('zzp3bmenudata', $flat['id'], 'flat-white'), 'null is the default language');
+			// its slug in the URL's language: shown as it is
+			same(null, cms_store::resolve_slug('zzp3bmenudata', 'cafea-cu-lapte', 'ro'));
+			same(null, cms_store::resolve_slug('zzp3bmenudata', 'flat-white', 'en'));
+			same(null, cms_store::resolve_slug('zzp3bmenudata', 'espresso', 'ro'), 'no Romanian slug: the default is its Romanian one');
+			same(null, cms_store::resolve_slug('zzp3bmenudata', 'nothing', 'ro'), 'no item: the list 404s');
+			same(null, cms_store::resolve_slug('zzp3bmenudata', (string)$espresso['id'], 'ro'), 'an id is an id (#90)');
+			// another language's
+			same(array('id' => $flat['id'], 'slug' => 'cafea-cu-lapte'), cms_store::resolve_slug('zzp3bmenudata', 'flat-white', 'ro'));
+			same(array('id' => $flat['id'], 'slug' => 'flat-white'), cms_store::resolve_slug('zzp3bmenudata', 'cafea-cu-lapte', 'en'));
+		});
+		// renamed in English: the old slug is history
+		p3b_save($flat['id'], array('slug' => 'flat-white-coffee'));
+		// and in Romanian
+		p3b_save($flat['id'], array('slug__ro' => 'cafea-cu-lapte-mare'));
+		with_settings(p2a_on(), function () use ($flat) {
+			same(array('id' => $flat['id'], 'slug' => 'flat-white-coffee'), cms_store::resolve_slug('zzp3bmenudata', 'flat-white', 'en'));
+			same(array('id' => $flat['id'], 'slug' => 'cafea-cu-lapte-mare'), cms_store::resolve_slug('zzp3bmenudata', 'flat-white', 'ro'));
+			same(array('id' => $flat['id'], 'slug' => 'cafea-cu-lapte-mare'), cms_store::resolve_slug('zzp3bmenudata', 'cafea-cu-lapte', 'ro'));
+			same(array('id' => $flat['id'], 'slug' => 'flat-white-coffee'), cms_store::resolve_slug('zzp3bmenudata', 'cafea-cu-lapte', 'en'));
+			same(4, (int)R::getCell("SELECT COUNT(*) FROM slughistory WHERE item = ?", array($flat['id'])));
+		});
+		// a slug an item has now wins over one another item had
+		$new = p3b_save(0, array('name' => 'Flat white'));
+		same('flat-white', $new['slug']);
+		with_settings(p2a_on(), function () use ($new) {
+			same(null, cms_store::resolve_slug('zzp3bmenudata', 'flat-white', 'en'));
+			same(null, cms_store::resolve_slug('zzp3bmenudata', 'flat-white', 'ro'), 'the new item is at it in Romanian too');
+		});
+		// a slug from before multilingual was on is history once it changes
+		with_settings(array('multilingual' => false, 'languages' => array('en', 'ro')), function () use (&$old) {
+			$old = cms_store::save_item('zzp3bmenudata', 0, array('name' => 'Mocha'), array('name'));
+		});
+		same(0, (int)R::getCell("SELECT COUNT(*) FROM slughistory WHERE item = ?", array($old['id'])), 'off: nothing kept');
+		p3b_save($old['id'], array('slug' => 'mocha-cup'));
+		with_settings(p2a_on(), function () use ($old) {
+			same(array('id' => $old['id'], 'slug' => 'mocha-cup'), cms_store::resolve_slug('zzp3bmenudata', 'mocha', 'en'));
+		});
+	} finally {
+		p3b_drop();
+	}
+});
+
+test('P3.B: path_in and item_alternates spell an item URL with each language\'s slug', function () {
+	p3b_table();
+	try {
+		$flat = p3b_save(0, array('name' => 'Flat white', 'name__ro' => 'Cafea cu lapte'));
+		$espresso = p3b_save(0, array('name' => 'Espresso'));
+		with_settings(p1c_on(array('uri_string' => '/zzp3bmenu/zzp3bmenu_item/cafea-cu-lapte')), function () use ($flat, $espresso) {
+			same('zzp3bmenu/zzp3bmenu_item/flat-white', cms::path_in('zzp3bmenu/zzp3bmenu_item/cafea-cu-lapte', 'en'));
+			same('zzp3bmenu/zzp3bmenu_item/cafea-cu-lapte', cms::path_in('zzp3bmenu/zzp3bmenu_item/cafea-cu-lapte', 'ro'));
+			same('/zzp3bmenu/zzp3bmenu_item/cafea-cu-lapte', cms::path_in('/zzp3bmenu/zzp3bmenu_item/flat-white', 'ro', 'en'));
+			same('zzp3bmenu/zzp3bmenu_item/espresso', cms::path_in('zzp3bmenu/zzp3bmenu_item/espresso', 'en'), 'no Romanian slug: the default');
+			same('zzp3bmenu/zzp3bmenu_item/nothing', cms::path_in('zzp3bmenu/zzp3bmenu_item/nothing', 'en'), 'no item: as it is');
+			// any other path costs no query
+			same(array(), p2a_sql(function () {
+				same('about', cms::path_in('about', 'en'));
+				same('zzp3bmenu/zzp3bmenu_page/2', cms::path_in('zzp3bmenu/zzp3bmenu_page/2', 'en'));
+				same('zzp3bmenu/zzp3bmenu_items/name/x', cms::path_in('zzp3bmenu/zzp3bmenu_items/name/x', 'en'));
+			}));
+			// the page's alternates follow
+			same(array(array('lang' => 'en', 'url' => 'http://cafe.test/zzp3bmenu/zzp3bmenu_item/flat-white'), array('lang' => 'ro', 'url' => 'http://cafe.test/ro/zzp3bmenu/zzp3bmenu_item/cafea-cu-lapte')), i18n::alternates());
+			// an item's own, from its row, with no query
+			$rows = R::getAll('SELECT * FROM zzp3bmenudata ORDER BY id');
+			same(array(), p2a_sql(function () use ($rows, &$alternates) {
+				foreach ($rows as $row) $alternates[] = cms::item_alternates('zzp3bmenu', $row);
+			}));
+			same(array(array('lang' => 'en', 'url' => 'http://cafe.test/zzp3bmenu/zzp3bmenu_item/flat-white'), array('lang' => 'ro', 'url' => 'http://cafe.test/ro/zzp3bmenu/zzp3bmenu_item/cafea-cu-lapte')), $alternates[0]);
+			same(array(array('lang' => 'en', 'url' => 'http://cafe.test/zzp3bmenu/zzp3bmenu_item/espresso'), array('lang' => 'ro', 'url' => 'http://cafe.test/ro/zzp3bmenu/zzp3bmenu_item/espresso')), $alternates[1]);
+			same('http://cafe.test/ro/zzp3bmenu/zzp3bmenu_item/7', cms::item_alternates('zzp3bmenu', array('id' => 7, 'slug' => ''))[1]['url'], 'no slug: the id');
+		});
+		// off: the stub's answer, the item's own slug in every language
+		with_settings(array('multilingual' => false, 'languages' => array('en', 'ro')), function () use ($flat) {
+			same(i18n::alternates('zzp3bmenu/zzp3bmenu_item/flat-white'), cms::item_alternates('zzp3bmenu', $flat));
+		});
+	} finally {
+		p3b_drop();
+	}
+});
+
+test('P3.B: /ro/ item URLs: its Romanian slug renders, another language\'s or an old one answers 301, off an old slug is a 404', function () {
+	global $root;
+	$view = "$root/application/views/default/zzp3bmenu.html";
+	test_fixture($view);
+	file_put_contents($view, '<!doctype html><html><head><title>Menu</title></head><body>'
+		.'<!-- render.cms.zzp3bmenu --><article><!-- print.@href.raster_detail_link --><a href="#"><!-- print.name -->Flat white<!-- /print.name --></a><!-- /print.@href.raster_detail_link --></article><!-- /render.cms.zzp3bmenu -->'
+		.'</body></html>');
+	p3b_table();
+	try {
+		$flat = p3b_save(0, array('name' => 'Flat white', 'name__ro' => 'Cafea cu lapte'));
+		p3b_save(0, array('name' => 'Espresso'));
+		$draft = p3b_save(0, array('name' => 'Cortado'));
+		p3b_save($draft['id'], array('slug' => 'cortado-mic', 'enabled' => 0));
+		// renamed: the old slug redirects
+		p3b_save($flat['id'], array('slug' => 'flat-white-coffee'));
+		$on = "config::set('languages')->to(array('en', 'ro'));\nconfig::set('multilingual')->to(true);";
+		p1b_site($on, function () {
+			p1b_server(array(), function ($port) {
+				$base = "http://127.0.0.1:$port";
+				$item = "$base/ro/zzp3bmenu/zzp3bmenu_item";
+				list($status, $body) = http('GET', "$item/cafea-cu-lapte");
+				same(200, $status, 'its Romanian slug');
+				check(strpos($body, 'Flat white') !== false && strpos($body, 'Espresso') === false, 'the one item');
+				check(strpos($body, '<link rel="alternate" hreflang="en" href="'.$base.'/zzp3bmenu/zzp3bmenu_item/flat-white-coffee">') !== false, 'hreflang follows the slug: '.$body);
+				check(strpos($body, '<link rel="canonical" href="'.$item.'/cafea-cu-lapte">') !== false, 'canonical');
+				foreach (array(
+					"$item/flat-white-coffee" => "$item/cafea-cu-lapte",
+					"$item/flat-white" => "$item/cafea-cu-lapte",
+					"$base/zzp3bmenu/zzp3bmenu_item/cafea-cu-lapte" => "$base/zzp3bmenu/zzp3bmenu_item/flat-white-coffee",
+					"$base/zzp3bmenu/zzp3bmenu_item/flat-white" => "$base/zzp3bmenu/zzp3bmenu_item/flat-white-coffee",
+					"$base/zzp3bmenu/zzp3bmenu_item/flat-white?x=1" => "$base/zzp3bmenu/zzp3bmenu_item/flat-white-coffee?x=1",
+				) as $url => $to) {
+					list($status, $body, $headers) = http('GET', $url);
+					same(301, $status, $url);
+					same($to, p1b_header($headers, 'Location'), $url);
+					same('', (string)$body, "$url has no body");
+					same(null, p1b_header($headers, 'X-Raster-Cache'), "$url is not cached");
+				}
+				same(200, http('GET', "$base/zzp3bmenu/zzp3bmenu_item/flat-white-coffee")[0]);
+				same(200, http('GET', "$item/espresso")[0], 'no Romanian slug: at the default one');
+				same(404, http('GET', "$item/nothing")[0]);
+				// a draft's old slug says nothing to visitors
+				same(404, http('GET', "$item/cortado")[0], 'draft');
+				// a post is never redirected
+				check(http('POST', "$base/zzp3bmenu/zzp3bmenu_item/flat-white", 'x=1')[0] !== 301, 'a post is not redirected');
+			});
+		});
+		// off: an old slug is a 404, as it always was
+		p1b_site("config::set('languages')->to(array('en', 'ro'));", function () {
+			p1b_server(array(), function ($port) {
+				$base = "http://127.0.0.1:$port";
+				list($status, , $headers) = http('GET', "$base/zzp3bmenu/zzp3bmenu_item/flat-white");
+				same(404, $status, 'off: the old slug');
+				same(null, p1b_header($headers, 'Location'));
+				same(200, http('GET', "$base/zzp3bmenu/zzp3bmenu_item/flat-white-coffee")[0]);
+				same(404, http('GET', "$base/ro/zzp3bmenu/zzp3bmenu_item/cafea-cu-lapte")[0], 'off: no /ro/');
+			});
+		});
+	} finally {
+		@unlink($view);
+		p3b_drop();
+	}
+});
+
+test('P3.B: schema lists slug__ro and slughistory only when on, and --apply makes and indexes them', function () {
+	global $root;
+	$view = "$root/application/views/default/zzp3bschema.html";
+	test_fixture($view);
+	file_put_contents($view, '<!doctype html><html><head><title>S</title></head><body><!-- render.cms.zzp3bschema --><p><!-- print.name -->Tea<!-- /print.name --></p><!-- /render.cms.zzp3bschema --></body></html>');
+	cms_store::connect();
+	p3b_drop('zzp3bschemadata');
+	cms_types::ensure('zzp3bschemadata', array('name' => 'text', 'slug' => 'text', 'enabled' => 'bool', 'published_at' => 'datetime', 'updated_at' => 'datetime'));
+	$changes = array();
+	try {
+		$find = function ($status) {
+			foreach ($status['tables'] as $table) if ($table['table'] === 'zzp3bschemadata') return $table;
+			return null;
+		};
+		$off = (new raster_schema())->status();
+		check(!array_key_exists('missing_translations', $find($off)), 'off: nothing missing');
+		check(!in_array('slughistory', array_column($off['system_tables'], 'table'), true), 'off: no slughistory');
+		with_settings(p2a_on(), function () use ($find, &$changes) {
+			$schema = new raster_schema();
+			$status = $schema->status();
+			same(array('slug__ro'), $find($status)['missing_translations']);
+			check($status['drift'], 'drift');
+			$history = current(array_filter($status['system_tables'], function ($t) { return $t['table'] === 'slughistory'; }));
+			same(false, $history['exists']);
+			$changes = $schema->apply();
+			check(in_array('added zzp3bschemadata.slug__ro', $changes, true), implode(' | ', $changes));
+			check(in_array('created table slughistory', $changes, true), implode(' | ', $changes));
+			check(p3b_indexed('zzp3bschemadata', 'zzp3bschemadata_slug__ro'), 'indexed');
+			check(p3b_indexed('slughistory', 'slughistory_slug'), 'slughistory indexed by slug');
+			cms_store::forget();
+			same(array(), $find($schema->status())['missing_translations']);
+		});
+		// off again: slug__ro is a kept translation, never an orphan
+		cms_store::forget();
+		$off = (new raster_schema())->status();
+		same(array(), $find($off)['orphans']);
+		same(array('slug__ro'), $off['translations']['zzp3bschemadata']);
+	} finally {
+		@unlink($view);
+		p2a_undo($changes, array('zzp3bschemadata', 'slughistory'));
 	}
 });
 
