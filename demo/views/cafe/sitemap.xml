@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <!-- render.feed.pages -->
-  <url><loc><!-- print.url /--></loc><lastmod><!-- print.updated /--></lastmod></url>
+  <url><loc><!-- print.url /--></loc><lastmod><!-- print.updated /--></lastmod><!-- print.if.multilingual --><!-- print.alternates -->
+    <!-- print.@hreflang.lang --><!-- print.@href.url --><xhtml:link xmlns:xhtml="http://www.w3.org/1999/xhtml" rel="alternate" hreflang="en" href="https://example.com/"/><!-- /print.@href.url --><!-- /print.@hreflang.lang --><!-- /print.alternates -->
+  <!-- /print.if.multilingual --></url>
   <!-- /render.feed.pages -->
 </urlset>

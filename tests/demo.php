@@ -5182,6 +5182,57 @@ test(array('A2', 'E3'), 'P2.D: the opening hours are the about page\'s hours lis
 	has(http('GET', "$base/hours.txt")[1], "Monday: closed\n");
 });
 
+// ## P3.C: the sitemap (#126) and items in every language
+
+test(array('B4', 'O1'), 'P3.C: the sitemap lists the FAQ, which has no item view, and dates a page by its last save (#126)', function () use ($base) {
+	foreach (array('/faq', '/menu') as $page) same(200, http('GET', $base.$page)[0]);
+	$body = http('GET', "$base/sitemap.xml")[1];
+	has($body, "<loc>$base/faq/faq_item/is-there-wifi</loc>");
+	has($body, "<loc>$base/menu/menu_item/flat-white</loc>");
+	// one language: no alternates
+	lacks($body, 'xhtml:link');
+	// the page's date is its newest revision's
+	same(200, http('GET', "$base/about")[0]);
+	cms_store::connect();
+	$type = cms::page_type('/about');
+	R::exec("UPDATE $type SET updated_at = '2025-01-02 10:00:00'");
+	util::content_changed();
+	has(http('GET', "$base/sitemap.xml")[1], "<url><loc>$base/about</loc><lastmod>2025-01-02</lastmod></url>");
+	cms_store::update_page($type, '/about', array(), array());
+	has(http('GET', "$base/sitemap.xml")[1], "<url><loc>$base/about</loc><lastmod>".date('Y-m-d').'</lastmod></url>');
+});
+test('N9', 'P3.C export: a multilingual site is written at its Romanian item slugs (needs P3.A and P3.B)', function () use ($root, $tmp, $base) {
+	$config = "$root/demo/config/the_app.php";
+	$out = "$tmp/p3c-export";
+	same(200, http('GET', "$base/menu/menu_item/flat-white")[0]);
+	cms_store::connect();
+	cms_types::ensure('menudata', array('slug__ro' => 'text'));
+	R::exec("UPDATE menudata SET slug__ro = 'cafea-cu-lapte' WHERE slug = 'flat-white'");
+	cms_store::forget();
+	try {
+		with_file($config, file_get_contents($config)."\nconfig::set('multilingual')->to(true);\nconfig::set('domain_language')->to(array());\n", function () use ($out) {
+			list($code, $output) = raster(array('export', $out, '--url=https://cafe.example/'));
+			same(0, $code, $output);
+			check(is_file("$out/menu/menu_item/flat-white/index.html"), 'the English item at its slug');
+			check(is_file("$out/ro/menu/menu_item/cafea-cu-lapte/index.html"), 'the Romanian item at its Romanian slug');
+			check(!file_exists("$out/ro/menu/menu_item/flat-white/index.html"), 'not at the English slug in ro/');
+			has(file_get_contents("$out/ro/menu/index.html"), 'href="https://cafe.example/ro/menu/menu_item/cafea-cu-lapte"');
+			has(file_get_contents("$out/menu/menu_item/flat-white/index.html"), 'hreflang="ro" href="https://cafe.example/ro/menu/menu_item/cafea-cu-lapte"');
+			$sitemap = file_get_contents("$out/sitemap.xml");
+			has($sitemap, '<loc>https://cafe.example/ro/menu/menu_item/cafea-cu-lapte</loc>');
+			has($sitemap, 'hreflang="en" href="https://cafe.example/menu/menu_item/flat-white"');
+		});
+	} finally {
+		cms_store::connect();
+		$adapter = R::getDatabaseAdapter();
+		foreach (array('DROP INDEX IF EXISTS menudata_slug__ro', 'ALTER TABLE menudata DROP INDEX menudata_slug__ro') as $sql) {
+			try { $adapter->exec($sql); } catch (Exception $e) {}
+		}
+		$adapter->exec('ALTER TABLE menudata DROP COLUMN slug__ro');
+		cms_store::forget();
+	}
+});
+
 // ## No PHP warnings, notices or deprecations on any request
 
 $log = is_file("$tmp/php-errors.log") ? file_get_contents("$tmp/php-errors.log") : '';
