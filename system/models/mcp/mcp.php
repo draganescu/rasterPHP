@@ -208,7 +208,7 @@ class mcp
 					'protocolVersion' => in_array($requested, self::$protocol_versions) ? $requested : self::$protocol_versions[0],
 					'capabilities' => array('tools' => array('listChanged' => false)),
 					'serverInfo' => array('name' => 'raster', 'version' => trim((string)@file_get_contents(BASE.'VERSION'))),
-					'instructions' => 'This is a Raster site: views are plain HTML and the dynamic parts are HTML comments. Call describe first — it returns how URLs reach views, the content model the markup declares, and whether the templates lint clean. Before writing an annotation, check vocabulary (the models and their signatures) and annotations (the grammar); both are read from the code, so neither can be out of date. To change a template use check_view then write_view, which refuses markup that does not lint, and render_url to see the result. Content edits go through get_page/update_page and the item tools: page edits keep revisions, and fields that are not in the templates cannot be written — to add a field, edit the template. In production pages are cached for visitors who are not logged in: Raster\'s own tools clear that cache, but views, theme files, models, config or the database changed any other way do not, so call clear_cache after such a change. render_url never reads the cache, so a fresh render_url does not mean visitors see the change. The in-page editor only marks what the CMS prints: keep lists staff edit on render.cms.<name>, using its options for filters from the URL (field=?param), dates (date>=today) and sorting (order=date,time); for what those cannot say (totals, grouping by day, several types), the render method of a model returns its records through cms_records::listed($type, $rows), which keeps them editable; after changing such a page, call render_url with as="editor" to see that editing still works. read_asset and write_asset read and write the theme\'s CSS, JS and SVG files. Making a site multilingual: 1. set_languages, the default language first (["en", "ro"]). 2. Words editors change are CMS fields (print.cms.<name>); fixed interface words, such as a button\'s, are dictionary keys (print.i18n.<file>(\'key\')). 3. translation_status lists what a language lacks, with the default text. 4. Translate with update_page with lang, and write_strings. 5. Check with render_url /ro/….',
+					'instructions' => 'This is a Raster site: views are plain HTML and the dynamic parts are HTML comments. Call describe first — it returns how URLs reach views, the content model the markup declares, and whether the templates lint clean. Before writing an annotation, check vocabulary (the models and their signatures) and annotations (the grammar); both are read from the code, so neither can be out of date. To change a template use check_view then write_view, which refuses markup that does not lint, and render_url to see the result. Content edits go through get_page/update_page and the item tools: page edits keep revisions, and fields that are not in the templates cannot be written — to add a field, edit the template. In production pages are cached for visitors who are not logged in: Raster\'s own tools clear that cache, but views, theme files, models, config or the database changed any other way do not, so call clear_cache after such a change. render_url never reads the cache, so a fresh render_url does not mean visitors see the change. The in-page editor only marks what the CMS prints: keep lists staff edit on render.cms.<name>, using its options for filters from the URL (field=?param), dates (date>=today) and sorting (order=date,time); for what those cannot say (totals, grouping by day, several types), the render method of a model returns its records through cms_records::listed($type, $rows), which keeps them editable; after changing such a page, call render_url with as="editor" to see that editing still works. read_asset and write_asset read and write the theme\'s CSS, JS and SVG files. Making a site multilingual: 1. set_languages, the default language first (["en", "ro"]). 2. Words editors change are CMS fields (print.cms.<name>); fixed interface words, such as a button\'s, are dictionary keys (print.i18n.<file>(\'key\')). 3. translation_status lists what a language lacks, with the default text. 4. Translate with update_page or update_item with lang, and write_strings. 5. Check with render_url /ro/….',
 				));
 			case 'ping':
 				return $this->result($id, new stdClass());
@@ -253,7 +253,7 @@ class mcp
 				'annotations' => $annotations,
 			);
 		};
-		$lang = array('type' => 'string', 'description' => 'A language code from the site\'s languages. Leave out for the default language.');
+		$lang = array('type' => 'string', 'description' => 'Language code; default if left out');
 		$dictionary = array('type' => 'string', 'pattern' => '^[a-z0-9_]+$', 'description' => 'Dictionary name: home for print.i18n.home(\'key\'). raster_editor is the editor\'s own words.');
 		$asset = array('type' => 'string', 'description' => 'Path inside the theme folder, e.g. css/style.css');
 		$tools = array(
@@ -261,10 +261,10 @@ class mcp
 			$tool('get_page', 'Current values of the editable fields of a page.', array('page' => $page, 'lang' => $lang), array('page'), $read_only),
 			$tool('update_page', 'Changes fields of a page. Stores a new revision; nothing is overwritten.', array('page' => $page, 'fields' => $fields, 'lang' => $lang), array('page', 'fields'), $write),
 			$tool('page_history', 'Previous revisions of a page, newest first.', array('page' => $page, 'limit' => array('type' => 'integer', 'default' => 10), 'lang' => $lang), array('page'), $read_only),
-			$tool('list_items', 'Items of a collection.', array('collection' => $collection, 'limit' => array('type' => 'integer', 'default' => 50), 'offset' => array('type' => 'integer', 'default' => 0)), array('collection'), $read_only),
-			$tool('get_item', 'One item of a collection.', array('collection' => $collection, 'id' => $id), array('collection', 'id'), $read_only),
-			$tool('create_item', 'Adds an item to a collection.', array('collection' => $collection, 'fields' => $fields), array('collection', 'fields'), $write),
-			$tool('update_item', 'Changes fields of a collection item.', array('collection' => $collection, 'id' => $id, 'fields' => $fields), array('collection', 'id', 'fields'), $write),
+			$tool('list_items', 'Items of a collection.', array('collection' => $collection, 'limit' => array('type' => 'integer', 'default' => 50), 'offset' => array('type' => 'integer', 'default' => 0), 'lang' => $lang), array('collection'), $read_only),
+			$tool('get_item', 'One item of a collection.', array('collection' => $collection, 'id' => $id, 'lang' => $lang), array('collection', 'id'), $read_only),
+			$tool('create_item', 'Adds an item to a collection.', array('collection' => $collection, 'fields' => $fields, 'lang' => $lang), array('collection', 'fields'), $write),
+			$tool('update_item', 'Changes fields of a collection item.', array('collection' => $collection, 'id' => $id, 'fields' => $fields, 'lang' => $lang), array('collection', 'id', 'fields'), $write),
 			$tool('run_action', 'Runs an action of a record type (confirm a booking); site_overview lists them. The model may refuse, saying why.',
 				array('collection' => $collection, 'id' => $id, 'action' => array('type' => 'string'), 'input' => array('type' => 'object', 'description' => 'Values the action takes, if any', 'additionalProperties' => array('type' => 'string'))), array('collection', 'id', 'action'), $write),
 			$tool('delete_item', 'Deletes a collection item.', array('collection' => $collection, 'id' => $id), array('collection', 'id'), array('readOnlyHint' => false, 'destructiveHint' => true, 'openWorldHint' => false)),
@@ -273,7 +273,7 @@ class mcp
 			// ##Languages (#200)
 			$tool('set_languages', 'Writes the languages to the site\'s config and adds translation columns. Not in production.',
 				array('languages' => array('type' => 'array', 'items' => array('type' => 'string', 'pattern' => '^[a-z]{2,3}(-[a-z0-9]{2,8})?$'), 'description' => 'Language codes, the default first. [] turns languages off.')), array('languages'), $write),
-			$tool('translation_status', 'What a language lacks: page, site and dictionary words, with the default text.',
+			$tool('translation_status', 'What a language lacks: page, site, item and dictionary words, with the default text.',
 				array('lang' => $lang, 'limit' => array('type' => 'integer', 'default' => 200), 'offset' => array('type' => 'integer', 'default' => 0)), array('lang'), $read_only),
 			$tool('read_strings', 'A dictionary in a language, and the keys the views print.', array('file' => $dictionary, 'lang' => $lang), array('file', 'lang'), $read_only),
 			$tool('write_strings', 'Merges words into a dictionary; Raster writes the file. Not in production.',
@@ -493,6 +493,13 @@ class mcp
 				$before = count(cms_store::columns($page['type']));
 				$this->ensure_columns($page['type'], $page['fields'], array('slug', 'updated_at'));
 				$added += count(cms_store::columns($page['type'])) - $before;
+			}
+			// and of every markup collection's items
+			foreach ($this->model()['collections'] as $collection) {
+				if (isset($collection['model']) || !cms_store::table_exists($collection['type'])) continue;
+				$before = count(cms_store::columns($collection['type']));
+				$this->ensure_item_columns($collection);
+				$added += count(cms_store::columns($collection['type'])) - $before;
 			}
 		}
 		$described = raster_describe::languages();
@@ -760,27 +767,71 @@ class mcp
 	protected function tool_list_items($arguments) {
 		cms_store::connect();
 		$collection = $this->find_collection($this->arg($arguments, 'collection'));
+		$lang = $this->item_lang($arguments);
 		$limit = min(200, max(1, (int)$this->arg($arguments, 'limit', 50)));
 		$offset = max(0, (int)$this->arg($arguments, 'offset', 0));
 		$fields = array_keys($collection['fields']);
 		if (isset($collection['model'])) $fields = array_values(array_diff($fields, $collection['hidden']));
-		return array('collection' => $collection['name'], 'fields' => $fields) + cms_store::list_items($collection['type'], $limit, $offset);
+		$listed = cms_store::list_items($collection['type'], $limit, $offset);
+		if ($lang === null) return array('collection' => $collection['name'], 'fields' => $fields) + $listed;
+		// each item as /<lang>/ shows it, and what it lacks there
+		$translated = raster_describe::item_translated($collection);
+		$empty = function ($value) { return is_array($value) || trim((string)$value) === ''; };
+		foreach ($listed['items'] as $key => $item) {
+			$row = cms_store::localized($item, $collection['type'], $lang);
+			foreach (array_keys($row) as $column) {
+				if (strpos($column, '__') !== false) unset($row[$column]);
+			}
+			$row['untranslated'] = array_values(array_filter($translated, function ($field) use ($item, $lang, $empty) {
+				$column = cms_types::column($field, $lang);
+				return isset($item[$field]) && !$empty($item[$field]) && (!isset($item[$column]) || $empty($item[$column]));
+			}));
+			$listed['items'][$key] = $row;
+		}
+		return array('collection' => $collection['name'], 'lang' => $lang, 'fields' => $fields) + $listed;
 	}
 
 	protected function tool_get_item($arguments) {
 		cms_store::connect();
 		$collection = $this->find_collection($this->arg($arguments, 'collection'));
+		$lang = $this->item_lang($arguments);
 		$item = cms_store::get_item($collection['type'], $this->arg($arguments, 'id'));
 		if (!$item) throw new InvalidArgumentException('No item with that id');
-		return $item;
+		if ($lang === null) return $item;
+		// in a language: each field's own value next to the default one's,
+		// as get_page gives them; id, slug (in that language), enabled and
+		// the dates stay plain, and the translation columns are left out
+		$translated = raster_describe::item_translated($collection);
+		$shown = array('id' => $item['id'], 'lang' => $lang);
+		foreach ($item as $name => $value) {
+			if ($name === 'id' || strpos($name, '__') !== false) continue;
+			if (!isset($collection['fields'][$name])) {
+				$shown[$name] = $value;
+				continue;
+			}
+			$shared = !in_array($name, $translated, true);
+			$column = cms_types::column($name, $lang);
+			$own = $shared ? $value : (isset($item[$column]) ? (string)$item[$column] : '');
+			$shown[$name] = array('value' => $own, 'default_value' => $value, 'translated' => !$shared && trim($own) !== '', 'shared' => $shared);
+		}
+		$slug = cms_store::slug_column($lang);
+		if (array_key_exists('slug', $item) && !empty($item[$slug])) $shown['slug'] = $item[$slug];
+		return $shown;
+	}
+
+	// the language an item tool is asked for: null for none and for the
+	// default language, which is what the fields hold without one
+	protected function item_lang($arguments) {
+		$lang = $this->lang_argument($arguments);
+		return $lang === null || i18n::is_default($lang) ? null : $lang;
 	}
 
 	// in development, the columns a write needs, of the templates' types, so a
-	// page or collection no request rendered yet is stored the same way
-	protected function ensure_columns($table, $fields, $system) {
+	// page or collection no request rendered yet is stored the same way;
+	// $translated adds fields with a column per language (slug, for items)
+	protected function ensure_columns($table, $fields, $system, $translated = array()) {
 		if (database::$frozen) return;
 		$types = array_intersect_key(cms_types::$system, array_flip($system));
-		$translated = array();
 		foreach ($fields as $name => $field) {
 			$types[$name] = $field['type'];
 			// and a column per language for the fields the templates translate
@@ -789,17 +840,45 @@ class mcp
 		cms_types::ensure($table, $types, $translated);
 	}
 
+	// a markup collection's columns, with a slug per language (slug__ro)
+	// when multilingual is on
+	protected function ensure_item_columns($collection) {
+		if (!isset($collection['model'])) $this->ensure_columns($collection['type'], $collection['fields'], array('slug', 'enabled', 'published_at', 'updated_at'), array('slug'));
+	}
+
 	protected function tool_create_item($arguments) {
 		cms_store::connect();
 		$collection = $this->find_collection($this->arg($arguments, 'collection'));
-		if (!isset($collection['model'])) $this->ensure_columns($collection['type'], $collection['fields'], array('slug', 'enabled', 'published_at', 'updated_at'));
+		if ($this->item_lang($arguments) !== null) {
+			throw new InvalidArgumentException('Create the item without lang, in the default language ('.i18n::default_language().'), then translate it with update_item and lang');
+		}
+		$this->ensure_item_columns($collection);
 		return cms_store::save_item($collection['type'], 0, $this->fields_argument($arguments), array_keys($collection['fields']), 'editor', $collection['name']);
 	}
 
 	protected function tool_update_item($arguments) {
 		cms_store::connect();
 		$collection = $this->find_collection($this->arg($arguments, 'collection'));
-		return cms_store::save_item($collection['type'], (int)$this->arg($arguments, 'id'), $this->fields_argument($arguments), array_keys($collection['fields']), 'editor', $collection['name']);
+		$id = (int)$this->arg($arguments, 'id');
+		$fields = $this->fields_argument($arguments);
+		$lang = $this->item_lang($arguments);
+		if ($lang === null) return cms_store::save_item($collection['type'], $id, $fields, array_keys($collection['fields']), 'editor', $collection['name']);
+		// a translation: the translated fields, and the item's slug in that language
+		$translated = raster_describe::item_translated($collection);
+		foreach (array_keys($fields) as $name) {
+			if ((isset($collection['fields'][$name]) || in_array($name, array('enabled', 'published_at'), true)) && !in_array($name, $translated, true)) {
+				throw new InvalidArgumentException("'$name' is shared by every language; update it without lang");
+			}
+		}
+		$this->ensure_item_columns($collection);
+		try {
+			cms_store::save_item($collection['type'], $id, $fields, array_keys($collection['fields']), 'editor', $collection['name'], $lang);
+		} catch (cms_refused $e) {
+			if (!in_array('field_shared', $e->problems, true)) throw $e;
+			// the model translates it, but a frozen database has no column for it yet
+			throw new InvalidArgumentException('The database has no translation column for '.implode(', ', array_keys($fields)).' yet: run `php bin/raster schema --apply` on the server');
+		}
+		return $this->tool_get_item(array('collection' => $collection['name'], 'id' => $id, 'lang' => $lang));
 	}
 
 	protected function tool_run_action($arguments) {

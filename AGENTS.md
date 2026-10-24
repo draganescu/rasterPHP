@@ -2265,14 +2265,18 @@ output as a one-language site.
      both settings out. Nothing is dropped.
   2. Words editors change become CMS fields, fixed words dictionary keys.
   3. `translation_status` (`lang: "ro"`) lists what that language lacks:
-     page and `site` fields, and dictionary keys.
-  4. `update_page` with `lang` writes a page's translation; `write_strings`
-     a dictionary's (`read_strings` reads one, with the keys the views use
-     and the ones it lacks).
-  5. `render_url` with `/ro/…` shows the result.
+     page and `site` fields, items' and records' fields, and dictionary
+     keys.
+  4. `update_page` with `lang` writes a page's translation, `update_item`
+     with `lang` an item's (`where` `menu/3` is collection `menu`, id 3);
+     `write_strings` a dictionary's (`read_strings` reads one, with the
+     keys the views use and the ones it lacks).
+  5. `render_url` with `/ro/…` shows the result (`/ro/menu`, and an item
+     at its Romanian address).
 
-  `get_page` with `lang` gives each field as `{ value, default_value,
-  translated, shared }`, and `page_history` with `lang` the revisions saved
+  `get_page` and `get_item` with `lang` give each field as `{ value,
+  default_value, translated, shared }`, `list_items` with `lang` the items
+  as `/ro/` shows them, and `page_history` with `lang` the revisions saved
   in it. `describe` and `site_overview` have a `languages` block
   (`enabled`, `default`, `list`, `urls`, `missing`). `set_languages` and
   `write_strings` refuse in production.
@@ -2602,15 +2606,19 @@ of lists and filter pages come along; drafts and the editor don't.
     lowercased, and one that isn't a code (`en_US`) or is listed twice is
     refused. One code writes `languages` with `multilingual` false; `[]`
     takes both lines out. Nothing is dropped. In development it then adds the
-    translation columns of every page table that exists. It answers
+    translation columns of every page and collection table that exists. It answers
     `{ enabled, default, languages, urls, columns_added, missing }`. Refused
     in production.
   - `translation_status(lang)`: what a language other than the default
     lacks, `{ lang, missing: [{ kind, where, field, default_value, length,
     shared }], total, done }`. `kind` is `page` (`where` its URL), `site`
-    (the `site_*` fields) or `strings` (a dictionary key the views print;
-    `where` the dictionary). A field counts when the templates translate it
-    and its default-language value isn't empty; `default_value` is cut at
+    (the `site_*` fields), `item` (a markup collection's item, `where`
+    `<collection>/<id>`, `menu/3`), `record` (the same, for a record type
+    whose `types()` declares `translate` or `shared`) or `strings` (a
+    dictionary key the views print; `where` the dictionary). An item's slug
+    is never listed: it is made from its translated title. A field counts
+    when the templates (or the record type) translate it and its
+    default-language value isn't empty; `default_value` is cut at
     300 characters, `length` is its whole length. `limit` (200) and `offset`
     page through it; `total` counts every missing one, `done` the ones
     translated.
@@ -2633,6 +2641,20 @@ of lists and filter pages come along; drafts and the editor don't.
     `page_history` keeps the revisions saved in that language. A field name
     with `__` (a translation's column, `headline__ro`) is refused by every
     write tool: name the field, and pass `lang`.
+  - `list_items`, `get_item`, `create_item` and `update_item` take `lang`
+    the same way. `get_item` gives each of the item's fields as `{ value,
+    default_value, translated, shared }`; `id`, `slug` (its slug in that
+    language, else the default one), `enabled` and the dates stay plain,
+    and the translation columns are left out. `list_items` gives each item
+    as that language shows it (the translation, else the default text) with
+    `untranslated`, its translated fields that have words in the default
+    language and none in this one. `update_item` writes the translated
+    fields, and `slug` as the item's slug in that language; a shared field
+    (a price, `enabled`, `published_at`) is refused as for `update_page`.
+    `create_item` refuses a translation language: create the item in the
+    default language, then translate it with `update_item`. In
+    development they, and `set_languages`, add a markup collection's
+    translation columns, a slug per language (`slug__ro`) among them.
   - `describe` (section `languages`, there by default), `site_overview` and
     `raster describe --json` have the block `{ enabled,
     multilingual_setting, default, list, urls, missing }`: `urls` is where
