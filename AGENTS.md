@@ -2120,7 +2120,9 @@ use `'model.method'`: `method(true)` returns
   `<link rel="canonical">` (the page in its own language), one
   `<link rel="alternate" hreflang="xx">` per language, and
   `hreflang="x-default"` (the default language's address). A page that
-  writes its own canonical or hreflang links keeps them instead. Off,
+  writes its own canonical or hreflang links keeps them instead. None are
+  added on a page that isn't a 200 (the 404 page) or on a URL with a query
+  (`?page=2`); tracking parameters (`utm_*`, `fbclid`, …) don't count. Off,
   nothing is added.
 - **Lint, multilingual on.** Three more warnings: `untranslatable_text`,
   words in a view that no annotation prints, so every language shows them

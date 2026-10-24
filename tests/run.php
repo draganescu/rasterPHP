@@ -9234,17 +9234,14 @@ test('P1.C: in multilingual mode <head> gets the canonical link, one hreflang pe
 	same('', with_settings(p1c_on(array('multilingual' => false)), $links));
 	same('', with_settings(p1c_on(array('languages' => array('en'))), $links));
 	// a refusal (the 404 page) and a URL with a query (?page=2) are no page's address
-	$status = http_response_code();
-	http_response_code(404);
-	try {
-		same('', with_settings(p1c_on(), $links), 'a 404');
-	} finally {
-		http_response_code($status ?: 200);
-	}
+	same('', with_settings(p1c_on(), function () { return template::language_links('', 404); }), 'a 404');
 	$get = $_GET;
 	$_GET = array('page' => '2');
 	try {
 		same('', with_settings(p1c_on(), $links), '?page=2');
+		// a tracking parameter is the same page: the links stay
+		$_GET = array('utm_source' => 'newsletter', 'fbclid' => 'x');
+		check(strpos(with_settings(p1c_on(), $links), 'rel="canonical"') !== false, '?utm_source keeps the canonical');
 	} finally {
 		$_GET = $get;
 	}

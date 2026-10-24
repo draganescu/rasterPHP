@@ -59,11 +59,16 @@ class template {
   // every language (hreflang, x-default the default language's), for <head>.
   // '' when off. What the page writes itself ($html has a canonical or an
   // hreflang link) is left to it. None on a refusal (a 404), nor on a URL
-  // with a query (?page=2 of a model's list): its address isn't the page's
-  static function language_links($html = '') {
+  // with a query (?page=2 of a model's list): its address isn't the page's.
+  // Tracking parameters (utm_*, fbclid, …) don't count: it is the same page
+  // ($status: the response's, http_response_code() when null)
+  static function language_links($html = '', $status = null) {
   	if (!i18n::enabled()) return '';
-  	$status = http_response_code();
-  	if (($status && $status !== 200) || $_GET) return '';
+  	if ($status === null) $status = http_response_code();
+  	if ($status && $status !== 200) return '';
+  	foreach (array_keys($_GET) as $name) {
+  		if (!preg_match(raster_cache::$tracking, $name)) return '';
+  	}
   	$current = strtolower(i18n::current());
   	$default = strtolower(i18n::default_language());
   	$canonical = '';
