@@ -10,8 +10,9 @@
 // - narrow: a MySQL text column too small for what SQLite would hold
 //   (varchar(191), TEXT); --apply makes it LONGTEXT
 // - translations (#200, D3): a column <field>__<lang> holds a field's
-//   translation. Multilingual on, a page's translated field without one
-//   for every language is drift that --apply adds (missing_translations).
+//   translation. Multilingual on, a translated field of a page or an item
+//   without one for every language is drift that --apply adds
+//   (missing_translations), and so is a table without saved_lang.
 //   Off, and for a language or field no longer used, they are kept
 //   translations: never orphans, never renamed, never drift, so turning
 //   multilingual on again brings them back.
@@ -154,10 +155,10 @@ class raster_schema {
 			$kept[] = $column;
 		}
 		// what multilingual needs here: a column per language for each
-		// translated field (D7), and the language each revision is in. P2
-		// translates page fields; items are P3's.
+		// translated field (D7), and the language each revision or item save
+		// is in: pages, collections' items and records alike
 		$missing_translations = array();
-		if (i18n::enabled() && $kind === 'page' && $fields) {
+		if (i18n::enabled() && $fields) {
 			foreach ($fields as $name => $field) {
 				if (empty($field['translate'])) continue;
 				foreach (i18n::available() as $lang) {
@@ -222,7 +223,7 @@ class raster_schema {
 			'orphans' => $orphans,
 			'rename_candidates' => $renames,
 		);
-		if (i18n::enabled() && $kind === 'page') {
+		if (i18n::enabled()) {
 			$table['translated'] = array_keys(array_filter($fields, function ($f) { return !empty($f['translate']); }));
 			$table['missing_translations'] = $missing_translations;
 		}
@@ -262,9 +263,14 @@ class raster_schema {
 				}
 				// records: every column the model declares, and no row left behind
 				if ($table['kind'] === 'record') {
-					if ($table['exists'] && !$table['missing']) continue;
+					$translations = isset($table['missing_translations']) ? $table['missing_translations'] : array();
+					if ($table['exists'] && !$table['missing'] && !$translations) continue;
 					cms_records::ensure(cms_records::info($table['name']), true);
-					$changes[] = $table['exists'] ? "added {$table['table']}.".implode(", {$table['table']}.", $table['missing']) : "created table {$table['table']}";
+					if (in_array('saved_lang', $translations, true)) cms_types::ensure($table['table'], array('saved_lang' => 'text'));
+					if (!$table['exists'] || $table['missing']) $changes[] = $table['exists'] ? "added {$table['table']}.".implode(", {$table['table']}.", $table['missing']) : "created table {$table['table']}";
+					if ($table['exists']) {
+						foreach ($translations as $column) $changes[] = "added {$table['table']}.$column";
+					}
 					continue;
 				}
 				// multilingual: each translated field's column per language,

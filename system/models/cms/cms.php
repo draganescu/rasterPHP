@@ -591,6 +591,11 @@ class cms
 			}
 		}
 
+		// multilingual, in development: the collection's translated fields
+		// get their columns per language where its fields are first seen
+		// (a new table, a new field, one made before the site had languages)
+		if (!$record && !database::$frozen && i18n::enabled()) $this->item_translations($name, $datastarts[1]);
+
 		// only real columns can be filtered on
 		$fields = cms_store::columns($this->data_name);
 		// /menu/menu_items/price/14.500 and /events/events_items/date/10 Oct 2026
@@ -609,11 +614,17 @@ class cms
 			}
 		}
 		// what the list shows, as the pager counts it
-		$where = cms_store::list_where($name, $list['conditions'], $filters, $uri_filters);
+		// filtered and sorted in the page's language: a translation, else the
+		// default language's value (D8)
+		$lang = i18n::current();
+		$where = cms_store::list_where($name, $list['conditions'], $filters, $uri_filters, $lang);
 		if ($where === null) return array();
 		list($sql, $bindings) = $where;
-		$sql .= ' ORDER BY '.cms_store::order_sql(isset($options['order']) ? $options['order'] : '', $fields).' LIMIT '.(int)$page_size.' OFFSET '.(int)$roffset;
+		$sql .= ' ORDER BY '.cms_store::order_sql(isset($options['order']) ? $options['order'] : '', $fields, $lang).' LIMIT '.(int)$page_size.' OFFSET '.(int)$roffset;
 		$data = array_values(array_map(array('cms_store', 'export_item'), R::find($this->data_name, $sql, $bindings)));
+		// and shown in it: each translated field's translation, or the
+		// default language's text while it has none
+		foreach ($data as $key => $row) $data[$key] = cms_store::localized($row, $this->data_name, $lang);
 		// a filter nothing matches and a page past the last one answer, empty;
 		// they are not kept, so made-up URLs don't fill the page cache
 		if (!$data && ($page > 1 || $uri_filters)) raster_cache::skip();
@@ -732,6 +743,42 @@ class cms
 		if (!cms::loggedin() || !$this->page_name) return false;
 		cms_editor::inject($this->page_name, $this->slug);
 		return true;
+	}
+
+	// Multilingual, in development: the columns per language of the
+	// collection's translated fields (the content model's translate, D7),
+	// looked for once a request. $prints are the list's print references
+	// (name, @src.photo): only a field one of them prints as words that
+	// lacks its column in a language sends for the content model, which
+	// reads every view, so a list whose columns are there costs nothing.
+	private function item_translations($name, $prints) {
+		$type = $this->data_name;
+		if (isset($this->translations['collection.'.$type])) return;
+		$this->translations['collection.'.$type] = true;
+		$columns = cms_store::columns($type);
+		$types = cms_types::of_table($type);
+		$candidates = array();
+		foreach ($prints as $value) {
+			if (strpos($value, 'if.') !== false || strpos($value, 'raster_filter') !== false) continue;
+			$parts = explode('.', $value);
+			$field = $parts[count($parts) - 1];
+			$attribute = in_array(substr($parts[0], 0, 1), array('@', '+'), true) ? substr($parts[0], 1) : null;
+			if (!isset($types[$field]) || in_array($field, cms_store::$system_fields, true) || !cms_types::translates($types[$field], $attribute)) continue;
+			foreach (i18n::available() as $lang) {
+				$column = cms_types::column($field, $lang);
+				if ($column !== $field && !array_key_exists($column, $columns)) $candidates[$field] = true;
+			}
+		}
+		if (!$candidates) return;
+		require_once BASE.'tools/inspector.php';
+		$inspector = new raster_inspector();
+		$model = $inspector->content_model();
+		$known = isset($model['collections'][$name]) ? $model['collections'][$name]['fields'] : array();
+		$wanted = array();
+		foreach (array_keys($candidates) as $field) {
+			if (!empty($known[$field]['translate'])) $wanted[] = $field;
+		}
+		if ($wanted) cms_types::ensure($type, array(), $wanted);
 	}
 
 	private function detect_data($key, $value) {

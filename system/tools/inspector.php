@@ -1685,8 +1685,9 @@ class raster_inspector {
 		foreach (cms_records::types() as $name => $info) {
 			$views = isset($collections[$name]) ? $collections[$name]['views'] : array();
 			$fields = array();
-			// translate and shared declarations are P3's: shared until then
-			foreach ($info['fields'] as $field => $default) $fields[$field] = array('default' => is_array($default) ? '[]' : cms_types::show($default), 'type' => $info['types'][$field], 'translate' => false);
+			// translated: what the type declares with translate or shared (D7)
+			$translated = cms_records::translated_fields($info);
+			foreach ($info['fields'] as $field => $default) $fields[$field] = array('default' => is_array($default) ? '[]' : cms_types::show($default), 'type' => $info['types'][$field], 'translate' => in_array($field, $translated, true));
 			$collections[$name] = array(
 				'name' => $name, 'type' => $info['type'], 'fields' => $fields, 'views' => $views,
 				'model' => $info['model'], 'public' => $info['public'], 'owner' => $info['owner'], 'create' => $info['create'], 'staff_add' => $info['staff_add'],

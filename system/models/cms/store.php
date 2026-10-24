@@ -137,8 +137,8 @@ class cms_store {
 	// (/news/news_items/tag/php) and the item asked for (id or slug), $uri
 	// the ones of those the URL asked for. Drafts and scheduled items for
 	// editors only; a private type's records for editors and their owners.
-	// $lang: the language the list is shown in, for conditions_sql (null:
-	// as it always was).
+	// $lang: the language the list is shown in: its filters match the
+	// translations (conditions_sql; null: as it always was).
 	static function list_where($name, $conditions, $filters = array(), $uri = array(), $lang = null) {
 		$fields = self::columns(cms::collection_type($name));
 		$record = cms_records::info($name);
@@ -186,7 +186,7 @@ class cms_store {
 			$compare[] = array($key, '=', $value);
 		}
 		// featured=1, date>=today, guests>4, each as its field's type
-		list($more, $more_bindings) = self::conditions_sql($compare, $fields);
+		list($more, $more_bindings) = self::conditions_sql($compare, $fields, 'c', $lang);
 		return array($sql.$more, $bindings + $more_bindings);
 	}
 
@@ -254,9 +254,22 @@ class cms_store {
 		return $equals;
 	}
 
+	// The SQL a list compares and sorts $field by in $lang (D8): `name`, or
+	// in a translation language whose column the table has (name__ro) the
+	// translation, and the default language's value where it is empty, so
+	// an untranslated item still matches and sorts by its own words. Null,
+	// off and the default language: `name`, as it always was.
+	static function field_sql($field, $columns, $lang = null) {
+		if ($lang !== null && $lang !== '' && i18n::suffix($lang) !== '') {
+			$column = cms_types::column($field, $lang);
+			if (array_key_exists($column, $columns)) return "COALESCE(NULLIF(`$column`, ''), `$field`)";
+		}
+		return "`$field`";
+	}
+
 	// SQL for conditions on columns the table has; others are left out.
-	// $lang: the language the values are in (null: the default); ignored
-	// for now
+	// $lang: the language the values are in (null: the default); a field
+	// with a translation in it compares as field_sql says
 	static function conditions_sql($conditions, $columns, $prefix = 'c', $lang = null) {
 		$sql = '';
 		$bindings = array();
@@ -272,13 +285,14 @@ class cms_store {
 				$sql .= $operator === '!=' ? '' : ' AND 1 = 0 ';
 				continue;
 			}
+			$column = self::field_sql($field, $columns, $lang);
 			if ($value === null) {
-				$sql .= $operator === '=' ? " AND `$field` IS NULL " : ($operator === '!=' ? " AND `$field` IS NOT NULL " : ' AND 1 = 0 ');
+				$sql .= $operator === '=' ? " AND $column IS NULL " : ($operator === '!=' ? " AND $column IS NOT NULL " : ' AND 1 = 0 ');
 				continue;
 			}
 			$name = ':'.$prefix.$i.'_'.$field;
 			// a field nobody filled is not equal to anything
-			$sql .= $operator === '!=' ? " AND (`$field` IS NULL OR `$field` != $name) " : " AND `$field` $operator $name ";
+			$sql .= $operator === '!=' ? " AND ($column IS NULL OR $column != $name) " : " AND $column $operator $name ";
 			$bindings[$name] = $value;
 		}
 		return array($sql, $bindings);
@@ -286,7 +300,8 @@ class cms_store {
 
 	// order=newest|oldest|<field>|-<field> (minus means descending), or
 	// several separated by commas: order=date,time or order=-date,-time.
-	// $lang: the language to sort in (null: the default); ignored for now
+	// $lang: the language to sort in (null: the default); a field with a
+	// translation in it sorts as field_sql says
 	static function order_sql($order, $columns, $lang = null) {
 		$parts = array();
 		foreach (explode(',', (string)$order) as $part) {
@@ -300,7 +315,7 @@ class cms_store {
 			$desc = $part[0] === '-';
 			$field = ltrim($part, '-');
 			if (!preg_match('/^[a-z0-9_]+$/', $field) || !array_key_exists($field, $columns)) continue;
-			$parts[] = "`$field`".($desc ? ' DESC' : ' ASC');
+			$parts[] = self::field_sql($field, $columns, $lang).($desc ? ' DESC' : ' ASC');
 		}
 		if (!$parts) return 'id ASC';
 		$sql = implode(', ', $parts);
@@ -536,7 +551,12 @@ class cms_store {
 	// hidden fields and the owner). Records of a declared type go through the
 	// model's check() first. $name is the collection's own name, for the
 	// event (team_members, whose table is teammembersdata). $lang is the
-	// language the values are in (null: the default); ignored for now.
+	// language the values are in (null: the default): in a translation
+	// language each translated field is stored in its column (name__ro) and
+	// a shared one is refused (field_shared). $values and $allowed always
+	// name the fields themselves (name). A markup collection's translated
+	// fields are the ones with translation columns; a declared type's are
+	// what it declares (cms_records::translated_fields).
 	static function save_item($type, $id, $values, $allowed, $who = 'editor', $name = null, $lang = null) {
 		$info = cms_records::for_table($type);
 		if ($info) cms_records::ensure($info);
@@ -549,13 +569,14 @@ class cms_store {
 	}
 
 	static function store_item($type, $id, $values, $allowed, $who, $info, $name = null, $lang = null) {
+		$lang = self::write_language($lang);
 		if ($info) {
 			$allowed = $who === 'model' ? array_merge(array_keys($info['fields']), array('owner')) : array_values(array_intersect($allowed, cms_records::writable($info)));
 		}
 		// slug, enabled (0 = draft) and published_at can always be set, except by visitors
 		if ($who !== 'visitor') $allowed = array_merge($allowed, array('slug', 'enabled', 'published_at'));
 		// one value, like every other field: slug[]=x is refused, not 'array'
-		if (isset($values['slug'])) $values['slug'] = self::unique_slug($type, cms_types::clean('text', $values['slug'], 'slug') ?: 'item', (int)$id);
+		if (isset($values['slug'])) $values['slug'] = self::unique_slug($type, cms_types::clean('text', $values['slug'], 'slug') ?: 'item', (int)$id, $lang !== '' ? $lang : i18n::default_language());
 		$types = cms_types::of_table($type);
 		foreach ($values as $field => $value) {
 			if (!in_array($field, $allowed, true)) {
@@ -574,6 +595,37 @@ class cms_store {
 			// the field's type: 'guests' => '4' is stored as 4, 'many' is refused
 			$values[$field] = cms_types::clean(isset($types[$field]) ? $types[$field] : 'text', $value, $field);
 		}
+		// the column each value goes to: the field's own, or in a
+		// translation its column there (name__ro), all or nothing. The slug
+		// is the slug lines' (above and below) in every language.
+		$columns = $values;
+		if ($lang !== '') {
+			$translated = $info ? cms_records::translated_fields($info) : cms_types::translated($type);
+			$columns = array();
+			foreach ($values as $field => $value) {
+				if ($field === 'slug') { $columns[$field] = $value; continue; }
+				if (!in_array($field, $translated, true)) throw new cms_refused(array('field_shared'));
+				$columns[cms_types::column($field, $lang)] = $value;
+			}
+			$missing = array_diff_key($columns, self::columns($type));
+			if ($missing && database::$frozen) {
+				throw new InvalidArgumentException("No column for the $lang translation of '".implode("', '", array_keys($missing))."' yet: run php bin/raster schema --apply");
+			}
+			if ($missing) {
+				$add = array();
+				foreach ($missing as $column => $value) {
+					$field = substr($column, 0, -strlen(i18n::suffix($lang)));
+					$add[$column] = isset($types[$field]) ? $types[$field] : 'text';
+				}
+				cms_types::ensure($type, $add);
+			}
+		}
+		// development keeps the language of each save from the first
+		// multilingual one on
+		if (i18n::enabled() && !database::$frozen && self::table_exists($type) && !array_key_exists('saved_lang', $types)) {
+			cms_types::ensure($type, array('saved_lang' => 'text'));
+			$types = cms_types::of_table($type);
+		}
 		if ($id) {
 			$bean = R::findOne($type, ' id = ? ', array((int)$id));
 			if (!$bean) throw new InvalidArgumentException("No item $id");
@@ -582,7 +634,7 @@ class cms_store {
 			$bean->enabled = 1;
 		}
 		$before = $id ? self::export_item($bean) : null;
-		foreach ($values as $field => $value) {
+		foreach ($columns as $field => $value) {
 			$bean->$field = $value;
 		}
 		if (!empty($bean->published_at) && strtotime($bean->published_at) > time()) {
@@ -629,12 +681,19 @@ class cms_store {
 				cms_records::$writer = $writer;
 			}
 		}
+		// the language the save changed: the default's code for a save
+		// without one. Only while multilingual and once the table has the
+		// column, so off a save stores what it always did
+		$saved_lang = $lang !== '' ? $lang : i18n::default_language();
+		if (i18n::enabled() && isset($types['saved_lang'])) $bean->saved_lang = $saved_lang;
 		$bean->updated_at = R::isoDateTime();
 		R::store($bean);
 		util::content_changed();
 		$item = self::export_item($bean);
 		if ($info) $item = cms_records::decode($info, $item);
-		cms_records::dispatch('cms.item_saved', array('collection' => self::collection_of($type, $name), 'created' => !$id, 'item' => $item));
+		$event = array('collection' => self::collection_of($type, $name), 'created' => !$id, 'item' => $item);
+		if (i18n::enabled()) $event['lang'] = $saved_lang;
+		cms_records::dispatch('cms.item_saved', $event);
 		return $info && $who !== 'model' ? cms_records::shown($info, $item) : $item;
 	}
 

@@ -359,7 +359,11 @@ class cms_editor {
 		return is_array($examples) ? array_filter($examples, 'is_string') : array();
 	}
 
-	// collection, id (0 for a new item), fields[name]=value
+	// collection, id (0 for a new item), fields[name]=value, and lang when
+	// multilingual. In a translation, a field with a translation is saved
+	// in the page's language and a shared one (a photo, a price) as the one
+	// value of every language, as save_field does; a new item is made in
+	// the default language, the only text it has until it is translated
 	static function save_item() {
 		cms::require_admin(true);
 		if ($bad = self::one_value()) return $bad;
@@ -373,10 +377,24 @@ class cms_editor {
 		$fields = util::post('fields');
 		if (!is_array($fields)) $fields = array();
 		unset($fields['id'], $fields['updated_at']);
-		$allowed = $record ? cms_records::writable($record) : array_diff(array_keys($columns), array('id', 'updated_at'));
+		// name__ro is a language's column, and saved_lang Raster's, never fields
+		$allowed = $record ? cms_records::writable($record) : array_values(array_filter(array_diff(array_keys($columns), array('id', 'updated_at', 'saved_lang')), function ($column) { return strpos($column, '__') === false; }));
+		$lang = self::language();
+		if ($lang === false) return self::fail('This page is in '.i18n::current().': reload it');
+		$id = (int)util::post('id');
+		$write = $lang !== null && !i18n::is_default($lang) && $id ? $lang : null;
+		$translated = $write === null ? array() : ($record ? cms_records::translated_fields($record) : cms_types::translated($type));
+		$own = array_intersect_key($fields, array_flip($translated));
+		$shared = array_diff_key($fields, $own);
 		try {
-			// the page prints text, so the editor gets the item as text too
-			return cms_types::show_row(cms_store::save_item($type, (int)util::post('id'), $fields, $allowed, 'editor', $collection), self::examples());
+			// both parts or neither
+			$saved = !$own ? cms_store::save_item($type, $id, $shared, $allowed, 'editor', $collection) : cms_records::transaction(function () use ($type, $id, $own, $shared, $allowed, $collection, $write) {
+				if ($shared) cms_store::save_item($type, $id, $shared, $allowed, 'editor', $collection);
+				return cms_store::save_item($type, $id, $own, $allowed, 'editor', $collection, $write);
+			});
+			// the page prints text, so the editor gets the item as text too,
+			// in the page's language
+			return cms_types::show_row($write === null ? $saved : cms_store::localized($saved, $type, $write), self::examples());
 		} catch (cms_refused $e) {
 			return self::refused($e);
 		} catch (cms_type_error $e) {

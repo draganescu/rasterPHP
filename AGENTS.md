@@ -407,7 +407,7 @@ alike:
 | `rsvp.replied` | a reply to an event was made (by a guest on the form, or by staff in the page, over MCP or in model code): its fields but `token_hashes` and `link_sent_at`, `who` (`guest`, `staff` or `waitlist`), `event_title`, `event_date`, `event_starts`. After the commit, as are the two below |
 | `rsvp.changed` | the same, after its `answer`, `people` or `event` changed, with `was` and `was_people` (the status and party before) |
 | `rsvp.promoted` | the same, after a waiting reply was moved in (`who` `waitlist`; `staff` by the `promote` action) |
-| `cms.item_saved` | `collection` (its own name, `team_members`), `created` (true for new items), `item` |
+| `cms.item_saved` | `collection` (its own name, `team_members`), `created` (true for new items), `item`; multilingual, also `lang` (the language the save changed) |
 | `cms.item_deleted` | `collection`, `item` |
 | `cms.page_saved` | `type`, `slug`, `changed` (field names), `fields`; multilingual, also `lang` (the language the revision changed) |
 | `content_changed` | none (sent by `util::content_changed()`; inside a transaction, once after the commit) |
@@ -811,13 +811,14 @@ mock-up is stored only when the collection's table is made.
   shown as a link's text and in its `href` stays one value). The content
   model (`raster_inspector::content_model()`) gives each field
   `'translate' => true|false` by this rule; a record type's fields are
-  shared for now. `cms_types::translated($table)` names the fields that
+  what its `types()` says (`translate`/`shared`, see **Records**).
+  `cms_types::translated($table)` names the fields that
   have translation columns, as the database has them (empty when off).
   `cms_types::ensure($table, $types, $translated)` makes the columns, in
   development and with `schema --apply`; with multilingual off it adds none.
-  Page tables and `sitepage` get them, and a `saved_lang` column (the
-  language a revision was saved in, managed by Raster); collections' items
-  come later. Raster makes a translation column before anything is stored
+  Page tables, `sitepage` and collection and record tables get them, and
+  a `saved_lang` column (the language a revision or an item was last saved
+  in, managed by Raster). Raster makes a translation column before anything is stored
   in it (every write path declares it first), which is what keeps
   `name__id` a plain text column. A column RedBean creates itself takes its
   type from the first value stored, and one ending in `_id` also gets an
@@ -845,6 +846,23 @@ mock-up is stored only when the collection's table is made.
   restoring one brings back the whole row, every language's translations
   included. Off, none of this happens: no column, no `saved_lang`, the
   event as it was.
+- **Items in a language** (`multilingual` on): a collection's items
+  (`render.cms.menu`) follow the same rule, and a record type says which
+  of its fields are translated in `types()` (**Records**: Languages). On
+  `/ro/…` a list, its item pages and `feed::items` show each item through
+  `localized()`: its Romanian, else its default language's text, so an
+  untranslated item is listed in English. Sorting and filtering go by the
+  same words, in SQL: `order=name`, `name=?q`, `/menu/menu_items/name/…`
+  and `cms_records::find()` compare `COALESCE(NULLIF(name__ro, ''), name)`
+  (`cms_store::field_sql`); in the default language, and off, the SQL is
+  what it always was. In development the first print of a translated item
+  field adds its columns. `cms_store::save_item($type, $id, $values,
+  $allowed, $who, $name, $lang)` writes `$lang` as `update_page` does (base
+  names, `field_shared` for a shared field), keeps `saved_lang`, and
+  `cms.item_saved` carries `lang`. In the editor on `/ro/menu` an item's
+  translated fields are saved in Romanian and its shared ones (a photo, a
+  price) for every language; an item added there is made in the default
+  language.
 - **Changing fields.** A new annotation adds a column: on the next request in
   development, or with `php bin/raster schema --apply` in production.
   `schema` shows orphaned columns and suggests
@@ -857,8 +875,8 @@ mock-up is stored only when the collection's table is made.
   unused. `--dry-run` says what `--rename`, `--drop` and `--apply` would
   change and changes nothing. `--check` exits 1 when the templates and the
   database differ (for CI).
-  - With multilingual on, a translated page field lacking its column in a
-    language, or a page table lacking `saved_lang`, is drift (marked `+`,
+  - With multilingual on, a translated page, item or record field lacking
+    its column in a language, or a table lacking `saved_lang`, is drift (marked `+`,
     `missing_translations` in `--json`, with the table's `translated`
     fields): `--apply` adds them, empty, so each language shows the default
     text until it is translated. A translation column of a field no
@@ -975,6 +993,12 @@ own: the bundled booking model has the type, its rules and its emails (see
   `submit()` first asks `suspect(array())` (see **Forms**): a post that
   looks like spam (`holds()`) gets the form again with `try_again` or `slow_down`, so
   word both. A type that runs its own checks says `'spam' => false`.
+- **Languages** (multilingual on, see **Multilingual sites**): a record's
+  fields are one value for every language unless its type says otherwise:
+  `'translate' => array('name', 'description')` gives those text fields a
+  column per language, `'shared' => array('email', 'phone')` gives one to
+  every text field but those (lists and hidden fields never get one).
+  `cms_records::translated_fields($info)` names them.
 - **Editors and agents** change records like items, except that readonly
   fields are shown and not editable, hidden fields never reach them, and the
   item's handle has the type's actions instead of Duplicate and Schedule.
@@ -2217,6 +2241,7 @@ as a one-language site. Each part is described where it lives:
 | the settings and the language API (`i18n::current()`, `suffix()`, `with()`, …) | **i18n** |
 | addresses (`/ro/menu`), links, redirects, headers, cache | **Multilingual URLs** |
 | which fields are translated, columns (`headline__ro`), fallback, `update_page($…, $lang)` | **The CMS**: Translations, Page fields in a language |
+| items in a language: display, sort and filter, `save_item($…, $lang)`; a record type's `translate`/`shared` | **The CMS**: Items in a language; **Records**: Languages |
 | translation columns in `schema`, kept translations | **The CMS**: Changing fields |
 | `untranslatable_text`, `missing_translation_key`, `html_lang_fixed` | **i18n**: Lint, multilingual on |
 | the editor on `/ro/…` and the editor's own language | **Editors and agents**: the in-page editor |
@@ -2230,8 +2255,8 @@ as a one-language site. Each part is described where it lives:
   it: the starter's `site::nav()` gives each link its `url` and `state`
   and `_layout.html` says "Home"; the shop's order mail gets the flags
   `by_card` and `on_delivery` and words them with `print.if`; the demo's
-  opening hours are a `render.cms.hours` list, content rather than code
-  (translated once collection items are, in a later release).
+  opening hours are a `render.cms.hours` list, content rather than code,
+  translated as any collection's items are.
 - **Making a site multilingual, as an agent** (MCP):
   1. `set_languages` with `["en", "ro"]`, the default first.
   2. Words editors change become CMS fields, fixed words dictionary keys
