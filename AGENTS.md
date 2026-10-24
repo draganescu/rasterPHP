@@ -770,6 +770,14 @@ mock-up is stored only when the collection's table is made.
     for `8pm`, `1` for `yes`. One that can't be (`many` for an int,
     `2026-02-30`, `x` for a date) is refused with the field and an
     example. An empty value is `null` (`false` for a bool, `''` for text).
+  - A date typed with slashes follows the language once `languages` is set
+    (#135, D14), whether or not `multilingual` is on: day first for every
+    language but `en-us`, so `5/10/2026` is 5 October on an `en`+`ro` site
+    and `31/02/2026` is refused. `en-us` reads it month first. `2026-10-05`,
+    `5.10.2026` and words (`10 May 2026`, `today`) read the same in every
+    language. With `languages` unset nothing changed: `5/10/2026` is 10 May.
+    `cms_types::parse_date($value, $lang)` does it (null `$lang`: the
+    current language, `i18n::date_order()`).
     A form's ticked checkbox is yes, whatever its `value`.
   - Lists filter and sort by type: `order=-price` puts 100 above 18 above
     9.50.
@@ -1240,6 +1248,19 @@ bundled model declares none of its types, and `lint` warns.
   as the process was killed isn't noted yet, so that one reader may get it
   twice. One SMTP connection serves the whole run, and the transport is
   printed without its user, password or options.
+  - **On a multilingual site** (see **i18n**) the page is rendered once per
+    language (`/news/x`, `/ro/news/x`), and each rendering goes to the
+    subscribers who read that language (`subscriber.lang`; none, or one the
+    site dropped, reads the default), with its own `<title>` as the subject
+    and that language's unsubscribe page. Each language is an issue of its
+    own, keyed by its address, so "sent once" and "goes on after a stop"
+    hold per language. `--lang=ro` sends only that one (refused on a site
+    that isn't multilingual); `--to` sends the default's rendering unless
+    `--lang` names another; `--subject` is every language's; `--dry-run`
+    prints a line per language. A language whose page doesn't render or has
+    no `<title>` is an error for it alone: the others still go, and the exit
+    status is 1. In code, `newsletter::recipients($issue, $lang)` and the
+    `$lang` of `send_issue()`; a null `$lang`, or off, means everyone.
   - From code: `newsletter::send_issue($url, $html, $subject, $again)`
     sends a page rendered with `RASTER_SENDING=1` and passed through
     `newsletter::prepare_issue()`. It returns false when the issue already

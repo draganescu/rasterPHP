@@ -11376,6 +11376,192 @@ test('P4 kickoff: off, newsletter recipients in a language are everyone, as befo
 	}
 });
 
+// ## P4.B: newsletter per language, record names, dates (#135)
+
+// the subscriber table set aside for $fn, so it starts with none; the rows
+// $fn makes are thrown away and the table put back after
+function p4b_subscribers($fn) {
+	cms_store::connect();
+	$kept = cms_store::table_exists('subscriber');
+	if ($kept) R::exec('ALTER TABLE subscriber RENAME TO zzp4b_subscriber');
+	try {
+		return $fn(function ($email, $fields = array()) {
+			$subscriber = R::dispense('subscriber');
+			foreach ($fields + array('email' => $email, 'name' => '', 'status' => 'confirmed', 'token' => sha1($email), 'source' => '', 'created_at' => R::isoDateTime()) as $name => $value) $subscriber->$name = $value;
+			return (int)R::store($subscriber);
+		});
+	} finally {
+		if (cms_store::table_exists('subscriber')) R::exec('DROP TABLE subscriber');
+		if ($kept) R::exec('ALTER TABLE zzp4b_subscriber RENAME TO subscriber');
+	}
+}
+
+test('P4.B: newsletter recipients in a language are those who read it; no lang, or none known, reads the default', function () {
+	$on = array('multilingual' => true, 'languages' => array('en', 'ro'));
+	p4b_subscribers(function ($add) use ($on) {
+		$ana = $add('ana@example.test');
+		$bob = $add('bob@example.test');
+		$add('gone@example.test', array('status' => 'unsubscribed'));
+		$emails = function ($rows) { return array_map(function ($row) { return $row['email']; }, $rows); };
+		with_settings($on, function () use ($emails) {
+			// a table from before the column: everyone reads the default
+			check(!array_key_exists('lang', cms_store::columns('subscriber')), 'the fixture has no lang column yet');
+			same(array('ana@example.test', 'bob@example.test'), $emails(newsletter::recipients(null, 'en')), 'no column: the default');
+			same(array(), newsletter::recipients(null, 'ro'), 'no column: nobody reads ro');
+		});
+		$cy = $add('cy@example.test', array('lang' => 'ro'));
+		$add('dan@example.test', array('lang' => 'fr'));
+		$add('eve@example.test', array('lang' => 'RO'));
+		$add('fay@example.test', array('lang' => 'en'));
+		$add('gil@example.test', array('lang' => 'ro', 'status' => 'pending'));
+		with_settings($on, function () use ($emails, $cy) {
+			same(array('cy@example.test', 'eve@example.test'), $emails(newsletter::recipients(null, 'ro')), 'ro');
+			same(array('ana@example.test', 'bob@example.test', 'dan@example.test', 'fay@example.test'), $emails(newsletter::recipients(null, 'en')), "en: '' and a dropped language too");
+			$row = newsletter::recipients(null, 'ro')[0];
+			same(array('id', 'email', 'name', 'token'), array_keys($row), 'the rows keep their keys');
+			// an issue: only those it has not reached
+			$issue = R::dispense('newsletterissue');
+			$issue->url = '/ro/zzp4b-issue';
+			R::store($issue);
+			$delivery = R::dispense('newsletterdelivery');
+			$delivery->issue = (int)$issue->id;
+			$delivery->email = 'cy@example.test';
+			R::store($delivery);
+			try {
+				same(array('eve@example.test'), $emails(newsletter::recipients($issue, 'ro')), 'ro, not reached yet');
+				same(4, count(newsletter::recipients($issue, 'en')));
+				// no language: everyone, as before
+				same(5, count(newsletter::recipients($issue)));
+			} finally {
+				R::trash($delivery);
+				R::trash($issue);
+			}
+		});
+		// off, a language changes nothing: the same rows, keys and order
+		foreach (p4_off_settings() as $what => $setting) {
+			with_settings($setting, function () use ($what) {
+				same(newsletter::recipients(null), newsletter::recipients(null, 'ro'), $what);
+				same(array('id', 'email', 'name', 'token'), array_keys(newsletter::recipients(null, 'ro')[0]), $what);
+			});
+		}
+	});
+});
+
+test('P4.B: raster send on a bilingual site sends each subscriber the page in their language (#200)', function () use ($root, $db, $maildir, $base, $p1b_on) {
+	$theme = "$root/application/views/default";
+	test_fixture("$theme/zzp4b_issue.html");
+	file_put_contents("$theme/zzp4b_issue.html", '<!doctype html><html><head><title><!-- print.i18n.zzp1b(\'hello\') -->Hello<!-- /print.i18n.zzp1b(\'hello\') --></title></head><body>'
+		.'<p>Issue</p><a href="<!-- print.newsletter.unsubscribe_url /-->">Unsubscribe</a></body></html>');
+	$env = 'RASTER_DB='.escapeshellarg($db).' RASTER_MAIL='.escapeshellarg("log://$maildir").' RASTER_URL='.escapeshellarg("$base/");
+	$send = function ($args) use ($env, $root) {
+		return shell_exec("$env ".php_cmd().' '.escapeshellarg("$root/bin/raster").' send '.$args.' 2>&1; echo "exit=$?"');
+	};
+	$sent = function ($fn) use ($maildir) {
+		$before = glob("$maildir/*.eml") ?: array();
+		$out = $fn();
+		$mails = array();
+		foreach (array_diff(glob("$maildir/*.eml") ?: array(), $before) as $file) {
+			$raw = file_get_contents($file);
+			preg_match('/^To: (.*)$/m', $raw, $to);
+			preg_match('/^Subject: (.*)$/m', $raw, $subject);
+			$mails[trim($to[1])] = array('subject' => iconv_mime_decode(trim($subject[1]), 0, 'UTF-8'), 'raw' => $raw);
+		}
+		ksort($mails);
+		return array($out, $mails);
+	};
+	try {
+		p4b_subscribers(function ($add) use ($p1b_on, $send, $sent) {
+			$add('old@example.test');
+			$add('ro@example.test', array('lang' => 'ro'));
+			$add('en@example.test', array('lang' => 'en'));
+			p1b_site($p1b_on, function () use ($send, $sent) {
+				$out = $send('/zzp4b_issue --dry-run');
+				check(strpos($out, 'Would send "Hello" (en) to 2 subscriber(s)') !== false && strpos($out, 'Would send "Bună ziua" (ro) to 1 subscriber(s)') !== false && strpos($out, 'exit=0') !== false, "dry run: $out");
+				list($out, $mails) = $sent(function () use ($send) { return $send('/zzp4b_issue'); });
+				check(strpos($out, 'Sent "Hello" (en) to 2 subscriber(s)') !== false && strpos($out, 'Sent "Bună ziua" (ro) to 1 subscriber(s)') !== false && strpos($out, 'exit=0') !== false, "send: $out");
+				same(array('en@example.test', 'old@example.test', 'ro@example.test'), array_keys($mails));
+				same(array('Hello', 'Hello', 'Bună ziua'), array_values(array_map(function ($m) { return $m['subject']; }, $mails)), 'each in their language; a subscriber from before the column in the default');
+				check(preg_match('#List-Unsubscribe: <[^>]*/ro/newsletter-unsubscribe\?token=#', $mails['ro@example.test']['raw']) === 1, 'the Romanian reader unsubscribes on the Romanian page');
+				check(preg_match('#List-Unsubscribe: <[^>]*/newsletter-unsubscribe\?token=#', $mails['old@example.test']['raw']) === 1 && strpos($mails['old@example.test']['raw'], '/ro/newsletter-unsubscribe') === false, 'the default reader on the default one');
+				// each language is an issue of its own, keyed by its address
+				same(array('/zzp4b_issue', '/ro/zzp4b_issue'), R::getCol("SELECT url FROM newsletterissue WHERE url LIKE '%zzp4b_issue' ORDER BY id"));
+				list($out, $mails) = $sent(function () use ($send) { return $send('/zzp4b_issue'); });
+				check(strpos($out, '/zzp4b_issue was already sent') !== false && strpos($out, '/ro/zzp4b_issue was already sent') !== false && strpos($out, 'exit=1') !== false && !$mails, "sent once: $out");
+				// a new reader of ro gets it on the next run with --lang
+				R::exec("UPDATE newsletterissue SET incomplete = 1 WHERE url = '/ro/zzp4b_issue'");
+				return null;
+			});
+			$add('ro2@example.test', array('lang' => 'ro'));
+			p1b_site($p1b_on, function () use ($send, $sent) {
+				list($out, $mails) = $sent(function () use ($send) { return $send('/zzp4b_issue --lang=ro'); });
+				check(strpos($out, 'Sent "Bună ziua" (ro) to 1 more subscriber(s), 2 in all') !== false && strpos($out, '(en)') === false, "--lang=ro: $out");
+				same(array('ro2@example.test'), array_keys($mails));
+				// --to: the default's rendering, or --lang's
+				list($out, $mails) = $sent(function () use ($send) { return $send('/zzp4b_issue --to=me@example.test'); });
+				same(array('me@example.test'), array_keys($mails));
+				same('Hello', $mails['me@example.test']['subject'], "--to: $out");
+				list(, $mails) = $sent(function () use ($send) { return $send('/zzp4b_issue --to=me@example.test --lang=ro --subject=Salut'); });
+				same('Salut', $mails['me@example.test']['subject'], '--subject applies to every language');
+				check(strpos($send('/zzp4b_issue --lang=fr --dry-run'), 'exit=2') !== false, 'a language the site lacks');
+				// a language that doesn't render is an error for it; the others still go
+				$out = $send('/zzp4b_nothing --dry-run');
+				check(strpos($out, '/ro/zzp4b_nothing did not render') !== false && strpos($out, 'error: /zzp4b_nothing did not render') !== false && strpos($out, 'exit=1') !== false, "missing page: $out");
+				return null;
+			});
+			// off: no language, everyone gets the one page, and --lang is refused
+			list($out, $mails) = $sent(function () use ($send) { return $send('/zzp4b_issue --again'); });
+			check(strpos($out, 'Sent "Hello" to 4 subscriber(s) via') !== false && strpos($out, 'exit=0') !== false, "off: $out");
+			same(4, count($mails));
+			check(strpos($send('/zzp4b_issue --lang=ro --dry-run'), 'exit=2') !== false, 'off, --lang is refused');
+		});
+	} finally {
+		@unlink("$theme/zzp4b_issue.html");
+		cms_store::connect();
+		if (cms_store::table_exists('newsletterissue') && cms_store::table_exists('newsletterdelivery')) R::exec("DELETE FROM newsletterdelivery WHERE issue IN (SELECT id FROM newsletterissue WHERE url LIKE '%zzp4b_issue')");
+		if (cms_store::table_exists('newsletterissue')) R::exec("DELETE FROM newsletterissue WHERE url LIKE '%zzp4b_issue'");
+	}
+});
+
+test('P4.B: dates are typed day first in every language but en-us; ISO and words everywhere; no languages, as before (D14)', function () {
+	$day = function ($typed, $lang = null) {
+		$time = cms_types::parse_date($typed, $lang);
+		return $time === null ? null : date('Y-m-d H:i', $time);
+	};
+	with_settings(array('multilingual' => true, 'languages' => array('en', 'ro')), function () use ($day) {
+		same('2026-10-05 00:00', $day('5/10/2026'), 'en+ro: 5 October');
+		same('2026-10-05 00:00', $day('5/10/2026', 'ro'));
+		same('2026-10-05 00:00', $day('05/10/2026', 'en'), 'en is day first too');
+		same('2026-10-05 19:30', $day('5/10/2026 19:30'), 'with a time');
+		same('2026-10-05 00:00', $day('5.10.2026'), 'dots, as PHP reads them');
+		same('2026-10-05 00:00', $day('5-10-2026'), 'dashes, as PHP reads them');
+		same('2026-10-05 00:00', $day('2026-10-05'), 'ISO');
+		same('2026-05-10 00:00', $day('10 May 2026'), 'words');
+		same(date('Y-m-d 00:00'), $day('today'));
+		same('2026-12-25 00:00', $day('25/12/2026'), 'a day past 12, which American order refuses');
+		same(null, $day('13/13/2026'));
+		same(null, $day('31/02/2026'));
+		same(null, $day('5/10/2026 nonsense'));
+		same('2026-05-10 00:00', $day('5/10/2026', 'en-us'), 'en-us is month first');
+		// what is stored, through clean()
+		same('2026-10-05', cms_types::clean('date', '5/10/2026', 'when'));
+		same('2026-10-05 19:30:00', cms_types::clean('datetime', '5/10/2026 19:30', 'when'));
+		same('2026-10-05', i18n::with('ro', function () { return cms_types::clean('date', '5/10/2026', 'when'); }), 'in the current language');
+	});
+	with_settings(array('multilingual' => true, 'languages' => array('en-us', 'es')), function () use ($day) {
+		same('2026-05-10 00:00', $day('5/10/2026'), 'an en-us site reads it the American way');
+		same('2026-10-05 00:00', $day('5/10/2026', 'es'));
+	});
+	// languages set, the switch off: the order still follows them (D14)
+	with_settings(array('multilingual' => false, 'languages' => array('ro')), function () use ($day) {
+		same('2026-10-05 00:00', $day('5/10/2026'), 'a site in Romanian only');
+	});
+	with_settings(array('multilingual' => false, 'languages' => array()), function () use ($day) {
+		same('2026-05-10 00:00', $day('5/10/2026'), 'no languages: unchanged');
+		same('2026-05-10', cms_types::clean('date', '5/10/2026', 'when'));
+		same(strtotime('25/12/2026') === false ? null : date('Y-m-d H:i', strtotime('25/12/2026')), $day('25/12/2026'), 'no languages: as strtotime');
+	});
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";
 foreach ($skipped as $skip) echo "  - $skip\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";

@@ -112,6 +112,8 @@ The cookie is the only cookie a visitor gets without logging in, and only after 
 
 A site with a single language (`array('ro')`) is fine this way: its pages say `lang="ro"`, dates are read day first, and the editor speaks Romanian.
 
+Dates typed with slashes follow `languages` whether or not `multilingual` is on: `5/10/2026` is 5 October for every language except `en-us`, which reads it as May 10. `2026-10-05` and dates in words read the same everywhere. A site without `languages` reads dates as it always did (`5/10/2026` is May 10).
+
 ## Other places languages matter
 
 - The page cache keeps one copy per address, so one per language.
