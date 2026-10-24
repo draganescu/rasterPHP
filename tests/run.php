@@ -9864,11 +9864,36 @@ test('P2.C: set_languages writes the two settings in their canonical form and le
 	same("<?php\n// config::set('languages')->to(array('fr'));\nconfig::set('theme')->to('default');\nconfig::set('languages')->to(array('en', 'ro'));\nconfig::set('protected')->to(array('x' => 'member'));\nconfig::set('multilingual')->to(true);\n", mcp::config_lines($source, $lines), 'replaced where it was, the commented example kept, the missing one added');
 	same(mcp::config_lines($source, $lines), mcp::config_lines(mcp::config_lines($source, $lines), $lines), 'a second run changes nothing');
 	// a setting set twice keeps the first place, once
-	same("<?php\nconfig::set('languages')->to(array('en', 'ro'));\n\$x = 1;\nconfig::set('multilingual')->to(true);\n", mcp::config_lines("<?php\nconfig::set('languages')->to(array('ro'));\n\$x = 1;\nconfig::set(\"languages\")->to(array('de'));\n", $lines));
+	same("<?php\nconfig::set('languages')->to(array('en', 'ro'));\nconfig::set('multilingual')->to(true);\n\$x = 1;\n", mcp::config_lines("<?php\nconfig::set('languages')->to(array('ro'));\n\$x = 1;\nconfig::set(\"languages\")->to(array('de'));\n", $lines));
 	// null removes both, whole lines, and nothing else
 	same("<?php\nconfig::set('theme')->to('default');\n// config::set('multilingual')->to(true);\n", mcp::config_lines("<?php\nconfig::set('multilingual')->to(true);\nconfig::set('theme')->to('default');\n  config::set('languages')->to(array('en', 'ro'));\n// config::set('multilingual')->to(true);\n", array('multilingual' => null, 'languages' => null)));
-	// a file that ends in a closing tag gets them before it
-	same("<?php\n\$a = 1;\nconfig::set('multilingual')->to(true);\nconfig::set('languages')->to(array('en', 'ro'));\n?>\n", mcp::config_lines("<?php\n\$a = 1;\n?>\n", $lines));
+	// without a config::set, at the start of PHP: never after a return or a closing tag
+	same("<?php\nconfig::set('multilingual')->to(true);\nconfig::set('languages')->to(array('en', 'ro'));\n\$a = 1;\nreturn;\n?>\n<p>x</p>", mcp::config_lines("<?php\n\$a = 1;\nreturn;\n?>\n<p>x</p>", $lines));
+	// after the last config::set, inside PHP, when HTML follows
+	same("<?php\nconfig::set('db')->to('keep');\nconfig::set('multilingual')->to(true);\nconfig::set('languages')->to(array('en', 'ro'));\n?>\n<p>html</p>\n", mcp::config_lines("<?php\nconfig::set('db')->to('keep');\n?>\n<p>html</p>\n", $lines));
+	// a statement a closing tag ends is only that statement
+	$closed = "<?php config::set('languages')->to(array('en')) ?>\n<?php\nconfig::set('db')->to('keep');";
+	same("<?php config::set('languages')->to(array('en', 'ro')); ?>\n<?php\nconfig::set('db')->to('keep');\nconfig::set('multilingual')->to(true);", mcp::config_lines($closed, $lines));
+	same("<?php  ?>\n<?php\nconfig::set('db')->to('keep');", mcp::config_lines($closed, array('multilingual' => null, 'languages' => null)));
+	same("<?php config::set('db')->to('keep');\nconfig::set('multilingual')->to(true);\nconfig::set('languages')->to(array('en', 'ro')); ?>x", mcp::config_lines("<?php config::set('db')->to('keep') ?>x", $lines), 'a ; for the statement before');
+	// \config::set too, and the file's own line endings
+	same("<?php\r\nconfig::set('theme')->to('x');\r\nconfig::set('languages')->to(array('en', 'ro'));\r\nconfig::set('multilingual')->to(true);\r\n", mcp::config_lines("<?php\r\nconfig::set('theme')->to('x');\r\n\\config::set('languages')->to(array('de'));\r\n", $lines));
+	// refused rather than guessed: the body of an if or else without braces
+	foreach (array("<?php\nif (\$x) config::set('languages')->to(array('de'));\n", "<?php\nif (\$x) {} else config::set('multilingual')->to(true);\n") as $braceless) {
+		try {
+			mcp::config_lines($braceless, $lines);
+			check(false, 'changed: '.$braceless);
+		} catch (InvalidArgumentException $e) {
+			check(strpos($e->getMessage(), 'without braces') !== false, $e->getMessage());
+		}
+	}
+	same("<?php\nconfig::set('multilingual')->to(true);\nif (\$x) {\n\tconfig::set('languages')->to(array('en', 'ro'));\n}\n", mcp::config_lines("<?php\nif (\$x) {\n\tconfig::set('languages')->to(array('de'));\n}\n", $lines), 'inside braces it is a statement of its own; a new one never goes in the block');
+	// what PHP would make of each result: every other statement as it was
+	foreach (array($source, $closed, "<?php\nconfig::set('db')->to('keep');\n?>\n<p>html</p>\n") as $file) {
+		$after = mcp::config_lines($file, $lines);
+		same(array_values(array_filter(array_column(mcp::config_statements($file), 'name'), function ($n) { return !in_array($n, array('languages', 'multilingual'), true); })), array_values(array_filter(array_column(mcp::config_statements($after), 'name'), function ($n) { return !in_array($n, array('languages', 'multilingual'), true); })));
+		same(1, count(array_filter(mcp::config_statements($after), function ($s) { return $s['name'] === 'languages'; })));
+	}
 });
 
 test('P2.C: set_languages over MCP: on, one language, off; bad codes refused, production refuses', function () {
@@ -9948,12 +9973,48 @@ test('P2.C: read_strings and write_strings: the agent sends words, Raster writes
 				array('file' => 'zzp2c', 'lang' => 'ro', 'strings' => array('a' => array('b'))),
 				array('file' => 'zzp2c', 'lang' => 'ro', 'strings' => array('a' => 3)),
 				array('file' => 'zzp2c', 'lang' => 'ro', 'strings' => array('x')),
+				array('file' => "zzp2c\n", 'lang' => 'ro', 'strings' => array('a' => 'b')),
+				array('file' => 'zzp2c', 'lang' => 'ro', 'strings' => array("a\n" => 'b')),
+				array('file' => 'zzp2c', 'lang' => 'ro', 'strings' => array('big' => str_repeat('x', 1048577))),
 				array('file' => 'zzp2c', 'lang' => 'ro', 'strings' => array()),
 			) as $arguments) {
 				check(isset($mcp->call('write_strings', $arguments)['error']), 'refused: '.json_encode($arguments));
 			}
 			same(array('order' => 'Comandă', 'extra.key-1' => $php), include $file, 'nothing written by a refusal');
 			check(!is_file(APPBASE.'i18n/de/zzp2c.php'));
+			check(isset($mcp->call('read_strings', array('file' => "zzp2c\n", 'lang' => 'ro'))['error']), 'a name ends where it ends');
+			// a dictionary or a language folder that links out of i18n/ is refused
+			$outside = sys_get_temp_dir().'/raster-p2c-i18n-'.getmypid();
+			@mkdir($outside);
+			symlink("$outside/target.php", APPBASE.'i18n/ro/zzp2clink.php');
+			try {
+				check(isset($mcp->call('write_strings', array('file' => 'zzp2clink', 'lang' => 'ro', 'strings' => array('order' => 'x')))['error']), 'a file linking out');
+				check(!file_exists("$outside/target.php"), 'nothing written through it');
+			} finally {
+				unlink(APPBASE.'i18n/ro/zzp2clink.php');
+			}
+			$real = APPBASE.'i18n/ro';
+			rename($real, "$real.zzkept");
+			@mkdir($outside);
+			symlink($outside, $real);
+			try {
+				check(isset($mcp->call('write_strings', array('file' => 'zzp2c', 'lang' => 'ro', 'strings' => array('order' => 'x')))['error']), 'a folder linking out');
+				same(array(), glob("$outside/*"), 'nothing written there');
+			} finally {
+				unlink($real);
+				rename("$real.zzkept", $real);
+				@rmdir($outside);
+			}
+			// a key with no text in the template: used, never missing, in both tools
+			file_put_contents(APPBASE.'views/default/zzp2c_empty.html', '<p><!-- print.i18n.zzp2c(\'blank\') /--></p>');
+			test_fixture(APPBASE.'views/default/zzp2c_empty.html');
+			try {
+				$read = $mcp->call('read_strings', array('file' => 'zzp2c', 'lang' => 'ro'));
+				check(in_array('blank', $read['used_keys'], true) && !in_array('blank', $read['missing_keys'], true), json_encode($read));
+				check(!in_array('blank', array_column($mcp->call('translation_status', array('lang' => 'ro'))['missing'], 'field'), true), 'nor in translation_status');
+			} finally {
+				unlink(APPBASE.'views/default/zzp2c_empty.html');
+			}
 			// the editor's own words
 			$editor = $mcp->call('read_strings', array('file' => 'raster_editor', 'lang' => 'ro'));
 			check(in_array('save', $editor['used_keys'], true), 'the editor\'s keys');
@@ -10064,6 +10125,9 @@ test('P2.C: an agent turns a one-language site into a bilingual one over MCP (ne
 
 test('P2.C: check_view and write_view say which new fields are translated (needs P2.A)', function () {
 	p2c_site(function ($db) {
+		$other = APPBASE.'views/zzp2ctheme';
+		test_fixture($other);
+		@mkdir($other);
 		p2c_session(array('RASTER_DB' => $db), function ($mcp) {
 			$mcp->call('set_languages', array('languages' => array('en', 'ro')));
 			$draft = '<!doctype html><html><head><title>Menu</title></head><body><h1><!-- print.cms.zzp2c_heading -->Our menu<!-- /print.cms.zzp2c_heading --></h1>'
@@ -10079,7 +10143,12 @@ test('P2.C: check_view and write_view say which new fields are translated (needs
 			same(true, $written['written']);
 			same($check['new_fields'], $written['new_fields']);
 			same(array(), $mcp->call('check_view', array('content' => $draft, 'view' => 'zzp2c_menu.html'))['new_fields'], 'written, nothing is new');
+			// a draft without a name is compared with every page
+			same(array(array('field' => 'zzp2c_other', 'translate' => true)), $mcp->call('check_view', array('content' => $draft.'<p><!-- print.cms.zzp2c_other -->x<!-- /print.cms.zzp2c_other --></p>'))['new_fields']);
+			// a view of a theme no route serves is no page: nothing of it is stored
+			same(array(), $mcp->call('check_view', array('content' => $draft, 'view' => 'zzp2c_menu.html', 'theme' => 'zzp2ctheme'))['new_fields']);
 		});
+		@rmdir($other);
 	});
 });
 
@@ -10144,13 +10213,24 @@ test('P2.C: read_asset and write_asset: a theme\'s CSS, JS and SVG, with write_v
 				'<svg>&lt;',
 				'not xml at all',
 				'<!DOCTYPE svg [<!ENTITY x "y">]><svg xmlns="http://www.w3.org/2000/svg">&x;</svg>',
+				'<!DOCTYPE svg><svg xmlns="http://www.w3.org/2000/svg"/>',
+				'<?xml-stylesheet href="x.css"?><svg xmlns="http://www.w3.org/2000/svg"/>',
+				'<svg xmlns="http://www.w3.org/2000/svg"><foreignObject><p xmlns="http://www.w3.org/1999/xhtml">x</p></foreignObject></svg>',
+				'<svg xmlns="http://www.w3.org/2000/svg"><a><set attributeName="href" to="javascript:alert(1)"/></a></svg>',
+				'<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><a><animate attributeName="xlink:href" values="x"/></a></svg>',
+				'<svg xmlns="http://www.w3.org/2000/svg"><iframe srcdoc="x"/></svg>',
+				'<svg xmlns="http://www.w3.org/2000/svg"><a href="data:text/html,x"><rect/></a></svg>',
+				'<svg xmlns="http://www.w3.org/2000/svg"><a title="see javascript:x"><rect/></a></svg>',
 			) as $bad) {
 				$refused = $mcp->call('write_asset', array('path' => 'zzp2c.svg', 'content' => $bad));
 				check(isset($refused['error']), 'written: '.$bad);
 			}
 			same($svg, file_get_contents("$theme/zzp2c.svg"), 'the file is left as it was');
+			$declared = '<?xml version="1.0" encoding="UTF-8"?>'."\n".$svg;
+			same(true, $mcp->call('write_asset', array('path' => 'zzp2c.svg', 'content' => $declared))['written'], 'the XML declaration is fine');
+			check(isset($mcp->call('write_asset', array('path' => 'zzp2c.js', 'content' => str_repeat('x', 2097153)))['error']), 'at most 2 MB');
 			// only theme files that aren't views, inside the theme
-			foreach (array('../../config/the_app.php', '../zz.css', '../../../zz.css', '/etc/passwd.css', "style.css\0.css", 'about.html', 'zzp2c.php', 'zzp2c.CSS', 'zzp2c_link.css', 'zzp2c_dir/secret.css', 'nope/zz.css', '', '.') as $path) {
+			foreach (array("zzp2c.css\n", 'zzp2c.php.css', 'zzp2c.PHP.js', 'zzp2c.phtml.svg', '../../config/the_app.php', '../zz.css', '../../../zz.css', '/etc/passwd.css', "style.css\0.css", 'about.html', 'zzp2c.php', 'zzp2c.CSS', 'zzp2c_link.css', 'zzp2c_dir/secret.css', 'nope/zz.css', '', '.') as $path) {
 				check(isset($mcp->call('read_asset', array('path' => $path))['error']), 'read: '.json_encode($path));
 				check(isset($mcp->call('write_asset', array('path' => $path, 'content' => 'x'))['error']), 'written: '.json_encode($path));
 			}
@@ -10184,12 +10264,21 @@ test('P2.C: read_asset and write_asset: a theme\'s CSS, JS and SVG, with write_v
 });
 
 test('P2.C: tools/list and describe grow by less than 1,000 characters (#161)', function () {
-	// tools/list over stdio at the P2 kickoff (c247d94): 10954 characters.
-	// describe's own growth is its languages block; the rest of describe
-	// is other packages' (the starter's views, lint)
-	p2c_site(function ($db) {
-		p2c_session(array('RASTER_DB' => $db), function ($mcp) {
-			$tools = strlen(json_encode($mcp->message('tools/list')['result'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+	// The baseline is tools/list over stdio at the P2 kickoff (c247d94):
+	// 10954 characters, these 21 tools. P2.C added the six below. A later
+	// release that adds tools measures its own growth: it moves the
+	// baseline to the size before its change and adds its tools to the
+	// list, so this test keeps saying what each step costs. describe's own
+	// growth is its languages block; the rest of describe is other
+	// packages' (the starter's views, lint).
+	$kickoff = array('site_overview', 'get_page', 'update_page', 'page_history', 'list_items', 'get_item', 'create_item', 'update_item', 'run_action', 'delete_item',
+		'lint_templates', 'schema_status', 'describe', 'vocabulary', 'annotations', 'list_views', 'read_view', 'check_view', 'write_view', 'render_url', 'clear_cache');
+	$added = array('set_languages', 'translation_status', 'read_strings', 'write_strings', 'read_asset', 'write_asset');
+	p2c_site(function ($db) use ($kickoff, $added) {
+		p2c_session(array('RASTER_DB' => $db), function ($mcp) use ($kickoff, $added) {
+			$list = $mcp->message('tools/list')['result'];
+			same(array(), array_values(array_diff(array_column($list['tools'], 'name'), $kickoff, $added)), 'a tool this baseline does not know: move the baseline (see above)');
+			$tools = strlen(json_encode($list, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
 			$languages = strlen(json_encode(array('languages' => $mcp->call('describe', array('sections' => array('languages')))['languages']), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)) - 2;
 			$growth = $tools - 10954 + $languages;
 			check($growth < 1000, "tools/list is $tools characters and the languages block $languages: $growth more than at the kickoff");

@@ -2488,13 +2488,21 @@ of lists and filter pages come along; drafts and the editor don't.
     `new_fields`: each field the markup adds, `{ field, translate }` (with
     `collection` for an item's), so an agent sees before writing that a
     heading gets a translation per language and a price or a link is shared.
+    The view's name says which page it is compared with (`check_view`
+    without one compares with every page); a view of a theme no route
+    serves is no page, so it has none.
   - `read_asset`, `write_asset` — the theme's files that aren't views:
     `.css`, `.js` and `.svg`, by their path inside the theme
     (`css/style.css`), with the view tools' checks (inside the theme, no link
-    out, the folder must exist). An SVG is written only when it is
-    well-formed XML with no `<script>` element, no `on…` attribute, no
-    `javascript:` link and no entity declarations; otherwise nothing is
-    written and the answer says why. `write_asset` clears the page cache.
+    out, the folder must exist), and no `.php` anywhere in the name
+    (`x.php.css`). An SVG is written only when it is well-formed XML that
+    runs nothing opened on its own: no DOCTYPE, no processing instruction
+    but the XML declaration, no `<script>` or `<foreignObject>`, no `on…` or
+    `srcdoc` attribute, no `<animate>` or `<set>` of a link, no
+    `javascript:` in any value and no `data:` link; otherwise nothing is
+    written and the answer says why. A file is at most 2 MB, and is
+    written whole (a temporary file renamed over it). `write_asset` clears
+    the page cache.
   - The six view and asset tools take an optional `theme`: the name of a folder
     directly under `views/` (letters, digits, `_` and `-`), the site's theme
     when left out. A path, or a folder that links out of `views/`, is
@@ -2512,8 +2520,9 @@ of lists and filter pages come along; drafts and the editor don't.
     cache. On a multilingual site, with `as` it also reports `editing_lang`,
     the language the in-page editor saves in there (the page's own).
   - `clear_cache` — throws the page cache away. Call it after changing
-    views, theme files, models or config any way but `write_view`, or the
-    database directly; Raster's own tools already clear it.
+    views, theme files, models or config any way but `write_view`,
+    `write_asset` and `write_strings`, or the database directly; Raster's
+    own tools already clear it.
 - **Tools for content:** `site_overview`, `get_page`, `update_page`,
   `page_history`, `list_items`, `get_item`, `create_item`, `update_item`,
   `delete_item`, `run_action` (records), `lint_templates`, `schema_status`.
@@ -2521,14 +2530,21 @@ of lists and filter pages come along; drafts and the editor don't.
   - `set_languages(languages)` writes `multilingual` and `languages` to
     `<app>/config/the_app.php` as `config::set('multilingual')->to(true);`
     and `config::set('languages')->to(array('en', 'ro'));`, replacing the
-    statements that set them (a commented-out example stays) or adding them
-    at the end, and nothing else. The default language is first; codes are
+    statements that set them (a commented-out example stays; a statement a
+    closing tag `?>` ends counts, and so does `\config::set`) or adding them
+    after the file's last `config::set`, and nothing else. It checks the
+    result changes no other `config::set` statement before it writes the
+    file (whole, by renaming a temporary one), and refuses, writing
+    nothing, when it would, or when a setting is the body of an `if` or
+    `else` without braces. Line endings stay as they were. The default language is first; codes are
     lowercased, and one that isn't a code (`en_US`) or is listed twice is
     refused. One code writes `languages` with `multilingual` false; `[]`
     takes both lines out. Nothing is dropped. In development it then adds the
     translation columns of every page table that exists. It answers
     `{ enabled, default, languages, urls, columns_added, missing }`. Refused
-    in production.
+    in production. Since `the_app.php` changed, the stdio server answers
+    every later call from a fresh process (see above); restart it to make
+    it fast again.
   - `translation_status(lang)`: what a language other than the default
     lacks, `{ lang, missing: [{ kind, where, field, default_value, length,
     shared }], total, done }`. `kind` is `page` (`where` its URL), `site`
@@ -2544,7 +2560,11 @@ of lists and filter pages come along; drafts and the editor don't.
     `print.i18n.<file>('key')`) and `missing_keys`. Writing merges, and
     Raster writes the file (`<?php return var_export(...)`): what the agent
     sends is only ever words. Keys are letters, digits, `_`, `.` and `-`,
-    values strings. A key no view prints comes back in `unused_keys`, a
+    values strings, and a dictionary is at most 1 MB. The file stays in the
+    app's `i18n/<lang>/` (a folder or file linking out of it is refused) and
+    is written whole. A key with no text in the template
+    (`<!-- print.i18n.home('x') /-->`) is in `used_keys` but never missing,
+    here or in `translation_status`. A key no view prints comes back in `unused_keys`, a
     warning. It clears the page cache, and is refused in production.
     `raster_editor` is the in-page editor's own words, in any language the
     editor has (`action_<name>` and `problem_<name>` keys are the site's

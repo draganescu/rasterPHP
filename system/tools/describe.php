@@ -178,9 +178,8 @@ class raster_describe
 				$urls[$code] = isset($domains[strtolower($code)]) ? $domains[strtolower($code)] : '/'.i18n::prefix($code);
 			}
 			try {
-				$inspector = $inspector ?: new raster_inspector();
-				foreach (array_slice(i18n::available(), 1) as $code) {
-					$missing[$code] = count(array_filter(self::translations($code, $inspector), function ($row) { return !$row['done']; }));
+				foreach (self::translations_in(array_slice(i18n::available(), 1), $inspector) as $code => $rows) {
+					$missing[$code] = count(array_filter($rows, function ($row) { return !$row['done']; }));
 				}
 			} catch (Exception $e) {
 				$missing = array();
@@ -202,8 +201,13 @@ class raster_describe
 	// text, with done telling whether $lang has it. For translation_status
 	// and the missing counts above; P3 and P4 add items, records and emails.
 	static function translations($lang, $inspector = null) {
+		return self::translations_in(array($lang), $inspector)[$lang];
+	}
+
+	// the same for several languages, reading the views and pages once
+	static function translations_in($langs, $inspector = null) {
 		$inspector = $inspector ?: new raster_inspector();
-		$rows = array();
+		$rows = array_fill_keys($langs, array());
 		cms_store::connect();
 		foreach ($inspector->content_model()['pages'] as $page) {
 			$stored = cms_store::page_values($page['type']);
@@ -213,16 +217,21 @@ class raster_describe
 				if (empty($field['translate']) && !in_array($name, $translated, true)) continue;
 				$value = isset($values[$name]) && trim((string)$values[$name]) !== '' ? (string)$values[$name] : (string)$field['default'];
 				if (trim($value) === '') continue;
-				$column = cms_types::column($name, $lang);
-				$done = $column !== $name && isset($values[$column]) && trim((string)$values[$column]) !== '';
-				$rows[] = array('kind' => $page['view'] === '*' ? 'site' : 'page', 'where' => $page['url'], 'field' => $name, 'default_value' => $value, 'done' => $done);
+				foreach ($langs as $lang) {
+					$column = cms_types::column($name, $lang);
+					$done = $column !== $name && isset($values[$column]) && trim((string)$values[$column]) !== '';
+					$rows[$lang][] = array('kind' => $page['view'] === '*' ? 'site' : 'page', 'where' => $page['url'], 'field' => $name, 'default_value' => $value, 'done' => $done);
+				}
 			}
 		}
 		foreach (self::strings_used($inspector) as $file => $keys) {
-			$strings = self::dictionary($file, $lang);
-			foreach ($keys as $key => $default) {
-				if (trim($default) === '') continue;
-				$rows[] = array('kind' => 'strings', 'where' => $file, 'field' => $key, 'default_value' => $default, 'done' => isset($strings[$key]) && trim((string)$strings[$key]) !== '');
+			foreach ($langs as $lang) {
+				$strings = self::dictionary($file, $lang);
+				foreach ($keys as $key => $default) {
+					// a key with no text in the template has nothing to translate
+					if (trim($default) === '') continue;
+					$rows[$lang][] = array('kind' => 'strings', 'where' => $file, 'field' => (string)$key, 'default_value' => $default, 'done' => isset($strings[$key]) && trim((string)$strings[$key]) !== '');
+				}
 			}
 		}
 		return $rows;
@@ -263,7 +272,7 @@ class raster_describe
 
 	// the words of <app>/i18n/<lang>/<file>.php, as the i18n model reads them
 	static function dictionary($file, $lang) {
-		if (!preg_match('/^[a-z0-9_]+$/', $file) || !preg_match('/^[a-z]{2,3}(-[a-z0-9]{2,8})?$/i', $lang)) return array();
+		if (!preg_match('/^[a-z0-9_]+$/D', $file) || !preg_match('/^[a-z]{2,3}(-[a-z0-9]{2,8})?$/Di', $lang)) return array();
 		return self::dictionary_file(APPBASE.'i18n/'.$lang.'/'.$file.'.php');
 	}
 
