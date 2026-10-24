@@ -75,12 +75,13 @@ This works on every URL, including `/docs/setup` and `/news/news_item/3`, becaus
 <script>var BASE = "http://localhost:8000/"</script>
 ```
 
-It also defines a JavaScript variable, `BASE`, holding the site's root address, for scripts that need to build URLs.
+It also defines a JavaScript variable, `BASE`, holding the site's root address, for scripts that need to build URLs. On a multilingual site it is the address of the page's language (`http://localhost:8000/ro/` on a Romanian page), so a link a script builds stays in that language; `/ro/api/…` answers as `/api/…` does.
 
 Two things follow from the `<base>` tag:
 
-- **In-page anchors need the page name.** `href="#contact"` would point at the theme folder, not the current page. Write `href="about.html#contact"` (which becomes `/about#contact`) or `href="/about#contact"`.
-- The tag is only added when your `<head>` is written exactly as `<head>` (no attributes) and when the page doesn't already have a `<base>` tag. If you write your own `<base>`, asset paths are up to you.
+- **In-page anchors and query links need the page name.** `href="#contact"` and `href="?sort=price"` would point at the theme folder, not the current page. Write `href="about.html#contact"` (which becomes `/about#contact`), `href="about.html?sort=price"`, or `href="/about#contact"`. `lint` warns about the short forms.
+- The tag goes right after your `<head>` tag, with attributes or without (`<head prefix="og: …">`), unless the page already has a `<base>` tag. If you write your own `<base>`, asset paths are up to you.
+- A link to another site without its scheme, `href="//cdn.example.com/guide.html"`, is left as written.
 
 Emails and newsletter issues don't get the tag; their relative links and images are turned into absolute addresses instead.
 

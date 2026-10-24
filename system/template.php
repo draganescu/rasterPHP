@@ -37,6 +37,54 @@ class template {
   static function unscript($html) {
   	return str_replace(array_keys(self::$script_form), array_values(self::$script_form), $html);
   }
+
+  // $tags right after the first <head>, attributes or not (<head prefix="og: …">),
+  // that isn't inside a comment or a script
+  static function insert_in_head($html, $tags) {
+  	$from = 0;
+  	while (preg_match('/<!--|<script\b|<head(\s[^>]*)?>/i', $html, $m, PREG_OFFSET_CAPTURE, $from)) {
+  		$at = $m[0][1];
+  		if (stripos($m[0][0], '<head') === 0) {
+  			$at += strlen($m[0][0]);
+  			return substr($html, 0, $at)."\n".$tags.substr($html, $at);
+  		}
+  		$end = $m[0][0] === '<!--' ? strpos($html, '-->', $at + 4) : stripos($html, '</script', $at);
+  		if ($end === false) return $html;
+  		$from = $end + 3;
+  	}
+  	return $html;
+  }
+
+  // In multilingual mode the page's canonical address and its address in
+  // every language (hreflang, x-default the default language's), for <head>.
+  // '' when off. What the page writes itself ($html has a canonical or an
+  // hreflang link) is left to it. None on a refusal (a 404), nor on a URL
+  // with a query (?page=2 of a model's list): its address isn't the page's.
+  // Tracking parameters (utm_*, fbclid, …) don't count: it is the same page
+  // ($status: the response's, http_response_code() when null)
+  static function language_links($html = '', $status = null) {
+  	if (!i18n::enabled()) return '';
+  	if ($status === null) $status = http_response_code();
+  	if ($status && $status !== 200) return '';
+  	foreach (array_keys($_GET) as $name) {
+  		if (!preg_match(raster_cache::$tracking, $name)) return '';
+  	}
+  	$current = strtolower(i18n::current());
+  	$default = strtolower(i18n::default_language());
+  	$canonical = '';
+  	$links = '';
+  	$fallback = '';
+  	foreach (i18n::alternates() as $row) {
+  		$url = htmlspecialchars($row['url'], ENT_QUOTES);
+  		$links .= "\n<link rel=\"alternate\" hreflang=\"".htmlspecialchars($row['lang'], ENT_QUOTES)."\" href=\"$url\">";
+  		if (strtolower($row['lang']) === $current) $canonical = $url;
+  		if (strtolower($row['lang']) === $default) $fallback = $url;
+  	}
+  	if ($fallback !== '') $links .= "\n<link rel=\"alternate\" hreflang=\"x-default\" href=\"$fallback\">";
+  	if (preg_match('/<link\b[^>]*\shreflang\s*=/i', $html)) $links = '';
+  	if (preg_match('/<link\b[^>]*\srel\s*=\s*["\']?canonical\b/i', $html)) $canonical = '';
+  	return ($canonical !== '' ? "\n<link rel=\"canonical\" href=\"$canonical\">" : '').$links;
+  }
   
 
   public $replace = array();
@@ -277,8 +325,10 @@ class template {
 			$base = $script;
 		
 		if ($template->format === 'html' && !$template->is_email) {
-			$template->output = str_replace('<head>', "<head>\n".$base, $template->output);
+			$template->output = self::insert_in_head($template->output, $base.self::language_links($template->output));
 		}
+		// print.if.languages: the language switcher has somewhere to go
+		if (!array_key_exists('languages', $template->vars)) $template->vars['languages'] = count(i18n::available()) > 1;
 		
 		// mock-up content goes first, so models inside it are never called
 		$template->remove();

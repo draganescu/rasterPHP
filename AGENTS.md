@@ -91,6 +91,19 @@ media/                        uploads from the CMS
 - Link to pages by file name, `href="about.html"`. Raster rewrites that to
   `/about`, and `index.html` becomes `/`, so the file still works as a static
   mock-up. Asset paths are relative to the theme folder.
+- **The `<base>` tag.** Every HTML page but an email gets
+  `<base href=".../views/<theme>/">` right after its `<head>` tag, with
+  attributes or without (`<head prefix="og: …">`), unless it has a
+  `<base>` of its own; that is what makes asset paths work on every URL. So
+  `href="#prices"` and `href="?sort=price"` open the theme folder, not the
+  page: write `href="about.html#prices"` (it becomes `/about#prices`) or
+  `href="about.html?sort=price"`. `lint` warns about the short forms,
+  except on a link a `print.@href` sets and on a page with its own `<base>`. A link to another
+  site without its scheme (`href="//cdn.example.com/guide.html"`) is left
+  as written.
+  Next to it a script sets `BASE`, the site's address for scripts; on a
+  multilingual site the address of the page's language (`/ro/`), where
+  `/api` answers too.
 - **Asset versions.** A relative URL to a real file in the theme
   (`href="style.css"`, `src`, `srcset`, `poster`) gets `?v=<version>`, made
   from the file's time and size, so it changes when the file does
@@ -2033,9 +2046,28 @@ use `'model.method'`: `method(true)` returns
   suggests the switch; one language, `array('ro')`, is fine) only the
   template's words are translated, and the language comes from `?lang=`
   (remembered in a cookie), the domain, the cookie, then the browser.
-- `print.i18n.language` gives the current language (without `languages`,
-  nothing: the mock-up's `lang="en"` stays, so write it with a default);
-  `render.i18n.languages` gives a switcher with `code`, `url` and `state`.
+- `print.i18n.language` gives the current language (`false` when the site
+  has no `languages`, so the mock-up's value stays), and `print.i18n.dir`
+  `rtl` for a language written right to left (Arabic, Hebrew, Persian,
+  Urdu, …), else `ltr`. Every page in the starter, the demo and the shop
+  starts with them, so the mock-up reads `lang="en"` (emails say
+  `lang="en"` as written for now):
+  `<!-- print.@lang.i18n.language --><!-- print.@dir.i18n.dir --><html lang="en" dir="ltr"><!-- /print.@dir.i18n.dir --><!-- /print.@lang.i18n.language -->`.
+- `render.i18n.languages` gives a switcher with `code`, `url` (this page in
+  that language), `state` (`active` for the current one) and `current`
+  (true for it). Multilingual, `url` is the language's own address
+  (`/ro/menu`, from `i18n::alternates()`); otherwise it is the page with
+  `?lang=xx`. The flag `if.languages` is true when the site has more than
+  one language: the starter's `_layout.html` shows its switcher inside
+  `print.if.languages`.
+- Multilingual, Raster also puts into `<head>`, after the `<base>`:
+  `<link rel="canonical">` (the page in its own language), one
+  `<link rel="alternate" hreflang="xx">` per language, and
+  `hreflang="x-default"` (the default language's address). A page that
+  writes its own canonical or hreflang links keeps them instead. None are
+  added on a page that isn't a 200 (the 404 page) or on a URL with a query
+  (`?page=2`); tracking parameters (`utm_*`, `fbclid`, …) don't count. Off,
+  nothing is added.
 - **The language API.** Every model, a site's own too, reads language
   state through these static calls, never `config::get('languages')`.
   With multilingual off they give the one-language answer, so callers
@@ -2227,10 +2259,23 @@ of lists and filter pages come along; drafts and the editor don't.
 
 - `/about` becomes `about/index.html`, feeds keep their names, a missing
   page becomes `404.html`, and theme files and `media/` are copied.
-- Links point at `--url` (the site's address, `RASTER_URL`, or root-relative
-  links when neither is set).
-- Every language after the first goes in `/<lang>/`, and the language
-  switcher links there.
+- Links point at `--url`, else the site's address (`RASTER_URL`, then
+  `site_url`), else they are root-relative.
+- Every language after the first goes in `/<lang>/`: `/ro/` becomes
+  `ro/index.html` and `/ro/menu` `ro/menu/index.html`. A multilingual site
+  (`multilingual` on) is crawled at each language's own addresses: every
+  view is started in every language (`/menu` and `/ro/menu`), and the links
+  its pages carry are followed from there. Each language gets its own
+  `404.html` (`ro/404.html`). It warns when the links are root-relative (no
+  `--url` or site address: search engines want absolute `hreflang` and
+  canonical links). A language with its own `domain_language` host is
+  exported as the site serves it: when the site has no `site_url`, the
+  export's server is the site's own address and sends that language to its
+  domain, so its pages are asked for on that host, written in its folder
+  (`ro/`), and linked at the domain (publish that folder there; the export
+  warns). With `site_url` set it is under `/ro/` like any other language. With languages but `multilingual` off, each page is
+  fetched again in every other language, and the export rewrites its links
+  and the language switcher's `?lang=` links to `/<lang>/`.
 - **Forms need PHP**, so a page that still shows one stops the export and
   nothing is written. Wrap forms in `<!-- print.if.live -->` and write what
   the static site shows instead in `<!-- print.if.static -->` (a phone
@@ -2241,7 +2286,8 @@ of lists and filter pages come along; drafts and the editor don't.
 - Left out: pages that need an account, the pages the models in use name
   in `requires()` (login, sign-up, password and newsletter pages, wherever
   their settings put them), `/api`, and paths in
-  `config::set('export_skip')` or `--skip=/path`. The command lists links to left-out pages and query
+  `config::set('export_skip')` or `--skip=/path`, under every language's
+  prefix too (`/ro/login`). The command lists links to left-out pages and query
   strings, since a static host can't answer them.
 - **Exporting again** to the same folder writes only files that changed and
   removes the ones the site no longer has, so a deploy uploads just those.

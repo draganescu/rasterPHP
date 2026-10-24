@@ -24,7 +24,7 @@
 * from ?lang=xx (remembered in a cookie), then the domain, the cookie, the
 * browser's Accept-Language, then the default.
 *
-*   <html lang="<!-- print.i18n.language /-->">
+*   <!-- print.@lang.i18n.language --><!-- print.@dir.i18n.dir --><html lang="en" dir="ltr"><!-- /print.@dir.i18n.dir --><!-- /print.@lang.i18n.language -->
 *   <!-- render.i18n.languages --><!-- print.+class.state --><!-- print.@href.url --><a href="#"><!-- print.code -->en<!-- /print.code --></a><!-- /print.@href.url --><!-- /print.+class.state --><!-- /render.i18n.languages -->
 */
 class i18n
@@ -247,13 +247,21 @@ class i18n
 		return $language === '' ? false : $language;
 	}
 
-	// a switcher: rows with code, url and state (active or empty)
+	// a switcher: rows with code, url (this page in that language), state
+	// (active or empty) and current (true for this page's language). In
+	// multilingual mode the url is the language's own address (/ro/menu),
+	// otherwise a ?lang= link
 	function languages() {
 		$current = self::detect();
+		$urls = array();
+		if (self::enabled()) {
+			foreach (self::alternates() as $row) $urls[$row['lang']] = $row['url'];
+		}
 		$path = rtrim(config::get('link_uri'), '/').strtok((string)config::get('uri_string'), '?');
 		$rows = array();
 		foreach (self::available() as $code) {
-			$rows[] = array('code' => $code, 'url' => $path.'?lang='.$code, 'state' => $code === $current ? 'active' : '');
+			$url = isset($urls[$code]) ? $urls[$code] : $path.'?lang='.$code;
+			$rows[] = array('code' => $code, 'url' => $url, 'state' => $code === $current ? 'active' : '', 'current' => $code === $current);
 		}
 		return $rows;
 	}
