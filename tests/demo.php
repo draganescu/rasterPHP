@@ -5216,7 +5216,11 @@ test('N9', 'P3.C export: a multilingual site is written at its Romanian item slu
 			check(is_file("$out/menu/menu_item/flat-white/index.html"), 'the English item at its slug');
 			check(is_file("$out/ro/menu/menu_item/cafea-cu-lapte/index.html"), 'the Romanian item at its Romanian slug');
 			check(!file_exists("$out/ro/menu/menu_item/flat-white/index.html"), 'not at the English slug in ro/');
-			has(file_get_contents("$out/ro/menu/index.html"), 'href="https://cafe.example/ro/menu/menu_item/cafea-cu-lapte"');
+			// the list links it at its Romanian slug, on whichever of its
+			// pages it is (earlier tests add items to the menu)
+			$lists = file_get_contents("$out/ro/menu/index.html");
+			foreach (glob("$out/ro/menu/menu_page/*/index.html") ?: array() as $page) $lists .= file_get_contents($page);
+			has($lists, 'href="https://cafe.example/ro/menu/menu_item/cafea-cu-lapte"');
 			has(file_get_contents("$out/menu/menu_item/flat-white/index.html"), 'hreflang="ro" href="https://cafe.example/ro/menu/menu_item/cafea-cu-lapte"');
 			$sitemap = file_get_contents("$out/sitemap.xml");
 			has($sitemap, '<loc>https://cafe.example/ro/menu/menu_item/cafea-cu-lapte</loc>');
