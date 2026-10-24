@@ -241,6 +241,8 @@ switch ($command) {
 			echo '      '.$rules['what']."\n";
 			foreach ($rules['examples'] as $example) echo '      '.$example."\n";
 		}
+		echo "\n  ".$paint('names', '1')." (the characters of each kind; dry fills in {$grammar['dry_depth']} levels)\n";
+		foreach ($grammar['names'] as $kind => $class) echo '      '.str_pad($kind, 11).$class."\n";
 		echo "\n";
 		foreach ($grammar['structure'] as $rule) echo '  '.$rule."\n";
 		exit(0);

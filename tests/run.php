@@ -8056,7 +8056,7 @@ test('P0.A names: lint reads the engine\'s character classes (#28)', function ()
 test('P0.A names: row keys and attributes with digits and dashes print, nested too (#28)', function () {
 	$app = APPBASE.config::get('models_path', 'models');
 	$theme = APPBASE.config::get('views_path', 'views').'/'.config::get('theme', 'default');
-	temp_model("$app/zzp0a2", array('zzp0a2.php' => "<?php\nclass zzp0a2\n{\n\tfunction rows() {\n\t\treturn array(array('line2' => 'L2', 'line-3' => 'L3', 'kids-2' => array(array('line2' => 'K2', 'line-3' => 'K3'))));\n\t}\n}\n"));
+	temp_model("$app/zzp0a2", array('zzp0a2.php' => "<?php\nclass zzp0a2\n{\n\tfunction rows() {\n\t\treturn array(array('line2' => 'L2', 'line-3' => 'L3', 'a:b' => 'AB', 'kids-2' => array(array('line2' => 'K2', 'line-3' => 'K3'))));\n\t}\n}\n"));
 	test_fixture("$theme/zzp0arows.html");
 	file_put_contents("$theme/zzp0arows.html", '<html><head><title>Rows</title></head><body><ul><!-- render.zzp0a2.rows --><li>'
 		.'<!-- print.line2 -->m2<!-- /print.line2 --> <!-- print.line-3 -->m3<!-- /print.line-3 -->'
@@ -8066,15 +8066,25 @@ test('P0.A names: row keys and attributes with digits and dashes print, nested t
 		.'<!-- print.+class.line-3 --><s class="a">s</s><!-- /print.+class.line-3 -->'
 		.'<!-- print.kids-2 --><em><!-- print.line2 -->k2<!-- /print.line2 -->|<!-- print.@data-x.line-3 --><u data-x="mock">u</u><!-- /print.@data-x.line-3 --></em><!-- /print.kids-2 -->'
 		.'</li><!-- /render.zzp0a2.rows --></ul></body></html>');
+	test_fixture("$theme/zzp0acolon.html");
+	file_put_contents("$theme/zzp0acolon.html", '<html><head><title>Colon</title></head><body><!-- render.zzp0a2.rows --><p><!-- print.a:b -->mock<!-- /print.a:b --></p><!-- /render.zzp0a2.rows --></body></html>');
 	controller::forget_models();
 	try {
 		same(array(), (new raster_inspector())->lint_file('zzp0arows.html'), 'lint passes it');
+		// a plain key with a colon is no key: lint says so, and the engine
+		// keeps it as 2.2.45 did
+		check(has_problem((new raster_inspector())->lint_file('zzp0acolon.html'), "'a:b' is never printed"), 'lint');
+		// in production, where template errors don't stop the page
+		global $root, $db;
+		$page = (string)shell_exec('RASTER_DB='.escapeshellarg($db).' RASTER_ENV=production '.php_cmd().' '.escapeshellarg("$root/bin/raster").' render /zzp0acolon 2>&1');
+		check(strpos($page, 'AB') === false && strpos($page, '<!-- print.a:b -->mock<!-- /print.a:b -->') !== false, 'never printed: '.$page);
 		$page = contact_render('/zzp0arows');
 		check(strpos($page, '[exit 0]') !== false, $page);
 		check(strpos($page, '<li>L2 L3<b data-x="L2">b</b><i aria-label="L3">i</i><q xml:lang="L2">q</q><s class="a L3">s</s><em>K2|<u data-x="K3">u</u></em></li>') !== false, 'every key and attribute set: '.$page);
 		check(strpos($page, 'mock') === false && strpos($page, '<!-- print.') === false, 'no mock-up and no tags left: '.$page);
 	} finally {
 		@unlink("$theme/zzp0arows.html");
+		@unlink("$theme/zzp0acolon.html");
 		remove_dir("$app/zzp0a2");
 		controller::forget_models();
 	}
@@ -8140,23 +8150,35 @@ test('P0.A one level of dry renders as it did: no second pass without a dry in t
 	// a res inside the fragment kept its marks in 2.2.45, and still does
 	file_put_contents("$theme/_zzpaone.html", '<!-- res.outer --><div><!-- res.inner --><b>x</b><!-- /res.inner --></div><!-- /res.outer -->');
 	file_put_contents("$theme/zzpaone.html", '<html><head><title>One</title></head><body><!-- dry._zzpaone.outer /--></body></html>');
+	// one level further down, the fragment's marks stay the same way
+	test_fixture("$theme/zzpatwo.html");
+	file_put_contents("$theme/_zzpaone.html", file_get_contents("$theme/_zzpaone.html").'<!-- res.wrap --><main><!-- res.mark --><i>m</i><!-- /res.mark --><!-- dry._zzpaone.outer /--></main><!-- /res.wrap -->');
+	file_put_contents("$theme/zzpatwo.html", '<html><head><title>Two</title></head><body><!-- dry._zzpaone.wrap /--></body></html>');
 	try {
 		$page = contact_render('/zzpaone');
 		check(strpos($page, '<body><div><!-- res.inner --><b>x</b><!-- /res.inner --></div></body>') !== false, $page);
+		$page = contact_render('/zzpatwo');
+		check(strpos($page, '<body><main><!-- res.mark --><i>m</i><!-- /res.mark --><div><!-- res.inner --><b>x</b><!-- /res.inner --></div></main></body>') !== false, $page);
 	} finally {
 		@unlink("$theme/_zzpaone.html");
 		@unlink("$theme/zzpaone.html");
+		@unlink("$theme/zzpatwo.html");
 	}
 });
 
-test('P0.A slugs: _page and _items are list segments only with something after them (#132)', function () {
+test('P0.A slugs: _page and _items are list segments only where the router serves the list (#132)', function () {
 	same('/landing_page', cms::slug_for_uri('/landing_page'));
 	same('/landing_items', cms::slug_for_uri('/landing_items/'));
+	// a list URL is one route() sends to a view that renders the list:
+	// docs.html doesn't exist, so /docs/news_page is docs/news_page.html's
 	same('/docs/news_page', cms::slug_for_uri('/docs/news_page'));
 	same('/news', cms::slug_for_uri('/news/news_page/2'));
 	same('/news', cms::slug_for_uri('/news/news_items/tag/x'));
+	same('/news', cms::slug_for_uri('/news/news_page'));
+	same('/news', cms::slug_for_uri('/news/news_items'));
 	same('/news', cms::slug_for_uri('/news_page/2'));
-	same('/landing_page', cms::slug_for_uri('/landing_page/landing_page/2'));
+	// about.html renders no news list
+	same('/about/news_page/2', cms::slug_for_uri('/about/news_page/2'));
 	$inspector = new raster_inspector();
 	foreach (array('landing_page.html' => '/landing_page', 'landing_items.html' => '/landing_items', 'index.html' => '/', 'about.html' => '/about', 'docs/setup.html' => '/docs/setup') as $view => $url) {
 		same(cms::slug_for_uri($url), $inspector->slug_for_view($view), $view);
@@ -8182,6 +8204,13 @@ test('P0.A landing.html and landing_page.html keep their own values, and MCP edi
 		check(strpos(http('GET', "$base/zzland_page")[1], '<p>Edited by the agent</p>') !== false, 'the edit shows');
 		check(strpos(http('GET', "$base/zzland")[1], '<p>Come for the coffee</p>') !== false, 'the other page keeps its own');
 		same('Come for the coffee', mcp_call('get_page', array('page' => '/zzland'))['structuredContent']['fields']['zz_pitch']);
+		// a list's URLs with nothing after the segment are still the list's page
+		$heading = mcp_call('get_page', array('page' => '/news'))['structuredContent']['fields']['heading'];
+		mcp_call('update_page', array('page' => '/news', 'fields' => array('heading' => 'Zz news heading')));
+		foreach (array('/news', '/news/news_page', '/news/news_page/2', '/news/news_items') as $url) {
+			check(strpos(http('GET', $base.$url)[1], 'Zz news heading') !== false, "$url shows the edit");
+		}
+		mcp_call('update_page', array('page' => '/news', 'fields' => array('heading' => $heading)));
 	} finally {
 		@unlink("$theme/zzland.html");
 		@unlink("$theme/zzland_page.html");
@@ -8199,7 +8228,8 @@ test('P0.A a routed view of another theme is linted, gets its table and MCP edit
 	$view = "$views/zzp0aprint/zzmenu.html";
 	$good = '<html><head><title>Print</title></head><body><h1><!-- print.cms.zz_print_title -->Print title<!-- /print.cms.zz_print_title --></h1></body></html>';
 	file_put_contents($view, str_replace('</h1>', '</h1><!-- print.site.zz_no_such_thing /-->', $good));
-	file_put_contents($routes, $original."\ncontroller::route('zzp0aprint/menu')->to('zzmenu')->from('zzp0aprint');\n");
+	file_put_contents("$views/zzp0aprint/zzlist.html", '<html><head><title>List</title></head><body><ul><!-- render.cms.zzp0alist --><li><!-- print.name -->Soup<!-- /print.name --></li><!-- /render.cms.zzp0alist --></ul></body></html>');
+	file_put_contents($routes, $original."\ncontroller::route('zzp0aprint/menu')->to('zzmenu')->from('zzp0aprint');\ncontroller::route('zzp0aprint/list')->to('zzlist')->from('zzp0aprint');\n");
 	$db = test_db(sys_get_temp_dir().'/raster-p0a-routed-'.getmypid().'.sqlite');
 	$raster = function ($args, $env = '') use ($root, $db) {
 		exec(trim($env.' RASTER_DB='.escapeshellarg($db)).' '.php_cmd().' '.escapeshellarg("$root/bin/raster").' '.$args.' 2>&1', $out, $code);
@@ -8234,6 +8264,13 @@ test('P0.A a routed view of another theme is linted, gets its table and MCP edit
 		$described = array();
 		foreach (json_decode($out, true)['pages'] as $page) $described[$page['url']] = $page;
 		same('zzp0aprint', $described['/zzp0aprint/menu']['theme']);
+		// a routed view with only a list is a page too, and lists its collection
+		same('zzp0aprint', $described['/zzp0aprint/list']['theme']);
+		$model = (new raster_inspector())->content_model();
+		same(array('zzp0aprint/zzlist.html'), $model['collections']['zzp0alist']['views']);
+		// MCP finds a routed page by its address, never by its view's name
+		check(!empty(mcp_call('get_page', array('page' => 'zzmenu'))['isError']), 'zzmenu is the site theme\'s /zzmenu, which is no page');
+		check(!empty(mcp_call('get_page', array('page' => '/zzmenu'))['isError']), '/zzmenu');
 		same($table, $described['/zzp0aprint/menu']['table']);
 		// MCP reads and edits it, and the page shows the edit
 		same('Print title', mcp_call('get_page', array('page' => '/zzp0aprint/menu'))['structuredContent']['fields']['zz_print_title']);
@@ -8242,6 +8279,7 @@ test('P0.A a routed view of another theme is linted, gets its table and MCP edit
 	} finally {
 		file_put_contents($routes, $original);
 		@unlink($view);
+		@unlink("$views/zzp0aprint/zzlist.html");
 		@rmdir("$views/zzp0aprint");
 		cms_store::connect();
 		R::exec('DROP TABLE IF EXISTS '.cms::page_type('/zzp0aprint/menu'));
@@ -8283,7 +8321,7 @@ test('P0.B collection URLs: one parser, and what it reads', function () {
 	same(null, cms::page_path('news.rss'));
 });
 
-// the parsers of 2.2.45, kept here to prove the one parser reads every
+// the parsers of 2.2.45 (slug_for_uri as P0.A left it), kept here to prove the one parser reads every
 // address the site's links spell as they did
 test('P0.B off is identical: the old copies and the one parser agree', function () {
 	$segments = function ($uri) {
@@ -8299,8 +8337,11 @@ test('P0.B off is identical: the old copies and the one parser agree', function 
 	$old_slug = function ($uri) {
 		$slug = '/'.trim(preg_replace('#/+#', '/', (string)$uri), '/');
 		if ($slug === '/' || $slug === '/'.config::get('default_view', 'index')) return 'home';
-		if (preg_match('#^(/.*?)?/([a-z0-9_]+)_(page|items)(/.+)$#', $slug, $m)) {
-			$slug = $m[1] !== '' ? $m[1] : '/'.$m[2];
+		// as P0.A left it: a list URL is its view's page when the view renders the list
+		if (preg_match('#^/(.+?)/([a-z0-9_]+)_(page|items)(/.*)?$#', $slug, $m) && cms::renders_collection($m[1], $m[2])) {
+			$slug = '/'.$m[1];
+		} elseif (preg_match('#^/([a-z0-9_]+)_(page|items)/.+$#', $slug, $m)) {
+			$slug = '/'.$m[1];
 		} elseif (preg_match('#^(?:/.*?)?/([a-z0-9_]+)_item(/.*)?$#', $slug, $m)) {
 			$slug = file_exists(controller::build_view_path($m[1].'_item')) ? '/'.$m[1].'/'.$m[1].'_item' : '/'.$m[1];
 		}

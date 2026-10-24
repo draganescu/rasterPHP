@@ -879,6 +879,8 @@ class template {
 
 		            // lists inside the row were rendered above
 		            if(array_key_exists($datakey, $data) && is_array($data[$datakey])) continue;
+		            // a plain key is a field name: print.a:b is not one, as lint says
+		            if(!$is_attr && !preg_match('/^'.$n['field'].'+$/', $datakey)) continue;
 
 		            if(!array_key_exists($datakey, $data)) {	
 		            	continue;
@@ -1024,6 +1026,9 @@ class template {
 
 		$dry = '/<!-- dry\.('.self::$names['view'].'*)\.('.self::$names['res'].'*) (\/?)-->/';
 		$loaded_files = array();
+		// the page's own res marks go; a fragment keeps the marks inside it,
+		// on every level, as it did when there was one
+		$this->output = preg_replace('/<!-- (\/?)res\.('.self::$names['res'].'*) -->/', "", $this->output);
 		for ($level = 0; $level < self::DRY_DEPTH; $level++) {
 			// after the page's own, a level only when a fragment brought dry tags
 			if ($level > 0 && !preg_match($dry, $this->output)) break;
@@ -1034,7 +1039,6 @@ class template {
 
     // fills every dry tag in the output with its fragment, once
     function dry_level($dry, &$loaded_files) {
-		$this->output = preg_replace('/<!-- (\/?)res\.('.self::$names['res'].'*) -->/', "", $this->output);
 		$res = preg_match_all($dry, $this->output, $datastarts);
 		arsort($datastarts);
 		foreach ($datastarts[0] as $key => $value) {					

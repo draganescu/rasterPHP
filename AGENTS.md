@@ -129,7 +129,8 @@ The grammar is also data: `system/tools/annotations.php`, printed by
 an agent can read it and be sure. Its `names` are the characters each kind
 of name is made of, and the engine builds its patterns from the same list
 (`template::$names`), so a name lint accepts is one the page reads: model
-names are lowercase letters, digits, `_` and `-`; row keys letters, digits,
+names are lowercase letters, digits and `_`, as PHP class names are (a
+name with `-` is read as one, and lint reports no such model); row keys letters, digits,
 `_` and `-` (`print.line2`, `print.line-2`); attributes may have dashes and
 colons too (`print.@data-id.key`, `print.@aria-label.key`,
 `print.@xlink:href.url`); views and `res` names lowercase letters, digits,
@@ -707,9 +708,13 @@ mock-up is stored only when the collection's table is made.
   - `/news/news_page/2` is page 2. The page size comes from `news_page_size` or
     `raster_page_size` (10).
   - `/news/news_items/tag/php` lists the items where `tag` is `php`.
-  - `<name>_page` and `<name>_items` are these only with something after
-    them: `/landing_page` is the view `landing_page.html`, a page with
-    fields of its own, apart from `/landing`'s.
+    Filters count only under the collection's own name, as its filter
+    links write them; the list and its pager read them the same way.
+  - `<name>_page` and `<name>_items` are these only after a page whose
+    view renders the list (`/news/news_page` is `news.html`'s, with its
+    page fields), or with something after them: `/landing_page` is the
+    view `landing_page.html`, a page with fields of its own, apart from
+    `/landing`'s.
 - **Options:** `render.cms.news('featured=1&order=newest&limit=3')`, pairs
   joined by `&`. They work the same in `pagination.links('cms.news', '…')`:
   the list and its pager are built from the same conditions, so the pager

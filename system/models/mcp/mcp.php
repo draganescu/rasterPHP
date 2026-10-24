@@ -371,6 +371,9 @@ class mcp
 		foreach ($this->model()['pages'] as $page) {
 			$view = $page['view'] === '*' ? '*' : substr($page['view'], 0, -strlen(config::get('views_ext', '.html')));
 			$names = $page['view'] === '*' ? array('site', 'sitepage') : array($page['url'], $page['slug'], $page['type'], $page['view'], $view, '/'.$view);
+			// a routed view of another theme is found by its address only:
+			// its view's name (menu.html) is the site theme's /menu
+			if (isset($page['theme'])) $names = array($page['url'], $page['slug'], $page['type']);
 			if (in_array($reference, $names, true)) {
 				return $page;
 			}

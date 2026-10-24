@@ -679,7 +679,7 @@ class raster_inspector {
 			return;
 		}
 		if (!preg_match('/^'.self::name('model').'+$/', $ref['model'])) {
-			$problems[] = self::problem('error', $block, "Model names are lowercase letters, digits and underscores: '{$ref['model']}'");
+			$problems[] = self::problem('error', $block, "Model names are lowercase letters, digits and underscores, as PHP class names are: '{$ref['model']}'");
 			return;
 		}
 		$call = template::parse_call($ref['method']);
@@ -1539,7 +1539,7 @@ class raster_inspector {
 			if (!isset($site[$name])) $site[$name] = $field;
 			unset($fields[$name]);
 		}
-		if (!$fields) return;
+		if (empty($fields) && !$this->uses_collections($blocks)) return;
 		$pages[] = array('view' => $view, 'theme' => $route['theme'], 'url' => $slug, 'slug' => $slug, 'type' => cms::page_type($slug), 'fields' => $fields);
 	}
 
