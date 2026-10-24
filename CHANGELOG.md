@@ -3,6 +3,35 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.51
+
+**Multilingual sites** (#200). A site can now serve its template text and everything editors write in several languages, behind one setting that is off by default. A site that doesn't turn it on renders as before.
+
+What sites need to do after `php bin/raster update`:
+
+- **Nothing, unless you turn multilingual on.** With `multilingual` off your pages, headers, links and SQL are as they were.
+- **Dates typed day first.** On a site that sets `languages` (multilingual or not), a date typed as `5/10/2026` or `5/10/26` is read as 5 October, except for `en-us`. ISO dates (`2026-10-05`) are read as always. A site without `languages` reads dates as before.
+- **A site with `languages` and no `multilingual`** (template-only translation) keeps working until 3.0.0; `doctor` suggests the switch. Keep it on purpose with `allow_deprecated` (`'template-only-languages' => true`).
+- **A dictionary that sets `$lang = array(…)`** instead of returning its array is deprecated (#44); the upgrade step adds `return $lang;`.
+- **The demo café** gained an editable opening-hours list: run `php bin/raster schema --apply` and `php demo/seed.php` on a demo install.
+
+To turn it on: `config::set('multilingual')->to(true);` and `config::set('languages')->to(array('en', 'ro'));` (the first is the default) in `config/the_app.php`, then `php bin/raster schema --apply` in production. Or ask an agent: MCP `set_languages(["en", "ro"])`.
+
+- **Addresses.** Every language but the default has its own addresses under its code (`/ro/menu`, its home `/ro/`), or its own domain (`domain_language`). The URL alone picks the language: one URL is one language, so the page cache, CDNs and 304s stay correct, every page answers `Content-Language`, `?lang=ro` answers 301 to the page in that language, and no language cookie is set. The prefix is taken off before anything reads the path, so `protected` pages, `/ro/api`, `/ro/mcp` and the login keep working, and every link Raster builds (pages and emails) keeps the language. A site under a path (`/preview/abc/ro/menu`) works too.
+- **Pages, site fields and items in every language.** A text field printed as content (or as `alt`, `title`, `placeholder`, `aria-label`, a meta `content`) gets one column per language (`headline__ro`); photos, links, numbers and dates stay one value for every language. An empty translation shows the default language. Lists sort and filter by the translated text. `php bin/raster schema --apply` adds the columns; turning multilingual off keeps them ("kept translations"), never offered for `--drop`.
+- **Item addresses per language** (#138). Items get a Romanian slug from their Romanian title; another language's slug, or an old one, answers 301 to the right address.
+- **The in-page editor** edits the page's language on `/ro/…`, says which fields still show the default, and speaks the editor's own language (chosen in the dock), not the page's.
+- **Emails go out in the recipient's language** (D13): bookings, replies, contact messages, accounts, subscribers and shop orders remember the language they were made in, and every email to them (also those staff trigger) is rendered in it, with `/ro/` links. Staff copies go in the default language. `raster send` sends each subscriber the issue in their language.
+- **SEO.** `<html lang dir>` follows the page (#138); multilingual pages carry `canonical`, `hreflang` and `x-default` links; the sitemap lists every language with alternates.
+- **The sitemap lists every published item** (#126): collections without an item view, no 1,000 cap, `lastmod` from the last save.
+- **Static export** crawls each language at its own addresses.
+- **Lint** (multilingual on) warns about words no annotation prints, dictionary keys missing in a language, and an `<html>` whose `lang` is fixed; always about `__` in names and `href="#…"` links (#117).
+- **`doctor`** checks the languages: the switch with fewer than two, codes it can't read, `domain_language` without a site address, and missing translation columns.
+- **The coding MCP builds multilingual sites:** `set_languages`, `translation_status` (pages, site fields, items, records, dictionary words, emails), `read_strings`/`write_strings` (Raster writes the PHP), `lang` on the page and item tools, a `languages` block in `describe`, and the theme's CSS, JS and SVG through `read_asset`/`write_asset` (#159). Over HTTP the writing tools need `mcp_write_views`.
+- **The language API** for every model: `i18n::enabled()`, `current()`, `default_language()`, `suffix()`, `prefix()`, `address()`, `with()`, `dir()`, `date_order()`, `alternates()`, `of()`.
+- **Groundwork that shipped on the way:** see 2.2.46–2.2.50 (lint/engine agreement, one URL parser, no English from the framework, the switch and `/ro/` URLs, `<html lang dir>`).
+- **Other fixes:** the framework's error pages and the editor's refusals are words a site can change (#38 #128, 2.2.48); the starter, demo and shop models return no words (#127); newsletter queries live in `sql/` files.
+
 ## 2.2.50
 
 Nothing for sites to do. Every view's `<html>` tag in the starter, the demo and the shop now prints its language and direction; a site's own views keep theirs until it changes them.
