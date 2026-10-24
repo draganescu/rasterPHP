@@ -154,10 +154,10 @@ class i18n
 	// host. A language with its own domain_language host is there, and on
 	// such a host the others are on the site's own address (site_url), the
 	// host that takes prefixes; both keep the folder and the index file
-	// (as config::language_of_url sends ?lang= there). On a language's
+	// (config::language_of_url redirects there too). On a language's
 	// domain without a site address to send the others to, they have
 	// none: null (`doctor` fails on that).
-	protected static function address($lang) {
+	static function address($lang) {
 		$base = (string)(config::get('link_base') ?: config::get('link_uri'));
 		if (!self::enabled()) return $base;
 		$domains = array_change_key_case((array)config::get('domain_language', array()));
@@ -165,10 +165,10 @@ class i18n
 		$protocol = (string)config::get('protocol');
 		$after_host = substr($base, strlen($protocol.'://'.config::get('host')));
 		foreach ($domains as $domain => $language) {
-			if (strtolower($language) !== strtolower($lang)) continue;
+			if (strtolower($language) !== strtolower($lang) || self::known($language) === null) continue;
 			return $domain === $host ? $base : $protocol.'://'.$domain.$after_host;
 		}
-		if (isset($domains[$host])) {
+		if (isset($domains[$host]) && self::known($domains[$host]) !== null) {
 			$site = parse_url((string)(getenv('RASTER_URL') ?: config::get('site_url')));
 			if (empty($site['host']) || isset($domains[strtolower($site['host'])])) return null;
 			return $protocol.'://'.strtolower($site['host']).(isset($site['port']) ? ':'.$site['port'] : '').$after_host.(self::is_default($lang) ? '' : strtolower($lang).'/');
