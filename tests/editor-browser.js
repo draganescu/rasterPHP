@@ -81,6 +81,13 @@ async function multilingual(browser) {
 		check(await page.locator('h1[data-raster-untranslated]').count() === 0, 'translated now');
 		check(await page.locator('p.intro[data-raster-untranslated]').count() === 1 && await page.locator('p.intro').textContent() === 'Coffee since 2001.', 'the other field still shows English');
 		await page.screenshot({ path: path.join(screens, 'multilingual.png') });
+		// undo puts back what the Romanian held, nothing, never the English it showed
+		await page.mouse.click(5, 5);
+		await page.keyboard.press('Control+z');
+		await page.waitForTimeout(800);
+		await page.reload();
+		await page.waitForTimeout(500);
+		check(await page.locator('h1[data-raster-untranslated]').count() === 1 && await page.locator('h1').textContent() === 'Our story', 'after undo the Romanian is empty again, and the English shows');
 		// the picker: the editor's own words in Romanian
 		await Promise.all([page.waitForNavigation(), inShadow(page, h => { const s = h.shadowRoot.querySelector('.dock .langs'); s.value = 'ro'; s.dispatchEvent(new Event('change')); })]);
 		await page.waitForTimeout(500);

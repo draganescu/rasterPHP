@@ -461,10 +461,7 @@ class cms_store {
 			$values = cms_types::read_row($type, $revision->export());
 			foreach (self::$system_fields as $field) unset($values[$field]);
 			$entry = array('revision' => (int)$revision->id, 'updated_at' => $revision->updated_at, 'fields' => $values);
-			if ($languages) {
-				unset($entry['fields']['saved_lang']);
-				$entry['saved_lang'] = (string)$revision->saved_lang;
-			}
+			if ($languages) $entry['saved_lang'] = (string)$revision->saved_lang;
 			$history[] = $entry;
 		}
 		return $history;

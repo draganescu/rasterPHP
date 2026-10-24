@@ -120,11 +120,14 @@ class authentication
 
 	// the columns this model uses, for `raster schema --apply`
 	static function schema() {
-		return array('user' => array(
+		$user = array(
 			'email' => '', 'username' => '', 'name' => '', 'password' => '', 'role' => 'member',
 			'created_at' => '', 'last_login' => '', 'failed_count' => 0, 'failed_at' => '',
-			'reset_hash' => '', 'reset_expires' => '', 'login_hash' => '', 'login_expires' => '', 'editor_lang' => '',
-		));
+			'reset_hash' => '', 'reset_expires' => '', 'login_hash' => '', 'login_expires' => '',
+		);
+		// the editor's own language (D9), only a multilingual site's
+		if (i18n::enabled()) $user['editor_lang'] = '';
+		return array('user' => $user);
 	}
 
 	// what a site with accounts needs: the reset email's view, the pages

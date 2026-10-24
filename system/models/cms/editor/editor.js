@@ -49,7 +49,9 @@
 		keyboard: 'E to edit · Esc to stop · ⌘Z to undo', fields_changed: '{fields}', page_fields: 'Fields', nothing_here: 'Nothing on this page comes from the CMS.',
 		// a multilingual site: the page's language, and the editor's own
 		editing_lang: 'editing: {lang}', falls_back: '(falls back to {lang})', untranslated: 'not translated yet: shows the {lang} text',
-		every_language: 'the same in every language', editor_language: 'The editor’s language'
+		every_language: 'the same in every language', editor_language: 'The editor’s language',
+		restore_every: 'Restore, every language', restored_every: 'Brought back every language of the version from {when}',
+		problem_translation_columns_missing: 'This language has no place on the site yet: run php bin/raster schema --apply on the server'
 	};
 	for (var k in (C.strings || {})) T[k] = C.strings[k];
 	// a problem's words; {field} is the field it is about, when there is one
@@ -717,7 +719,8 @@
 	function commit(field) {
 		var value = fieldValue(field), before = field.before;
 		field.before = null;
-		if (before == null || value === before.value) return;
+		// left as it was: an untranslated field still showing the default's words saves nothing
+		if (before == null || value === before.value || (field.info.untranslated && value === before.shown)) return;
 		// what was stored, as the page prints it: 2026-10-05 for "5 Oct 2026",
 		// 14.50 for 14.5
 		var shown = function (saved) { return saved == null ? '' : String(saved); };
@@ -850,7 +853,9 @@
 		}
 		var field = fieldFor(e.target);
 		if (!field || !editing || field.kind === 'image') return;
-		if (field.before == null) field.before = { value: fieldValue(field), html: field.el.innerHTML };
+		// an untranslated field shows the default language's words, but holds
+		// nothing in this language: that is what an undo puts back
+		if (field.before == null) field.before = { value: field.info.untranslated && !field.item ? '' : fieldValue(field), shown: fieldValue(field), html: field.el.innerHTML };
 		if (field.el.hasAttribute('data-raster-default')) field.el.removeAttribute('data-raster-default');
 		if (field.kind === 'rich') showFormatBar(field); else hideFormatBar();
 	});
@@ -1641,6 +1646,7 @@
 			seen[key] = true;
 			var input = h(info.rich ? 'textarea' : 'input', { class: 'in', type: 'text' });
 			input.value = info.value;
+			if (info.untranslated) input.placeholder = info.fallback;
 			var status = h('span', { class: 'sub muted', text: (info.type === 'sitepage' ? t('site_wide') + ' · ' : '') + t('not_on_page') + (languageNote(info) ? ' · ' + languageNote(info) : '') });
 			input.addEventListener('change', function () {
 				var before = info.value, field = { info: info, el: input };
@@ -1716,7 +1722,8 @@
 				var saved = C.languages && rev.saved_lang ? code(rev.saved_lang) + ' · ' : '';
 				var entry = h('div', { class: 'entry' }, [
 					h('div', {}, [h('div', { class: 'name', text: i === 0 ? t('current') : when(rev.updated_at) }), h('div', { class: 'sub', text: saved + changed.join(', ') })]),
-					i === 0 ? null : h('button', { class: 'link', text: t('restore'), onclick: function () { restore(rev, list[0]); } })
+					// multilingual, a restore brings back every language of that version
+					i === 0 ? null : h('button', { class: 'link', text: C.languages ? t('restore_every') : t('restore'), onclick: function () { restore(rev, list[0]); } })
 				]);
 				section.appendChild(entry);
 			});
@@ -1725,7 +1732,7 @@
 	function restore(rev, current) {
 		working(1);
 		call('editor_restore', { type: C.page.type, slug: C.page.slug, revision: rev.revision }).then(function () {
-			store('raster-flash', JSON.stringify({ text: t('restored', { when: when(rev.updated_at) }), type: C.page.type, slug: C.page.slug, revision: current.revision }));
+			store('raster-flash', JSON.stringify({ text: t(C.languages ? 'restored_every' : 'restored', { when: when(rev.updated_at) }), type: C.page.type, slug: C.page.slug, revision: current.revision }));
 			location.reload();
 		}, function (e) { working(-1); failed(e); });
 	}

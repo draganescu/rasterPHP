@@ -38,7 +38,8 @@ class cms_editor {
 			'rich' => (bool)preg_match('/<[a-z][^>]*>/i', $shown.$default),
 			'attr' => $template->current_attr !== null ? substr($template->current_attr, 1) : null,
 		);
-		$id = $template->mark($language ? $mark + $language : $mark);
+		// the language's own value (value '' for an untranslated field) wins
+		$id = $template->mark($language ? array_merge($mark, $language) : $mark);
 		if ($template->current_attr !== null) {
 			$template->pending_mark = $id;
 			return $value;
@@ -302,6 +303,16 @@ class cms_editor {
 		return !is_array($posted) && strtolower((string)$posted) === strtolower($lang) ? $lang : false;
 	}
 
+	// whether a page's table has a column for $lang yet (headline__ro): on a
+	// frozen database, schema --apply makes them
+	protected static function has_language($type, $lang) {
+		$suffix = i18n::suffix($lang);
+		foreach (array_keys(cms_store::columns($type)) as $column) {
+			if (substr($column, -strlen($suffix)) === $suffix) return true;
+		}
+		return false;
+	}
+
 	// type, slug, field, value, and lang when multilingual. A field with a
 	// translation is saved in the page's language; a shared one (a photo,
 	// a link) is one value for every language
@@ -318,6 +329,12 @@ class cms_editor {
 		$lang = self::language();
 		if ($lang === false) return self::fail('This page is in '.i18n::current().': reload it');
 		$write = $lang !== null && !i18n::is_default($lang) && in_array($field, cms_types::translated($type), true) ? $lang : null;
+		// production before schema --apply made the language's columns: a
+		// text field would land in the default language's column
+		if ($lang !== null && $write === null && !i18n::is_default($lang) && database::$frozen && !self::has_language($type, $lang)) {
+			$types = cms_types::of_table($type);
+			if (!isset($types[$field]) || $types[$field] === 'text') return self::refused(new cms_refused(array('translation_columns_missing')));
+		}
 		$slug = $type === 'sitepage' ? 'site' : (string)util::post('slug');
 		try {
 			$saved = cms_store::update_page($type, $slug, array($field => (string)util::post('value')), array($field), $write);
