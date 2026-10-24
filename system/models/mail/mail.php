@@ -93,9 +93,23 @@ class mail
 			return false;
 		}
 		$html = controller::render_view($view, $vars);
-		$subject = preg_match('/<title>(.*?)<\/title>/is', $html, $m) ? html_entity_decode(trim(strip_tags($m[1])), ENT_QUOTES) : 'Message from '.config::get('host');
+		$subject = preg_match('/<title>(.*?)<\/title>/is', $html, $m) ? html_entity_decode(trim(strip_tags($m[1])), ENT_QUOTES) : static::site_name();
 		// static: a site's the_mail sends it, when it has one
 		return static::send($to, $subject, $html, null, $headers);
+	}
+
+	// the subject of a view without a <title>: the site's name (the
+	// site_name field every page shares, print.cms.site_name), else its host
+	static function site_name() {
+		$name = '';
+		try {
+			database::instance();
+			$site = database::configured() ? cms_store::latest('sitepage') : null;
+			if ($site) $name = trim(html_entity_decode(strip_tags((string)$site->site_name), ENT_QUOTES));
+		} catch (Throwable $e) {
+			log::warning('mail: '.$e->getMessage());
+		}
+		return $name !== '' ? $name : (string)config::get('host');
 	}
 
 	static function text_version($html) {

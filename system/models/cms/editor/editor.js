@@ -38,10 +38,22 @@
 		items: '{n} items', one_item: '1 item', hidden_count: '{n} hidden', empty_field: 'Empty: the template’s text shows',
 		new_item: 'New', edit_mode_on: 'Editing. Click anything that glows.', edit_mode_off: 'Done editing',
 		action_done: 'Done: {action}',
+		// refusals the server names (problems), as a record's are
+		problem_type_int: '{field} needs a whole number, like 4', problem_type_number: '{field} needs a number, like 4.50',
+		problem_type_bool: '{field} needs yes or no (1 or 0)', problem_type_date: '{field} needs a date, like 2026-10-05',
+		problem_type_datetime: '{field} needs a date and time, like 2026-10-05 19:30', problem_type_time: '{field} needs a time, like 19:30',
+		problem_type_text: '{field} needs one piece of text',
+		problem_upload_too_big: 'That picture is too big', problem_upload_missing: 'The picture didn’t arrive; try again',
+		problem_upload_not_a_picture: 'That isn’t a picture: use a JPEG, PNG, GIF or WebP', problem_upload_not_stored: 'The picture couldn’t be stored',
+		problem_form_expired: 'This page is out of date: reload it and try again', problem_not_allowed: 'You can’t do that; if you were logged out, log in again',
 		keyboard: 'E to edit · Esc to stop · ⌘Z to undo', fields_changed: '{fields}', page_fields: 'Fields', nothing_here: 'Nothing on this page comes from the CMS.'
 	};
 	for (var k in (C.strings || {})) T[k] = C.strings[k];
-	function problem(name) { return T['problem_' + name] || human(name); }
+	// a problem's words; {field} is the field it is about, when there is one
+	function problem(name, field) {
+		var words = T['problem_' + name];
+		return words ? String(words).replace('{field}', field ? human(field) : '').trim() : human(name);
+	}
 	function readonly(info) { return info.readonly || []; }
 	function writable(info, values) {
 		var out = Object.assign({}, values);
@@ -102,7 +114,7 @@
 				var json = null;
 				try { json = JSON.parse(text); } catch (e) {}
 				// a record's model said no: its problems, in the site's words if it has them
-				if (json && json.problems) throw new Error(json.problems.map(problem).join(', '));
+				if (json && json.problems) throw new Error(json.problems.map(function (name) { return problem(name, json.field); }).join(', '));
 				if (!response.ok || !json || json.error) throw new Error(json && json.error ? json.error : (text.slice(0, 120) || response.status));
 				return json;
 			});
@@ -1425,11 +1437,11 @@
 	function hideDrop() { if (dropZone) { dropZone.remove(); dropZone = null; } }
 
 	function framePhoto(field, file) {
-		if (!file || !/^image\//.test(file.type)) return failed(new Error('not a picture'));
+		if (!file || !/^image\//.test(file.type)) return failed(new Error(problem('upload_not_a_picture')));
 		var url = URL.createObjectURL(file);
 		var image = new Image();
 		image.onload = function () { cropDialog(field, file, image, url); };
-		image.onerror = function () { failed(new Error('not a picture')); };
+		image.onerror = function () { failed(new Error(problem('upload_not_a_picture'))); };
 		image.src = url;
 	}
 	function cropDialog(field, file, image, url) {

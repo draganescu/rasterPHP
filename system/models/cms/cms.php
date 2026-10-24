@@ -481,8 +481,7 @@ class cms
 	static function require_admin($check_csrf = false) {
 		cms::session();
 		if (!cms::loggedin() || ($check_csrf && !util::csrf_valid(util::post('csrf')))) {
-			http_response_code(403);
-			exit('Forbidden');
+			controller::refuse(403, 'not_allowed');
 		}
 		database::instance();
 	}
@@ -532,16 +531,14 @@ class cms
 		return $auth->login();
 	}
 
-	// message shown above the login form
+	// what the login page should say before anyone can log in: the alerts
+	// no_database (none is configured for this environment) and no_users
+	// (make one with php bin/raster user). It prints nothing itself.
 	function login_message() {
 		database::instance();
-		if (!database::configured()) {
-			return '<p class="notice">No database is configured for this environment (application/config/db/).</p>';
-		}
+		if (!database::configured()) return validation::get()->raise('no_database');
 		authentication::connect();
-		if (!authentication::has_users()) {
-			return '<p class="notice">There are no users yet. Create one from the project folder: <code>php bin/raster user admin</code></p>';
-		}
+		if (!authentication::has_users()) return validation::get()->raise('no_users');
 		return '';
 	}
 

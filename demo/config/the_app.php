@@ -30,10 +30,16 @@ config::set('feed_limit')->to(5);
 
 // the sitemap leaves out private pages, the account, newsletter and booking
 // pages (wherever the settings put them), and these utility pages
-config::set('sitemap_skip')->to(array('lab', '404', '503'));
+config::set('sitemap_skip')->to(array('lab', '403', '404', '500', '503'));
 
 // a friendlier 404 page (views/cafe/404.html)
 config::set('error_document_404')->to('404');
+
+// the café's own words for a refusal (views/cafe/403.html: a form from
+// another site, one open too long, a page the account can't open) and for
+// a page that broke (views/cafe/500.html)
+config::set('error_document_403')->to('403');
+config::set('error_document_500')->to('500');
 
 // what visitors see when the database can't be reached (views/cafe/503.html);
 // it uses no model that needs the database

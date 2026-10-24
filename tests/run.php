@@ -2234,8 +2234,7 @@ test('the fallback 404 prints after the session starts (#74)', function () use (
 	list($prod) = b_server(array('RASTER_ENV' => 'production', 'RASTER_DB' => $b_db));
 	list($status, $body) = http('GET', "$prod/nothing-here", null, array('Cookie: PHPSESSID=abcdefabcdefabcdefabcdefab'));
 	same(404, $status);
-	check(strpos($body, '404 Not Found') !== false, $body);
-	check(strpos($body, 'Warning') === false && strpos($body, 'session') === false, $body);
+	same("<!doctype html><meta charset='utf-8'><title>404</title><h1>404</h1>", $body, 'the bare status, no words (#38)');
 });
 
 test('doctor warns when PHP shows errors in production; the command line keeps them (#74)', function () use ($root) {
@@ -8032,6 +8031,274 @@ test('a collection emptied by deleting its items stays empty (#91)', function ()
 		unlink("$theme/zzgone.html");
 		R::exec('DROP TABLE IF EXISTS zzgonedata');
 	}
+});
+
+// ## P0.C: the framework prints no English (#38 #128)
+
+// the starter's the_events.php for the length of $fn, with these settings
+// added (it is read on every request, after the_app.php)
+function p0c_settings($php, $fn) {
+	$events = APPBASE.'config/the_events.php';
+	$kept = file_get_contents($events);
+	file_put_contents($events, (strpos($kept, '<?php') === 0 ? $kept : "<?php\n")."\n".$php."\n");
+	try { return $fn(); } finally { file_put_contents($events, $kept); }
+}
+// a session cookie for a new account with this role
+function p0c_login($base, $role) {
+	cms_store::connect();
+	$email = "zzp0c-$role@example.test";
+	authentication::create_user($email, 'a long password', $role, ucfirst($role));
+	list($status, , $headers) = form_post("$base/login", array('raster_form' => 'authentication.login', 'login' => $email, 'password' => 'a long password'));
+	same(303, $status, "login as $role");
+	return preg_replace('/^Set-Cookie:\s*([^;]+).*$/i', '$1', current(preg_grep('/^Set-Cookie:\s*PHPSESSID/i', $headers)));
+}
+// the body of a refusal without a view: the code, and no words
+function p0c_bare($code) {
+	return "<!doctype html><meta charset='utf-8'><title>$code</title><h1>$code</h1>";
+}
+function p0c_multipart($fields, $file = null) {
+	$boundary = 'zzp0c'.bin2hex(random_bytes(4));
+	$body = '';
+	foreach ($fields as $name => $value) $body .= "--$boundary\r\nContent-Disposition: form-data; name=\"$name\"\r\n\r\n$value\r\n";
+	if ($file) $body .= "--$boundary\r\nContent-Disposition: form-data; name=\"image\"; filename=\"{$file[0]}\"\r\nContent-Type: image/png\r\n\r\n{$file[1]}\r\n";
+	return array($body."--$boundary--\r\n", "Content-Type: multipart/form-data; boundary=$boundary");
+}
+
+test('P0.C: without a view, a refusal is the bare status with no words (#38)', function () use ($base, $root) {
+	$theme = "$root/application/views/default";
+	test_fixture("$theme/zzp0c_staff.html");
+	file_put_contents("$theme/zzp0c_staff.html", '<!doctype html><html><head><title>Rota</title></head><body><p>Rota</p></body></html>');
+	try {
+		p0c_settings("config::set('protected')->to(array('account' => 'member', 'zzp0c_staff' => 'editor'));", function () use ($base) {
+			list($status, $body) = form_post("$base/about", array('email' => 'a@b.co'), array('Origin: https://evil.example'));
+			same(array(403, p0c_bare(403)), array($status, $body), 'a post from another site');
+			list($status, $body) = http('GET', "$base/zzp0c-nothing-here");
+			same(array(404, p0c_bare(404)), array($status, $body), 'a 404');
+			$member = p0c_login($base, 'member');
+			list($status, $body) = http('GET', "$base/zzp0c_staff", null, array("Cookie: $member"));
+			same(array(403, p0c_bare(403)), array($status, $body), 'a page the account may not open');
+			list($status, $body) = form_post("$base/about", array('email' => 'a@b.co'), array("Cookie: $member"));
+			same(array(403, p0c_bare(403)), array($status, $body), 'a logged in post without the token');
+			// /api answers the alert as JSON, for the editor to word
+			list($status, $body) = form_post("$base/api/cms/editor_save_field", array('type' => 'aboutpage'), array('Origin: https://evil.example'));
+			same(array(403, array('error' => 'cross_site', 'problems' => array('cross_site'))), array($status, json_decode($body, true)), $body);
+			list($status, $body) = form_post("$base/api/cms/editor_save_field", array('type' => 'aboutpage'));
+			same(array(403, array('error' => 'not_allowed', 'problems' => array('not_allowed'))), array($status, json_decode($body, true)), $body);
+			list($status, $body) = form_post("$base/api/cms/editor_save_field", array('type' => 'aboutpage'), array("Cookie: $member"));
+			same(array(403, array('error' => 'form_expired', 'problems' => array('form_expired'))), array($status, json_decode($body, true)), $body);
+		});
+	} finally {
+		@unlink("$theme/zzp0c_staff.html");
+	}
+});
+
+test('P0.C: a site words its 403 and 500 pages with a view, an alert for each refusal (#38)', function () use ($base, $root, $b_db) {
+	$theme = "$root/application/views/default";
+	$alerts = '';
+	foreach (array('cross_site' => 'zz from elsewhere', 'form_expired' => 'zz open too long', 'not_allowed' => 'zz not for your account') as $name => $words) {
+		$alerts .= "<!-- print.validation.alert('$name') --><p>$words</p><!-- /print.validation.alert('$name') -->";
+	}
+	$views = array(
+		'zzp0c_staff.html' => '<!doctype html><html><head><title>Rota</title></head><body><p>Rota</p></body></html>',
+		// a form on the 403 page never sees the post that was refused
+		'zzp0c_403.html' => '<!doctype html><html><head><title>No</title></head><body><h1>zz our own 403</h1>'.$alerts
+			.'<!-- render.newsletter.signup --><form method="post"><input type="email" name="email" required><button>Join</button></form><!-- /render.newsletter.signup --></body></html>',
+		'zzp0c_500.html' => '<!doctype html><html><head><title>Oops</title></head><body><h1>zz our own 500</h1></body></html>',
+		'zzp0c_broken.html' => '<!doctype html><html><head><title>Broken</title></head><body><p><!-- render.cms.zzp0cnope -->unclosed</p></body></html>',
+	);
+	foreach ($views as $file => $html) { test_fixture("$theme/$file"); file_put_contents("$theme/$file", $html); }
+	try {
+		p0c_settings("config::set('protected')->to(array('account' => 'member', 'zzp0c_staff' => 'editor'));\nconfig::set('error_document_403')->to('zzp0c_403');\nconfig::set('error_document_500')->to('zzp0c_500');", function () use ($base, $b_db, $theme) {
+			$shows = function ($body, $only) {
+				check(strpos($body, '<h1>zz our own 403</h1>') !== false, $body);
+				foreach (array('zz from elsewhere', 'zz open too long', 'zz not for your account') as $words) same($words === $only, strpos($body, $words) !== false, "$words in $body");
+				check(strpos($body, 'Forbidden') === false && strpos($body, 'access to this page') === false && strpos($body, 'has expired') === false, $body);
+			};
+			list($status, $body) = form_post("$base/about", array('raster_form' => 'newsletter.signup', 'email' => 'zzp0c-refused@example.test'), array('Origin: https://evil.example'));
+			same(403, $status);
+			$shows($body, 'zz from elsewhere');
+			cms_store::connect();
+			same(0, (int)R::count('subscriber', ' email = ? ', array('zzp0c-refused@example.test')), 'the refused post signed nobody up');
+			$member = p0c_login($base, 'member');
+			list($status, $body) = form_post("$base/about", array('raster_form' => 'newsletter.signup', 'email' => 'zzp0c-refused@example.test'), array("Cookie: $member"));
+			same(403, $status);
+			$shows($body, 'zz open too long');
+			same(0, (int)R::count('subscriber', ' email = ? ', array('zzp0c-refused@example.test')));
+			list($status, $body) = http('GET', "$base/zzp0c_staff", null, array("Cookie: $member"));
+			same(403, $status);
+			$shows($body, 'zz not for your account');
+			// a page that breaks in production: the site's 500 page, no details
+			list($prod) = b_server(array('RASTER_ENV' => 'production', 'RASTER_DB' => $b_db));
+			list($status, $body) = http('GET', "$prod/zzp0c_broken");
+			same(500, $status);
+			check(strpos($body, '<h1>zz our own 500</h1>') !== false && strpos($body, 'zzp0cnope') === false && strpos($body, 'could not be shown') === false, $body);
+			// and a 500 page that breaks too is the bare status
+			file_put_contents("$theme/zzp0c_500.html", '<p><!-- render.cms.zzp0cnope -->unclosed</p>');
+			list($status, $body) = http('GET', "$prod/zzp0c_broken");
+			same(array(500, p0c_bare(500)), array($status, $body));
+		});
+	} finally {
+		foreach (array_keys($views) as $file) @unlink("$theme/$file");
+	}
+});
+
+test('P0.C: the login page words why nobody can log in, from alerts login_message raises', function () use ($base, $root) {
+	$fresh = test_db(sys_get_temp_dir().'/raster-p0c-'.getmypid().'.sqlite');
+	shell_exec('RASTER_ENV=production RASTER_DB='.escapeshellarg($fresh).' '.php_cmd().' '.escapeshellarg("$root/bin/raster").' schema --apply 2>&1');
+	try {
+		list($prod) = b_server(array('RASTER_ENV' => 'production', 'RASTER_DB' => $fresh));
+		list($status, $body) = http('GET', "$prod/login");
+		same(200, $status);
+		check(strpos($body, '<p class="notice">There are no users yet.') !== false, 'the starter words no_users: '.$body);
+		check(strpos($body, 'No database is configured') === false, $body);
+	} finally {
+		if (strpos($fresh, 'mysql://') !== 0) array_map('unlink', glob("$fresh*") ?: array());
+	}
+	// the model raises them and prints nothing
+	$source = file_get_contents(BASE.'models/cms/cms.php');
+	check(strpos($source, "raise('no_users')") !== false && strpos($source, "raise('no_database')") !== false && strpos($source, 'There are no users') === false, 'cms.php');
+});
+
+test('P0.C: off is identical: the login page with accounts, and a page that passes the checks, are as before', function () use ($base, $root) {
+	cms_store::connect();
+	authentication::create_user('zzp0c-member@example.test', 'a long password', 'member', 'Member');
+	$theme = "$root/application/views/default";
+	// the login view as 2.2.45 had it: the alerts this package added taken out
+	$view = file_get_contents("$theme/login.html");
+	$old = preg_replace("#<!-- print\.validation\.alert\('no_(database|users)'\) -->.*?<!-- /print\.validation\.alert\('no_(database|users)'\) -->#", '', $view);
+	check($old !== $view && strpos($old, '<!-- print.cms.login_message /-->') !== false, 'the alerts are in the starter\'s login.html');
+	test_fixture("$theme/zzp0c_oldlogin.html");
+	file_put_contents("$theme/zzp0c_oldlogin.html", $old);
+	try {
+		$clean = function ($html) { return preg_replace('/name="raster_ts" value="[^"]*"/', '', $html); };
+		list($status, $now) = http('GET', "$base/login");
+		list(, $before) = http('GET', "$base/zzp0c_oldlogin");
+		same(200, $status);
+		same($clean($before), $clean($now), 'byte for byte, the stamp aside');
+	} finally {
+		@unlink("$theme/zzp0c_oldlogin.html");
+	}
+	// a post from this site, a mail with a <title>: untouched
+	same(303, form_post("$base/about", array('raster_form' => 'newsletter.signup', 'email' => 'zzp0c-ok@example.test'))[0]);
+	$dir = "$theme/_email";
+	test_fixture("$dir/zzp0c_titled.html");
+	file_put_contents("$dir/zzp0c_titled.html", '<html><head><title>Your table</title></head><body><p>Hi</p></body></html>');
+	try {
+		same(true, mail::send_view('_email/zzp0c_titled', 'ana@example.test'));
+		check(strpos(last_mail()['raw'], "\r\nSubject: Your table\r\n") !== false, last_mail()['raw']);
+	} finally {
+		@unlink("$dir/zzp0c_titled.html");
+	}
+});
+
+test('P0.C: a mail without a <title> takes the site\'s name, else the host, no English (#38)', function () use ($root) {
+	cms_store::connect();
+	$dir = "$root/application/views/default/_email";
+	test_fixture("$dir/zzp0c_untitled.html");
+	file_put_contents("$dir/zzp0c_untitled.html", '<html><body><p>Hi</p></body></html>');
+	cms_types::ensure('sitepage', array('slug' => 'text', 'updated_at' => 'datetime', 'site_name' => 'text'));
+	$last = (int)R::getCell('SELECT MAX(id) FROM sitepage');
+	$host = config::get('host');
+	config::set('host')->to('zzp0c.example');
+	try {
+		cms_store::update_page('sitepage', 'site', array('site_name' => 'Zz &amp; Bakery'), array('site_name'));
+		same(true, mail::send_view('_email/zzp0c_untitled', 'ana@example.test'));
+		check(strpos(last_mail()['raw'], "\r\nSubject: Zz & Bakery\r\n") !== false, last_mail()['raw']);
+		cms_store::update_page('sitepage', 'site', array('site_name' => ''), array('site_name'));
+		same(true, mail::send_view('_email/zzp0c_untitled', 'ana@example.test'));
+		check(strpos(last_mail()['raw'], "\r\nSubject: zzp0c.example\r\n") !== false, last_mail()['raw']);
+		check(strpos(file_get_contents(BASE.'models/mail/mail.php'), 'Message from') === false, 'no English subject');
+	} finally {
+		config::set('host')->to($host);
+		R::exec('DELETE FROM sitepage WHERE id > ?', array($last));
+		@unlink("$dir/zzp0c_untitled.html");
+	}
+});
+
+test('P0.C: the editor\'s refusals are names it words, in Romanian too, and a site rewords them (#128)', function () use ($base, $root, $db) {
+	$theme = "$root/application/views/default";
+	test_fixture("$theme/zzp0c_menu.html");
+	file_put_contents("$theme/zzp0c_menu.html", '<!doctype html><html><head><title>Menu</title></head><body><p><!-- print.cms.zzp0c_opens -->2026-10-05<!-- /print.cms.zzp0c_opens --></p>'
+		.'<!-- render.cms.zzp0cmenu --><p><!-- print.name -->Tart<!-- /print.name --> <!-- print.price -->4.50<!-- /print.price --></p><!-- /render.cms.zzp0cmenu --></body></html>');
+	$words = "$root/application/i18n/ro/raster_editor.php";
+	$made = !is_dir(dirname($words));
+	test_fixture($words);
+	@mkdir(dirname($words), 0777, true);
+	file_put_contents($words, "<?php\nreturn array('problem_upload_too_big' => 'zz poza noastră e prea mare');\n");
+	try {
+		p0c_settings("config::set('languages')->to(array('en', 'ro'));", function () use ($base, $root, $db) {
+			$editor = p0c_login($base, 'editor');
+			$page = http('GET', "$base/zzp0c_menu?lang=ro", null, array("Cookie: $editor"))[1];
+			check(preg_match('#<script id="raster-editor-config" type="application/json">(.*?)</script>#s', $page, $m), 'the editor: '.$page);
+			$config = json_decode($m[1], true);
+			$post = function ($endpoint, $fields) use ($base, $editor, $config) {
+				list($status, $body) = form_post("$base/api/cms/$endpoint", $fields + array('csrf' => $config['csrf']), array("Cookie: $editor"));
+				return array($status, json_decode($body, true), $body);
+			};
+			// a value that isn't of its field's type: type_<type>, with the field
+			list($status, $json, $body) = $post('editor_save_item', array('collection' => 'zzp0cmenu', 'id' => 0, 'fields' => array('name' => 'Cheap tart', 'price' => 'cheap')));
+			same(array(400, array('type_number'), 'price'), array($status, $json['problems'], $json['field']), $body);
+			list($status, $json, $body) = $post('editor_save_field', array('type' => $config['page']['type'], 'slug' => $config['page']['slug'], 'field' => 'zzp0c_opens', 'value' => 'soon'));
+			same(array(400, array('type_date'), 'zzp0c_opens'), array($status, $json['problems'], $json['field']), $body);
+			// uploads
+			$upload = function ($file, $url) use ($editor, $config) {
+				list($body, $type) = p0c_multipart(array('csrf' => $config['csrf']), $file);
+				list($status, $text) = http('POST', "$url/api/cms/editor_upload", $body, array("Cookie: $editor", $type));
+				return array($status, json_decode($text, true));
+			};
+			same(array(400, array('error' => 'upload_missing', 'problems' => array('upload_missing'))), $upload(null, $base), 'no picture');
+			same(array(400, array('error' => 'upload_not_a_picture', 'problems' => array('upload_not_a_picture'))), $upload(array('notes.png', '<?php echo 1;'), $base), 'not a picture');
+			// over PHP's own limit, the file never arrives whole: too big, not missing
+			$port = free_port();
+			$small = proc_open(php_argv('-d', 'upload_max_filesize=1K', '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root,
+				array('RASTER_DB' => $db, 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
+			try {
+				for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
+				same(array(400, array('error' => 'upload_too_big', 'problems' => array('upload_too_big'))), $upload(array('big.png', str_repeat('x', 4096)), "http://127.0.0.1:$port"), 'too big');
+			} finally {
+				proc_terminate($small); proc_close($small);
+			}
+			// each has its words: in English in editor.js, in Romanian in lang/ro.php, and the site's own win
+			$js = file_get_contents(BASE.'models/cms/editor/editor.js');
+			preg_match_all('/\b(problem_(?:type|upload|form|not)_[a-z_]+):/', $js, $names);
+			$names = array_unique($names[1]);
+			foreach (array('type_int', 'type_number', 'type_bool', 'type_date', 'type_datetime', 'type_time', 'type_text', 'upload_too_big', 'upload_missing', 'upload_not_a_picture', 'upload_not_stored', 'form_expired', 'not_allowed') as $name) {
+				check(in_array("problem_$name", $names, true), "editor.js words problem_$name");
+				check(isset($config['strings']["problem_$name"]), "the Romanian editor words problem_$name");
+			}
+			same('{field} trebuie să fie un număr, de exemplu 4.50', $config['strings']['problem_type_number']);
+			same('zz poza noastră e prea mare', $config['strings']['problem_upload_too_big'], 'raster_editor.php rewords it');
+			// "not a picture" goes through the words too
+			check(strpos($js, "'not a picture'") === false && substr_count($js, "problem('upload_not_a_picture')") === 2, 'editor.js');
+		});
+	} finally {
+		@unlink("$theme/zzp0c_menu.html");
+		@unlink($words);
+		if ($made) @rmdir(dirname($words));
+		cms_store::connect();
+		R::exec('DROP TABLE IF EXISTS zzp0cmenudata');
+		R::exec('DROP TABLE IF EXISTS zzp0cmenupage');
+	}
+});
+
+test('P0.C: system/ prints no English sentence to visitors (#38)', function () {
+	// echo, exit and print of a quoted string with two words in a row; the
+	// command line (system/tools) and the development-only pages are not
+	// for visitors
+	$found = array();
+	foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator(BASE, FilesystemIterator::SKIP_DOTS)) as $file) {
+		$path = $file->getPathname();
+		if (substr($path, -4) !== '.php' || strpos($path, BASE.'tools/') === 0 || strpos($path, BASE.'libraries/') === 0) continue;
+		foreach (file($path) as $i => $line) {
+			if (!preg_match('/\b(echo|exit|print)\b\s*\(?\s*(["\'])(.*?)(?<!\\\\)\2/', $line, $m)) continue;
+			// the words people read, tags aside
+			if (!preg_match('/[A-Za-z]{2,} [A-Za-z]{2,}/', strip_tags($m[3]))) continue;
+			// development only: the database error and the template errors
+			if (strpos($line, 'No database') !== false || preg_match('/template errors|php bin\/raster lint|font:/i', $line)) continue;
+			$found[] = substr($path, strlen(BASE)).':'.($i + 1).': '.trim($line);
+		}
+	}
+	same(array(), $found);
 });
 
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";

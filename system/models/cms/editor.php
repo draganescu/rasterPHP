@@ -169,6 +169,21 @@ class cms_editor {
 		return array('error' => $e->getMessage(), 'problems' => $e->problems);
 	}
 
+	// a value that isn't of its field's type: the problem type_<type>
+	// (type_number), which the editor words as it words a record's
+	// refusals, with the field
+	protected static function mistyped($e) {
+		http_response_code(400);
+		return array('error' => $e->getMessage(), 'problems' => array('type_'.$e->type), 'field' => $e->field);
+	}
+
+	// an upload refused: upload_missing, upload_too_big, upload_not_a_picture
+	// or upload_not_stored, for the editor to word
+	protected static function refused_upload($problem, $status = 400) {
+		http_response_code($status);
+		return array('error' => $problem, 'problems' => array($problem));
+	}
+
 	// Each name the editor posts holds one value (lists come only under
 	// fields, examples and input): id[]=99 would be read as item 1, and
 	// value[]=x stored as 'Array'. Every endpoint that reads one of these refuses that first.
@@ -205,6 +220,8 @@ class cms_editor {
 		$slug = $type === 'sitepage' ? 'site' : (string)util::post('slug');
 		try {
 			$saved = cms_store::update_page($type, $slug, array($field => (string)util::post('value')), array($field));
+		} catch (cms_type_error $e) {
+			return self::mistyped($e);
 		} catch (Exception $e) {
 			return self::fail($e->getMessage());
 		} catch (Throwable $e) {
@@ -241,6 +258,8 @@ class cms_editor {
 			return cms_types::show_row(cms_store::save_item($type, (int)util::post('id'), $fields, $allowed), self::examples());
 		} catch (cms_refused $e) {
 			return self::refused($e);
+		} catch (cms_type_error $e) {
+			return self::mistyped($e);
 		} catch (Exception $e) {
 			return self::fail($e->getMessage());
 		} catch (Throwable $e) {
@@ -283,6 +302,8 @@ class cms_editor {
 			return cms_types::show_row(cms_records::shown(cms_records::info($collection), $item), self::examples());
 		} catch (cms_refused $e) {
 			return self::refused($e);
+		} catch (cms_type_error $e) {
+			return self::mistyped($e);
 		} catch (Exception $e) {
 			return self::fail($e->getMessage());
 		} catch (Throwable $e) {
@@ -321,6 +342,8 @@ class cms_editor {
 			$saved = cms_store::update_page($type, $slug, $values, array_keys($values));
 			$saved['fields'] = cms_types::show_row($saved['fields']);
 			return $saved;
+		} catch (cms_type_error $e) {
+			return self::mistyped($e);
 		} catch (Exception $e) {
 			return self::fail($e->getMessage());
 		} catch (Throwable $e) {
@@ -332,15 +355,18 @@ class cms_editor {
 	static function upload() {
 		cms::require_admin(true);
 		$types = array(IMAGETYPE_JPEG => 'jpg', IMAGETYPE_PNG => 'png', IMAGETYPE_GIF => 'gif', IMAGETYPE_WEBP => 'webp');
-		if (empty($_FILES['image']) || $_FILES['image']['error'] !== UPLOAD_ERR_OK) return self::fail('The upload did not arrive');
-		if ($_FILES['image']['size'] > self::UPLOAD_MB * 1024 * 1024) return self::fail('Pictures can be up to 12 MB');
+		// one too big for PHP's own limits (upload_max_filesize) arrives as an error
+		$error = empty($_FILES['image']) || is_array($_FILES['image']['error']) ? UPLOAD_ERR_NO_FILE : $_FILES['image']['error'];
+		if (in_array($error, array(UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE), true)) return self::refused_upload('upload_too_big');
+		if ($error !== UPLOAD_ERR_OK) return self::refused_upload('upload_missing');
+		if ($_FILES['image']['size'] > self::UPLOAD_MB * 1024 * 1024) return self::refused_upload('upload_too_big');
 		$info = @getimagesize($_FILES['image']['tmp_name']);
-		if (!$info || !isset($types[$info[2]])) return self::fail('Only JPEG, PNG, GIF and WebP pictures can be used');
+		if (!$info || !isset($types[$info[2]])) return self::refused_upload('upload_not_a_picture');
 		$folder = trim(config::get('raster_media_folder', 'media'), '/');
 		$dir = dirname(BASE).'/'.$folder.'/';
 		if (!is_dir($dir)) @mkdir($dir, 0775, true);
 		$name = date('Ymd').'-'.bin2hex(random_bytes(6)).'.'.$types[$info[2]];
-		if (!move_uploaded_file($_FILES['image']['tmp_name'], $dir.$name)) return self::fail('The picture could not be stored', 500);
+		if (!move_uploaded_file($_FILES['image']['tmp_name'], $dir.$name)) return self::refused_upload('upload_not_stored', 500);
 		// from the site's root, so the address survives a new domain or a static export
 		$path = rtrim((string)parse_url(config::get('base_uri'), PHP_URL_PATH), '/');
 		return array('url' => $path.'/'.$folder.'/'.$name, 'width' => $info[0], 'height' => $info[1]);

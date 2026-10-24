@@ -1108,7 +1108,7 @@ test(array('E21', 'E29', 'C44'), 'pictures: upload, page and item photos, empty 
 	list($status, $response) = http('POST', "$base/api/cms/editor_upload", $multipart('shell.png', '<?php echo 1;'), $type);
 	if (isset(json_decode($response, true)['url'])) media_made(json_decode($response, true)['url']);
 	same(400, $status);
-	has($response, 'Only JPEG, PNG, GIF and WebP');
+	same(array('upload_not_a_picture'), json_decode($response, true)['problems'], 'a named refusal the editor words');
 	// a page field in an attribute: <!-- print.@src.cms.photo -->
 	http('POST', "$base/api/cms/editor_save_field", array('csrf' => $token, 'type' => 'aboutpage', 'slug' => '/about', 'field' => 'photo', 'value' => $upload['url']), $h);
 	has(http('GET', "$base/about")[1], '<img class="photo wide" src="'.$upload['url'].'" alt="The café from across the street">');
@@ -1891,6 +1891,25 @@ test(array('A13', 'C26'), 'a custom 404 page and the route_not_found event', fun
 	same('yes', header_value($headers, 'X-Cafe-Missing'));
 	same(null, header_value(http('GET', "$base/about")[2], 'X-Cafe-Missing'));
 });
+test('A19', 'the café words its refusals: a 403 page with an alert for each, a 500 page; never the framework\'s words', function () use ($base) {
+	list($status, $body) = http('POST', "$base/visit", array('raster_form' => 'contact.form', 'email' => 'a@b.test', 'message' => 'Hi'), array('Origin: https://evil.example'));
+	same(403, $status);
+	has($body, '<h1>Not this way</h1>');
+	has($body, 'That form came from another website');
+	lacks($body, 'open a long time', 'only the alert that was raised');
+	lacks($body, 'Forbidden');
+	// a member on a staff page: the account's alert
+	raster(array('user', 'a19.member@example.com', '--role=member', '--password=member password'));
+	$member = login($base, 'a19.member@example.com', 'member password');
+	list($status, $body) = http('GET', "$base/staff", null, array("Cookie: $member"));
+	same(403, $status);
+	has($body, "Your account can't open this page.");
+	lacks($body, 'You do not have access');
+	// a logged in post without the session token
+	list($status, $body) = http('POST', "$base/visit", array('raster_form' => 'contact.form', 'email' => 'a@b.test', 'message' => 'Hi'), array("Cookie: $member"));
+	same(403, $status);
+	has($body, 'That form was open a long time.');
+});
 test('A14', 'a route to a view in another theme', function () use ($base) {
 	list($status, $body) = http('GET', "$base/print/menu");
 	same(200, $status);
@@ -1944,7 +1963,7 @@ test(array('C36', 'C37', 'C49'), 'the log console, and strict templates off', fu
 	with_file("$views/zz-broken.html", '<p><!-- render.cafe.hours -->unclosed</p>', function () use ($loud) {
 		list($status, $body) = http('GET', "$loud/zz-broken");
 		same(500, $status);
-		has($body, 'This page could not be shown.');
+		has($body, '<h1>Something burnt</h1>', 'the café\'s own 500 page (error_document_500)');
 		lacks($body, 'render.cafe.hours', 'no details for visitors');
 	});
 	// any exception, not only template errors: a named query that doesn't exist
@@ -1954,7 +1973,7 @@ test(array('C36', 'C37', 'C49'), 'the log console, and strict templates off', fu
 			with_file("$views/zz-query.html", '<p><!-- render.zzquery.rows -->row<!-- /render.zzquery.rows --></p>', function () use ($loud, $tmp) {
 				list($status, $body) = http('GET', "$loud/zz-query");
 				same(500, $status);
-				has($body, 'This page could not be shown.');
+				has($body, '<h1>Something burnt</h1>');
 				lacks($body, 'no_such_query', 'no details for visitors');
 				has(file_get_contents("$tmp/php-errors.log"), 'Raster error: BadMethodCallException', 'logged');
 			});
@@ -3112,7 +3131,8 @@ test('T2', 'values are stored as their type, whoever writes them, or refused nam
 	same(9.5, cms_store::get_item('menudata', $tart['id'])['price'], 'stored as a number');
 	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'menu', 'id' => $tart['id'], 'fields' => array('price' => 'nine'), 'csrf' => $token), $h);
 	same(400, $status);
-	has($body, "'price' must be a number");
+	same(array('type_number'), json_decode($body, true)['problems'], 'a name the editor words: '.$body);
+	same('price', json_decode($body, true)['field']);
 	// with the mock-ups from the item's mark, it comes back as the page prints it
 	list(, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'menu', 'id' => $tart['id'], 'fields' => array('price' => '9.5'), 'examples' => array('price' => '14.50'), 'csrf' => $token), $h);
 	same('9.50', json_decode($body, true)['price']);

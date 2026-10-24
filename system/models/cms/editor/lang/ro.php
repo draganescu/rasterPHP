@@ -22,4 +22,11 @@ return array(
 	'new_item' => 'Nou', 'edit_mode_on' => 'Editezi. Apasă pe orice strălucește.', 'edit_mode_off' => 'Ai terminat de editat',
 	'keyboard' => 'E pentru editare · Esc ca să ieși · ⌘Z pentru anulare', 'page_fields' => 'Câmpuri', 'nothing_here' => 'Nimic din pagina asta nu vine din CMS.',
 	'action_done' => 'Gata: {action}',
+	'problem_type_int' => '{field} trebuie să fie un număr întreg, de exemplu 4', 'problem_type_number' => '{field} trebuie să fie un număr, de exemplu 4.50',
+	'problem_type_bool' => '{field} trebuie să fie da sau nu (1 sau 0)', 'problem_type_date' => '{field} trebuie să fie o dată, de exemplu 2026-10-05',
+	'problem_type_datetime' => '{field} trebuie să fie o dată și o oră, de exemplu 2026-10-05 19:30', 'problem_type_time' => '{field} trebuie să fie o oră, de exemplu 19:30',
+	'problem_type_text' => '{field} trebuie să fie un singur text',
+	'problem_upload_too_big' => 'Poza e prea mare', 'problem_upload_missing' => 'Poza n-a ajuns; mai încearcă',
+	'problem_upload_not_a_picture' => 'Nu e o poză: folosește JPEG, PNG, GIF sau WebP', 'problem_upload_not_stored' => 'Poza nu a putut fi păstrată',
+	'problem_form_expired' => 'Pagina e veche: reîncarc-o și mai încearcă', 'problem_not_allowed' => 'Nu poți face asta; dacă ai ieșit din cont, intră din nou',
 );
