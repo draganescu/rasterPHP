@@ -50,6 +50,7 @@
 		// a multilingual site: the page's language, and the editor's own
 		editing_lang: 'editing: {lang}', falls_back: '(falls back to {lang})', untranslated: 'not translated yet: shows the {lang} text',
 		every_language: 'the same in every language', editor_language: 'The editor’s language',
+		problem_not_multilingual: 'This site has one language: the editor’s follows the browser',
 		restore_every: 'Restore, every language', restored_every: 'Brought back every language of the version from {when}',
 		problem_translation_columns_missing: 'This language has no place on the site yet: run php bin/raster schema --apply on the server'
 	};
