@@ -559,11 +559,12 @@ class raster_project
 			$add('fail', 'multilingual is on with fewer than two languages', "The site behaves as if it were off. List two or more, the default first:\nconfig::set('languages')->to(array('en', 'ro'))");
 		} elseif (i18n::enabled()) {
 			$add('ok', 'Multilingual: '.implode(', ', i18n::available()));
-			// on a language's own domain the other languages are linked on
-			// the site's address, which must be a host that takes prefixes
+			// on a language's own domain the languages without one are linked
+			// on the site's address, which must be a host that takes prefixes
 			$domains = array_change_key_case((array)config::get('domain_language', array()));
 			$site = parse_url((string)(getenv('RASTER_URL') ?: config::get('site_url')));
-			if ($domains && (empty($site['host']) || isset($domains[strtolower($site['host'])]))) {
+			$without = array_filter(i18n::available(), function ($l) use ($domains) { return !in_array(strtolower($l), array_map('strtolower', $domains), true); });
+			if ($domains && $without && (empty($site['host']) || isset($domains[strtolower($site['host'])]))) {
 				$add('fail', 'domain_language needs the site\'s address', "On a language's own domain Raster can't link to the other languages.\nSet RASTER_URL (or config site_url) to the address that takes the /ro/ prefixes, a host not in domain_language");
 			}
 		}

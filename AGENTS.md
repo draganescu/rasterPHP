@@ -2053,8 +2053,8 @@ use `'model.method'`: `method(true)` returns
   | `i18n::with($lang, $fn)` | runs `$fn` with `current()` set to `$lang` (one the site doesn't list runs in the default) and, multilingual, `link_uri` set to that language's address; puts both back, even when `$fn` throws, nests, and returns what `$fn` returned |
   | `i18n::dir($lang = null)` | `rtl` for Arabic, Hebrew, Persian, Urdu and the other right-to-left languages, else `ltr` |
   | `i18n::date_order($lang = null)` | how dates are typed: `''` without languages, `mdy` for `en-us`, `dmy` for the rest (`Y-m-d` is always read) |
-  | `i18n::address($lang)` | where that language's pages start (`link_base` and its prefix, or its own `domain_language` host, or the site's address seen from another language's host), the base `alternates()`, `with()` and the `/ro/` and `?lang=` redirects use; `null` when it has none |
-| `i18n::alternates($path = null)` | the page (or `$path`, as it reads) in every language: rows of `lang` and `url`, each path segment encoded; a language with its own `domain_language` host is at that host, and from such a host the others are on the site's address (`RASTER_URL`, `site_url`), or left out without one (`doctor` fails on that) |
+  | `i18n::address($lang)` | where that language's pages start (`link_base` and its prefix; its own `domain_language` host, seen from the site's address or a language's domain; or the site's address seen from another language's domain), the base `alternates()`, `with()` and the `/ro/` and `?lang=` redirects use; `null` when it has none |
+  | `i18n::alternates($path = null)` | the page (or `$path`, as it reads) in every language: rows of `lang` and `url`, each path segment encoded; a language with its own `domain_language` host is at that host, and from such a host the others are on the site's address (`RASTER_URL`, `site_url`), or left out without one (`doctor` fails on that) |
 
   `$lang` left out is `current()`. Raster calls these on the bundled
   class, from the page cache before any model loads too, so a site's
@@ -2070,9 +2070,12 @@ URL alone says the content's language, so one URL is always one language.
   `?lang=ro` 301 to the same page in that language (`/ro/menu`, the rest of
   the query kept; `ro-RO` names `ro`). A host listed in `domain_language`
   (exactly, port aside) is that language and takes no prefix. One language
-  has one address: on the site's address `/ro/menu` answers 301 to
-  `example.ro/menu` when `ro` has its own domain, and `?lang=` goes to a
-  language's domain, or from one to the site's address (`RASTER_URL`).
+  has one address: on the site's address (`site_url`, else `RASTER_URL`)
+  `/ro/menu` answers 301 to `example.ro/menu` when `ro` has its own
+  domain, and `?lang=` goes to a language's domain, or from one to the
+  site's address. On any other host (a preview or staging copy whose
+  `RASTER_URL` isn't the `site_url`, `localhost`) every language is served
+  under its prefix there, and links stay on that host.
   The cookie and `Accept-Language` don't choose the content, and no `lang`
   cookie is set.
 - **One place.** `config::initialize()` takes the prefix off, after the

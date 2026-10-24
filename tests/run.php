@@ -9386,6 +9386,37 @@ test('P1.A: multilingual, a domain_language host is its language\'s address', fu
 	});
 });
 
+test('P1.A: a preview of a site with language domains serves every language under its prefix', function () {
+	$on = "config::set('multilingual')->to(true);\nconfig::set('languages')->to(array('en', 'ro'));\nconfig::set('domain_language')->to(array('zzp1a-ro.test' => 'ro'));";
+	// the site's own address is site_url; the preview's RASTER_URL is another host
+	p1b_site($on."\nconfig::set('site_url')->to('https://zzp1a-site.test/');", function () {
+		p1b_server(array('RASTER_URL' => 'http://127.0.0.1:{port}/preview/abc/'), function ($port) {
+			$base = "http://127.0.0.1:$port/preview/abc/";
+			list($status, $body, $headers) = http('GET', $base.'ro/zzp1b_menu');
+			same(200, $status, 'not sent to the language\'s domain');
+			check(strpos($body, '<h1>Meniu</h1>') !== false, 'Romanian');
+			check(strpos($body, 'href="'.$base.'ro/zzp1b_about"') !== false, 'links under /preview/abc/ro/: '.$body);
+			check(strpos($body, 'zzp1a-ro.test') === false, 'nothing points at the domain');
+			list($status, , $headers) = http('GET', $base.'zzp1b_menu?lang=ro');
+			same('301 '.$base.'ro/zzp1b_menu', $status.' '.location($headers));
+			list($status, , $headers) = http('GET', $base.'ro');
+			same('301 '.$base.'ro/', $status.' '.location($headers));
+		});
+	});
+	// without site_url, RASTER_URL is the site's own address, and the language lives on its domain
+	p1b_site($on, function () {
+		p1b_server(array('RASTER_URL' => 'http://127.0.0.1:{port}/preview/abc/'), function ($port) {
+			list($status, , $headers) = http('GET', "http://127.0.0.1:$port/preview/abc/ro/zzp1b_menu");
+			same('301 http://zzp1a-ro.test/preview/abc/zzp1b_menu', $status.' '.location($headers));
+		});
+	});
+	// in the API: a host that is neither the site's address nor a language's domain
+	p1a_request(array('multilingual' => true, 'languages' => array('en', 'ro'), 'domain_language' => array('example.ro' => 'ro'), 'site_url' => 'https://example.com/', 'protocol' => 'http', 'host' => 'localhost:8000', 'link_base' => 'http://localhost:8000/', 'link_uri' => 'http://localhost:8000/', 'uri_string' => '/menu'), array(), function () {
+		same(array('http://localhost:8000/menu', 'http://localhost:8000/ro/menu'), array_column(i18n::alternates(), 'url'));
+		same('http://localhost:8000/ro/', i18n::address('ro'));
+	});
+});
+
 test('P1.A: i18n::with() runs in a language, nests, and puts everything back, also after an exception', function () {
 	$settings = array('multilingual' => true, 'languages' => array('en', 'ro', 'fr'), 'link_base' => 'https://example.com/', 'link_uri' => 'https://example.com/', 'host' => 'example.com', 'url_language' => '');
 	p1a_request($settings, array(), function () {
@@ -9517,6 +9548,9 @@ test('P1.A: doctor fails on multilingual without two languages and on a code it 
 	same(array('ok Multilingual: en, ro', "fail domain_language needs the site's address"), $titles(array('multilingual' => true, 'languages' => array('en', 'ro'), 'domain_language' => array('example.ro' => 'ro'), 'site_url' => null)));
 	same(array('ok Multilingual: en, ro', "fail domain_language needs the site's address"), $titles(array('multilingual' => true, 'languages' => array('en', 'ro'), 'domain_language' => array('example.ro' => 'ro'), 'site_url' => 'https://example.ro/')));
 	same(array('ok Multilingual: en, ro'), $titles(array('multilingual' => true, 'languages' => array('en', 'ro'), 'domain_language' => array('example.ro' => 'ro'), 'site_url' => 'https://example.com/')));
+	// every language on its own domain needs no site address to link the others on
+	same(array('ok Multilingual: en, ro'), $titles(array('multilingual' => true, 'languages' => array('en', 'ro'), 'domain_language' => array('example.com' => 'en', 'example.ro' => 'ro'), 'site_url' => 'https://example.com/')));
+	same(array('ok Multilingual: en, ro'), $titles(array('multilingual' => true, 'languages' => array('en', 'ro'), 'domain_language' => array('example.com' => 'en', 'example.ro' => 'ro'), 'site_url' => null)));
 });
 
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";
