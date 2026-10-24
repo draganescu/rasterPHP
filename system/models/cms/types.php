@@ -39,6 +39,7 @@ class cms_types {
 	static $system = array(
 		'slug' => 'text', 'enabled' => 'bool', 'published_at' => 'datetime',
 		'updated_at' => 'datetime', 'created_at' => 'datetime', 'owner' => 'int',
+		'saved_lang' => 'text',
 	);
 
 	// table => field => type, read once per request (see forget)
@@ -103,25 +104,44 @@ class cms_types {
 
 	// whether a field of $type (text, int, ...) printed as element content
 	// ($attribute null) or into the attribute $attribute (alt, src, ...) has
-	// a translation per language (D7). Cheap, so page_field can ask it on a
-	// page request; the content model asks it too. false until P2.A.
+	// a translation per language (D7): text, as content or in an attribute
+	// that holds words. A photo's src, a link's href and every number, date
+	// and bool are shared by every language. Cheap, so page_field can ask it
+	// on a page request; the content model asks it too.
 	static function translates($type, $attribute = null) {
-		return false;
+		if ($type !== 'text') return false;
+		if ($attribute === null || $attribute === '') return true;
+		return in_array(strtolower(ltrim((string)$attribute, '@')), array('alt', 'title', 'placeholder', 'aria-label', 'content'), true);
 	}
 
 	// the fields of $table that have a translation per language (D7), as
-	// its columns say; the others are shared by every language. Empty
-	// until P2.A.
+	// its columns say: headline when headline__ro is there. The others are
+	// shared by every language. Empty when multilingual is off.
 	static function translated($table) {
-		return array();
+		if (!i18n::enabled()) return array();
+		$columns = self::of_table($table);
+		$fields = array();
+		foreach (i18n::available() as $lang) {
+			$suffix = i18n::suffix($lang);
+			if ($suffix === '') continue;
+			foreach ($columns as $column => $type) {
+				$field = substr($column, 0, -strlen($suffix));
+				if (substr($column, -strlen($suffix)) === $suffix && isset($columns[$field]) && !in_array($field, $fields, true)) $fields[] = $field;
+			}
+		}
+		return $fields;
 	}
 
 	// ##Columns
 
 	// Creates the table and the columns it lacks, each declared as its type.
 	// Columns that exist are left as they are; schema --apply retypes them.
-	// $translated names the fields that also get a column per non-default
-	// language when multilingual is on (headline__ro); ignored until P2.A.
+	// $translated names the fields (of $types, or already in the table) that
+	// also get a column per translation language when multilingual is on
+	// (headline__ro), of the field's type. Off it is ignored, so the SQL is
+	// what it always was. Raster declares a translation column before any
+	// value is stored in it: a column RedBean made itself for name__id would
+	// be read as a link to another table (an int, in MySQL).
 	static function ensure($table, $types, $translated = array()) {
 		if (!preg_match('/^[a-z0-9_]+$/', $table)) throw new InvalidArgumentException("Invalid table '$table'");
 		if (!cms_store::table_exists($table)) {
@@ -134,6 +154,20 @@ class cms_types {
 			if (!preg_match('/^[a-z0-9_]+$/', $field)) throw new InvalidArgumentException("Invalid field '$field'");
 			// the adapter, not R::exec: a fluid RedBean ignores some failed SQL
 			R::getDatabaseAdapter()->exec("ALTER TABLE `$table` ADD `$field` ".self::sql($type));
+		}
+		if ($translated && i18n::enabled()) {
+			cms_store::forget();
+			$now = cms_store::columns($table);
+			foreach ((array)$translated as $field) {
+				if (!preg_match('/^[a-z0-9_]+$/', $field) || strpos($field, '__') !== false) throw new InvalidArgumentException("Invalid field '$field'");
+				$type = isset($types[$field]) ? $types[$field] : (isset($now[$field]) ? self::of_column($now[$field]) : 'text');
+				foreach (i18n::available() as $lang) {
+					$column = self::column($field, $lang);
+					if ($column === $field || array_key_exists($column, $now)) continue;
+					R::getDatabaseAdapter()->exec("ALTER TABLE `$table` ADD `$column` ".self::sql($type));
+					$now[$column] = $type;
+				}
+			}
 		}
 		cms_store::forget();
 		if (isset($types['slug']) && !array_key_exists('slug', $have)) self::index_slug($table);

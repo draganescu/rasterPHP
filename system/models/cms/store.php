@@ -14,7 +14,7 @@ require_once __DIR__.'/records.php';
 class cms_store {
 
 	// columns RedBean or Raster manage, never edited as content
-	static $system_fields = array('id', 'slug', 'updated_at', 'enabled', 'published_at');
+	static $system_fields = array('id', 'slug', 'updated_at', 'enabled', 'published_at', 'saved_lang');
 
 	// ##Slugs, drafts and order
 
@@ -335,9 +335,30 @@ class cms_store {
 	// $row (a page row or an item, as read_row gives it) as it reads in
 	// $lang (null: i18n::current()): each translated field replaced by its
 	// translation, or kept as the default language's value when that is
-	// empty. For showing only, never for a write. Pass-through until P2.B.
+	// empty. The translations stay in the row (headline__ro). For showing
+	// only, never for a write: a save of it would copy one language into
+	// another.
 	static function localized($row, $type, $lang = null) {
+		if (!is_array($row) || !i18n::enabled()) return $row;
+		$lang = $lang === null ? i18n::current() : (string)$lang;
+		if ($lang === '' || i18n::is_default($lang)) return $row;
+		foreach (cms_types::translated($type) as $field) {
+			$column = cms_types::column($field, $lang);
+			if (isset($row[$column]) && !is_array($row[$column]) && (string)$row[$column] !== '') $row[$field] = $row[$column];
+		}
 		return $row;
+	}
+
+	// the language a page or item is written in: '' for the default (and
+	// whenever multilingual is off, so a write is what it always was), the
+	// listed code for a translation; a language the site doesn't list is
+	// refused
+	static function write_language($lang) {
+		if ($lang === null || $lang === '' || !i18n::enabled() || i18n::is_default($lang)) return '';
+		foreach (i18n::available() as $code) {
+			if (strtolower($code) === strtolower((string)$lang)) return $code;
+		}
+		throw new InvalidArgumentException("Unknown language '$lang'; the site's languages: ".implode(', ', i18n::available()));
 	}
 
 	// ##Pages
@@ -356,8 +377,10 @@ class cms_store {
 
 	// Stores a new revision of the page with the given fields changed.
 	// $allowed lists the fields the templates define; others are rejected.
-	// $lang is the language the values are in (null: the default); ignored
-	// until P2.B.
+	// $lang is the language the values are in (null: the default): in a
+	// translation language each translated field is stored in its column
+	// (headline__ro) and a shared one is refused (field_shared). $values
+	// and $allowed always name the fields themselves (headline).
 	static function update_page($type, $slug, $values, $allowed, $lang = null) {
 		foreach ($values as $field => $value) {
 			if (!in_array($field, $allowed, true)) {
@@ -373,6 +396,34 @@ class cms_store {
 	}
 
 	static function store_page($type, $slug, $values, $lang = null) {
+		$lang = self::write_language($lang);
+		$columns = $values;
+		if ($lang !== '') {
+			// a translation: each field into its column, all or nothing
+			$translated = cms_types::translated($type);
+			$columns = array();
+			foreach ($values as $field => $value) {
+				if (!in_array($field, $translated, true)) throw new cms_refused(array('field_shared'));
+				$columns[cms_types::column($field, $lang)] = $value;
+			}
+			$have = self::columns($type);
+			$missing = array_diff_key($columns, $have);
+			if ($missing && database::$frozen) {
+				throw new InvalidArgumentException("No column for the $lang translation of '".implode("', '", array_keys($missing))."' yet: run php bin/raster schema --apply");
+			}
+			if ($missing) {
+				$base = cms_types::of_table($type);
+				$add = array();
+				foreach ($missing as $column => $value) {
+					$field = substr($column, 0, -strlen(i18n::suffix($lang)));
+					$add[$column] = isset($base[$field]) ? $base[$field] : 'text';
+				}
+				cms_types::ensure($type, $add);
+			}
+		}
+		// development keeps the language of each revision from the first
+		// multilingual save on
+		if (i18n::enabled() && !database::$frozen && !array_key_exists('saved_lang', cms_types::of_table($type))) cms_types::ensure($type, array('saved_lang' => 'text'));
 		$latest = self::latest($type);
 		if ($latest) {
 			$page = R::duplicate($latest);
@@ -381,25 +432,40 @@ class cms_store {
 			$page->slug = $slug;
 		}
 		$types = cms_types::of_table($type);
-		foreach ($values as $field => $value) {
+		foreach ($columns as $field => $value) {
 			$page->$field = cms_types::clean(isset($types[$field]) ? $types[$field] : 'text', $value, $field);
 		}
+		// the language the revision changed: the default's code for a save
+		// without one. Only while multilingual and once the table has the
+		// column, so off a save stores what it always did
+		$saved_lang = $lang !== '' ? $lang : i18n::default_language();
+		if (i18n::enabled() && isset($types['saved_lang'])) $page->saved_lang = $saved_lang;
 		$page->updated_at = R::isoDateTime();
 		R::store($page);
 		util::content_changed();
 		$saved = self::page_values($type);
-		cms_records::dispatch('cms.page_saved', array('type' => $type, 'slug' => (string)$page->slug, 'changed' => array_keys($values), 'fields' => $saved));
+		$event = array('type' => $type, 'slug' => (string)$page->slug, 'changed' => array_keys($values), 'fields' => $saved);
+		if (i18n::enabled()) $event['lang'] = $saved_lang;
+		cms_records::dispatch('cms.page_saved', $event);
 		return $saved;
 	}
 
+	// the page's revisions, newest first; multilingual, each says the
+	// language it changed (saved_lang, '' for one older than languages)
 	static function page_history($type, $limit = 20) {
 		if (!self::table_exists($type)) return array();
 		$revisions = R::find($type, ' ORDER BY id DESC LIMIT '.max(1, (int)$limit));
+		$languages = i18n::enabled();
 		$history = array();
 		foreach ($revisions as $revision) {
 			$values = cms_types::read_row($type, $revision->export());
 			foreach (self::$system_fields as $field) unset($values[$field]);
-			$history[] = array('revision' => (int)$revision->id, 'updated_at' => $revision->updated_at, 'fields' => $values);
+			$entry = array('revision' => (int)$revision->id, 'updated_at' => $revision->updated_at, 'fields' => $values);
+			if ($languages) {
+				unset($entry['fields']['saved_lang']);
+				$entry['saved_lang'] = (string)$revision->saved_lang;
+			}
+			$history[] = $entry;
 		}
 		return $history;
 	}

@@ -9234,17 +9234,14 @@ test('P1.C: in multilingual mode <head> gets the canonical link, one hreflang pe
 	same('', with_settings(p1c_on(array('multilingual' => false)), $links));
 	same('', with_settings(p1c_on(array('languages' => array('en'))), $links));
 	// a refusal (the 404 page) and a URL with a query (?page=2) are no page's address
-	$status = http_response_code();
-	http_response_code(404);
-	try {
-		same('', with_settings(p1c_on(), $links), 'a 404');
-	} finally {
-		http_response_code($status ?: 200);
-	}
+	same('', with_settings(p1c_on(), function () { return template::language_links('', 404); }), 'a 404');
 	$get = $_GET;
 	$_GET = array('page' => '2');
 	try {
 		same('', with_settings(p1c_on(), $links), '?page=2');
+		// a tracking parameter is the same page: the links stay
+		$_GET = array('utm_source' => 'newsletter', 'fbclid' => 'x');
+		check(strpos(with_settings(p1c_on(), $links), 'rel="canonical"') !== false, '?utm_source keeps the canonical');
 	} finally {
 		$_GET = $get;
 	}
@@ -10202,6 +10199,807 @@ test('P2.C: tools/list and describe grow by less than 1,000 characters (#161)', 
 			check(str_word_count($m[0]) <= 120, 'the recipe is at most 120 words: '.str_word_count($m[0]));
 		});
 	});
+});
+
+// ## P2.B: page reads and writes in a language, the editor
+
+// The checkout copied to a folder of its own for the P2.B tests that need
+// translated fields, made once. Until P2.A lands, cms_types::translates(),
+// translated() and ensure()'s $translated are stubs that say no field is
+// translated; the copy gets bodies that follow the contract (D7) in their
+// place, so these tests run the real path here, and once P2.A's bodies are
+// in, the copy runs them unchanged. Nothing in the checkout is touched.
+function p2b_copy() {
+	global $root;
+	static $dir = null;
+	if ($dir !== null) return $dir;
+	$dir = sys_get_temp_dir().'/raster-p2b-'.getmypid();
+	exec('rm -rf '.escapeshellarg($dir));
+	mkdir($dir, 0775, true);
+	foreach (array('index.php', 'system', 'application', 'bin', 'tests') as $part) {
+		exec('cp -R '.escapeshellarg("$root/$part").' '.escapeshellarg("$dir/$part"));
+	}
+	register_shutdown_function(function () use ($dir) { exec('rm -rf '.escapeshellarg($dir)); });
+	$file = "$dir/system/models/cms/types.php";
+	$types = file_get_contents($file);
+	$stubs = array(
+		"static function translates(\$type, \$attribute = null) {\n\t\treturn false;\n\t}" =>
+			"static function translates(\$type, \$attribute = null) {\n\t\treturn \$type === 'text' && in_array(\$attribute, array(null, 'alt', 'title', 'placeholder', 'aria-label', 'content'), true);\n\t}",
+		"static function translated(\$table) {\n\t\treturn array();\n\t}" =>
+			"static function translated(\$table) {\n\t\tif (!i18n::enabled()) return array();\n\t\t\$columns = self::of_table(\$table);\n\t\t\$found = array();\n\t\tforeach (i18n::available() as \$lang) {\n\t\t\t\$suffix = i18n::suffix(\$lang);\n\t\t\tif (\$suffix === '') continue;\n\t\t\tforeach (\$columns as \$column => \$type) {\n\t\t\t\t\$field = substr(\$column, 0, -strlen(\$suffix));\n\t\t\t\tif (substr(\$column, -strlen(\$suffix)) === \$suffix && isset(\$columns[\$field])) \$found[\$field] = true;\n\t\t\t}\n\t\t}\n\t\treturn array_keys(\$found);\n\t}",
+		"\t\t\$have = cms_store::columns(\$table);\n" =>
+			"\t\t\$have = cms_store::columns(\$table);\n\t\tif (i18n::enabled()) foreach ((array)\$translated as \$f) foreach (i18n::available() as \$l) if (i18n::suffix(\$l) !== '') \$types[\$f.i18n::suffix(\$l)] = isset(\$types[\$f]) ? \$types[\$f] : (isset(\$have[\$f]) ? self::of_column(\$have[\$f]) : 'text');\n",
+	);
+	if (strpos($types, "static function translated(\$table) {\n\t\treturn array();\n\t}") !== false) {
+		foreach ($stubs as $stub => $body) {
+			check(substr_count($types, $stub) === 1, "types.php changed: $stub");
+			$types = str_replace($stub, $body, $types);
+		}
+		file_put_contents($file, $types);
+	}
+	return $dir;
+}
+// the copy multilingual (en, ro), with the fixture page /zzp2babout
+function p2b_site($fn, $settings = "config::set('languages')->to(array('en', 'ro'));\nconfig::set('multilingual')->to(true);") {
+	$dir = p2b_copy();
+	$theme = "$dir/application/views/default";
+	file_put_contents("$theme/zzp2babout.html", '<!doctype html><html><head><title><!-- print.cms.zzp2b_title -->About us<!-- /print.cms.zzp2b_title --></title></head><body>'
+		.'<h1><!-- print.cms.zzp2b_headline -->Our story<!-- /print.cms.zzp2b_headline --></h1>'
+		.'<p class="intro"><!-- print.cms.zzp2b_intro -->Coffee since 2001.<!-- /print.cms.zzp2b_intro --></p>'
+		.'<!-- print.@src.cms.zzp2b_photo --><img src="photo.jpg" alt="Cup"><!-- /print.@src.cms.zzp2b_photo -->'
+		.'<footer><!-- print.cms.site_zzp2b_tagline -->Slow coffee<!-- /print.cms.site_zzp2b_tagline --></footer></body></html>');
+	$events = "$dir/application/config/the_events.php";
+	$kept = file_get_contents($events);
+	file_put_contents($events, (strpos($kept, '<?php') === 0 ? $kept : "<?php\n")."\n".$settings."\n");
+	try {
+		return $fn($dir);
+	} finally {
+		file_put_contents($events, $kept);
+	}
+}
+// a server for the copy
+function p2b_server($dir, $fn) {
+	global $db;
+	$port = free_port();
+	$env = array('RASTER_DB' => $db, 'RASTER_SECRET' => 'test-secret', 'RASTER_ENV' => 'development', 'PATH' => getenv('PATH'));
+	$server = proc_open(php_argv('-S', "127.0.0.1:$port", "$dir/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $dir, $env);
+	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
+	try {
+		return $fn("http://127.0.0.1:$port");
+	} finally {
+		proc_terminate($server); proc_close($server);
+	}
+}
+// PHP run in the copy, booted as the command line is, multilingual; what
+// it echoes, decoded from JSON
+function p2b_php($dir, $code) {
+	global $db;
+	reconnect();
+	$script = 'require "'.$dir.'/system/boot.php"; boot::$appname = "application"; boot::cli(); cms_store::connect();'
+		.' config::set("languages")->to(array("en", "ro")); config::set("multilingual")->to(true); '.$code;
+	$process = proc_open(php_argv('-r', $script), array(1 => array('pipe', 'w'), 2 => array('redirect', 1)), $pipes, $dir,
+		array('RASTER_DB' => $db, 'RASTER_ENV' => 'development', 'PATH' => getenv('PATH')));
+	$out = stream_get_contents($pipes[1]);
+	proc_close($process);
+	$json = json_decode($out, true);
+	check(is_array($json), 'the child said: '.$out);
+	return $json;
+}
+// an editor's session cookie on $base; $accept is the browser's Accept-Language
+function p2b_login($base, $email = 'zzp2b-editor@example.test') {
+	cms_store::connect();
+	authentication::create_user($email, 'a long password', 'editor', 'Ed');
+	list($status, , $headers) = form_post("$base/login", array('raster_form' => 'authentication.login', 'login' => $email, 'password' => 'a long password'));
+	same(303, $status, 'login');
+	return preg_replace('/^Set-Cookie:\s*([^;]+).*$/i', '$1', current(preg_grep('/^Set-Cookie:\s*PHPSESSID/i', $headers)));
+}
+// the editor's config on a page, decoded, and the raw JSON
+function p2b_config($url, $cookie, $headers = array()) {
+	$page = http('GET', $url, null, array_merge(array("Cookie: $cookie"), $headers))[1];
+	check(preg_match('#<script id="raster-editor-config" type="application/json">(.*?)</script>#s', (string)$page, $m) === 1, 'no editor: '.$page);
+	return array(json_decode($m[1], true), $m[1], $page);
+}
+// the mark of a page field in a config
+function p2b_mark($config, $field) {
+	foreach ($config['marks'] as $mark) if ($mark['kind'] === 'field' && $mark['field'] === $field) return $mark;
+	return null;
+}
+// the tables and columns the P2.B tests made, taken away again
+function p2b_clean($site_last) {
+	cms_store::connect();
+	R::exec('DROP TABLE IF EXISTS zzp2baboutpage');
+	R::exec('DROP TABLE IF EXISTS zzp2bunitpage');
+	R::exec('DELETE FROM sitepage WHERE id > ?', array($site_last));
+	$columns = cms_store::columns('sitepage');
+	foreach (array_keys($columns) as $column) {
+		if (strpos($column, 'zzp2b') !== false) R::exec("ALTER TABLE sitepage DROP COLUMN `$column`");
+	}
+	cms_store::forget();
+}
+
+test('P2.B: localized() shows each translated field in the language, the default language\'s value while it is empty', function () {
+	$out = p2b_php(p2b_copy(), 'R::exec("DROP TABLE IF EXISTS zzp2bunitpage");
+		cms_types::ensure("zzp2bunitpage", array("slug" => "text", "updated_at" => "datetime", "headline" => "text", "intro" => "text", "photo" => "text"), array("headline", "intro"));
+		$row = array("headline" => "Our story", "headline__ro" => "Povestea noastră", "intro" => "Since 2001", "intro__ro" => "", "photo" => "a.jpg");
+		$null = array("intro__ro" => null) + $row;
+		echo json_encode(array(
+			"translated" => cms_types::translated("zzp2bunitpage"),
+			"ro" => cms_store::localized($row, "zzp2bunitpage", "ro"),
+			"null" => cms_store::localized($null, "zzp2bunitpage", "ro")["intro"],
+			"en" => cms_store::localized($row, "zzp2bunitpage", "en") === $row,
+			"current" => i18n::with("ro", function () use ($row) { return cms_store::localized($row, "zzp2bunitpage"); })["headline"],
+			"default" => cms_store::localized($row, "zzp2bunitpage") === $row,
+			"off" => with_off(function () use ($row) { return cms_store::localized($row, "zzp2bunitpage", "ro") === $row; }),
+		));
+		R::exec("DROP TABLE zzp2bunitpage");
+		function with_off($fn) { config::set("multilingual")->to(false); try { return $fn(); } finally { config::set("multilingual")->to(true); } }
+	');
+	sort($out['translated']);
+	same(array('headline', 'intro'), $out['translated']);
+	// the translation, or the default's value; the translations stay in the row
+	same(array('headline' => 'Povestea noastră', 'headline__ro' => 'Povestea noastră', 'intro' => 'Since 2001', 'intro__ro' => '', 'photo' => 'a.jpg'), $out['ro']);
+	same('Since 2001', $out['null']);
+	same('Povestea noastră', $out['current'], 'null is the current language');
+	same(true, $out['en'], 'the default language is the row as it is');
+	same(true, $out['default'], 'the default when no language is current');
+	same(true, $out['off'], 'off is the row as it is');
+});
+
+test('P2.B: update_page() in a language writes its column, refuses a shared field, keeps saved_lang and sends lang', function () {
+	$out = p2b_php(p2b_copy(), 'R::exec("DROP TABLE IF EXISTS zzp2bunitpage");
+		function p2b_saved($payload) { $GLOBALS["p2b_events"][] = $payload; }
+		event::bind("cms.page_saved")->to(null, "p2b_saved");
+		cms_types::ensure("zzp2bunitpage", array("slug" => "text", "updated_at" => "datetime", "headline" => "text", "intro" => "text", "photo" => "text"), array("headline", "intro"));
+		$all = array("headline", "intro", "photo");
+		cms_store::update_page("zzp2bunitpage", "/zzp2bunit", array("headline" => "Our story", "photo" => "a.jpg"), $all);
+		$ro = cms_store::update_page("zzp2bunitpage", "/zzp2bunit", array("headline" => "Povestea noastră"), $all, "ro");
+		$revisions = (int)R::count("zzp2bunitpage");
+		$refused = null;
+		try { cms_store::update_page("zzp2bunitpage", "/zzp2bunit", array("headline" => "x", "photo" => "b.jpg"), $all, "ro"); } catch (cms_refused $e) { $refused = $e->problems; }
+		$unknown = null;
+		try { cms_store::update_page("zzp2bunitpage", "/zzp2bunit", array("headline" => "x"), $all, "de"); } catch (InvalidArgumentException $e) { $unknown = $e->getMessage(); }
+		$named = null;
+		try { cms_store::update_page("zzp2bunitpage", "/zzp2bunit", array("headline__ro" => "x"), $all, "ro"); } catch (InvalidArgumentException $e) { $named = $e->getMessage(); }
+		echo json_encode(array(
+			"fields" => array_intersect_key($ro["fields"], array_flip(array("headline", "headline__ro", "photo"))),
+			"revisions" => array($revisions, (int)R::count("zzp2bunitpage")),
+			"refused" => $refused, "unknown" => $unknown, "named" => $named,
+			"saved_lang" => R::getCol("SELECT saved_lang FROM zzp2bunitpage ORDER BY id"),
+			"history" => array_map(function ($r) { return array($r["saved_lang"], array_key_exists("saved_lang", $r["fields"])); }, cms_store::page_history("zzp2bunitpage")),
+			"events" => array_map(function ($e) { return array($e["lang"], $e["changed"]); }, $GLOBALS["p2b_events"]),
+		));
+		R::exec("DROP TABLE zzp2bunitpage");
+	');
+	// the default language's value stays, the translation is beside it
+	same(array('headline' => 'Our story', 'photo' => 'a.jpg', 'headline__ro' => 'Povestea noastră'), $out['fields']);
+	// nothing stored when one of the fields is shared by every language
+	same(array('field_shared'), $out['refused']);
+	same(array(2, 2), $out['revisions'], 'refused writes store no revision');
+	check(strpos((string)$out['unknown'], "Unknown language 'de'") === 0, (string)$out['unknown']);
+	check(strpos((string)$out['named'], "Unknown field 'headline__ro'") === 0, 'a column is not a field: '.$out['named']);
+	same(array('en', 'ro'), $out['saved_lang']);
+	same(array(array('ro', false), array('en', false)), $out['history'], 'the history says the language, not as a field');
+	same(array(array('en', array('headline', 'photo')), array('ro', array('headline'))), $out['events']);
+});
+
+test('P2.B: an editor on /ro/ saves Romanian, /about keeps English, and an empty Romanian field shows English', function () {
+	$site_last = (int)R::getCell('SELECT MAX(id) FROM sitepage');
+	try {
+		p2b_site(function ($dir) {
+			p2b_server($dir, function ($base) {
+				// the first prints make the fields and their Romanian columns (development)
+				same(200, http('GET', "$base/zzp2babout")[0]);
+				$columns = cms_store::columns('zzp2baboutpage');
+				foreach (array('zzp2b_headline__ro', 'zzp2b_intro__ro', 'zzp2b_title__ro') as $column) check(isset($columns[$column]), "$column: ".implode(', ', array_keys($columns)));
+				check(!isset($columns['zzp2b_photo__ro']), 'a photo (@src) is shared');
+				check(isset(cms_store::columns('sitepage')['site_zzp2b_tagline__ro']), 'site fields too');
+				$editor = p2b_login($base);
+				list($config) = p2b_config("$base/ro/zzp2babout", $editor);
+				same('ro', $config['lang'], 'the content language');
+				same($base.'/ro/api/cms/', $config['api'], 'saves go to the page\'s language');
+				same(array('en', 'ro'), $config['languages']);
+				$mark = p2b_mark($config, 'zzp2b_headline');
+				same(array('ro', false, true, 'Our story', 'Our story'), array($mark['lang'], $mark['shared'], $mark['untranslated'], $mark['fallback'], $mark['value']), json_encode($mark));
+				same(array('ro', true), array(p2b_mark($config, 'zzp2b_photo')['lang'], p2b_mark($config, 'zzp2b_photo')['shared']));
+				check(!isset(p2b_mark($config, 'zzp2b_photo')['untranslated']), 'a shared field is never untranslated');
+				$post = function ($endpoint, $fields, $lang = 'ro') use ($base, $editor, $config) {
+					$url = $lang === 'ro' ? "$base/ro/api/cms/$endpoint" : "$base/api/cms/$endpoint";
+					list($status, $body) = form_post($url, $fields + array('csrf' => $config['csrf']), array("Cookie: $editor"));
+					return array($status, json_decode($body, true), $body);
+				};
+				$field = array('type' => $config['page']['type'], 'slug' => $config['page']['slug']);
+				list($status, $json, $body) = $post('editor_save_field', $field + array('field' => 'zzp2b_headline', 'value' => 'Povestea noastră', 'lang' => 'ro'));
+				same(200, $status, $body);
+				same('Povestea noastră', $json['value']);
+				check(strpos(http('GET', "$base/ro/zzp2babout")[1], '<h1>Povestea noastră</h1>') !== false, 'Romanian on /ro/');
+				check(strpos(http('GET', "$base/zzp2babout")[1], '<h1>Our story</h1>') !== false, 'English stays on /');
+				// an empty translation shows the default language's words
+				$post('editor_save_field', $field + array('field' => 'zzp2b_headline', 'value' => '', 'lang' => 'ro'));
+				check(strpos(http('GET', "$base/ro/zzp2babout")[1], '<h1>Our story</h1>') !== false, 'English while the Romanian is empty');
+				$post('editor_save_field', $field + array('field' => 'zzp2b_headline', 'value' => 'Povestea noastră', 'lang' => 'ro'));
+				// site fields alike
+				list($status, , $body) = $post('editor_save_field', array('type' => 'sitepage', 'slug' => 'site', 'field' => 'site_zzp2b_tagline', 'value' => 'Cafea fără grabă', 'lang' => 'ro'));
+				same(200, $status, $body);
+				check(strpos(http('GET', "$base/ro/zzp2babout")[1], '<footer>Cafea fără grabă</footer>') !== false, 'the site field in Romanian');
+				check(strpos(http('GET', "$base/zzp2babout")[1], '<footer>Slow coffee</footer>') !== false, 'and in English');
+				// a shared field is one value for every language
+				list($status, , $body) = $post('editor_save_field', $field + array('field' => 'zzp2b_photo', 'value' => '/media/b.jpg', 'lang' => 'ro'));
+				same(200, $status, $body);
+				check(strpos(http('GET', "$base/zzp2babout")[1], 'src="/media/b.jpg"') !== false, 'the photo changed everywhere');
+				// the page's language is the URL's: a page open in another one is refused
+				list($status, $json) = $post('editor_save_field', $field + array('field' => 'zzp2b_headline', 'value' => 'Wrong', 'lang' => 'en'));
+				same(400, $status);
+				list($status) = $post('editor_save_field', $field + array('field' => 'zzp2b_headline', 'value' => 'Wrong'));
+				same(400, $status, 'no lang');
+				list($status) = $post('editor_save_field', $field + array('field' => 'zzp2b_headline', 'value' => 'Wrong', 'lang' => 'ro'), 'en');
+				same(400, $status, '/api/ is the default language');
+				// a language's column is never a field of its own
+				list($status, $json) = $post('editor_save_field', $field + array('field' => 'zzp2b_headline__ro', 'value' => 'Wrong', 'lang' => 'ro'));
+				same(array(400, "Unknown field 'zzp2b_headline__ro'"), array($status, $json['error']));
+				check(strpos(http('GET', "$base/ro/zzp2babout")[1], 'Wrong') === false, 'nothing refused was stored');
+				// the English page edits English
+				list($en) = p2b_config("$base/zzp2babout", $editor);
+				same(array('en', null), array(p2b_mark($en, 'zzp2b_headline')['lang'], isset(p2b_mark($en, 'zzp2b_headline')['shared']) ? true : null));
+				list($status, , $body) = $post('editor_save_field', $field + array('field' => 'zzp2b_headline', 'value' => 'Our whole story', 'lang' => 'en'), 'en');
+				same(200, $status, $body);
+				check(strpos(http('GET', "$base/ro/zzp2babout")[1], '<h1>Povestea noastră</h1>') !== false, 'the Romanian stays');
+				// the history says which language each revision changed
+				list($status, $json, $body) = $post('editor_history', $field + array('lang' => 'ro'));
+				same(200, $status, $body);
+				$langs = array_map(function ($r) { return $r['saved_lang']; }, $json['revisions']);
+				// the newest first: the English save, the photo (shared, so the
+				// default language's), the three Romanian ones
+				same(array('en', 'en', 'ro', 'ro', 'ro'), array_slice($langs, 0, 5), json_encode($langs));
+				// restoring brings back the whole row, every language
+				$old = $json['revisions'][1];
+				same('Povestea noastră', $old['fields']['zzp2b_headline__ro']);
+				$post('editor_save_field', $field + array('field' => 'zzp2b_headline', 'value' => 'Altă poveste', 'lang' => 'ro'));
+				list($status, , $body) = $post('editor_restore', $field + array('revision' => $old['revision']), 'ro');
+				same(200, $status, $body);
+				check(strpos(http('GET', "$base/ro/zzp2babout")[1], '<h1>Povestea noastră</h1>') !== false, 'the Romanian is back');
+				check(strpos(http('GET', "$base/zzp2babout")[1], '<h1>Our story</h1>') !== false, 'and the English of then');
+			});
+		});
+	} finally {
+		p2b_clean($site_last);
+	}
+});
+
+test('P2.B: the editor\'s own words: an English editor on /ro/ sees English, the browser\'s otherwise, and the dock\'s choice wins', function () {
+	$site_last = (int)R::getCell('SELECT MAX(id) FROM sitepage');
+	try {
+		p2b_site(function ($dir) {
+			p2b_server($dir, function ($base) {
+				$editor = p2b_login($base, 'zzp2b-words@example.test');
+				// English browser on the Romanian page: English words, Romanian content
+				list($config) = p2b_config("$base/ro/zzp2babout", $editor, array('Accept-Language: en-GB,en;q=0.9'));
+				same(array('ro', 'en'), array($config['lang'], $config['editor_lang']));
+				same(array(), (array)$config['strings'], 'English is editor.js\'s own');
+				check(in_array('ro', $config['editor_languages'], true) && $config['editor_languages'][0] === 'en', json_encode($config['editor_languages']));
+				// a Romanian browser on the English page: Romanian words
+				list($config) = p2b_config("$base/zzp2babout", $editor, array('Accept-Language: ro-RO,ro;q=0.9'));
+				same(array('en', 'ro'), array($config['lang'], $config['editor_lang']));
+				same('Editează', $config['strings']['edit']);
+				same('editezi: {lang}', $config['strings']['editing_lang']);
+				// a language the editor has no words in falls back to the default's
+				list($config) = p2b_config("$base/ro/zzp2babout", $editor, array('Accept-Language: de'));
+				same('en', $config['editor_lang']);
+				// the dock's picker: the account's choice wins over the browser
+				$post = function ($fields, $headers = array()) use ($base, $editor, $config) {
+					list($status, $body) = form_post("$base/ro/api/cms/editor_set_lang", $fields, array_merge(array("Cookie: $editor"), $headers));
+					return array($status, json_decode($body, true));
+				};
+				same(403, $post(array('lang' => 'ro'))[0], 'the session token');
+				same(array(400, "The editor has no words in 'xx'"), array($post(array('lang' => 'xx', 'csrf' => $config['csrf']))[0], $post(array('lang' => 'xx', 'csrf' => $config['csrf']))[1]['error']));
+				same(array(200, array('editor_lang' => 'ro')), $post(array('lang' => 'RO', 'csrf' => $config['csrf'])));
+				same('ro', R::getCell('SELECT editor_lang FROM user WHERE email = ?', array('zzp2b-words@example.test')));
+				list($config) = p2b_config("$base/ro/zzp2babout", $editor, array('Accept-Language: en'));
+				same(array('ro', 'Editează'), array($config['editor_lang'], $config['strings']['edit']));
+				// '' follows the browser again
+				same(200, $post(array('lang' => '', 'csrf' => $config['csrf']))[0]);
+				same('en', p2b_config("$base/ro/zzp2babout", $editor, array('Accept-Language: en'))[0]['editor_lang']);
+			});
+		});
+	} finally {
+		p2b_clean($site_last);
+	}
+});
+
+test('P2.B: off, the editor\'s config JSON is byte for byte what it was, and saves are what they were', function () use ($base) {
+	$theme = APPBASE.'views/default';
+	test_fixture("$theme/zzp2boff.html");
+	file_put_contents("$theme/zzp2boff.html", '<!doctype html><html><head><title>Off</title></head><body><h1><!-- print.cms.zzp2b_off -->Plain<!-- /print.cms.zzp2b_off --></h1></body></html>');
+	$GLOBALS['p2b_events'] = array();
+	try {
+		$editor = p2b_login($base, 'zzp2b-off@example.test');
+		// the 2.2.45 config: these keys, in this order, and nothing else
+		$keys = array('api', 'csrf', 'page', 'user', 'marks', 'admin', 'strings', 'lang', 'now');
+		$mark_keys = array('kind', 'type', 'slug', 'field', 'value', 'default', 'rich', 'attr');
+		$same = function ($raw) use ($keys, $mark_keys) {
+			$config = json_decode($raw);
+			$rebuilt = new stdClass();
+			foreach ($keys as $key) {
+				check(property_exists($config, $key), "no $key");
+				$rebuilt->$key = $config->$key;
+			}
+			foreach ((array)$config->marks as $mark) {
+				if ($mark->kind === 'field') same($mark_keys, array_keys((array)$mark));
+			}
+			same(json_encode($rebuilt, JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR), $raw);
+			return json_decode($raw, true);
+		};
+		// no languages
+		$config = $same(p2b_config("$base/zzp2boff", $editor, array('Accept-Language: ro'))[1]);
+		same(array('', array()), array($config['lang'], $config['strings']));
+		// template-only languages: ?lang= picks the editor's words, as before
+		p0c_settings("config::set('languages')->to(array('en', 'ro'));", function () use ($base, $editor, $same) {
+			$config = $same(p2b_config("$base/zzp2boff?lang=ro", $editor)[1]);
+			same('ro', $config['lang']);
+			same((include BASE.'models/cms/editor/lang/ro.php'), $config['strings']);
+			// a save is what it was: no saved_lang, no lang in the event, a stray lang ignored
+			event::bind('cms.page_saved')->to(null, 'p2b_off_saved');
+			list($status, $body) = form_post("$base/api/cms/editor_save_field", array('type' => 'zzp2boffpage', 'slug' => '/zzp2boff', 'field' => 'zzp2b_off', 'value' => 'Saved', 'lang' => 'xx', 'csrf' => $config['csrf']), array("Cookie: $editor"));
+			same(200, $status, $body);
+			same(array('value' => 'Saved', 'revision' => (int)R::getCell('SELECT MAX(id) FROM zzp2boffpage')), json_decode($body, true));
+			check(!array_key_exists('saved_lang', cms_store::columns('zzp2boffpage')), 'no saved_lang column');
+			cms_store::update_page('zzp2boffpage', '/zzp2boff', array('zzp2b_off' => 'Again'), array('zzp2b_off'), 'ro');
+			same('Again', R::getCell('SELECT zzp2b_off FROM zzp2boffpage ORDER BY id DESC LIMIT 1'), 'a language is ignored off');
+			same(array('type', 'slug', 'changed', 'fields'), array_keys($GLOBALS['p2b_events'][0]));
+			same(array('revision', 'updated_at', 'fields'), array_keys(cms_store::page_history('zzp2boffpage')[0]));
+		});
+	} finally {
+		@unlink("$theme/zzp2boff.html");
+		R::exec('DROP TABLE IF EXISTS zzp2boffpage');
+		cms_store::forget();
+	}
+});
+function p2b_off_saved($payload) { $GLOBALS['p2b_events'][] = $payload; }
+
+// ## P2.A: translation columns, schema, lint
+
+// settings that make a site multilingual, for with_settings()
+function p2a_on($languages = array('en', 'ro')) {
+	return array('multilingual' => true, 'languages' => $languages);
+}
+// the columns of a table, as the database has them now
+function p2a_columns($table) {
+	cms_store::forget();
+	return array_keys(cms_store::columns($table));
+}
+// the SQL $fn sends
+function p2a_sql($fn) {
+	R::startLogging();
+	try {
+		$fn();
+		return R::getLogs();
+	} finally {
+		R::stopLogging();
+	}
+}
+// takes out what schema --apply added ("added t.c" lines), and the tables
+function p2a_undo($changes, $tables = array()) {
+	cms_store::connect();
+	foreach ($changes as $change) {
+		if (!preg_match('/^added ([a-z0-9_]+)\.([a-z0-9_]+)$/', $change, $m) || in_array($m[1], $tables, true)) continue;
+		cms_store::forget();
+		if (array_key_exists($m[2], cms_store::columns($m[1]))) R::getDatabaseAdapter()->exec("ALTER TABLE `{$m[1]}` DROP COLUMN `{$m[2]}`");
+	}
+	foreach ($tables as $table) R::getDatabaseAdapter()->exec("DROP TABLE IF EXISTS `$table`");
+	cms_store::forget();
+}
+
+test('P2.A: translates() is the D7 rule: text as content or in an attribute that holds words', function () {
+	foreach (array(null, 'alt', 'title', 'placeholder', 'aria-label', 'content', '@alt', 'ALT') as $attribute) {
+		same(true, cms_types::translates('text', $attribute), 'text in '.var_export($attribute, true));
+	}
+	foreach (array('src', 'href', 'data-id', 'class', 'value', 'datetime', 'srcset', '+class') as $attribute) {
+		same(false, cms_types::translates('text', $attribute), "text in $attribute");
+	}
+	foreach (array('int', 'number', 'bool', 'date', 'datetime', 'time') as $type) {
+		same(false, cms_types::translates($type), $type);
+		same(false, cms_types::translates($type, 'alt'), "$type in alt");
+	}
+});
+
+test('P2.A: ensure() adds a column per translation language only when multilingual is on', function () {
+	cms_store::connect();
+	$types = array('slug' => 'text', 'headline' => 'text', 'price' => 'int');
+	$fresh = function ($translated) use ($types) {
+		R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS zzp2aensurepage');
+		cms_store::forget();
+		return p2a_sql(function () use ($types, $translated) { cms_types::ensure('zzp2aensurepage', $types, $translated); });
+	};
+	try {
+		// off, languages without the switch, and one language: the SQL is
+		// the same with or without $translated
+		$plain = $fresh(array());
+		same($plain, $fresh(array('headline')), 'off');
+		foreach (array(array('multilingual' => false, 'languages' => array('en', 'ro')), p2a_on(array('en'))) as $settings) {
+			same($plain, with_settings($settings, function () use ($fresh) { return $fresh(array('headline')); }), json_encode($settings));
+			same(array(), with_settings($settings, function () { return cms_types::translated('zzp2aensurepage'); }));
+		}
+		same(array('id', 'slug', 'headline', 'price'), p2a_columns('zzp2aensurepage'));
+		// on: <field><suffix> for every translation language, of the field's type
+		with_settings(p2a_on(array('en', 'ro', 'pt-br')), function () use ($types) {
+			cms_types::ensure('zzp2aensurepage', $types, array('headline', 'price'));
+			same(array('id', 'slug', 'headline', 'price', 'headline__ro', 'headline__pt_br', 'price__ro', 'price__pt_br'), p2a_columns('zzp2aensurepage'));
+			same('text', cms_types::of_table('zzp2aensurepage')['headline__pt_br']);
+			same('int', cms_types::of_table('zzp2aensurepage')['price__ro'], 'the type of its field');
+			// again: nothing new, nothing dropped
+			$again = p2a_sql(function () use ($types) { cms_types::ensure('zzp2aensurepage', $types, array('headline', 'price')); });
+			check(!preg_grep('/ALTER/i', $again), 'no ALTER the second time: '.json_encode($again));
+			same(array('headline', 'price'), cms_types::translated('zzp2aensurepage'));
+			// a field already in the table, named only in $translated
+			cms_types::ensure('zzp2aensurepage', array(), array('slug'));
+			check(in_array('slug__ro', p2a_columns('zzp2aensurepage')), 'slug__ro');
+			$refused = null;
+			try { cms_types::ensure('zzp2aensurepage', array(), array('head__line')); } catch (InvalidArgumentException $e) { $refused = $e->getMessage(); }
+			check($refused !== null, 'a name with __ is refused');
+		});
+		// off again: translated() is empty and the columns stay
+		same(array(), cms_types::translated('zzp2aensurepage'));
+		check(in_array('headline__ro', p2a_columns('zzp2aensurepage')), 'kept');
+	} finally {
+		R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS zzp2aensurepage');
+		cms_store::forget();
+	}
+});
+
+// D3: RedBean reads x_id as a link to an x record. Raster declares every
+// translation column before a value is stored in it, and then name__id
+// (Indonesian) is a plain text column, fluid and frozen. On MySQL a column
+// RedBean made itself would be an int; nothing in Raster lets it.
+test('P2.A: name__id is a plain text column, fluid and frozen (SQLite and MySQL)', function () {
+	cms_store::connect();
+	$frozen = R::getRedBean()->isFrozen();
+	try {
+		with_settings(p2a_on(array('en', 'id')), function () {
+			R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS zzp2aidpage');
+			cms_store::forget();
+			cms_types::ensure('zzp2aidpage', array('slug' => 'text', 'name' => 'text'), array('name'));
+			same('name__id', cms_types::column('name', 'id'));
+			same(array('id', 'slug', 'name', 'name__id'), p2a_columns('zzp2aidpage'));
+			same('text', cms_types::of_table('zzp2aidpage')['name__id']);
+			same(array('name'), cms_types::translated('zzp2aidpage'));
+			foreach (array(false, true) as $freeze) {
+				R::freeze($freeze);
+				foreach (array('Selamat datang', '12', '', 'Kopi & kue') as $value) {
+					$bean = R::dispense('zzp2aidpage');
+					$bean->slug = '/zzp2aid';
+					$bean->name = 'Welcome';
+					$bean->name__id = $value;
+					$id = R::store($bean);
+					$row = R::load('zzp2aidpage', $id);
+					same($value, (string)$row->name__id, ($freeze ? 'frozen' : 'fluid').' '.json_encode($value));
+					same('Welcome', $row->name, 'and its field');
+					$row->name__id = $value.'!';
+					R::store($row);
+					same($value.'!', (string)R::load('zzp2aidpage', $id)->name__id, 'updated');
+					same($value.'!', (string)R::getCell('SELECT name__id FROM zzp2aidpage WHERE id = ?', array($id)), 'as SQL reads it');
+				}
+			}
+			R::freeze(false);
+			same('text', cms_types::of_column(cms_store::columns('zzp2aidpage')['name__id']), 'still text');
+			same(array('id', 'slug', 'name', 'name__id'), p2a_columns('zzp2aidpage'), 'nothing added');
+			// no link: no foreign key or index on it
+			if (R::getDatabaseAdapter()->getDatabase()->getDatabaseType() === 'mysql') {
+				same(0, (int)R::getCell("SELECT COUNT(*) FROM information_schema.key_column_usage WHERE table_schema = DATABASE() AND table_name = 'zzp2aidpage' AND column_name = 'name__id'"));
+				same(0, (int)R::getCell("SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'zzp2aidpage' AND column_name = 'name__id'"));
+			} else {
+				same(0, (int)R::getCell("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND tbl_name = 'zzp2aidpage' AND sql LIKE '%name\_\_id%' ESCAPE '\\'"));
+				same(array(), R::getAll('PRAGMA foreign_key_list(zzp2aidpage)'));
+			}
+		});
+	} finally {
+		R::freeze($frozen);
+		R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS zzp2aidpage');
+		cms_store::forget();
+	}
+});
+
+test('P2.A: saved_lang and __ are reserved everywhere', function () {
+	check(in_array('saved_lang', cms_store::$system_fields, true), 'cms_store::$system_fields');
+	same('text', cms_types::$system['saved_lang']);
+	$grammar = raster_inspector::grammar();
+	check(in_array('saved_lang', $grammar['references']['reserved_fields'], true), 'annotations');
+	foreach (array(array('saved_lang', 'field'), array('head__ro', 'field'), array('a__b', 'field'), array('news__ro', 'collection'), array('team__members', 'collection')) as $name) {
+		same(true, cms::reserved($name[0], $name[1]), json_encode($name));
+	}
+	same(false, cms::reserved('team_members', 'collection'));
+	same(false, cms::reserved('head_line', 'field'));
+	check(has_problem(lint_html('<p><!-- print.cms.saved_lang -->x<!-- /print.cms.saved_lang --></p>'), "'saved_lang' is reserved by the CMS"), 'lint');
+});
+
+test('P2.A: double_underscore is an error, multilingual or not', function () {
+	foreach (array(array(), p2a_on()) as $settings) {
+		with_settings($settings, function () {
+			$errors = function ($html) {
+				return array_values(array_map(function ($p) { return $p['message']; }, array_filter(lint_html($html), function ($p) { return $p['severity'] === 'error'; })));
+			};
+			$said = "has __ in it, which Raster keeps for translation columns";
+			$field = $errors('<p><!-- print.cms.head__line -->x<!-- /print.cms.head__line --></p>');
+			check(count($field) === 1 && strpos($field[0], "'head__line' $said") !== false && strpos($field[0], 'give the field a name') !== false, json_encode($field));
+			$collection = $errors('<ul><!-- render.cms.news__ro --><li><!-- print.title -->T<!-- /print.title --></li><!-- /render.cms.news__ro --></ul>');
+			check(count($collection) === 1 && strpos($collection[0], "'news__ro' $said") !== false && strpos($collection[0], 'give the collection a name') !== false, json_encode($collection));
+			$key = $errors('<ul><!-- render.cms.zzp2anews --><li><!-- print.sub__title -->T<!-- /print.sub__title --></li><!-- /render.cms.zzp2anews --></ul>');
+			check(count($key) === 1 && strpos($key[0], "'sub__title' $said") !== false, json_encode($key));
+			same(array(), $errors('<p><!-- print.cms.head_line -->x<!-- /print.cms.head_line --></p>'), 'one _ is fine');
+		});
+	}
+});
+
+test('P2.A: the content model says which fields are translated, every place they print', function () use ($root) {
+	$theme = "$root/application/views/default";
+	foreach (array('zzp2amodel.html', 'zzp2aother.html') as $view) test_fixture("$theme/$view");
+	file_put_contents("$theme/zzp2amodel.html", '<html><head><title>M</title></head><body>'
+		.'<h1><!-- print.cms.headline -->Hello<!-- /print.cms.headline --></h1>'
+		.'<!-- print.@src.cms.photo --><!-- print.@alt.cms.photo_alt --><img src="a.jpg" alt="A cup"><!-- /print.@alt.cms.photo_alt --><!-- /print.@src.cms.photo -->'
+		.'<!-- print.@placeholder.cms.ask --><input placeholder="Your name"><!-- /print.@placeholder.cms.ask -->'
+		.'<p><!-- print.cms.seats -->14<!-- /print.cms.seats --></p>'
+		// a link's text and its href: one value, shared
+		.'<!-- print.@href.cms.site_link --><a href="https://example.com"><!-- print.cms.site_link -->https://example.com<!-- /print.cms.site_link --></a><!-- /print.@href.cms.site_link -->'
+		.'<p><!-- print.cms.site_motto -->Good coffee<!-- /print.cms.site_motto --></p>'
+		.'<ul><!-- render.cms.zzp2adishes --><li><!-- print.name -->Soup<!-- /print.name --><!-- print.@src.photo --><img src="s.jpg"><!-- /print.@src.photo -->'
+		.'<!-- print.price -->4.50<!-- /print.price --><!-- print.@title.note --><b title="Hot">!</b><!-- /print.@title.note --></li><!-- /render.cms.zzp2adishes --></ul>'
+		.'</body></html>');
+	// site_motto printed into an href on another page is shared too
+	file_put_contents("$theme/zzp2aother.html", '<html><head><title>O</title></head><body><!-- print.@href.cms.site_motto --><a href="/x">x</a><!-- /print.@href.cms.site_motto -->'
+		.'<ul><!-- render.cms.zzp2adishes --><li><!-- print.@data-name.name --><i data-name="Soup">i</i><!-- /print.@data-name.name --></li><!-- /render.cms.zzp2adishes --></ul></body></html>');
+	try {
+		foreach (array(array(), p2a_on()) as $settings) {
+			$model = with_settings($settings, function () { return (new raster_inspector())->content_model(); });
+			$page = null; $site = null;
+			foreach ($model['pages'] as $p) {
+				if ($p['view'] === 'zzp2amodel.html') $page = $p;
+				if ($p['type'] === 'sitepage') $site = $p;
+			}
+			$translate = array_map(function ($f) { return $f['translate']; }, $page['fields']);
+			same(array('headline' => true, 'photo' => false, 'photo_alt' => true, 'ask' => true, 'seats' => false), $translate, 'page fields, '.json_encode($settings));
+			same(false, $site['fields']['site_link']['translate'], 'text and href: shared');
+			same(false, $site['fields']['site_motto']['translate'], 'content here, an href there: shared');
+			same(true, $site['fields']['site_name']['translate'], "the starter's site_name");
+			$dishes = array_map(function ($f) { return $f['translate']; }, $model['collections']['zzp2adishes']['fields']);
+			same(array('name' => false, 'photo' => false, 'price' => false, 'note' => true), $dishes, 'collection fields (name is in a data- attribute on the other page)');
+			foreach ($model['collections'] as $name => $collection) {
+				foreach ($collection['fields'] as $field => $info) check(array_key_exists('translate', $info), "$name.$field has the key");
+				if (isset($collection['model'])) foreach ($collection['fields'] as $info) same(false, $info['translate'], "a record type's fields are shared until P3: $name");
+			}
+		}
+	} finally {
+		foreach (array('zzp2amodel.html', 'zzp2aother.html') as $view) @unlink("$theme/$view");
+	}
+});
+
+test('P2.A: off is identical: schema output and the content model\'s public views', function () use ($root, $db) {
+	// describe and site_overview pick their keys: no translate in them
+	require_once BASE.'tools/describe.php';
+	$described = json_encode(raster_describe::site(array('pages', 'collections')));
+	check(strpos($described, 'translate') === false, 'describe: '.$described);
+	// a site without languages: schema's status has exactly 2.2.45's keys
+	$status = (new raster_schema())->status();
+	same(array('environment', 'frozen', 'drift', 'tables', 'system_tables', 'unused_tables', 'site_url'), array_keys($status));
+	foreach ($status['tables'] as $table) {
+		check(!array_key_exists('missing_translations', $table) && !array_key_exists('translated', $table) && !array_key_exists('kept', $table), $table['table']);
+	}
+	// and lint says nothing of languages
+	$problems = (new raster_inspector())->lint();
+	check(!has_problem($problems, 'the same in every language') && !has_problem($problems, "names one language on every language's pages"), 'no language warnings off');
+});
+
+test('P2.A: schema --apply adds exactly the translation columns; off they are kept translations, never orphans or drift', function () use ($root, $db) {
+	$theme = "$root/application/views/default";
+	$view = "$theme/zzp2aschema.html";
+	test_fixture($view);
+	$write = function ($headline) use ($view) {
+		file_put_contents($view, '<html><head><title>S</title></head><body>'
+			."<h1><!-- print.cms.$headline -->Hello<!-- /print.cms.$headline --></h1>"
+			.'<!-- print.@src.cms.photo --><!-- print.@alt.cms.photo_alt --><img src="a.jpg" alt="A cup"><!-- /print.@alt.cms.photo_alt --><!-- /print.@src.cms.photo -->'
+			.'<p><!-- print.cms.seats -->14<!-- /print.cms.seats --></p></body></html>');
+	};
+	$write('headline');
+	$type = cms::page_type('/zzp2aschema');
+	$schema = new raster_schema();
+	$table = function ($status) use ($type) {
+		foreach ($status['tables'] as $t) if ($t['table'] === $type) return $t;
+		return null;
+	};
+	$changes = array();
+	$raster = function ($args) use ($root, $db) {
+		exec('RASTER_ENV=development RASTER_DB='.escapeshellarg($db).' '.php_cmd().' '.escapeshellarg("$root/bin/raster").' '.$args.' 2>&1', $out, $code);
+		return array($code, implode("\n", $out));
+	};
+	try {
+		// off: what 2.2.45 said, and the table made as it was
+		$status = $schema->status();
+		check(!array_key_exists('translations', $status), 'no translations key off, on a site that never had any');
+		same(array('view', 'url', 'slug', 'kind', 'table', 'exists', 'rows', 'fields', 'missing', 'retyped', 'narrow', 'orphans', 'rename_candidates'), array_keys($table($status)), 'the keys of 2.2.45');
+		$changes = $schema->apply();
+		same(array('id', 'slug', 'updated_at', 'headline', 'photo', 'photo_alt', 'seats'), p2a_columns($type), 'off: no translation columns');
+		$drift_before = $schema->status()['drift'];
+		// on: the translated fields' columns, saved_lang, and nothing else
+		$on = with_settings(p2a_on(array('en', 'ro', 'pt-br')), function () use ($schema, $table, $type, &$changes) {
+			$status = $schema->status();
+			$t = $table($status);
+			same(array('headline', 'photo_alt'), $t['translated']);
+			same(array('headline__ro', 'headline__pt_br', 'photo_alt__ro', 'photo_alt__pt_br', 'saved_lang'), $t['missing_translations']);
+			same(true, $status['drift'], 'missing translations are drift');
+			same(array(), $status['translations'], 'on, the key is there');
+			$applied = $schema->apply();
+			$changes = array_merge($changes, $applied);
+			foreach (array('headline__ro', 'headline__pt_br', 'photo_alt__ro', 'photo_alt__pt_br', 'saved_lang') as $column) check(in_array("added $type.$column", $applied, true), "added $column: ".json_encode($applied));
+			same(array('id', 'slug', 'updated_at', 'headline', 'photo', 'photo_alt', 'seats', 'saved_lang', 'headline__ro', 'headline__pt_br', 'photo_alt__ro', 'photo_alt__pt_br'), p2a_columns($type));
+			$t = $table($schema->status());
+			same(array(), $t['missing_translations']);
+			same(array(), $t['orphans']);
+			// a second --apply adds nothing here
+			same(array(), array_values(array_filter($schema->apply(), function ($c) use ($type) { return strpos($c, $type) !== false; })));
+			// translations a language no longer listed holds: kept
+			return with_settings(p2a_on(array('en', 'ro')), function () use ($schema, $table) { return array($table($schema->status()), $schema->status()['translations']); });
+		});
+		same(array(), $on[0]['orphans'], 'pt-br dropped from languages: no orphans');
+		same(array('headline__pt_br', 'photo_alt__pt_br'), $on[1][$type], 'kept');
+		// off again: kept translations, no drift, no orphans, no renames
+		$status = $schema->status();
+		$t = $table($status);
+		same(array(), $t['orphans']);
+		same(array(), $t['rename_candidates']);
+		same(array(), $t['missing']);
+		check(!array_key_exists('missing_translations', $t), 'off: no missing translations');
+		same(array('headline__ro', 'headline__pt_br', 'photo_alt__ro', 'photo_alt__pt_br'), $status['translations'][$type]);
+		same($drift_before, $status['drift'], 'no drift from them');
+		check(!in_array($type, $status['unused_tables']), 'used');
+		list($code, $out) = $raster('schema');
+		check(strpos($out, 'kept translations: headline__ro, headline__pt_br, photo_alt__ro, photo_alt__pt_br') !== false, $out);
+		check(strpos($out, "--drop=$type") === false && strpos($out, "--rename=$type") === false, 'nothing to drop or rename: '.$out);
+		check(!preg_match('/-\s+headline__ro/', $out), 'not listed as an orphan');
+		list($code, $out) = $raster('schema --json');
+		same(array('headline__ro', 'headline__pt_br', 'photo_alt__ro', 'photo_alt__pt_br'), json_decode($out, true)['translations'][$type], $out);
+		same(false, $drift_before, "the starter matches its database");
+		same(0, $raster('schema --check')[0], '--check passes');
+		// a renamed field: its old column is the orphan and the rename, never its translations
+		$write('title');
+		$t = $table($schema->status());
+		same(array('headline'), $t['orphans']);
+		same(array(array('from' => 'headline', 'to' => 'title')), $t['rename_candidates']);
+		with_settings(p2a_on(array('en', 'ro', 'pt-br')), function () use ($schema, $table) {
+			$t = $table($schema->status());
+			same(array('headline', 'headline__ro', 'headline__pt_br'), $t['orphans'], 'on: the old field and its translations go together');
+			same(array(array('from' => 'headline', 'to' => 'title')), $t['rename_candidates']);
+		});
+	} finally {
+		@unlink($view);
+		p2a_undo($changes, array($type));
+	}
+});
+
+test('P2.A: untranslatable_text warns on words no annotation prints, multilingual on only', function () {
+	$html = "<!doctype html>\n<!-- print.@lang.i18n.language --><html lang=\"en\"><!-- /print.@lang.i18n.language -->\n<head><title>Our café</title>\n"
+		."<style>body::after { content: 'styled words'; }</style><script>var said = 'script words';</script></head><body>\n"
+		."<h1><!-- print.cms.headline -->Mock-up words<!-- /print.cms.headline --></h1>\n"
+		."<p>   </p><p>14:00 – 2026, 4.50 € · © → | 12%</p><p>x</p>\n"
+		."<!-- a comment with words -->\n"
+		."<!-- remove --><p>Lorem ipsum dolor</p><!-- /remove -->\n"
+		."<!-- print.@alt.cms.photo_alt --><img src=\"a.jpg\" alt=\"Alt mock-up\"><!-- /print.@alt.cms.photo_alt -->\n"
+		."<p><!-- print.i18n.zzp2a('hello') -->Hello<!-- /print.i18n.zzp2a('hello') --></p>\n"
+		."<!-- render.cms.zzp2alist --><li><!-- print.name -->Soup<!-- /print.name --></li><!-- /render.cms.zzp2alist -->\n"
+		."<p>Opening hours</p>\n"
+		."<!-- print.if.logged_in --><p>Members only</p><!-- /print.if.logged_in -->\n"
+		."<img src=\"b.jpg\" alt=\"Our team\"><input placeholder=\"Your email\">\n"
+		."<!-- print.@href.cms.link --><a href=\"/x\">Read more</a><!-- /print.@href.cms.link -->\n"
+		."<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><meta name=\"description\" content=\"Coffee and cake\">\n"
+		."</body></html>";
+	$warned = function ($html) {
+		$lines = array();
+		foreach (lint_html($html) as $p) if (strpos($p['message'], 'is the same in every language') !== false) $lines[$p['line']] = $p['message'];
+		return $lines;
+	};
+	same(array(), $warned($html), 'off: nothing');
+	$lines = with_settings(p2a_on(), function () use ($warned, $html) { return $warned($html); });
+	same(array(3, 12, 13, 14, 15, 16), array_keys($lines), json_encode($lines));
+	check(strpos($lines[3], "'Our café' is the same in every language") !== false, $lines[3]);
+	check(strpos($lines[3], "print.cms.<name>") !== false && strpos($lines[3], "print.i18n.<file>('key')") !== false, 'suggests both');
+	check(strpos($lines[12], "'Opening hours'") !== false, $lines[12]);
+	check(strpos($lines[14], "alt=\"Our team\"") !== false, 'a fixed alt: '.$lines[14]);
+	check(strpos($lines[16], 'content="Coffee and cake"') !== false, 'a description: '.$lines[16]);
+	// it never floods: ten lines, then one that counts the rest
+	$many = '<html><body>'.str_repeat("\n<p>Fixed words</p>", 25).'</body></html>';
+	$problems = array_values(array_filter(with_settings(p2a_on(), function () use ($many) { return lint_html($many); }), function ($p) { return strpos($p['message'], 'is the same in every language') !== false || strpos($p['message'], 'more line(s) of this view') !== false; }));
+	same(11, count($problems), json_encode($problems));
+	check(strpos($problems[10]['message'], '15 more line(s) of this view') !== false, $problems[10]['message']);
+	// emails are left out
+	$file = sys_get_temp_dir().'/raster-p2a-'.getmypid().'/_email';
+	@mkdir($file, 0775, true);
+	file_put_contents("$file/zz.html", '<html><body><p>Fixed words</p></body></html>');
+	try {
+		same(array(), with_settings(p2a_on(), function () use ($file) { return (new raster_inspector())->lint_path("$file/zz.html"); }));
+	} finally {
+		@unlink("$file/zz.html");
+		@rmdir($file);
+		@rmdir(dirname($file));
+	}
+});
+
+test('P2.A: html_lang_fixed warns on an <html> whose lang no print.i18n.language prints, multilingual on only', function () {
+	$fixed = '<!doctype html><html lang="en"><head><title><!-- print.cms.t -->T<!-- /print.cms.t --></title></head><body></body></html>';
+	$none = '<!doctype html><html><head></head><body></body></html>';
+	$printed = '<!doctype html><!-- print.@lang.i18n.language --><!-- print.@dir.i18n.dir --><html lang="en" dir="ltr"><!-- /print.@dir.i18n.dir --><!-- /print.@lang.i18n.language --><head></head><body></body></html>';
+	$said = "names one language on every language's pages";
+	same(false, has_problem(lint_html($fixed), $said), 'off');
+	with_settings(p2a_on(), function () use ($fixed, $none, $printed, $said) {
+		check(has_problem(lint_html($fixed), '<html lang="en"> '.$said.': wrap it in <!-- print.@lang.i18n.language --><html lang="en"><!-- /print.@lang.i18n.language -->'), json_encode(lint_html($fixed)));
+		check(has_problem(lint_html($none), '<html> '.$said), 'no lang at all');
+		same(false, has_problem(lint_html($printed), $said), 'the starter\'s form');
+	});
+});
+
+test('P2.A: missing_translation_key warns on a dictionary word a language lacks, multilingual on only', function () use ($root) {
+	$dirs = array("$root/application/i18n", "$root/application/i18n/ro", "$root/application/i18n/de");
+	$made = array();
+	foreach ($dirs as $dir) if (!is_dir($dir)) { mkdir($dir); $made[] = $dir; }
+	foreach (array('ro', 'de') as $lang) test_fixture("$root/application/i18n/$lang/zzp2a.php");
+	file_put_contents("$root/application/i18n/ro/zzp2a.php", "<?php return array('hello' => 'Salut', 'bye' => 'Pa');");
+	file_put_contents("$root/application/i18n/de/zzp2a.php", "<?php return array('hello' => 'Hallo');");
+	$html = "<p><!-- print.i18n.zzp2a('hello') -->Hello<!-- /print.i18n.zzp2a('hello') --></p>\n"
+		."<p><!-- print.i18n.zzp2a('bye') -->Bye<!-- /print.i18n.zzp2a('bye') --></p>\n"
+		."<p><!-- print.i18n.zzp2anone('hi') -->Hi<!-- /print.i18n.zzp2anone('hi') --></p>\n"
+		."<!-- print.@alt.i18n.zzp2a('cup') --><img src=\"a.jpg\" alt=\"A cup\"><!-- /print.@alt.i18n.zzp2a('cup') -->\n"
+		.'<p><!-- print.i18n.language -->en<!-- /print.i18n.language --></p>';
+	$keys = function ($html) {
+		$found = array();
+		foreach (lint_html($html) as $p) if (preg_match("/^print\.i18n\.(\w+\('\w+'\)) has no entry in ([a-z, ]+) \(/", $p['message'], $m)) $found[$p['line']] = $m[1].' '.$m[2];
+		return $found;
+	};
+	try {
+		same(array(), $keys($html), 'off');
+		same(array(2 => "zzp2a('bye') de", 3 => "zzp2anone('hi') de, ro", 4 => "zzp2a('cup') de, ro"), with_settings(p2a_on(array('en', 'de', 'ro')), function () use ($keys, $html) { return $keys($html); }));
+		$one = with_settings(p2a_on(array('en', 'de')), function () use ($html) { return lint_html($html); });
+		check(has_problem($one, "print.i18n.zzp2a('bye') has no entry in de (application/i18n/de/zzp2a.php), so that language's pages show the template's text: add 'bye' => '…'"), json_encode($one));
+	} finally {
+		foreach (array('ro', 'de') as $lang) @unlink("$root/application/i18n/$lang/zzp2a.php");
+		foreach (array_reverse($made) as $dir) @rmdir($dir);
+	}
+});
+
+test('P2.A: the starter linted multilingual: warnings only, a few per view', function () {
+	$errors = function ($problems) { return array_values(array_filter($problems, function ($p) { return $p['severity'] === 'error'; })); };
+	$off = (new raster_inspector())->lint();
+	$on = with_settings(p2a_on(), function () { return (new raster_inspector())->lint(); });
+	same($errors($off), $errors($on), 'no new errors');
+	$per_file = array();
+	foreach ($on as $p) if (strpos($p['message'], 'is the same in every language') !== false || strpos($p['message'], 'more line(s) of this view') !== false) $per_file[$p['file']] = (isset($per_file[$p['file']]) ? $per_file[$p['file']] : 0) + 1;
+	foreach ($per_file as $file => $count) check($count <= 11, "$file: $count");
+	foreach ($on as $p) check(strpos($p['file'], '_email/') === false || strpos($p['message'], 'the same in every language') === false, 'no email: '.$p['file']);
+});
+
+test('P2.A: schema --rename moves a field\'s translation columns with it', function () {
+	cms_store::connect();
+	$schema = new raster_schema();
+	try {
+		R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS zzp2arenamepage');
+		cms_store::forget();
+		with_settings(p2a_on(array('en', 'ro', 'pt-br')), function () {
+			cms_types::ensure('zzp2arenamepage', array('slug' => 'text', 'headline' => 'text', 'title__pt_br' => 'text'), array('headline'));
+		});
+		R::getDatabaseAdapter()->exec("INSERT INTO zzp2arenamepage (slug, headline, headline__ro, headline__pt_br) VALUES ('/zz', 'Hello', 'Salut', 'Olá')");
+		// title__pt_br is there already: that one is a move
+		$columns = p2a_columns('zzp2arenamepage');
+		same('would rename zzp2arenamepage.headline to title (and headline__ro to title__ro, headline__pt_br into title__pt_br)', $schema->rename('zzp2arenamepage', 'headline', 'title', true));
+		same($columns, p2a_columns('zzp2arenamepage'), '--dry-run changes nothing');
+		// off: kept translations move too
+		same('renamed zzp2arenamepage.headline to title (and headline__ro to title__ro, headline__pt_br into title__pt_br)', $schema->rename('zzp2arenamepage', 'headline', 'title'));
+		$now = p2a_columns('zzp2arenamepage');
+		sort($now);
+		same(array('id', 'slug', 'title', 'title__pt_br', 'title__ro'), $now);
+		$row = R::getRow('SELECT * FROM zzp2arenamepage');
+		same(array('Hello', 'Salut', 'Olá'), array($row['title'], $row['title__ro'], $row['title__pt_br']));
+		// on: the same
+		same('renamed zzp2arenamepage.title to name (and title__pt_br to name__pt_br, title__ro to name__ro)', with_settings(p2a_on(array('en', 'ro', 'pt-br')), function () use ($schema) { return $schema->rename('zzp2arenamepage', 'title', 'name'); }));
+		// a field without translations reads as before
+		same('renamed zzp2arenamepage.slug to slug2', $schema->rename('zzp2arenamepage', 'slug', 'slug2'));
+	} finally {
+		R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS zzp2arenamepage');
+		cms_store::forget();
+	}
 });
 
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";

@@ -630,6 +630,7 @@ class raster_inspector {
 		$this->lint_blocks($blocks, $problems, null, $theme);
 		$this->lint_forms($html, $problems, $theme);
 		$this->lint_anchor_links($html, $problems);
+		$this->lint_languages($html, $blocks, $problems);
 		usort($problems, function ($a, $b) { return $a['line'] <=> $b['line'] ?: $a['column'] <=> $b['column']; });
 		foreach ($problems as &$problem) {
 			$problem['file'] = $name;
@@ -714,12 +715,19 @@ class raster_inspector {
 				$problems[] = self::problem('error', $block, "{$ref['model']}.$reads takes {$signature['total']} argument(s), $given given");
 			}
 		}
+		if ($ref['model'] === 'cms' && strpos($method, '__') !== false) {
+			$problems[] = self::problem('error', $block, self::double_underscore($method, $block['keyword'] === 'print' ? 'field' : 'collection'));
+			return;
+		}
+		if ($ref['model'] === 'i18n' && !in_array($method, $info['methods']) && isset($arguments[0]) && is_string($arguments[0])) {
+			$this->lint_translation_key($block, $method, $arguments[0], $problems);
+		}
 		if ($ref['model'] === 'cms') {
 			$template_methods = array('style', 'login', 'login_message', 'buttons');
 			// CMS helpers used by templates are written self-closing; a helper name
 			// wrapping default content is a field that would never be stored
 			$reserved = (in_array($method, $info['methods']) && (!in_array($method, $template_methods) || ($block['keyword'] === 'print' && $block['type'] !== 'self')))
-				|| ($block['keyword'] === 'print' && in_array($method, array('slug', 'id', 'updated_at', 'enabled', 'published_at')))
+				|| ($block['keyword'] === 'print' && in_array($method, array('slug', 'id', 'updated_at', 'enabled', 'published_at', 'saved_lang')))
 				|| ($block['keyword'] === 'render' && in_array($method, array('users', 'raster')));
 			if ($reserved) {
 				$problems[] = self::problem('error', $block, "'$method' is reserved by the CMS and can't be used as a ".($block['keyword'] === 'print' ? 'field' : 'collection')." name; pick another name");
@@ -805,6 +813,8 @@ class raster_inspector {
 		$ref = self::model_reference($render['ref']);
 		if ($ref && $ref['model'] === 'cms' && !preg_match('/^[a-z][a-z0-9_]*$/', $key['key'])) {
 			$problems[] = self::problem('error', $block, "CMS field names are lowercase letters, digits and underscores, starting with a letter: '{$key['key']}'");
+		} elseif ($ref && $ref['model'] === 'cms' && strpos($key['key'], '__') !== false) {
+			$problems[] = self::problem('error', $block, self::double_underscore($key['key'], 'field'));
 		}
 	}
 
@@ -882,6 +892,121 @@ class raster_inspector {
 			$href = $link[3][0];
 			$problems[] = self::problem_at('warning', $html, $at, "href=\"$href\" leaves the page: the <base> points at the theme folder, so the link opens that folder. Write href=\"$page.html$href\", which links to this page");
 		}
+	}
+
+	// double_underscore (always, D3): __ joins a field and a language in
+	// a translation's column, so no name of a field or collection has it
+	static function double_underscore($name, $what) {
+		return "'$name' has __ in it, which Raster keeps for translation columns (headline__ro holds headline in Romanian): give the $what a name without __";
+	}
+
+	// ##Languages
+	// Multilingual on (i18n::enabled()), a page has to say each language's
+	// words: untranslatable_text, html_lang_fixed and (lint_model_call)
+	// missing_translation_key, all warnings. Emails and feeds are left out.
+	protected function lint_languages($html, $blocks, &$problems) {
+		if (!i18n::enabled() || preg_match('#(^|/)_email/|\.(rss|atom|xml|json|txt)$#', $this->linting)) return;
+		$blank = function ($text) { return preg_replace('/[^\n]/', ' ', $text); };
+		$html = preg_replace_callback('/<!-- remove -->.*?<!-- \/remove -->/s', function ($m) use ($blank) { return $blank($m[0]); }, $html);
+		// html_lang_fixed: <html lang="en"> is the mock-up a print.@lang.i18n.language replaces
+		if (preg_match_all('/<html\b[^>]*>/i', $html, $tags, PREG_OFFSET_CAPTURE)) {
+			foreach ($tags[0] as $tag) {
+				if (preg_match('/<!-- print\.@lang\.i18n\.language -->(\s*<!--[^>]*-->)*\s*$/', substr($html, max(0, $tag[1] - 400), min($tag[1], 400)))) continue;
+				$problems[] = self::problem_at('warning', $html, $tag[1], "{$tag[0]} names one language on every language's pages: wrap it in <!-- print.@lang.i18n.language -->{$tag[0]}<!-- /print.@lang.i18n.language --> so each page says its own");
+			}
+		}
+		$this->lint_untranslatable($html, $blocks, $problems);
+	}
+
+	// untranslatable_text: words in the markup that no annotation prints,
+	// so every language shows them as written. What a print replaces (its
+	// mock-up), a print.@alt's alt, comments, scripts and styles are not
+	// read; nor are numbers, punctuation and lone symbols (14:00, ©, →).
+	// One warning per line, at most ten per file.
+	protected function lint_untranslatable($html, $blocks, &$problems) {
+		$text = $html;
+		$blank = function (&$text, $from, $length) {
+			if ($length > 0) $text = substr_replace($text, preg_replace('/[^\n]/', ' ', substr($text, $from, $length)), $from, $length);
+		};
+		$walk = function ($blocks) use (&$walk, &$text, $blank) {
+			foreach ($blocks as $block) {
+				if (empty($block['end'])) continue;
+				$from = $block['offset'] + strlen($block['raw']);
+				$length = $block['end']['offset'] - $from;
+				if ($block['keyword'] === 'dry') {
+					$blank($text, $from, $length);
+					continue;
+				}
+				if ($block['keyword'] === 'print') {
+					$call = self::attribute_call($block['ref']);
+					$key = self::data_key($block['ref']);
+					$attribute = $call ? $call['attribute'] : $key['attribute'];
+					if ($attribute !== null) {
+						// the attribute it sets is the mock-up; the rest is shown
+						if (preg_match('/\s'.preg_quote($attribute, '/').'\s*=\s*("[^"]*"|\'[^\']*\')/i', substr($text, $from, $length), $m, PREG_OFFSET_CAPTURE)) $blank($text, $from + $m[1][1], strlen($m[1][0]));
+					} elseif (strpos($block['ref'], 'if.') !== 0) {
+						$blank($text, $from, $length);
+						continue;
+					}
+				}
+				if (!empty($block['children'])) $walk($block['children']);
+			}
+		};
+		$walk($blocks);
+		$text = preg_replace_callback('/<!--.*?-->|<(script|style)\b[^>]*>.*?<\/\1\s*>/is', function ($m) { return preg_replace('/[^\n]/', ' ', $m[0]); }, $text);
+		$words = function ($value) { return preg_match('/\p{L}{2,}/u', html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8')) === 1; };
+		$found = array();
+		$parts = preg_split('/(<[^>]*>)/', $text, -1, PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_OFFSET_CAPTURE);
+		foreach ($parts as $part) {
+			list($value, $at) = $part;
+			if ($value === '') continue;
+			if ($value[0] !== '<') {
+				if ($words($value)) $found[] = array($at + strlen($value) - strlen(ltrim($value)), trim(preg_replace('/\s+/u', ' ', html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8'))));
+				continue;
+			}
+			// the attributes that hold words (D7); a meta's content when it is a description or title
+			$names = 'alt|title|placeholder|aria-label'.(preg_match('/^<meta\b/i', $value) && preg_match('/\s(name|property)\s*=\s*["\']?[^"\'>]*(description|title)/i', $value) ? '|content' : '');
+			if (preg_match_all('/\s('.$names.')\s*=\s*("([^"]*)"|\'([^\']*)\')/i', $value, $attributes, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+				foreach ($attributes as $attribute) {
+					$said = $attribute[3][0] !== '' ? $attribute[3][0] : (isset($attribute[4]) ? $attribute[4][0] : '');
+					if ($words($said)) $found[] = array($at + $attribute[1][1], $attribute[1][0].'="'.trim($said).'"');
+				}
+			}
+		}
+		$lines = array();
+		foreach ($found as $word) {
+			$line = self::position($html, $word[0])['line'];
+			if (!isset($lines[$line])) $lines[$line] = $word;
+		}
+		$shown = 0;
+		foreach ($lines as $line => $word) {
+			if (++$shown > 10) {
+				$problems[] = self::problem_at('warning', $html, $word[0], (count($lines) - 10).' more line(s) of this view have words no annotation prints; see above');
+				break;
+			}
+			$quote = mb_strlen($word[1]) > 40 ? mb_substr($word[1], 0, 39).'…' : $word[1];
+			$problems[] = self::problem_at('warning', $html, $word[0], "'$quote' is the same in every language: no annotation prints it. Make it <!-- print.cms.<name> -->…<!-- /print.cms.<name> --> for words editors change, or <!-- print.i18n.<file>('key') -->…<!-- /print.i18n.<file>('key') --> for fixed words");
+		}
+	}
+
+	// missing_translation_key: a dictionary word some language has no entry
+	// for shows the template's text on that language's pages
+	protected $dictionaries = array();
+
+	protected function lint_translation_key($block, $file, $key, &$problems) {
+		if (!i18n::enabled() || !preg_match('/^[a-z0-9_]+$/', $file)) return;
+		$missing = array();
+		foreach (i18n::available() as $lang) {
+			if (i18n::is_default($lang)) continue;
+			$path = APPBASE.'i18n/'.$lang.'/'.$file.'.php';
+			if (!isset($this->dictionaries[$path])) {
+				$this->dictionaries[$path] = is_file($path) ? (function ($path) { $lang = array(); $returned = include $path; return is_array($returned) ? $returned : (is_array($lang) ? $lang : array()); })($path) : array();
+			}
+			if (!isset($this->dictionaries[$path][$key])) $missing[] = $lang;
+		}
+		if (!$missing) return;
+		$where = implode(', ', array_map(function ($lang) use ($file) { return self::short(APPBASE.'i18n/'.$lang.'/'.$file.'.php'); }, $missing));
+		$problems[] = self::problem('warning', $block, "print.i18n.$file('$key') has no entry in ".implode(', ', $missing)." ($where), so ".(count($missing) > 1 ? 'those pages show' : 'that language\'s pages show')." the template's text: add '$key' => '…'");
 	}
 
 	protected function lint_forms($html, &$problems, $theme) {
@@ -1373,8 +1498,13 @@ class raster_inspector {
 		foreach (cms_records::types() as $name => $info) {
 			$reflection = new ReflectionClass($info['class']);
 			$at = array('file' => self::short($reflection->getFileName()), 'line' => $reflection->getStartLine(), 'column' => 1);
-			if (cms::reserved($name, 'collection')) {
+			if (strpos($name, '__') !== false) {
+				$problems[] = $at + array('severity' => 'error', 'message' => self::double_underscore($name, 'type'));
+			} elseif (cms::reserved($name, 'collection')) {
 				$problems[] = $at + array('severity' => 'error', 'message' => "'$name' is a name the CMS keeps for itself; call the type something else");
+			}
+			foreach (array_keys($info['fields']) as $field) {
+				if (strpos($field, '__') !== false) $problems[] = $at + array('severity' => 'error', 'message' => "The type '$name': ".self::double_underscore($field, 'field'));
 			}
 			foreach ($info['unknown'] as $key) {
 				$problems[] = $at + array('severity' => 'warning', 'message' => "The type '$name' has '$key', which means nothing. A type has: ".implode(', ', cms_records::$keys));
@@ -1498,6 +1628,8 @@ class raster_inspector {
 			foreach ($fields as $name => $field) {
 				if (strpos($name, 'site_') !== 0) continue;
 				if (!isset($site[$name])) $site[$name] = $field;
+				// every page's prints decide (D7)
+				$site[$name]['translate'] = $site[$name]['translate'] && $field['translate'];
 				unset($fields[$name]);
 			}
 			if (empty($fields) && !$this->uses_collections($blocks)) continue;
@@ -1533,7 +1665,10 @@ class raster_inspector {
 		// stored from: its own view's (collection_defaults)
 		foreach ($collections as $name => $collection) {
 			foreach ($this->collection_defaults($name, $theme) as $field => $default) {
-				if (isset($collection['fields'][$field])) $collections[$name]['fields'][$field] = array('default' => $default, 'type' => cms_types::of_example($default));
+				if (isset($collection['fields'][$field])) $collections[$name]['fields'][$field] = array('default' => $default, 'type' => cms_types::of_example($default)) + $collection['fields'][$field];
+			}
+			foreach ($collections[$name]['fields'] as $field => $info) {
+				$collections[$name]['fields'][$field]['translate'] = $info['translate'] && cms_types::translates($info['type']);
 			}
 		}
 		// types models declare (static function types()) are collections too;
@@ -1541,7 +1676,8 @@ class raster_inspector {
 		foreach (cms_records::types() as $name => $info) {
 			$views = isset($collections[$name]) ? $collections[$name]['views'] : array();
 			$fields = array();
-			foreach ($info['fields'] as $field => $default) $fields[$field] = array('default' => is_array($default) ? '[]' : cms_types::show($default), 'type' => $info['types'][$field]);
+			// translate and shared declarations are P3's: shared until then
+			foreach ($info['fields'] as $field => $default) $fields[$field] = array('default' => is_array($default) ? '[]' : cms_types::show($default), 'type' => $info['types'][$field], 'translate' => false);
 			$collections[$name] = array(
 				'name' => $name, 'type' => $info['type'], 'fields' => $fields, 'views' => $views,
 				'model' => $info['model'], 'public' => $info['public'], 'owner' => $info['owner'], 'create' => $info['create'], 'staff_add' => $info['staff_add'],
@@ -1567,6 +1703,7 @@ class raster_inspector {
 		foreach ($fields as $name => $field) {
 			if (strpos($name, 'site_') !== 0) continue;
 			if (!isset($site[$name])) $site[$name] = $field;
+			$site[$name]['translate'] = $site[$name]['translate'] && $field['translate'];
 			unset($fields[$name]);
 		}
 		if (empty($fields) && !$this->uses_collections($blocks)) return;
@@ -1621,7 +1758,13 @@ class raster_inspector {
 				if ($call !== false && !in_array($call[0], $reserved)) {
 					if ($block['keyword'] === 'print' && !isset($fields[$call[0]])) {
 						$default = $attribute ? template::get_attribute($block['inner'], $attribute['attribute']) : trim($block['inner']);
-						$fields[$call[0]] = array('default' => $default, 'type' => cms_types::of_example($default));
+						$fields[$call[0]] = array('default' => $default, 'type' => cms_types::of_example($default), 'translate' => true);
+					}
+					// translated only when every print of it is a place for
+					// words (D7): a URL shown as a link's text and in its
+					// href stays one value
+					if ($block['keyword'] === 'print') {
+						$fields[$call[0]]['translate'] = $fields[$call[0]]['translate'] && cms_types::translates($fields[$call[0]]['type'], $attribute ? $attribute['attribute'] : null);
 					}
 					if ($block['keyword'] === 'render') {
 						$this->collect_collection($block, $call, $collections, $view);
@@ -1649,7 +1792,11 @@ class raster_inspector {
 					$key = raster_inspector::data_key($child['ref']);
 					if (!$key['builtin'] && strpos($key['key'], '.') === false && !isset($collection['fields'][$key['key']])) {
 						$default = $key['attribute'] !== null ? template::get_attribute($child['inner'], $key['attribute']) : trim($child['inner']);
-						$collection['fields'][$key['key']] = array('default' => $default, 'type' => cms_types::of_example($default));
+						$collection['fields'][$key['key']] = array('default' => $default, 'type' => cms_types::of_example($default), 'translate' => true);
+					}
+					// the type is settled once every view is read (content_model)
+					if (!$key['builtin'] && strpos($key['key'], '.') === false) {
+						$collection['fields'][$key['key']]['translate'] = $collection['fields'][$key['key']]['translate'] && cms_types::translates('text', $key['attribute']);
 					}
 				}
 				// nested renders are separate collections
@@ -1661,7 +1808,7 @@ class raster_inspector {
 		// render.cms.booking('stylist=?stylist&date>=today')
 		if (!empty($arguments) && is_string($arguments[0])) {
 			foreach (cms_store::list_options($arguments[0])['fields'] as $field => $default) {
-				if (!isset($collection['fields'][$field])) $collection['fields'][$field] = array('default' => $default, 'type' => cms_types::of_example($default));
+				if (!isset($collection['fields'][$field])) $collection['fields'][$field] = array('default' => $default, 'type' => cms_types::of_example($default), 'translate' => false);
 			}
 		}
 		unset($collection);
