@@ -46,7 +46,10 @@
 		problem_upload_too_big: 'That picture is too big', problem_upload_missing: 'The picture didn’t arrive; try again',
 		problem_upload_not_a_picture: 'That isn’t a picture: use a JPEG, PNG, GIF or WebP', problem_upload_not_stored: 'The picture couldn’t be stored',
 		problem_form_expired: 'This page is out of date: reload it and try again', problem_not_allowed: 'You can’t do that; if you were logged out, log in again',
-		keyboard: 'E to edit · Esc to stop · ⌘Z to undo', fields_changed: '{fields}', page_fields: 'Fields', nothing_here: 'Nothing on this page comes from the CMS.'
+		keyboard: 'E to edit · Esc to stop · ⌘Z to undo', fields_changed: '{fields}', page_fields: 'Fields', nothing_here: 'Nothing on this page comes from the CMS.',
+		// a multilingual site: the page's language, and the editor's own
+		editing_lang: 'editing: {lang}', falls_back: '(falls back to {lang})', untranslated: 'not translated yet: shows the {lang} text',
+		every_language: 'the same in every language', editor_language: 'The editor’s language'
 	};
 	for (var k in (C.strings || {})) T[k] = C.strings[k];
 	// a problem's words; {field} is the field it is about, when there is one
@@ -67,7 +70,12 @@
 		name = String(name || '').replace(/^site_/, '').replace(/_/g, ' ');
 		return name.charAt(0).toUpperCase() + name.slice(1);
 	}
-	var lang = C.lang || document.documentElement.lang || undefined;
+	// dates read in the editor's own language (multilingual: editor_lang)
+	var lang = C.editor_lang || C.lang || document.documentElement.lang || undefined;
+	// a language code as the dock shows it: RO, PT-BR
+	function code(language) { return String(language || '').toUpperCase(); }
+	// the content language a save is in, posted with it (multilingual only)
+	function withLang(data) { if (C.languages) data.lang = C.lang; return data; }
 	// Stored times are the site's wall clock (its time zone setting), and are
 	// read here as if they were the browser's. The site's now, read the same
 	// way, is Date.now() + skew, so a badge and the Schedule box agree with
@@ -312,6 +320,7 @@
 			}
 			field.el.setAttribute('data-raster-field', id);
 			if (field.kind !== 'image' && field.kind !== 'attr') field.el.setAttribute('data-raster-edit', field.kind);
+			if (info.untranslated) field.el.setAttribute('data-raster-untranslated', '');
 			fields.push(field);
 		});
 		lists.forEach(function (list) {
@@ -353,6 +362,9 @@
 			'.raster-ghost:hover{opacity:.85}',
 			'.raster-ghost.raster-new{opacity:1;cursor:auto}',
 			'[data-raster-default]{opacity:.5}',
+			// no translation yet: the default language's words show
+			'html.raster-editing [data-raster-untranslated]{text-decoration-style:wavy}',
+			'html.raster-editing img[data-raster-untranslated]{outline-color:color-mix(in srgb,var(--raster-a) 45%,transparent)}',
 			'.raster-pulse{animation:raster-pulse 1.4s ease-out 1}',
 			'@keyframes raster-pulse{0%{box-shadow:0 0 0 0 var(--raster-a)}100%{box-shadow:0 0 0 18px transparent}}',
 			'@media (prefers-reduced-motion:reduce){html.raster-glow [data-raster-edit],.raster-arriving,.raster-pulse{animation:none!important}.raster-leaving{transition:none!important}}'
@@ -422,6 +434,8 @@
 			'.pill:active{transform:scale(.96)}',
 			'.pill.primary{background:' + look.accent + ';color:' + look.onAccent + ';font-weight:600}',
 			'.pill.primary:hover{filter:brightness(1.08)}',
+			'.lang{padding:0 8px;color:' + look.muted + ';font-size:12px}',
+			'.langs{font:inherit;font-size:12px;color:inherit;background:none;border:1px solid ' + look.line + ';border-radius:999px;height:28px;padding:0 6px;cursor:pointer}',
 			'.status{display:inline-flex;align-items:center;gap:6px;padding:0 10px;color:' + look.muted + ';font-size:13px;min-width:70px}',
 			'.dot{width:7px;height:7px;border-radius:50%;background:#3aa86b;transition:background .2s}',
 			'.dot.busy{background:' + look.accent + ';animation:blink 1s infinite}',
@@ -531,7 +545,19 @@
 		ui.editButton = h('button', { class: 'pill primary', title: t('keyboard'), onclick: function () { setEditing(!editing); } });
 		ui.pageButton = h('button', { class: 'pill', onclick: function () { closeAdminMenu(); togglePanel(); }, html: icon('layers') + '<span>' + t('page') + '</span>' });
 		ui.adminButton = (C.admin || []).length ? h('button', { class: 'pill', 'aria-haspopup': 'menu', 'aria-expanded': 'false', onclick: toggleAdminMenu, html: icon('grid') + '<span>' + t('admin') + '</span>' }) : null;
-		ui.dock = h('div', { class: 'dock surface hidden', role: 'toolbar', 'aria-label': 'Raster' }, [ui.who, ui.status, ui.adminButton, ui.pageButton, ui.editButton]);
+		// multilingual: the page's language, and a picker for the editor's own
+		if (C.languages) {
+			var base = C.languages[0];
+			ui.lang = h('span', { class: 'lang', text: t('editing_lang', { lang: code(C.lang) }) + (String(C.lang).toLowerCase() === String(base).toLowerCase() ? '' : ' ' + t('falls_back', { lang: code(base) })) });
+			var choices = C.editor_languages || [];
+			if (choices.length > 1) {
+				ui.langs = h('select', { class: 'langs', title: t('editor_language'), 'aria-label': t('editor_language'), onchange: function () {
+					var chosen = ui.langs.value;
+					call('editor_set_lang', { lang: chosen }).then(function () { location.reload(); }, failed);
+				} }, choices.map(function (c) { return h('option', { value: c, selected: c === C.editor_lang ? 'selected' : null, text: code(c) }); }));
+			}
+		}
+		ui.dock = h('div', { class: 'dock surface hidden', role: 'toolbar', 'aria-label': 'Raster' }, [ui.who, ui.lang, ui.langs, ui.status, ui.adminButton, ui.pageButton, ui.editButton]);
 		ui.layer.appendChild(ui.dock);
 		dockMoves();
 		setTimeout(function () { ui.dock.classList.remove('hidden'); }, 60);
@@ -668,15 +694,21 @@
 		working(1);
 		var request = field.item
 			? call('editor_save_item', { collection: field.item.info.collection, id: field.item.info.id, fields: obj(field.info.field, value), examples: field.item.info.examples }).then(function (item) { field.item.info.values = item; return item[field.info.field]; })
-			: call('editor_save_field', { type: field.info.type, slug: field.info.slug, field: field.info.field, value: value, example: field.info.default }).then(function (r) { field.info.value = r.value; return r.value; });
+			: call('editor_save_field', withLang({ type: field.info.type, slug: field.info.slug, field: field.info.field, value: value, example: field.info.default })).then(function (r) { field.info.value = r.value; return r.value; });
 		return request.then(function (saved) { working(-1); return saved; }, function (e) { working(-1); throw e; });
 	}
 	function obj(key, value) { var o = {}; o[key] = value; return o; }
 	function show(field, value) {
-		// an empty page field shows the template's text again
-		var empty = value === '' && field.info.default != null && !field.item;
-		var shown = empty ? field.info.default : value;
+		// an empty translation shows the default language's value (fallback),
+		// and an empty page field the template's text
+		var fallback = !field.item && value === '' && field.info.fallback ? field.info.fallback : null;
+		var empty = value === '' && fallback === null && field.info.default != null && !field.item;
+		var shown = fallback !== null ? fallback : (empty ? field.info.default : value);
 		[field].concat(twins(field)).forEach(function (f) {
+			if (f.info.fallback != null) {
+				f.info.untranslated = value === '';
+				if (value === '') f.el.setAttribute('data-raster-untranslated', ''); else f.el.removeAttribute('data-raster-untranslated');
+			}
 			if (f.kind === 'image' || f.kind === 'attr') { if (shown) setAttr(f, shown); return; }
 			if (f.kind === 'text') f.el.textContent = shown; else f.el.innerHTML = shown;
 			if (empty) f.el.setAttribute('data-raster-default', ''); else f.el.removeAttribute('data-raster-default');
@@ -1599,7 +1631,7 @@
 			var f = pageFields[key][0];
 			seen[key] = true;
 			fieldsSection.appendChild(h('div', { class: 'entry' }, [
-				h('div', {}, [h('div', { class: 'name', text: human(f.info.field) }), h('div', { class: 'sub', text: f.info.type === 'sitepage' ? t('site_wide') : '' })]),
+				h('div', {}, [h('div', { class: 'name', text: human(f.info.field) }), h('div', { class: 'sub', text: [f.info.type === 'sitepage' ? t('site_wide') : '', languageNote(f.info)].filter(Boolean).join(' · ') })]),
 				h('button', { class: 'link', text: t('show_me'), onclick: function () { togglePanel(); reveal(f); } })
 			]));
 		});
@@ -1609,7 +1641,7 @@
 			seen[key] = true;
 			var input = h(info.rich ? 'textarea' : 'input', { class: 'in', type: 'text' });
 			input.value = info.value;
-			var status = h('span', { class: 'sub muted', text: (info.type === 'sitepage' ? t('site_wide') + ' · ' : '') + t('not_on_page') });
+			var status = h('span', { class: 'sub muted', text: (info.type === 'sitepage' ? t('site_wide') + ' · ' : '') + t('not_on_page') + (languageNote(info) ? ' · ' + languageNote(info) : '') });
 			input.addEventListener('change', function () {
 				var before = info.value, field = { info: info, el: input };
 				saveValue(field, input.value).then(function () {
@@ -1653,6 +1685,18 @@
 		var closeButton = panel.querySelector('.close');
 		if (closeButton) closeButton.focus();
 	}
+	// what the panel says of a field in a translation: not translated yet,
+	// or one value for every language
+	function languageNote(info) {
+		if (!C.languages) return '';
+		if (info.untranslated) return t('untranslated', { lang: code(C.languages[0]) });
+		return info.shared ? t('every_language') : '';
+	}
+	// a revision's changed field: headline, or headline · RO for its translation
+	function changedName(key) {
+		var m = /^(.+?)__([a-z0-9_]+)$/.exec(key);
+		return m ? human(m[1]) + ' · ' + code(m[2].replace(/_/g, '-')) : human(key);
+	}
 	function reveal(field) {
 		if (!editing) setEditing(true, true);
 		field.el.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'center' });
@@ -1660,16 +1704,18 @@
 		setTimeout(function () { field.el.classList.remove('raster-pulse'); if (field.kind !== 'image') field.el.focus(); }, 500);
 	}
 	function loadHistory(section) {
-		call('editor_history', { type: C.page.type, slug: C.page.slug }).then(function (result) {
+		call('editor_history', withLang({ type: C.page.type, slug: C.page.slug })).then(function (result) {
 			var list = result.revisions || [];
 			section.innerHTML = '';
 			section.appendChild(h('h3', { text: t('history') }));
 			if (list.length < 2) { section.appendChild(h('p', { class: 'muted', text: t('no_history') })); return; }
 			list.slice(0, 12).forEach(function (rev, i) {
 				var older = list[i + 1];
-				var changed = older ? Object.keys(rev.fields).filter(function (k) { return String(rev.fields[k]) !== String(older.fields[k]); }).map(human) : [];
+				var changed = older ? Object.keys(rev.fields).filter(function (k) { return String(rev.fields[k]) !== String(older.fields[k]); }).map(C.languages ? changedName : human) : [];
+				// multilingual: the language the revision was saved in
+				var saved = C.languages && rev.saved_lang ? code(rev.saved_lang) + ' · ' : '';
 				var entry = h('div', { class: 'entry' }, [
-					h('div', {}, [h('div', { class: 'name', text: i === 0 ? t('current') : when(rev.updated_at) }), h('div', { class: 'sub', text: changed.join(', ') })]),
+					h('div', {}, [h('div', { class: 'name', text: i === 0 ? t('current') : when(rev.updated_at) }), h('div', { class: 'sub', text: saved + changed.join(', ') })]),
 					i === 0 ? null : h('button', { class: 'link', text: t('restore'), onclick: function () { restore(rev, list[0]); } })
 				]);
 				section.appendChild(entry);

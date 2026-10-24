@@ -123,7 +123,7 @@ class authentication
 		return array('user' => array(
 			'email' => '', 'username' => '', 'name' => '', 'password' => '', 'role' => 'member',
 			'created_at' => '', 'last_login' => '', 'failed_count' => 0, 'failed_at' => '',
-			'reset_hash' => '', 'reset_expires' => '', 'login_hash' => '', 'login_expires' => '',
+			'reset_hash' => '', 'reset_expires' => '', 'login_hash' => '', 'login_expires' => '', 'editor_lang' => '',
 		));
 	}
 

@@ -350,6 +350,12 @@ switch ($command) {
 				foreach ($table['rename_candidates'] as $rename) {
 					echo '    '.$paint("renamed? php bin/raster schema --rename={$table['table']}.{$rename['from']}:{$rename['to']}", '36')."\n";
 				}
+				foreach (isset($table['missing_translations']) ? $table['missing_translations'] : array() as $column) {
+					echo '  '.$paint('+', '33')." $column ".$paint('(multilingual'.($status['frozen'] ? '; run --apply' : '; --apply adds it').')', '2')."\n";
+				}
+				if (!empty($status['translations'][$table['table']])) {
+					echo '  '.$paint('kept translations: '.implode(', ', $status['translations'][$table['table']]).' (no language uses them now; kept for when one does)', '2')."\n";
+				}
 			}
 			foreach ($status['system_tables'] as $table) {
 				if ($table['missing']) {

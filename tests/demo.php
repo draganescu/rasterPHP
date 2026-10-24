@@ -1351,7 +1351,7 @@ test('M6', 'MCP over stdio', function () use ($root) {
 test('M10', 'describe: the site in one call', function () use ($base) {
 	$all = mcp($base, 'describe');
 	// all but the vocabulary, which is most of a full answer and has its own tool
-	same(array('site', 'routing', 'pages', 'admin_pages', 'collections', 'settings', 'lint', 'schema', 'views'), array_keys($all));
+	same(array('site', 'languages', 'routing', 'pages', 'admin_pages', 'collections', 'settings', 'lint', 'schema', 'views'), array_keys($all));
 	same('demo', $all['site']['app']);
 	same('cafe', $all['site']['theme']);
 	check(in_array('/menu', array_map(function ($p) { return $p['url']; }, $all['pages'])), 'the pages are there');
