@@ -159,6 +159,31 @@ class raster_describe
 		return $out;
 	}
 
+	// The site's languages, for describe, site_overview and set_languages
+	// (#200): whether multilingual is on (enabled: on and two or more
+	// languages; multilingual_setting: the setting as written), the default,
+	// the list, where each language's pages start when enabled (/ and /ro/,
+	// or a domain_language host) and how many translations each language
+	// lacks. Not in describe's answer yet; P2.C adds it and fills missing.
+	static function languages() {
+		$urls = array();
+		if (i18n::enabled()) {
+			$domains = array();
+			foreach ((array)config::get('domain_language', array()) as $domain => $language) $domains[strtolower($language)] = strtolower($domain);
+			foreach (i18n::available() as $code) {
+				$urls[$code] = isset($domains[strtolower($code)]) ? $domains[strtolower($code)] : '/'.i18n::prefix($code);
+			}
+		}
+		return array(
+			'enabled' => i18n::enabled(),
+			'multilingual_setting' => (bool)config::get('multilingual', false),
+			'default' => i18n::default_language(),
+			'list' => i18n::available(),
+			'urls' => (object)$urls,
+			'missing' => new stdClass(),
+		);
+	}
+
 	static protected function count_items($table) {
 		try {
 			cms_store::connect();

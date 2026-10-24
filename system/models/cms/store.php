@@ -330,6 +330,16 @@ class cms_store {
 		return R::findOne($type, ' ORDER BY id DESC ');
 	}
 
+	// ##Languages (#200, D8)
+
+	// $row (a page row or an item, as read_row gives it) as it reads in
+	// $lang (null: i18n::current()): each translated field replaced by its
+	// translation, or kept as the default language's value when that is
+	// empty. For showing only, never for a write. Pass-through until P2.B.
+	static function localized($row, $type, $lang = null) {
+		return $row;
+	}
+
 	// ##Pages
 
 	static function page_values($type) {
@@ -346,7 +356,9 @@ class cms_store {
 
 	// Stores a new revision of the page with the given fields changed.
 	// $allowed lists the fields the templates define; others are rejected.
-	static function update_page($type, $slug, $values, $allowed) {
+	// $lang is the language the values are in (null: the default); ignored
+	// until P2.B.
+	static function update_page($type, $slug, $values, $allowed, $lang = null) {
 		foreach ($values as $field => $value) {
 			if (!in_array($field, $allowed, true)) {
 				throw new InvalidArgumentException("Unknown field '$field'. Fields come from the templates; known fields: ".implode(', ', $allowed));
@@ -355,12 +367,12 @@ class cms_store {
 		// the newest revision is read and the next one stored together, so
 		// two saves at once (one field each) never lose one of them: the
 		// transaction locks the database for writing
-		return cms_records::transaction(function () use ($type, $slug, $values) {
-			return cms_store::store_page($type, $slug, $values);
+		return cms_records::transaction(function () use ($type, $slug, $values, $lang) {
+			return cms_store::store_page($type, $slug, $values, $lang);
 		});
 	}
 
-	static function store_page($type, $slug, $values) {
+	static function store_page($type, $slug, $values, $lang = null) {
 		$latest = self::latest($type);
 		if ($latest) {
 			$page = R::duplicate($latest);
@@ -425,19 +437,20 @@ class cms_store {
 	// (a form) or model (the model's own code, which may write readonly and
 	// hidden fields and the owner). Records of a declared type go through the
 	// model's check() first. $name is the collection's own name, for the
-	// event (team_members, whose table is teammembersdata).
-	static function save_item($type, $id, $values, $allowed, $who = 'editor', $name = null) {
+	// event (team_members, whose table is teammembersdata). $lang is the
+	// language the values are in (null: the default); ignored for now.
+	static function save_item($type, $id, $values, $allowed, $who = 'editor', $name = null, $lang = null) {
 		$info = cms_records::for_table($type);
 		if ($info) cms_records::ensure($info);
 		// the checks and the write happen together, so two bookings can't
 		// both take the last seats, and two items with one title can't both
 		// take its slug
-		return cms_records::transaction(function () use ($type, $id, $values, $allowed, $who, $info, $name) {
-			return cms_store::store_item($type, $id, $values, $allowed, $who, $info, $name);
+		return cms_records::transaction(function () use ($type, $id, $values, $allowed, $who, $info, $name, $lang) {
+			return cms_store::store_item($type, $id, $values, $allowed, $who, $info, $name, $lang);
 		});
 	}
 
-	static function store_item($type, $id, $values, $allowed, $who, $info, $name = null) {
+	static function store_item($type, $id, $values, $allowed, $who, $info, $name = null, $lang = null) {
 		if ($info) {
 			$allowed = $who === 'model' ? array_merge(array_keys($info['fields']), array('owner')) : array_values(array_intersect($allowed, cms_records::writable($info)));
 		}

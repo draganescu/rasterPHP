@@ -92,11 +92,37 @@ class cms_types {
 		self::$tables = array();
 	}
 
+	// ##Languages (#200, D3, D7)
+
+	// the column that holds $field in $lang (null: i18n::current()):
+	// headline in the default language and with multilingual off,
+	// headline__ro, name__pt_br otherwise
+	static function column($field, $lang = null) {
+		return $field.i18n::suffix($lang);
+	}
+
+	// whether a field of $type (text, int, ...) printed as element content
+	// ($attribute null) or into the attribute $attribute (alt, src, ...) has
+	// a translation per language (D7). Cheap, so page_field can ask it on a
+	// page request; the content model asks it too. false until P2.A.
+	static function translates($type, $attribute = null) {
+		return false;
+	}
+
+	// the fields of $table that have a translation per language (D7), as
+	// its columns say; the others are shared by every language. Empty
+	// until P2.A.
+	static function translated($table) {
+		return array();
+	}
+
 	// ##Columns
 
 	// Creates the table and the columns it lacks, each declared as its type.
 	// Columns that exist are left as they are; schema --apply retypes them.
-	static function ensure($table, $types) {
+	// $translated names the fields that also get a column per non-default
+	// language when multilingual is on (headline__ro); ignored until P2.A.
+	static function ensure($table, $types, $translated = array()) {
 		if (!preg_match('/^[a-z0-9_]+$/', $table)) throw new InvalidArgumentException("Invalid table '$table'");
 		if (!cms_store::table_exists($table)) {
 			R::getWriter()->createTable($table);
