@@ -2233,8 +2233,8 @@ URL alone says the content's language, so one URL is always one language.
     the page was stored). `describe` says
     whether the cache is on (`site.page_cache`).
   - **Changes Raster doesn't make itself don't clear it.** Raster's own
-    writes do (`write_view`, `update_page`, the item tools, the editor,
-    forms). A view, theme file, model or config edited with ordinary file
+    writes do (`write_view`, `write_asset`, `write_strings`, `update_page`,
+    the item tools, the editor, forms). A view, theme file, model or config edited with ordinary file
     tools, or the database changed directly, is not seen by visitors who
     aren't logged in until the cache is cleared or `page_cache_ttl` runs
     out: run `php bin/raster cache clear`, or MCP `clear_cache`. When it
@@ -2383,8 +2383,8 @@ of lists and filter pages come along; drafts and the editor don't.
     request gets `-32603` with PHP's message, until the file is fixed.
 - **Tools for the site itself:**
   - `describe` — how URLs reach views, the pages and collections the markup
-    declares, the admin pages, the settings that change behaviour, and whether
-    the templates lint clean. Ask this first. `sections` narrows it. The
+    declares, the admin pages, the site's languages, the settings that change
+    behaviour, and whether the templates lint clean. Ask this first. `sections` narrows it. The
     vocabulary is left out unless `sections` names it; it is most of a full
     answer and has its own tool. (`php bin/raster describe` still prints
     everything.)
@@ -2397,13 +2397,24 @@ of lists and filter pages come along; drafts and the editor don't.
   - `check_view` — lint markup that isn't written yet; nothing is saved.
   - `write_view` — write a view, but only if it lints: on an error the file is
     left alone and the problems come back. The answer says what the change
-    does to the content model.
-  - The four view tools take an optional `theme`: the name of a folder
+    does to the content model. On a multilingual site both answers have
+    `new_fields`: each field the markup adds, `{ field, translate }` (with
+    `collection` for an item's), so an agent sees before writing that a
+    heading gets a translation per language and a price or a link is shared.
+  - `read_asset`, `write_asset` — the theme's files that aren't views:
+    `.css`, `.js` and `.svg`, by their path inside the theme
+    (`css/style.css`), with the view tools' checks (inside the theme, no link
+    out, the folder must exist). An SVG is written only when it is
+    well-formed XML with no `<script>` element, no `on…` attribute, no
+    `javascript:` link and no entity declarations; otherwise nothing is
+    written and the answer says why. `write_asset` clears the page cache.
+  - The six view and asset tools take an optional `theme`: the name of a folder
     directly under `views/` (letters, digits, `_` and `-`), the site's theme
     when left out. A path, or a folder that links out of `views/`, is
     refused, and so is a view file that links out of the theme
     (`list_views` leaves it out); a link inside the theme works.
-  - `render_url` — the page's status and HTML, no web server. With `as`
+  - `render_url` — the page's status and HTML, no web server; `/ro/menu` is
+    the page in a language. With `as`
     (`editor`, `admin`, `member`, or an account's email) it renders the page
     as that person, outside production only, and for staff also says what the in-page editor marks:
     editable fields, items, and each list with whether it gets a card for a
@@ -2411,13 +2422,60 @@ of lists and filter pages come along; drafts and the editor don't.
     server down: the command line PHP (next to PHP-FPM's, over HTTP), with
     the server's whole environment, and what the page logs read after the
     page, so a page that logs a lot still answers. It never reads the page
-    cache.
+    cache. On a multilingual site, with `as` it also reports `editing_lang`,
+    the language the in-page editor saves in there (the page's own).
   - `clear_cache` — throws the page cache away. Call it after changing
     views, theme files, models or config any way but `write_view`, or the
     database directly; Raster's own tools already clear it.
 - **Tools for content:** `site_overview`, `get_page`, `update_page`,
   `page_history`, `list_items`, `get_item`, `create_item`, `update_item`,
   `delete_item`, `run_action` (records), `lint_templates`, `schema_status`.
+- **Tools for languages** (#200; see **Multilingual sites** for the rest):
+  - `set_languages(languages)` writes `multilingual` and `languages` to
+    `<app>/config/the_app.php` as `config::set('multilingual')->to(true);`
+    and `config::set('languages')->to(array('en', 'ro'));`, replacing the
+    statements that set them (a commented-out example stays) or adding them
+    at the end, and nothing else. The default language is first; codes are
+    lowercased, and one that isn't a code (`en_US`) or is listed twice is
+    refused. One code writes `languages` with `multilingual` false; `[]`
+    takes both lines out. Nothing is dropped. In development it then adds the
+    translation columns of every page table that exists. It answers
+    `{ enabled, default, languages, urls, columns_added, missing }`. Refused
+    in production.
+  - `translation_status(lang)`: what a language other than the default
+    lacks, `{ lang, missing: [{ kind, where, field, default_value, length,
+    shared }], total, done }`. `kind` is `page` (`where` its URL), `site`
+    (the `site_*` fields) or `strings` (a dictionary key the views print;
+    `where` the dictionary). A field counts when the templates translate it
+    and its default-language value isn't empty; `default_value` is cut at
+    300 characters, `length` is its whole length. `limit` (200) and `offset`
+    page through it; `total` counts every missing one, `done` the ones
+    translated.
+  - `read_strings(file, lang)` and `write_strings(file, lang, strings)`:
+    the dictionary `<app>/i18n/<lang>/<file>.php` as key/value JSON. Reading
+    gives `strings`, `used_keys` (what the views print through
+    `print.i18n.<file>('key')`) and `missing_keys`. Writing merges, and
+    Raster writes the file (`<?php return var_export(...)`): what the agent
+    sends is only ever words. Keys are letters, digits, `_`, `.` and `-`,
+    values strings. A key no view prints comes back in `unused_keys`, a
+    warning. It clears the page cache, and is refused in production.
+    `raster_editor` is the in-page editor's own words, in any language the
+    editor has (`action_<name>` and `problem_<name>` keys are the site's
+    own, never unused).
+  - `get_page`, `update_page` and `page_history` take `lang`, one of the
+    site's languages (left out, or the default: as without it). `get_page`
+    then gives each field as `{ value, default_value, translated, shared }`;
+    `update_page` writes the translations, and refuses a shared field
+    ("'price' is shared by every language; update it without lang");
+    `page_history` keeps the revisions saved in that language. A field name
+    with `__` (a translation's column, `headline__ro`) is refused by every
+    write tool: name the field, and pass `lang`.
+  - `describe` (section `languages`, there by default), `site_overview` and
+    `raster describe --json` have the block `{ enabled,
+    multilingual_setting, default, list, urls, missing }`: `urls` is where
+    each language's pages start (`/`, `/ro/`, or its `domain_language`
+    host) and `missing` each translation language's `translation_status`
+    total, both `{}` while multilingual is off.
 - **Addressing pages:** by URL (`/about`), by view (`about`), or `site` for the
   `site_*` fields.
 - **Writes** are limited to fields in the templates, plus `slug`, `enabled`
@@ -2425,8 +2483,9 @@ of lists and filter pages come along; drafts and the editor don't.
   `4.5`, `true`, `"2026-10-05"`); text is fine too and is converted the
   same way.
 - **`write_view` edits code, not content**, since a template can call any
-  model. Over stdio the agent is already on the machine with the files, so it
-  is available. Over HTTP it is not offered until the site sets
+  model, and so does `write_asset`: a script runs in every visitor's
+  browser. Over stdio the agent is already on the machine with the files, so
+  they are available. Over HTTP they are not offered until the site sets
   `config::set('mcp_write_views')->to(true)`.
 - Results come back as compact JSON, in `structuredContent` and as text.
 - `describe` leaves out anything that could be a secret: the MCP token and the
@@ -2550,7 +2609,7 @@ Set in `config/the_app.php` with `config::set('name')->to(value)`.
 | `page_cache`, `page_cache_ttl`, `page_cache_skip` | on in production, 3600, none | |
 | `asset_versions` | true | false leaves theme asset URLs as they are written |
 | `mcp_token` | none | same as `RASTER_MCP_TOKEN` |
-| `mcp_write_views` | false | lets MCP over HTTP write templates (`write_view`); over stdio it always can |
+| `mcp_write_views` | false | lets MCP over HTTP write templates and theme files (`write_view`, `write_asset`); over stdio it always can |
 | `api_system_models` | `cms` | system models reachable at `/api`, for what their `api()` lists |
 | `spam_min_seconds` | 3 | a post sooner than this after its form was shown is `too_fast`; false turns the stamp checks off |
 | `spam_max_age` | 86400 | a stamp older than this many seconds is `stamp_old`; false allows any age |

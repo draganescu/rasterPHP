@@ -1449,6 +1449,18 @@ class raster_inspector {
 		return $slug;
 	}
 
+	// the page fields and collections markup declares, read as
+	// content_model() reads a view's, for markup that isn't a file yet
+	// (MCP's check_view and write_view, #200)
+	function fields_in($html, $view, $theme = null) {
+		$cms = $this->model_info('cms');
+		list($blocks) = self::blocks($this->expand($html, $theme));
+		$fields = array();
+		$collections = array();
+		$this->collect_content($blocks, $fields, $collections, $view, $cms ? $cms['methods'] : array());
+		return array('fields' => $fields, 'collections' => $collections);
+	}
+
 	// Describes the CMS content of the theme: page fields per view and
 	// collections with their fields. Defaults are the placeholder content
 	// in the markup, which is what the CMS stores on first render.

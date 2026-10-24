@@ -33,7 +33,7 @@ class raster_describe
 	);
 
 	static function sections() {
-		return array('site', 'routing', 'pages', 'admin_pages', 'collections', 'vocabulary', 'settings', 'lint', 'schema', 'views');
+		return array('site', 'languages', 'routing', 'pages', 'admin_pages', 'collections', 'vocabulary', 'settings', 'lint', 'schema', 'views');
 	}
 
 	// $sections limits the work; the default is everything.
@@ -57,6 +57,9 @@ class raster_describe
 				'models' => config::get('models_path', 'models').'/',
 			);
 		}
+
+		// the site's languages and what each lacks (#200)
+		if ($want('languages')) $out['languages'] = self::languages($inspector);
 
 		if ($want('routing')) {
 			$routes = array();
@@ -164,14 +167,23 @@ class raster_describe
 	// languages; multilingual_setting: the setting as written), the default,
 	// the list, where each language's pages start when enabled (/ and /ro/,
 	// or a domain_language host) and how many translations each language
-	// lacks. Not in describe's answer yet; P2.C adds it and fills missing.
-	static function languages() {
+	// lacks (translation_status's total).
+	static function languages($inspector = null) {
 		$urls = array();
+		$missing = array();
 		if (i18n::enabled()) {
 			$domains = array();
 			foreach ((array)config::get('domain_language', array()) as $domain => $language) $domains[strtolower($language)] = strtolower($domain);
 			foreach (i18n::available() as $code) {
 				$urls[$code] = isset($domains[strtolower($code)]) ? $domains[strtolower($code)] : '/'.i18n::prefix($code);
+			}
+			try {
+				$inspector = $inspector ?: new raster_inspector();
+				foreach (array_slice(i18n::available(), 1) as $code) {
+					$missing[$code] = count(array_filter(self::translations($code, $inspector), function ($row) { return !$row['done']; }));
+				}
+			} catch (Exception $e) {
+				$missing = array();
 			}
 		}
 		return array(
@@ -180,8 +192,90 @@ class raster_describe
 			'default' => i18n::default_language(),
 			'list' => i18n::available(),
 			'urls' => (object)$urls,
-			'missing' => new stdClass(),
+			'missing' => (object)$missing,
 		);
+	}
+
+	// Everything that has words in the default language and could have
+	// them in $lang: each translated page and site_* field whose shown value
+	// isn't empty, and each dictionary key the views print with a mock-up
+	// text, with done telling whether $lang has it. For translation_status
+	// and the missing counts above; P3 and P4 add items, records and emails.
+	static function translations($lang, $inspector = null) {
+		$inspector = $inspector ?: new raster_inspector();
+		$rows = array();
+		cms_store::connect();
+		foreach ($inspector->content_model()['pages'] as $page) {
+			$stored = cms_store::page_values($page['type']);
+			$values = $stored ? $stored['fields'] : array();
+			$translated = cms_types::translated($page['type']);
+			foreach ($page['fields'] as $name => $field) {
+				if (empty($field['translate']) && !in_array($name, $translated, true)) continue;
+				$value = isset($values[$name]) && trim((string)$values[$name]) !== '' ? (string)$values[$name] : (string)$field['default'];
+				if (trim($value) === '') continue;
+				$column = cms_types::column($name, $lang);
+				$done = $column !== $name && isset($values[$column]) && trim((string)$values[$column]) !== '';
+				$rows[] = array('kind' => $page['view'] === '*' ? 'site' : 'page', 'where' => $page['url'], 'field' => $name, 'default_value' => $value, 'done' => $done);
+			}
+		}
+		foreach (self::strings_used($inspector) as $file => $keys) {
+			$strings = self::dictionary($file, $lang);
+			foreach ($keys as $key => $default) {
+				if (trim($default) === '') continue;
+				$rows[] = array('kind' => 'strings', 'where' => $file, 'field' => $key, 'default_value' => $default, 'done' => isset($strings[$key]) && trim((string)$strings[$key]) !== '');
+			}
+		}
+		return $rows;
+	}
+
+	// file => key => the mock-up text, for every print.i18n.<file>('key')
+	// in the site's theme and the themes its routes serve views from
+	static function strings_used($inspector) {
+		$used = array();
+		$themes = array_unique(array_merge(array($inspector->theme), array_column($inspector->routes(), 'theme')));
+		foreach ($themes as $theme) {
+			if (!is_dir($inspector->theme_dir($theme))) continue;
+			foreach ($inspector->views($theme) as $view) {
+				list($blocks) = raster_inspector::blocks(file_get_contents($inspector->theme_dir($theme).'/'.$view));
+				self::collect_strings($blocks, $used);
+			}
+		}
+		ksort($used);
+		return $used;
+	}
+
+	static protected function collect_strings($blocks, &$used) {
+		foreach ($blocks as $block) {
+			if ($block['keyword'] === 'remove') continue;
+			if ($block['keyword'] === 'print') {
+				$attribute = raster_inspector::attribute_call($block['ref']);
+				$ref = raster_inspector::model_reference($attribute ? $attribute['ref'] : $block['ref']);
+				$call = $ref && $ref['model'] === 'i18n' ? template::parse_call($ref['method']) : false;
+				// a dictionary is any method i18n doesn't have, with the key as its argument
+				if ($call !== false && isset($call[1][0]) && is_string($call[1][0]) && !method_exists('i18n', $call[0])) {
+					$default = $attribute ? (string)template::get_attribute($block['inner'], $attribute['attribute']) : trim($block['inner']);
+					if (!isset($used[$call[0]][$call[1][0]]) || $used[$call[0]][$call[1][0]] === '') $used[$call[0]][$call[1][0]] = $default;
+				}
+			}
+			if (!empty($block['children'])) self::collect_strings($block['children'], $used);
+		}
+	}
+
+	// the words of <app>/i18n/<lang>/<file>.php, as the i18n model reads them
+	static function dictionary($file, $lang) {
+		if (!preg_match('/^[a-z0-9_]+$/', $file) || !preg_match('/^[a-z]{2,3}(-[a-z0-9]{2,8})?$/i', $lang)) return array();
+		return self::dictionary_file(APPBASE.'i18n/'.$lang.'/'.$file.'.php');
+	}
+
+	// a dictionary file's array, or the $lang it sets in the older form
+	static function dictionary_file($path) {
+		if (!is_file($path)) return array();
+		$read = function ($path) {
+			$lang = array();
+			$returned = include $path;
+			return is_array($returned) ? $returned : $lang;
+		};
+		return (array)$read($path);
 	}
 
 	static protected function count_items($table) {
