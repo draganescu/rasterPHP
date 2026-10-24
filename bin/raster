@@ -13,7 +13,7 @@
 //   php bin/raster users
 //   php bin/raster login-link <email|name> [--next=/path]
 //   php bin/raster make model <name> --from=<view> [--form=<method>] [--dry-run] [--force]
-//   php bin/raster send <url> [--to=email] [--subject=…] [--dry-run] [--again]
+//   php bin/raster send <url> [--to=email] [--subject=…] [--dry-run] [--again] [--lang=<code>]
 //   php bin/raster mcp
 //   php bin/raster render <url> [--as=<email|username|role>]
 //   php bin/raster cache clear

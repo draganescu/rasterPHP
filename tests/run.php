@@ -8999,9 +8999,12 @@ test('P1.B: /ro/about renders the Romanian template text, and every link carries
 		list(, $body, $headers) = http('GET', "$base/zzp1b_about");
 		same('en', p1b_header($headers, 'Content-Language'));
 		check(strpos($body, '<h1>Hello</h1>') !== false && strpos($body, '<a href="/zzp1b_menu">Root</a>') !== false && strpos($body, 'href="'.$base.'/zzp1b_menu"') !== false, 'English page');
-		// an email rendered on a /ro/ page links to /ro/
+		// an email to an account made on /ro/ links to /ro/ (since P4.A the
+		// account's stored language decides, not the page asking)
 		cms_store::connect();
-		authentication::create_user('zzp1b-reset@example.test', 'a long password', 'member', 'Ana');
+		with_settings(array('multilingual' => true, 'languages' => array('en', 'ro')), function () {
+			i18n::with('ro', function () { return authentication::create_user('zzp1b-reset@example.test', 'a long password', 'member', 'Ana'); });
+		});
 		same(303, form_post("$base/ro/forgot", array('raster_form' => 'authentication.forgot', 'email' => 'zzp1b-reset@example.test'))[0]);
 		$mail = last_mail();
 		check($mail && strpos($mail['text'], "$base/ro/reset?token=") !== false, 'the reset link: '.($mail ? $mail['text'] : 'no mail'));
