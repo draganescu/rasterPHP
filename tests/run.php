@@ -8166,7 +8166,7 @@ test('P0.A one level of dry renders as it did: no second pass without a dry in t
 	}
 });
 
-test('P0.A slugs: _page and _items are list segments only with something after them (#132)', function () {
+test('P0.A slugs: _page and _items are list segments only where the router serves the list (#132)', function () {
 	same('/landing_page', cms::slug_for_uri('/landing_page'));
 	same('/landing_items', cms::slug_for_uri('/landing_items/'));
 	// a list URL is one route() sends to a view that renders the list:

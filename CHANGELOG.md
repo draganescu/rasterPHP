@@ -3,6 +3,18 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.46
+
+Two things for some sites to check, after `php bin/raster update`:
+
+- **A view named like `<name>_page.html` or `<name>_items.html`** (say `landing_page.html`) now keeps its own fields. Before, it read and saved them under another page (`/landing`), so text an editor wrote on it seems to disappear: copy it again on that page.
+- **A site with a route into another theme** (`->from('print')`) whose views print `print.cms` fields: `schema --check` and `doctor` now see those fields, so run `php bin/raster schema --apply` once.
+
+- **Lint, schema and the page agree on every name** (#28). The characters a model, key, field, attribute, view and `res`/`dry` name may use are one list in the engine (`template::$names`, printed by `raster annotations`), and lint reads the same list. `print.@data-x.key`, `print.@aria-label.key` and `print.line2` inside a render block now print, and `dry._layout.nav2` inserts `res.nav2`. A row key the engine can't read is a lint error.
+- **A `dry` inside a fragment is filled in**, up to five levels, as lint already read it (#36). The page, lint, `schema` and MCP list the same fields. A page with no nested `dry` renders as before.
+- **`/landing_page` is its own page** (#132). `<name>_page` and `<name>_items` are list segments only where the router serves the list (`/news/news_page/2`, `/news/news_items`), and the inspector uses the same rule as the page.
+- **Views a route serves from another theme are linted and get their tables** (#133). `lint`, MCP `lint_templates`, `describe` and `schema` include every theme a route names; `lint --theme=<name>` checks that theme alone and `--all-themes` works as before.
+
 ## 2.2.45
 
 Nothing for existing sites to do. This changes only what a new site starts with (`php bin/raster new`).
