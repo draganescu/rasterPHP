@@ -117,6 +117,10 @@ class newsletter
 				$subscriber = R::dispense('subscriber');
 				$subscriber->email = $email;
 				$subscriber->created_at = R::isoDateTime();
+				// the language they signed up in, which they read (#200 D13);
+				// signing up again leaves it; a frozen database without the
+				// column skips it
+				if (i18n::enabled() && (!R::getRedBean()->isFrozen() || array_key_exists('lang', cms_store::columns('subscriber')))) $subscriber->lang = i18n::current();
 			}
 			$subscriber->name = trim((string)$name);
 			if ($subscriber->status !== 'pending' || !$subscriber->token) {
@@ -147,10 +151,14 @@ class newsletter
 		$mail = controller::model_class('mail');
 		$subscriber = self::claim_confirmation(strtolower(trim((string)$subscribed['email'])), $mail);
 		if (!$subscriber) return null;
-		$sent = $mail::send_view('_email/newsletter_confirm', $subscriber->email, array(
-			'confirm_url' => util::url(config::get('newsletter_confirm_page', 'newsletter-confirm'), array('token' => $subscriber->token)),
-			'name' => (string)$subscriber->name,
-		));
+		// in the subscriber's language, the link too (#200 D13)
+		$lang = i18n::of($subscriber);
+		$sent = $mail::in_language($lang, function () use ($mail, $subscriber, $lang) {
+			return $mail::send_view('_email/newsletter_confirm', $subscriber->email, array(
+				'confirm_url' => util::url(config::get('newsletter_confirm_page', 'newsletter-confirm'), array('token' => $subscriber->token)),
+				'name' => (string)$subscriber->name,
+			), array(), $lang);
+		});
 		if (!$sent) log::error('Newsletter confirmation email failed: '.$mail::$last_error);
 		return null;
 	}

@@ -93,7 +93,7 @@ class cafe
 	}
 
 	function welcome($user) {
-		mail::send_view('_email/welcome', $user['email'], array('name' => $user['name'] ?: 'there'));
+		mail::send_view('_email/welcome', $user['email'], array('name' => $user['name'] ?: 'there'), array(), i18n::of($user));
 	}
 
 	// a change log in data/changes.log, whether the change came from the

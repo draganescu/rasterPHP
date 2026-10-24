@@ -217,6 +217,9 @@ class booking
 		// after writing() is done, at the commit of a transaction around it
 		if ($before) unset(self::$moved[(int)$before['id']]);
 		if ($before && $placed && self::is_staff() && !self::$writing) self::$moved[(int)$before['id']] = true;
+		// the language it was booked in, which the guest's emails go out in:
+		// set once, when it is made (#200 D13)
+		if (!$before && i18n::enabled()) $values['lang'] = i18n::current();
 		return $values;
 	}
 
@@ -569,33 +572,53 @@ class booking
 	// The guest's email, with their new link when the change made one, and
 	// staff's when the guest made the change. The views get the booking's
 	// fields, manage_url, resource_name, service_name, site_url and book_url.
+	// Multilingual (#200 D13): the guest's goes in the language they booked
+	// in (i18n::of), whoever made the change, and staff's in the default
+	// language, with the guest's as lang; the links and names are made in
+	// each one's.
 	protected static function mail($booking, $guest, $staff) {
 		if (!is_array($booking) || !isset($booking['id']) || !self::ready()) return null;
 		$id = (int)$booking['id'];
 		$setup = self::setup();
-		$vars = $booking;
-		$vars['manage_url'] = isset(self::$links[$id]) ? util::url(config::get('booking_manage_page', 'booking'), array('token' => self::$links[$id])) : '';
+		$token = isset(self::$links[$id]) ? self::$links[$id] : null;
 		unset(self::$links[$id]);
-		$vars['resource_name'] = isset($setup['resources'][$booking['resource']]) ? $setup['resources'][$booking['resource']]['name'] : '';
-		$vars['service_name'] = isset($setup['services'][$booking['service']]) ? $setup['services'][$booking['service']]['name'] : '';
-		$vars['site_url'] = util::url('');
-		$vars['book_url'] = util::url(config::get('booking_page', 'book'));
-		if (trim((string)$booking['email']) !== '') self::send('_email/'.$guest, $booking['email'], $vars);
+		$vars = function ($token) use ($booking, $setup) {
+			$vars = $booking;
+			$vars['manage_url'] = $token !== null ? util::url(config::get('booking_manage_page', 'booking'), array('token' => $token)) : '';
+			$vars['resource_name'] = isset($setup['resources'][$booking['resource']]) ? $setup['resources'][$booking['resource']]['name'] : '';
+			$vars['service_name'] = isset($setup['services'][$booking['service']]) ? $setup['services'][$booking['service']]['name'] : '';
+			$vars['site_url'] = util::url('');
+			$vars['book_url'] = util::url(config::get('booking_page', 'book'));
+			return $vars;
+		};
+		$lang = i18n::of($booking);
+		if (trim((string)$booking['email']) !== '') {
+			mail::in_language($lang, function () use ($guest, $booking, $vars, $token, $lang) {
+				self::send('_email/'.$guest, $booking['email'], $vars($token), $lang);
+			});
+		}
 		if (!$staff || !isset($booking['who']) || $booking['who'] !== 'guest') return null;
-		$vars['manage_url'] = '';
 		$to = trim((string)config::get('booking_staff_email', ''));
 		if ($to === '') $to = trim((string)(getenv('RASTER_MAIL_FROM') ?: config::get('mail_from', '')));
-		if ($to === '') log::warning('booking: no address for staff emails: set booking_staff_email or mail_from');
-		else self::send('_email/'.$staff, $to, $vars);
+		if ($to === '') {
+			log::warning('booking: no address for staff emails: set booking_staff_email or mail_from');
+			return null;
+		}
+		$default = i18n::default_language();
+		mail::in_language($default, function () use ($staff, $to, $vars, $lang, $default) {
+			$staff_vars = $vars(null);
+			if (i18n::enabled()) $staff_vars['lang'] = $lang;
+			self::send('_email/'.$staff, $to, $staff_vars, $default);
+		});
 		return null;
 	}
 
 	// a booking stays made when its email can't go: the failure is logged,
-	// without the address or the link
-	protected static function send($view, $to, $vars) {
+	// without the address or the link. $lang: the recipient's language
+	protected static function send($view, $to, $vars, $lang = null) {
 		$mail = controller::model_class('mail');
 		try {
-			if ($mail::send_view($view, $to, $vars)) return true;
+			if ($mail::send_view($view, $to, $vars, array(), $lang)) return true;
 		} catch (Exception $e) {
 			log::error("booking: $view: ".$e->getMessage());
 			return false;

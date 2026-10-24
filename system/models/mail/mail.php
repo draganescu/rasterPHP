@@ -95,8 +95,12 @@ class mail
 			log::error('Mail: '.static::$last_error);
 			return false;
 		}
-		$html = controller::render_view($view, $vars);
-		$subject = preg_match('/<title>(.*?)<\/title>/is', $html, $m) ? html_entity_decode(trim(strip_tags($m[1])), ENT_QUOTES) : static::site_name();
+		// the view, its <title> and the site's name in the recipient's language
+		list($html, $subject) = static::in_language($lang, function () use ($view, $vars, $lang) {
+			$html = controller::render_view($view, $vars, 'html', $lang);
+			$subject = preg_match('/<title>(.*?)<\/title>/is', $html, $m) ? html_entity_decode(trim(strip_tags($m[1])), ENT_QUOTES) : static::site_name();
+			return array($html, $subject);
+		});
 		// static: a site's the_mail sends it, when it has one
 		return static::send($to, $subject, $html, null, $headers);
 	}
@@ -118,7 +122,14 @@ class mail
 		try {
 			database::instance();
 			$site = database::configured() ? cms_store::latest('sitepage') : null;
-			if ($site) $name = trim(html_entity_decode(strip_tags((string)$site->site_name), ENT_QUOTES));
+			// multilingual: as it reads in i18n::current(), the recipient's
+			// language inside in_language()
+			if ($site && i18n::enabled()) {
+				$row = cms_store::localized($site->export(), 'sitepage');
+				$name = trim(html_entity_decode(strip_tags(isset($row['site_name']) ? (string)$row['site_name'] : ''), ENT_QUOTES));
+			} elseif ($site) {
+				$name = trim(html_entity_decode(strip_tags((string)$site->site_name), ENT_QUOTES));
+			}
 		} catch (Throwable $e) {
 			log::warning('mail: '.$e->getMessage());
 		}
