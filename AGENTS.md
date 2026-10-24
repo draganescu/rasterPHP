@@ -2215,7 +2215,8 @@ every language is **Multilingual sites**, below).
   as written (make them `print.cms.<name>` for words editors change, or
   `print.i18n.<file>('key')` for fixed words; what a print replaces,
   comments, `remove`, scripts, styles, numbers, punctuation and lone
-  symbols are left out, and so are emails; one per line, at most ten per
+  symbols are left out; `_email/` views are read too, since each email
+  goes out in its recipient's language; one per line, at most ten per
   view and a count of the rest); `missing_translation_key`, a
   `print.i18n.<file>('key')` some language's dictionary has no entry for;
   `html_lang_fixed`, an `<html>` whose `lang` no
@@ -2321,10 +2322,12 @@ as a one-language site. Each part is described where it lives:
   2. Words editors change become CMS fields, fixed words dictionary keys
      (`check_view` and `write_view` say which new fields get a translation).
   3. `translation_status` with `lang: "ro"` lists what Romanian lacks:
-     page and `site` fields, items' and records' fields, dictionary keys.
+     page and `site` fields, items' and records' fields, dictionary keys
+     (`email` for the ones only `_email/` views print).
   4. `update_page` with `lang` writes a page's translation, `update_item`
-     with `lang` an item's (`where` `menu/3` is collection `menu`, id 3),
-     `write_strings` a dictionary's.
+     with `lang` an item's or a record's (`where` `menu/3` is collection
+     `menu`, id 3; `bookingservice/2` a service's name), `write_strings` a
+     dictionary's, an email's words included.
   5. `render_url` with `/ro/…` shows the result (`/ro/menu`, and an item
      at its Romanian address).
 
@@ -2688,8 +2691,15 @@ of lists and filter pages come along; drafts and the editor don't.
     shared }], total, done }`. `kind` is `page` (`where` its URL), `site`
     (the `site_*` fields), `item` (a markup collection's item, `where`
     `<collection>/<id>`, `menu/3`), `record` (the same, for a record type
-    whose `types()` declares `translate` or `shared`) or `strings` (a
-    dictionary key the views print; `where` the dictionary). An item's slug
+    whose `types()` declares `translate` or `shared`; the bundled
+    `bookingresource` and `bookingservice` names on a site that uses
+    booking, never what people typed into a booking, rsvp, message or
+    order), `email` (a dictionary key only `_email/` views print; `where`
+    the dictionary, `view` the first email that prints it,
+    `_email/booking_confirmed`) or `strings` (a dictionary key other views
+    print; `where` the dictionary). `email` and `strings` keys are both
+    translated with `write_strings`; each key is one row, and a CMS field
+    an email prints counts once, where it is stored. An item's slug
     is never listed: it is made from its translated title. A field counts
     when the templates (or the record type) translate it and its
     default-language value isn't empty; `default_value` is cut at

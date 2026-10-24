@@ -903,9 +903,10 @@ class raster_inspector {
 	// ##Languages
 	// Multilingual on (i18n::enabled()), a page has to say each language's
 	// words: untranslatable_text, html_lang_fixed and (lint_model_call)
-	// missing_translation_key, all warnings. Emails and feeds are left out.
+	// missing_translation_key, all warnings. Feeds are left out; emails are
+	// read too, since each goes out in its recipient's language.
 	protected function lint_languages($html, $blocks, &$problems) {
-		if (!i18n::enabled() || preg_match('#(^|/)_email/|\.(rss|atom|xml|json|txt)$#', $this->linting)) return;
+		if (!i18n::enabled() || preg_match('#\.(rss|atom|xml|json|txt)$#', $this->linting)) return;
 		$blank = function ($text) { return preg_replace('/[^\n]/', ' ', $text); };
 		$html = preg_replace_callback('/<!-- remove -->.*?<!-- \/remove -->/s', function ($m) use ($blank) { return $blank($m[0]); }, $html);
 		// html_lang_fixed: <html lang="en"> is the mock-up a print.@lang.i18n.language replaces

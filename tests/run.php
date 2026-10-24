@@ -10303,8 +10303,9 @@ test('P2.C: tools/list and describe grow by less than 1,000 characters (#161)', 
 			$tools = strlen(json_encode($list, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
 			$languages = strlen(json_encode(array('languages' => $mcp->call('describe', array('sections' => array('languages')))['languages']), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)) - 2;
 			// P3.D's lang on the item tools (46 characters) is P3's growth,
-			// held to its own budget by its test
-			$growth = $tools - 10954 - 46 + $languages;
+			// and P4.C's "record, email" (15) P4's, each held to its own
+			// budget by its test
+			$growth = $tools - 10954 - 46 - 15 + $languages;
 			check($growth < 1000, "tools/list is $tools characters and the languages block $languages: $growth more than at the kickoff");
 			$instructions = $mcp->message('initialize')['result']['instructions'];
 			check(strpos($instructions, 'Making a site multilingual') !== false && strpos($instructions, 'write_asset') !== false, 'the recipe and the asset tools');
@@ -11117,12 +11118,13 @@ test('P2.A: untranslatable_text warns on words no annotation prints, multilingua
 	$problems = array_values(array_filter(with_settings(p2a_on(), function () use ($many) { return lint_html($many); }), function ($p) { return strpos($p['message'], 'is the same in every language') !== false || strpos($p['message'], 'more line(s) of this view') !== false; }));
 	same(11, count($problems), json_encode($problems));
 	check(strpos($problems[10]['message'], '15 more line(s) of this view') !== false, $problems[10]['message']);
-	// emails are left out
+	// emails are read too: each goes out in its recipient's language (P4.C)
 	$file = sys_get_temp_dir().'/raster-p2a-'.getmypid().'/_email';
 	@mkdir($file, 0775, true);
 	file_put_contents("$file/zz.html", '<html><body><p>Fixed words</p></body></html>');
 	try {
-		same(array(), with_settings(p2a_on(), function () use ($file) { return (new raster_inspector())->lint_path("$file/zz.html"); }));
+		$problems = with_settings(p2a_on(), function () use ($file) { return (new raster_inspector())->lint_path("$file/zz.html"); });
+		check(strpos(json_encode($problems), "'Fixed words' is the same in every language") !== false, json_encode($problems));
 	} finally {
 		@unlink("$file/zz.html");
 		@rmdir($file);
@@ -11186,7 +11188,8 @@ test('P2.A: the starter linted multilingual: warnings only, a few per view', fun
 	$per_file = array();
 	foreach ($on as $p) if (strpos($p['message'], 'is the same in every language') !== false || strpos($p['message'], 'more line(s) of this view') !== false) $per_file[$p['file']] = (isset($per_file[$p['file']]) ? $per_file[$p['file']] : 0) + 1;
 	foreach ($per_file as $file => $count) check($count <= 11, "$file: $count");
-	foreach ($on as $p) check(strpos($p['file'], '_email/') === false || strpos($p['message'], 'the same in every language') === false, 'no email: '.$p['file']);
+	// emails are read too (P4.C): the starter's are plain words
+	check(preg_grep('#_email/password_reset#', array_keys($per_file)) !== array(), 'the emails: '.json_encode(array_keys($per_file)));
 });
 
 test('P2.A: schema --rename moves a field\'s translation columns with it', function () {
@@ -12139,7 +12142,8 @@ test('P3.D: tools/list grows by less than 100 characters with lang on the item t
 			foreach ($tools as $tool) {
 				if (in_array($tool['name'], array('list_items', 'get_item', 'create_item', 'update_item'), true)) check(isset($tool['inputSchema']['properties']['lang']), $tool['name']);
 			}
-			$size = strlen(json_encode(array('tools' => $tools), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+			// less P4.C's "record, email" in translation_status (15), P4's
+			$size = strlen(json_encode(array('tools' => $tools), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)) - 15;
 			check($size - 11805 < 100, "tools/list is $size characters, ".($size - 11805).' more than P2 left it');
 		});
 	});
@@ -12602,6 +12606,220 @@ test('P4 kickoff: off, newsletter recipients in a language are everyone, as befo
 			same(newsletter::recipients(null), newsletter::recipients(null, 'en'), $what);
 		});
 	}
+});
+
+// ## P4.C: the coding MCP translates emails and records
+
+// The starter with a booking page (render.booking.form) and the booking
+// emails, whose words are keys of the zzp4c_mail dictionary: 'hello' is
+// printed by every email, 'book' by an email and the page too. Its own
+// database, the_app.php and the dictionaries as they were, put back after.
+function p4c_site($fn) {
+	global $root;
+	$theme = "$root/application/views/default";
+	$lang = '<!doctype html><!-- print.@lang.i18n.language --><html lang="en"><!-- /print.@lang.i18n.language -->';
+	$key = function ($key, $text) { return "<!-- print.i18n.zzp4c_mail('$key') -->$text<!-- /print.i18n.zzp4c_mail('$key') -->"; };
+	$body = '<body><p>'.$key('hello', 'Hello').' <!-- print.self.name -->there<!-- /print.self.name -->,</p>'
+		.'<p><!-- print.self.date -->2026-10-20<!-- /print.self.date --> <!-- print.self.time -->19:00<!-- /print.self.time -->:'
+		.' <!-- print.self.service_name -->Dinner<!-- /print.self.service_name --> <!-- print.self.resource_name -->Dining room<!-- /print.self.resource_name --></p>';
+	$views = array(
+		'zzp4c_book' => $lang.'<head><title>Book</title></head><body><h1>'.$key('book', 'Book a table').'</h1>'
+			.'<!-- render.booking.form --><form method="post"><input name="name" required><input type="email" name="email"><input type="date" name="date" required>'
+			.'<input name="time" required><input type="number" name="people"><input name="resource"><input name="service"><button>Book</button></form><!-- /render.booking.form --></body></html>',
+		'_email/booking_requested' => $lang.'<head><title>'.$key('requested_subject', 'We have your booking').'</title></head>'.$body
+			.'<p><a href="<!-- print.self.manage_url /-->">'.$key('book', 'Book a table').'</a></p></body></html>',
+		'_email/booking_confirmed' => $lang.'<head><title>'.$key('confirmed_subject', 'Your booking is confirmed').'</title></head>'.$body.'</body></html>',
+		'_email/booking_new' => $lang.'<head><title>'.$key('new_subject', 'A new booking').'</title></head>'.$body.'</body></html>',
+	);
+	// the rest of what render.booking.form sends, with a fixed subject each
+	foreach (array('booking_declined', 'booking_cancelled', 'booking_changed') as $email) $views["_email/$email"] = $lang."<head><title>$email</title></head>".$body.'</body></html>';
+	foreach ($views as $name => $html) {
+		test_fixture("$theme/$name.html");
+		file_put_contents("$theme/$name.html", $html);
+	}
+	$config = APPBASE.'config/the_app.php';
+	$kept = file_get_contents($config);
+	$i18n = APPBASE.'i18n';
+	$made = !is_dir($i18n);
+	$dictionaries = array();
+	foreach (glob("$i18n/*/*.php") ?: array() as $file) $dictionaries[$file] = file_get_contents($file);
+	$db = sys_get_temp_dir().'/raster-p4c-'.getmypid().'.sqlite';
+	controller::forget_models();
+	cms_records::forget();
+	try {
+		return $fn($db);
+	} finally {
+		file_put_contents($config, $kept);
+		foreach (array_keys($views) as $name) @unlink("$theme/$name.html");
+		foreach (glob("$i18n/*/*.php") ?: array() as $file) {
+			if (!isset($dictionaries[$file])) unlink($file);
+		}
+		foreach ($dictionaries as $file => $source) file_put_contents($file, $source);
+		foreach (glob("$i18n/*", GLOB_ONLYDIR) ?: array() as $dir) @rmdir($dir);
+		if ($made) @rmdir($i18n);
+		array_map('unlink', glob("$db*") ?: array());
+		controller::forget_models();
+		cms_records::forget();
+	}
+}
+// the rows translation_status lists, every page of them
+function p4c_status($mcp) {
+	$rows = array();
+	$offset = 0;
+	do {
+		$batch = $mcp->call('translation_status', array('lang' => 'ro', 'limit' => 50, 'offset' => $offset));
+		$rows = array_merge($rows, $batch['missing']);
+		$offset += 50;
+	} while ($offset < $batch['total']);
+	return $rows;
+}
+// the dining room, open every evening, and dinner there
+function p4c_setup($mcp) {
+	foreach (array(
+		array('bookingresource', array('name' => 'Dining room', 'people' => 20)),
+		array('bookinghours', array('resource' => 'dining-room', 'days' => 'daily', 'starts' => '19:00', 'ends' => '21:00', 'every' => 120)),
+		array('bookingservice', array('name' => 'Dinner', 'minutes' => 120, 'resources' => 'dining-room')),
+	) as list($collection, $fields)) {
+		$made = $mcp->call('create_item', array('collection' => $collection, 'fields' => $fields));
+		check(!isset($made['error']), "$collection: ".json_encode($made));
+	}
+}
+
+test('P4.C: off, emails lint as before and describe counts nothing', function () use ($root) {
+	require_once BASE.'tools/describe.php';
+	$dir = "$root/application/views/default/_email";
+	test_fixture("$dir/zzp4c.html");
+	file_put_contents("$dir/zzp4c.html", '<html lang="en"><head><title>Fixed words</title></head><body><p>Fixed words</p></body></html>');
+	try {
+		foreach (p4_off_settings() as $what => $setting) {
+			with_settings($setting, function () use ($what, $dir) {
+				$problems = (new raster_inspector())->lint_path("$dir/zzp4c.html");
+				same(array(), array_values(array_filter($problems, function ($p) { return strpos($p['message'], 'the same in every language') !== false || strpos($p['message'], 'names one language') !== false; })), $what);
+				same(array(), (array)raster_describe::languages()['missing'], $what);
+			});
+		}
+		// on, an email's fixed words and its <html lang> are warned about, as a page's are
+		$on = with_settings(p2a_on(), function () use ($dir) { return json_encode((new raster_inspector())->lint_path("$dir/zzp4c.html")); });
+		check(strpos($on, "'Fixed words' is the same in every language") !== false, $on);
+		check(strpos($on, "names one language on every language's pages") !== false, $on);
+	} finally {
+		@unlink("$dir/zzp4c.html");
+	}
+});
+
+test('P4.C: translation_status lists the keys only emails print as kind email, with the first email', function () {
+	p4c_site(function ($db) {
+		p2c_session(array('RASTER_DB' => $db), function ($mcp) {
+			$mcp->call('set_languages', array('languages' => array('en', 'ro')));
+			$mail = array_values(array_filter(p4c_status($mcp), function ($row) { return $row['where'] === 'zzp4c_mail'; }));
+			usort($mail, function ($a, $b) { return strcmp($a['field'], $b['field']); });
+			$row = function ($kind, $field, $text, $view = null) {
+				return array('kind' => $kind, 'where' => 'zzp4c_mail', 'field' => $field) + ($view ? array('view' => $view) : array()) + array('default_value' => $text, 'length' => mb_strlen($text), 'shared' => false);
+			};
+			same(array(
+				// the page prints it too: one strings row
+				$row('strings', 'book', 'Book a table'),
+				$row('email', 'confirmed_subject', 'Your booking is confirmed', '_email/booking_confirmed'),
+				// several emails print it: the first, sorted
+				$row('email', 'hello', 'Hello', '_email/booking_cancelled'),
+				$row('email', 'new_subject', 'A new booking', '_email/booking_new'),
+				$row('email', 'requested_subject', 'We have your booking', '_email/booking_requested'),
+			), $mail);
+			// counted once, in total and in describe's missing
+			$total = $mcp->call('translation_status', array('lang' => 'ro'))['total'];
+			same(array('ro' => $total), $mcp->call('describe', array('sections' => array('languages')))['languages']['missing']);
+			// write_strings translates them like any key
+			same(5, $mcp->call('write_strings', array('file' => 'zzp4c_mail', 'lang' => 'ro', 'strings' => array('book' => 'Rezervă o masă', 'confirmed_subject' => 'Rezervarea ta e confirmată',
+				'hello' => 'Bună', 'new_subject' => 'O rezervare nouă', 'requested_subject' => 'Am primit rezervarea ta')))['written']);
+			same(array(), array_values(array_filter(p4c_status($mcp), function ($row) { return $row['where'] === 'zzp4c_mail'; })));
+			same($total - 5, $mcp->call('translation_status', array('lang' => 'ro'))['total']);
+		});
+	});
+});
+
+test('P4.C: what people typed into a booking is never a record row', function () {
+	p4c_site(function ($db) {
+		p2c_session(array('RASTER_DB' => $db), function ($mcp) {
+			$mcp->call('set_languages', array('languages' => array('en', 'ro')));
+			p4c_setup($mcp);
+			$made = $mcp->call('create_item', array('collection' => 'booking', 'fields' => array('name' => 'Ana Pop', 'email' => 'ana@example.test', 'date' => date('Y-m-d', strtotime('next tuesday')), 'time' => '19:00', 'people' => 2, 'resource' => 'dining-room', 'service' => 'dinner', 'notes' => 'By the window')));
+			check(!isset($made['error']), json_encode($made));
+			$records = array_values(array_filter(p4c_status($mcp), function ($row) { return $row['kind'] === 'record'; }));
+			$collections = array_unique(array_map(function ($row) { return explode('/', $row['where'])[0]; }, $records));
+			same(array(), array_values(array_diff($collections, array('bookingresource', 'bookingservice'))), json_encode($records));
+			check(strpos(json_encode($records), 'By the window') === false && strpos(json_encode($records), 'Ana Pop') === false, json_encode($records));
+		});
+	});
+});
+
+test('P4.C: an agent translates the booking emails and service names over MCP, and translation_status reports 0 (needs P4.A, P4.B)', function () {
+	global $maildir;
+	p4c_site(function ($db) use ($maildir) {
+		p2c_session(array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir-booking", 'RASTER_MAIL_FROM' => 'staff@zz.test'), function ($mcp) use ($db) {
+			$mcp->call('set_languages', array('languages' => array('en', 'ro')));
+			p4c_setup($mcp);
+			// 1. the emails' keys and the names, beside the rest
+			$rows = p4c_status($mcp);
+			$listed = array();
+			foreach ($rows as $row) if (in_array($row['kind'], array('email', 'record'), true)) $listed[] = $row['kind'].' '.$row['where'].' '.$row['field'];
+			sort($listed);
+			same(array('email zzp4c_mail confirmed_subject', 'email zzp4c_mail hello', 'email zzp4c_mail new_subject', 'email zzp4c_mail requested_subject', 'record bookingresource/1 name', 'record bookingservice/1 name'), $listed);
+			// 2. everything translated the way its kind says
+			$words = array('Dining room' => 'Sala de mese', 'Dinner' => 'Cină', 'Hello' => 'Bună', 'We have your booking' => 'Am primit rezervarea ta', 'Your booking is confirmed' => 'Rezervarea ta e confirmată');
+			$pages = $items = $strings = array();
+			foreach ($rows as $row) {
+				$text = isset($words[$row['default_value']]) ? $words[$row['default_value']] : 'RO '.$row['default_value'];
+				if ($row['kind'] === 'page' || $row['kind'] === 'site') $pages[$row['where']][$row['field']] = $text;
+				elseif ($row['kind'] === 'item' || $row['kind'] === 'record') $items[$row['where']][$row['field']] = $text;
+				else $strings[$row['where']][$row['field']] = $text;
+			}
+			foreach ($pages as $where => $fields) check(!isset($mcp->call('update_page', array('page' => $where, 'fields' => $fields, 'lang' => 'ro'))['error']), $where);
+			foreach ($items as $where => $fields) {
+				list($collection, $id) = explode('/', $where);
+				$saved = $mcp->call('update_item', array('collection' => $collection, 'id' => (int)$id, 'fields' => $fields, 'lang' => 'ro'));
+				check(!isset($saved['error']), "$where: ".json_encode($saved));
+			}
+			foreach ($strings as $file => $keys) same(count($keys), $mcp->call('write_strings', array('file' => $file, 'lang' => 'ro', 'strings' => $keys))['written'], $file);
+			// 3. nothing left
+			$status = $mcp->call('translation_status', array('lang' => 'ro'));
+			same(0, $status['total'], json_encode($status['missing']));
+			same(array('ro' => 0), $mcp->call('describe', array('sections' => array('languages')))['languages']['missing']);
+			// 4. a booking made on /ro/ mails Romanian, its staff copy English,
+			// and so does staff's confirmation over MCP, in English
+			list($base, $log) = booking_server(array('RASTER_DB' => $db));
+			$tue = date('Y-m-d', strtotime('next tuesday'));
+			$mails = booking_mails(function () use ($base, $tue, $log) {
+				list($status, $body) = form_post("$base/ro/zzp4c_book", array('raster_form' => 'booking.form', 'name' => 'Ana', 'email' => 'ana@example.test', 'date' => $tue, 'time' => '19:00', 'people' => '2', 'resource' => 'dining-room', 'service' => 'dinner'));
+				same(303, $status, (string)@file_get_contents($log).substr(strip_tags((string)$body), 0, 1500));
+			});
+			same(array('Am primit rezervarea ta ana@example.test', 'A new booking staff@zz.test'), booking_sent($mails));
+			check(strpos($mails[0]['text'], 'Bună Ana') !== false && strpos($mails[0]['text'], 'Cină Sala de mese') !== false, $mails[0]['text']);
+			check(strpos($mails[1]['text'], 'Hello Ana') !== false && strpos($mails[1]['text'], 'Dinner Dining room') !== false, $mails[1]['text']);
+			$booking = $mcp->call('list_items', array('collection' => 'booking'))['items'][0];
+			$mails = booking_mails(function () use ($mcp, $booking) {
+				$done = $mcp->call('run_action', array('collection' => 'booking', 'id' => $booking['id'], 'action' => 'confirm'));
+				check(!isset($done['error']), json_encode($done));
+			});
+			same(array('Rezervarea ta e confirmată ana@example.test'), booking_sent($mails));
+			check(strpos($mails[0]['text'], 'Bună Ana') !== false && strpos($mails[0]['text'], 'Cină Sala de mese') !== false, $mails[0]['text']);
+		});
+	});
+});
+
+test('P4.C: tools/list grows by the translation_status words only; the recipe stays under 120 words (#161)', function () {
+	// translation_status's description says "record, email" (15 characters)
+	// more than P3 left it; P2.C's and P3.D's budgets leave them out
+	p4c_site(function ($db) {
+		p2c_session(array('RASTER_DB' => $db), function ($mcp) {
+			$tools = $mcp->message('tools/list')['result']['tools'];
+			$status = array_values(array_filter($tools, function ($tool) { return $tool['name'] === 'translation_status'; }))[0];
+			same('What a language lacks: page, site, item, record, email and dictionary words, with the default text.', $status['description']);
+			$instructions = $mcp->message('initialize')['result']['instructions'];
+			check(strpos($instructions, '_email/') !== false, 'the recipe says emails are translated too');
+			preg_match('/Making a site multilingual.*$/s', $instructions, $m);
+			check(str_word_count($m[0]) <= 120, 'the recipe is at most 120 words: '.str_word_count($m[0]));
+		});
+	});
 });
 
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";
