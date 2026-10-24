@@ -5342,7 +5342,17 @@ test('J11', 'P5.A: the lists in Romanian at their Romanian addresses; seeding ag
 	has(http('GET', "$base/ro/menu/menu_items/category/cafea")[1], 'Cafea cu lapte', 'a filter in Romanian');
 	has(http('GET', "$base/ro/events")[1], 'Seară de jazz');
 	has(http('GET', "$base/ro/journal")[1], 'Ziua deschiderii');
-	has(http('GET', "$base/ro/faq")[1], 'Aveți wifi?');
+	// an FAQ has no title: its Romanian address comes from its Romanian question
+	$faq = http('GET', "$base/ro/faq")[1];
+	has($faq, 'Aveți wifi?');
+	has($faq, 'href="'.$base.'/ro/faq/faq_item/aveti-wifi"');
+	same(200, http('GET', "$base/ro/faq/faq_item/aveti-wifi")[0]);
+	list($status, , $headers) = http('GET', "$base/ro/faq/faq_item/is-there-wifi");
+	same(301, $status, 'the English address on /ro/');
+	same("$base/ro/faq/faq_item/aveti-wifi", header_value($headers, 'Location'));
+	// the opening hours' mock-up row is Monday's, at a slug of its own
+	cms_store::connect();
+	same('monday', R::getCell("SELECT slug FROM hoursdata WHERE day = 'Monday'"));
 	// the opening hours: the page, the text and the API, each in its language
 	has(http('GET', "$base/ro/about")[1], '<tr class="day closed"><td>Luni</td><td>închis</td></tr>');
 	has(http('GET', "$base/ro/hours.txt")[1], "Programul Raster Café\n\nLuni: închis\nMarți–vineri: 8:00–18:00");

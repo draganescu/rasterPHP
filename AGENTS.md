@@ -882,7 +882,9 @@ mock-up is stored only when the collection's table is made.
   `slug__ro` (a text column per language, made with the slug's other
   translation columns, each with its own index; `schema --apply` adds a
   missing one). Raster makes it from the translated `title`, `headline`
-  or `name` (`title__ro`) on the first save that has one
+  or `name` (`title__ro`) on the first save that has one, or, for an
+  item with none of the three (an FAQ), from its first field with a
+  translation (`question__ro`), never a hidden one
   (`cms_store::slug_source($values, $skip, $lang)`); an item with no
   translated title, or the same words in both, has none, and its
   Romanian address is its default slug: `/ro/menu/menu_item/flat-white`
@@ -2384,7 +2386,7 @@ as a one-language site. Each part is described where it lives:
 | dates as typed: `5/10/2026` day first unless `en-us` | **The CMS**: Types |
 | the sitemap: every language's address, with `hreflang` alternates | **Bundled models**: feed |
 | a static export, a folder per language (`ro/`) | **Static export** |
-| `doctor`: fewer than two languages, a code it can't read, missing translation columns | **Keeping Raster up to date** |
+| `doctor`: fewer than two languages, a code it can't read, missing language columns (`headline__ro`, `saved_lang`) | **Keeping Raster up to date** |
 | the editor on `/ro/…` and the editor's own language | **Editors and agents**: the in-page editor |
 | `set_languages`, `translation_status`, `read_strings`, `write_strings`, `lang` on the page and item tools | **Editors and agents**: Tools for languages |
 
@@ -2392,7 +2394,11 @@ as a one-language site. Each part is described where it lives:
   (`print.cms.x`), with a value per language. Fixed words (a button, a
   label the site never changes) are dictionary keys,
   `print.i18n.common('menu')`, an email's too (the starter's and the
-  demo's emails use `print.i18n.emails('key')`). Words a model returns can't be translated,
+  demo's emails use `print.i18n.emails('key')`). The starter is written
+  that way: every fixed word of its views is a key of a dictionary named
+  after the view (`_layout.html` uses `common`), with the English as the
+  template's text, so it lints clean multilingual and `translation_status`
+  lists the words to translate. Words a model returns can't be translated,
   so a model returns data (addresses, states, flags) and the view words
   it: the starter's `site::nav()` gives each link its `url` and `state`
   and `_layout.html` says "Home"; the shop's order mail gets the flags
@@ -3053,8 +3059,9 @@ stamp check, so people with a page open send it again.
   that isn't a key, a language code it can't read, `multilingual` with
   fewer than two languages and, multilingual, a `domain_language` without
   a site address (`RASTER_URL`, `site_url`) on a host of no language and
-  the translation columns the database lacks (each table with the
-  columns `schema` lists in `missing_translations`, `headline__ro`,
+  the language columns the database lacks ("N language column(s)
+  missing": each table with the columns `schema` lists in
+  `missing_translations`, translations such as `headline__ro` and
   `saved_lang`: a warning in development, a failure in production, fixed
   by `schema --apply`), and, in production, one address that sent one form many different
   emails today (many people share it), the site address, mail, tokens,

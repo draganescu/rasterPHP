@@ -515,7 +515,7 @@ class raster_project
 					$lines[] = $table['table'].': '.implode(', ', $table['missing_translations']);
 					$count += count($table['missing_translations']);
 				}
-				if ($lines) $add($environment === 'production' ? 'fail' : 'warn', "$count translation column(s) missing", implode("\n", $lines)."\nphp bin/raster schema --apply adds them, empty: each language shows the default until it is translated");
+				if ($lines) $add($environment === 'production' ? 'fail' : 'warn', "$count language column(s) missing", implode("\n", $lines)."\nphp bin/raster schema --apply adds them, empty: each language shows the default until it is translated");
 			}
 		} catch (Exception $e) {
 			$add('fail', 'No database', $e->getMessage());

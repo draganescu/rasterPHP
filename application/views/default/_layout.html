@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="stylesheet" href="style.css">
-  <link rel="alternate" type="application/rss+xml" title="News" href="news.rss">
+  <!-- print.@title.i18n.common('news') --><link rel="alternate" type="application/rss+xml" title="News" href="news.rss"><!-- /print.@title.i18n.common('news') -->
   <!-- /res.head -->
 </head>
 <body>
@@ -14,12 +14,16 @@
     <a class="brand" href="index.html"><!-- print.cms.site_name -->My website<!-- /print.cms.site_name --></a>
     <nav>
       <!-- render.site.nav -->
-      <!-- print.home --><!-- print.+class.state --><!-- print.@href.url --><a class="nav-link" href="index.html">Home</a><!-- /print.@href.url --><!-- /print.+class.state --><!-- /print.home -->
-      <!-- print.news --><!-- print.+class.state --><!-- print.@href.url --><a class="nav-link" href="news.html">News</a><!-- /print.@href.url --><!-- /print.+class.state --><!-- /print.news -->
-      <!-- print.about --><!-- print.+class.state --><!-- print.@href.url --><a class="nav-link" href="about.html">About</a><!-- /print.@href.url --><!-- /print.+class.state --><!-- /print.about -->
+      <!-- print.home --><!-- print.+class.state --><!-- print.@href.url --><a class="nav-link" href="index.html"><!-- print.i18n.common('home') -->Home<!-- /print.i18n.common('home') --></a><!-- /print.@href.url --><!-- /print.+class.state --><!-- /print.home -->
+      
+
+      <!-- print.news --><!-- print.+class.state --><!-- print.@href.url --><a class="nav-link" href="news.html"><!-- print.i18n.common('news') -->News<!-- /print.i18n.common('news') --></a><!-- /print.@href.url --><!-- /print.+class.state --><!-- /print.news -->
+      
+
+      <!-- print.about --><!-- print.+class.state --><!-- print.@href.url --><a class="nav-link" href="about.html"><!-- print.i18n.common('about') -->About<!-- /print.i18n.common('about') --></a><!-- /print.@href.url --><!-- /print.+class.state --><!-- /print.about -->
       <!-- /render.site.nav -->
-      <!-- print.if.logged_out --><a class="nav-link" href="login.html">Log in</a><!-- /print.if.logged_out -->
-      <!-- print.if.logged_in --><a class="nav-link" href="account.html">Account</a><!-- /print.if.logged_in --><!-- print.if.languages --><!-- render.i18n.languages --><!-- print.+class.state --><!-- print.@href.url --><!-- print.@hreflang.code --><a class="nav-link" href="#" hreflang="en"><!-- print.code -->en<!-- /print.code --></a><!-- /print.@hreflang.code --><!-- /print.@href.url --><!-- /print.+class.state --><!-- /render.i18n.languages --><!-- /print.if.languages -->
+      <!-- print.if.logged_out --><a class="nav-link" href="login.html"><!-- print.i18n.common('log_in') -->Log in<!-- /print.i18n.common('log_in') --></a><!-- /print.if.logged_out -->
+      <!-- print.if.logged_in --><a class="nav-link" href="account.html"><!-- print.i18n.common('account') -->Account<!-- /print.i18n.common('account') --></a><!-- /print.if.logged_in --><!-- print.if.languages --><!-- render.i18n.languages --><!-- print.+class.state --><!-- print.@href.url --><!-- print.@hreflang.code --><a class="nav-link" href="#" hreflang="en"><!-- print.code -->en<!-- /print.code --></a><!-- /print.@hreflang.code --><!-- /print.@href.url --><!-- /print.+class.state --><!-- /render.i18n.languages --><!-- /print.if.languages -->
     </nav>
   </header>
   <!-- print.validation.alert('try_again') --><p class="error">That went too quickly. Wait a moment and send it again.</p><!-- /print.validation.alert('try_again') -->
@@ -29,19 +33,19 @@
   <!-- res.footer -->
   <footer class="site-footer">
     <section class="signup">
-      <h2>Get new posts by email</h2>
-      <p>One email when something new goes up. Unsubscribe any time.</p>
+      <h2><!-- print.i18n.common('get_new_posts_by_email') -->Get new posts by email<!-- /print.i18n.common('get_new_posts_by_email') --></h2>
+      <p><!-- print.i18n.common('one_email_when_something_new') -->One email when something new goes up. Unsubscribe any time.<!-- /print.i18n.common('one_email_when_something_new') --></p>
       <!-- print.validation.alert('check_email') --><p class="notice">Almost there: check your inbox to confirm.</p><!-- /print.validation.alert('check_email') -->
       <!-- render.newsletter.signup -->
       <form method="post" class="inline-form">
-        <label for="signup-email" class="visually-hidden">Email</label>
+        <label for="signup-email" class="visually-hidden"><!-- print.i18n.common('email') -->Email<!-- /print.i18n.common('email') --></label>
         <input id="signup-email" type="email" name="email" placeholder="you@example.com" required maxlength="200">
-        <button>Subscribe</button>
-        <!-- render.validation.field('email') --><p class="error">Please enter a valid email address.</p><!-- /render.validation.field('email') -->
+        <button><!-- print.i18n.common('subscribe') -->Subscribe<!-- /print.i18n.common('subscribe') --></button>
+        <!-- render.validation.field('email') --><p class="error"><!-- print.i18n.common('please_enter_a_valid_email') -->Please enter a valid email address.<!-- /print.i18n.common('please_enter_a_valid_email') --></p><!-- /render.validation.field('email') -->
       </form>
       <!-- /render.newsletter.signup -->
     </section>
-    <p>&copy; <!-- print.site.year -->2026<!-- /print.site.year --> · <!-- print.cms.site_footer -->Made with Raster<!-- /print.cms.site_footer --> · <a href="news.rss">RSS feed</a></p>
+    <p>&copy; <!-- print.site.year -->2026<!-- /print.site.year --> · <!-- print.cms.site_footer -->Made with Raster<!-- /print.cms.site_footer --> · <a href="news.rss"><!-- print.i18n.common('rss_feed') -->RSS feed<!-- /print.i18n.common('rss_feed') --></a></p>
   </footer>
   <!-- /res.footer -->
 </body>

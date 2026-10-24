@@ -101,7 +101,8 @@ $mockup = R::count('hoursdata') === 1 ? R::findOne('hoursdata', ' day = ? AND ti
 if (R::count('hoursdata') === 0 || $mockup) {
 	foreach ($hours as $row) {
 		if ($mockup && $row['day'] === 'Monday') {
-			cms_store::save_item('hoursdata', (int)$mockup->id, $row, array_keys($row));
+			// its slug came from the mock-up's class (day)
+			cms_store::save_item('hoursdata', (int)$mockup->id, $row + array('slug' => 'monday'), array_keys($row));
 			continue;
 		}
 		cms_store::save_item('hoursdata', 0, $row, array_keys($row));

@@ -13817,7 +13817,7 @@ test('P5.B: doctor names the translation columns a multilingual site lacks, and 
 	$checks = function ($environment) use ($root) {
 		$found = array();
 		foreach (raster_project::doctor($root, 'application', $environment) as $c) {
-			if (strpos($c['title'], 'translation column') !== false) $found[] = $c;
+			if (strpos($c['title'], 'language column') !== false) $found[] = $c;
 		}
 		return $found;
 	};
@@ -13833,7 +13833,7 @@ test('P5.B: doctor names the translation columns a multilingual site lacks, and 
 			$found = $checks('development');
 			same(1, count($found), json_encode($found));
 			same('warn', $found[0]['status']);
-			check(preg_match('/^\d+ translation column\(s\) missing$/', $found[0]['title']) === 1, $found[0]['title']);
+			check(preg_match('/^\d+ language column\(s\) missing$/', $found[0]['title']) === 1, $found[0]['title']);
 			check(strpos($found[0]['detail'], "$type: headline__ro, saved_lang") !== false, $found[0]['detail']);
 			check(strpos($found[0]['detail'], 'seats__ro') === false, 'a shared field has no translation');
 			check(strpos($found[0]['detail'], 'php bin/raster schema --apply') !== false, 'says how to add them');
@@ -13846,6 +13846,74 @@ test('P5.B: doctor names the translation columns a multilingual site lacks, and 
 		@unlink($view);
 		p2a_undo($changes, array($type));
 	}
+});
+
+// ## Final review: the starter as 2.2.45 made it, its words, lang on frozen records
+
+// a new site (raster new) renders its pages byte for byte as 2.2.45's did:
+// tests/expected/starter-2.2.45/ holds what v2.2.45 rendered, with the form
+// stamp and the asset versions blanked; the html tag's dir="ltr" is allowed
+test('Final review: a new starter site renders its pages as v2.2.45 did, byte for byte', function () use ($root) {
+	$tmp = sys_get_temp_dir().'/raster-final-'.getmypid();
+	@mkdir($tmp, 0775, true);
+	$site = "$tmp/site";
+	exec(php_cmd().' '.escapeshellarg("$root/bin/raster").' new '.escapeshellarg($site).' 2>&1', $out, $code);
+	same(0, $code, implode("\n", $out));
+	try {
+		$pages = array('/' => 'index', '/about' => 'about', '/news' => 'news', '/news/news_item/hello-world' => 'news_news_item_hello-world', '/login' => 'login', '/register' => 'register', '/forgot' => 'forgot', '/reset' => 'reset', '/newsletter-confirm' => 'newsletter-confirm', '/newsletter-unsubscribe' => 'newsletter-unsubscribe');
+		foreach ($pages as $page => $file) {
+			$db = "$tmp/".md5($page).'.sqlite';
+			@unlink($db);
+			$env = 'RASTER_APP=application RASTER_ENV= RASTER_DB='.escapeshellarg($db).' RASTER_URL=http://localhost:8000/';
+			$now = shell_exec('cd '.escapeshellarg($site).' && '.$env.' '.php_cmd().' bin/raster render '.escapeshellarg($page).' 2>&1');
+			@unlink($db);
+			$now = preg_replace(array('/name="raster_ts" value="[^"]*"/', '/\?v=[0-9a-f]{8}/'), array('name="raster_ts" value=""', '?v='), $now);
+			check(substr_count($now, '<html lang="en" dir="ltr">') === 1, "$page: ".substr($now, 0, 300));
+			same(file_get_contents("$root/tests/expected/starter-2.2.45/$file.html"), str_replace('<html lang="en" dir="ltr">', '<html lang="en">', $now), "$page byte for byte");
+		}
+	} finally {
+		remove_dir($tmp);
+	}
+});
+
+// spec #200 R9: every visible word of the starter is a CMS field or a
+// dictionary key, so turning languages on leaves nothing untranslatable
+test('Final review: the starter with multilingual on has no untranslatable words, and translation_status lists its fixed words as strings', function () {
+	$untranslatable = function () {
+		$found = array();
+		foreach ((new raster_inspector())->lint() as $p) {
+			if (strpos($p['file'], 'zzp2c') !== false) continue;
+			if (strpos($p['message'], 'is the same in every language') !== false || strpos($p['message'], 'more line(s) of this view') !== false) $found[] = $p['file'].':'.$p['line'].' '.$p['message'];
+		}
+		return $found;
+	};
+	same(array(), with_settings(p2a_on(), $untranslatable));
+	p2c_site(function ($db) {
+		p2c_session(array('RASTER_DB' => $db), function ($mcp) {
+			$mcp->call('set_languages', array('languages' => array('en', 'ro')));
+			$status = $mcp->call('translation_status', array('lang' => 'ro', 'limit' => 1000));
+			$strings = array();
+			foreach ($status['missing'] as $row) if ($row['kind'] === 'strings') $strings[] = $row['where'].' '.$row['field'];
+			foreach (array('common home', 'common subscribe', 'common get_new_posts_by_email', 'index latest_news', 'login log_in', 'register create_an_account', 'account your_account', 'reset save_password') as $want) check(in_array($want, $strings, true), "$want: ".json_encode($strings));
+		});
+	});
+});
+
+// a bundled record's lang column is left to schema --apply on a frozen
+// database and kept when multilingual is off again; a site's own record
+// field called lang is like any other field: no column, an orphan
+test('Final review: a site\'s own record table with a lang column it no longer declares is an orphan, multilingual off', function () {
+	p3a_model(function () {
+		cms_store::connect();
+		cms_types::ensure('zzp3abookdata', array('name' => 'text', 'note' => 'text', 'lang' => 'text', 'slug' => 'text', 'enabled' => 'bool', 'published_at' => 'datetime', 'updated_at' => 'datetime', 'created_at' => 'datetime'));
+		cms_store::forget();
+		$status = with_settings(array('multilingual' => false, 'languages' => array('en', 'ro')), function () { return (new raster_schema())->status(); });
+		$table = null;
+		foreach ($status['tables'] as $row) if ($row['table'] === 'zzp3abookdata') $table = $row;
+		check($table !== null, 'zzp3abookdata is listed');
+		check(in_array('lang', $table['orphans'], true), 'lang is an orphan: '.json_encode($table));
+		check(!isset($status['translations']['zzp3abookdata']) || !in_array('lang', $status['translations']['zzp3abookdata'], true), 'and not a kept translation');
+	});
 });
 
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";

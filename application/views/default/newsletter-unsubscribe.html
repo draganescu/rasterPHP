@@ -2,7 +2,7 @@
 <!-- print.@lang.i18n.language --><!-- print.@dir.i18n.dir --><html lang="en" dir="ltr"><!-- /print.@dir.i18n.dir --><!-- /print.@lang.i18n.language -->
 <head>
   <!-- dry._layout.head /-->
-  <title>Unsubscribe</title>
+  <title><!-- print.i18n.newsletter_unsubscribe('unsubscribe') -->Unsubscribe<!-- /print.i18n.newsletter_unsubscribe('unsubscribe') --></title>
 </head>
 <body>
   <!-- dry._layout.header /-->
@@ -10,10 +10,10 @@
     <!-- print.validation.alert('unsubscribed') --><h1>You are unsubscribed</h1><p>You will not get more emails from us.</p><!-- /print.validation.alert('unsubscribed') -->
     <!-- print.validation.alert('unsubscribe_invalid') --><h1>Link not valid</h1><p>Use the unsubscribe link from one of our emails.</p><!-- /print.validation.alert('unsubscribe_invalid') -->
     <!-- render.newsletter.unsubscribe -->
-    <h1>Unsubscribe</h1>
+    <h1><!-- print.i18n.newsletter_unsubscribe('unsubscribe') -->Unsubscribe<!-- /print.i18n.newsletter_unsubscribe('unsubscribe') --></h1>
     <form method="post">
-      <p>Stop sending the newsletter to <strong class="spa_email">you@example.com</strong>?</p>
-      <button>Unsubscribe</button>
+      <p><!-- print.i18n.newsletter_unsubscribe('stop_sending_the_newsletter_to') -->Stop sending the newsletter to<!-- /print.i18n.newsletter_unsubscribe('stop_sending_the_newsletter_to') --> <strong class="spa_email">you@example.com</strong>?</p>
+      <button><!-- print.i18n.newsletter_unsubscribe('unsubscribe') -->Unsubscribe<!-- /print.i18n.newsletter_unsubscribe('unsubscribe') --></button>
     </form>
     <!-- /render.newsletter.unsubscribe -->
   </main>

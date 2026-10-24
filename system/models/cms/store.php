@@ -43,12 +43,24 @@ class cms_store {
 	// field. $skip lists fields a public URL must never carry (a record's
 	// hidden fields, its owner). $lang: the language the slug is for (null:
 	// the default); in a translation language the translated title,
-	// headline or name comes first (title__ro), then as for the default.
+	// headline or name comes first (title__ro); an item with none of the
+	// three has the first field with a translation (an FAQ's question__ro);
+	// then as for the default.
 	static function slug_source($values, $skip = array(), $lang = null) {
 		if ($lang !== null && i18n::enabled() && !i18n::is_default($lang)) {
+			$named = false;
 			foreach (array('title', 'headline', 'name') as $field) {
+				if (in_array($field, $skip, true)) continue;
 				$column = cms_types::column($field, $lang);
-				if (!empty($values[$column]) && is_string($values[$column]) && !in_array($field, $skip, true)) return $values[$column];
+				if (!empty($values[$column]) && is_string($values[$column])) return $values[$column];
+				if (!empty($values[$field])) $named = true;
+			}
+			if (!$named) {
+				foreach ($values as $field => $value) {
+					if (in_array($field, $skip, true) || in_array($field, self::$system_fields) || strpos($field, '__') !== false) continue;
+					$column = cms_types::column($field, $lang);
+					if (isset($values[$column]) && is_string($values[$column]) && trim(strip_tags($values[$column])) !== '') return $values[$column];
+				}
 			}
 		}
 		foreach (array('title', 'headline', 'name') as $field) {
@@ -866,10 +878,11 @@ class cms_store {
 				cms_records::$writer = $writer;
 			}
 		}
-		// a record's stored language (#200 D13) on a frozen database whose
-		// column schema --apply hasn't made yet: left out, so the booking,
-		// reply or order still goes in (its mail is then in the default)
-		if ($info && database::$frozen && isset($bean->lang) && !array_key_exists('lang', self::columns($type))) unset($bean->lang);
+		// a bundled record's stored language (#200 D13) on a frozen database
+		// whose column schema --apply hasn't made yet: left out, so the
+		// booking, reply or order still goes in (its mail is then in the
+		// default). A site's own field called lang fails as any missing one
+		if ($info && database::$frozen && isset($bean->lang) && in_array($type, array('bookingdata', 'rsvpdata', 'contactmessagedata', 'orderdata'), true) && !array_key_exists('lang', self::columns($type))) unset($bean->lang);
 		// the language the save changed: the default's code for a save
 		// without one. Only while multilingual and once the table has the
 		// column, so off a save stores what it always did
