@@ -68,10 +68,11 @@ curl -s https://example.com/mcp \
 | `list_views`, `read_view` | list and read templates |
 | `check_view` | lint a template that isn't saved yet; nothing is written |
 | `write_view` | save a template, **only if it lints without errors**; otherwise the file is untouched and the problems come back. The answer says what the change does to the content model. |
-| `render_url` | a page's status and HTML, without a web server. Runs in its own process, with the server's environment, so a broken page can't crash the MCP server; works over HTTP under PHP-FPM too. Never reads the page cache. A protected page answers 303, with the login address in `errors`. |
+| `read_asset`, `write_asset` | read and write the theme's CSS, JavaScript and SVG files (`css/style.css`); an SVG is written only when it runs nothing, and writing clears the page cache |
+| `render_url` | a page's status and HTML, without a web server. Runs in its own process, with the server's environment, so a broken page can't crash the MCP server; works over HTTP under PHP-FPM too. Never reads the page cache. A protected page answers 303, with the login address in `errors`. `/ro/menu` renders the page in a language. |
 | `clear_cache` | throws the [page cache](Settings-and-Environments#the-page-cache) away, after views, theme files, models or the database were changed without Raster's own tools. In production, visitors who aren't logged in see cached pages until then. |
 
-The four view tools take an optional `theme`: the name of a folder directly under `views/` (letters, digits, `_` and `-`), the site's own theme when left out. A path such as `../..`, a folder inside a theme, or a theme folder that is a link pointing out of `views/` is refused with an error, and so is a view file that is a link pointing out of the theme (`list_views` leaves it out; a link that stays inside the theme works). An agent with the token can't read or write files elsewhere on the server.
+The view and asset tools take an optional `theme`: the name of a folder directly under `views/` (letters, digits, `_` and `-`), the site's own theme when left out. A path such as `../..`, a folder inside a theme, or a theme folder that is a link pointing out of `views/` is refused with an error, and so is a view file that is a link pointing out of the theme (`list_views` leaves it out; a link that stays inside the theme works). An agent with the token can't read or write files elsewhere on the server.
 
 ### Working on content
 
@@ -80,16 +81,29 @@ The four view tools take an optional `theme`: the name of a folder directly unde
 | `site_overview` | pages with their editable fields, collections with their fields and item counts, and which models listen to which events |
 | `get_page`, `update_page`, `page_history` | read and change a page's fields; every update is a new revision |
 | `list_items`, `get_item`, `create_item`, `update_item`, `delete_item` | work with collection items |
+| `run_action` | run a record type's action (confirm a booking, ship an order) |
 | `lint_templates` | check every template |
 | `schema_status` | compare templates and database |
 
 Pages are addressed by URL (`/about`), by view name (`about`), or `site` for the site-wide `site_*` fields.
 
+### Languages
+
+On a [multilingual site](Translations):
+
+| Tool | Does |
+|---|---|
+| `set_languages` | turns languages on (`["en", "ro"]`, the default first) or off (`[]`), in `config/the_app.php`, and in development adds the translation columns. Drops nothing |
+| `translation_status` | everything one language still lacks, with the default language's text: page and site fields, items, records' translated fields, dictionary words |
+| `read_strings`, `write_strings` | read and write a language's dictionary as key/value pairs; Raster writes the PHP file |
+
+`get_page`, `update_page`, `page_history`, `list_items`, `get_item`, `create_item` and `update_item` take an optional `lang`. With it, reads show each field's translation next to the default text, and writes save that language. A field that is the same in every language (a photo, a price) is refused with a `lang`: update it without one. `describe` and `site_overview` say which languages the site has and how much each one lacks.
+
 ## Safety rules built in
 
 - **Agents can only write fields the templates declare** (plus `slug`, `enabled` and `published_at` on items). An agent can't invent a field: to add one, it has to add an annotation to a template, which a person can review.
 - **Content changes go through the same code as the in-page editor**: page revisions are kept, [events](Events) fire, the page cache is cleared.
-- **Writing templates is a bigger permission** than writing content, because a template can call any model. Over standard input/output the agent already has your files, so `write_view` is available. Over HTTP it's **not offered** unless you allow it:
+- **Writing templates is a bigger permission** than writing content, because a template can call any model. Over standard input/output the agent already has your files, so `write_view` is available, and so are `write_asset`, `write_strings` and `set_languages`, which change the site's files too. Over HTTP they're **not offered** unless you allow it:
 
   ```php
   config::set('mcp_write_views')->to(true);

@@ -63,6 +63,8 @@ At the end, the command lists links to left-out pages and links with query strin
 
 With [translations](Translations), the first language goes at the root and each other language in its own folder: `/ro/`, `/ro/about/`, and so on. The language switcher links to those folders.
 
+On a multilingual site the export visits each language at its own addresses (`/menu` and `/ro/menu`) and follows the links it finds there, so an item is written at its slug in each language (`ro/menu/menu_item/cafea-cu-lapte/`), and each language gets its own `404.html` (`ro/404.html`). Give it `--url` (or set the site's address): search engines want absolute `hreflang` and canonical links, and the export warns without one. A language with its own domain (`domain_language`) is written to its folder too, ready to publish on that domain.
+
 ## Exporting again
 
 Export to the same folder again and Raster only does what's needed:
