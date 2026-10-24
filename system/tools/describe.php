@@ -86,7 +86,7 @@ class raster_describe
 				foreach ($page['fields'] as $name => $field) {
 					$fields[$name] = self::clip($field['default'], $limits['default']);
 				}
-				$pages[] = array('url' => $page['url'], 'view' => $page['view'], 'table' => $page['type'], 'fields' => $fields) + self::types($page['fields']);
+				$pages[] = array('url' => $page['url'], 'view' => $page['view']) + (isset($page['theme']) ? array('theme' => $page['theme']) : array()) + array('table' => $page['type'], 'fields' => $fields) + self::types($page['fields']);
 			}
 			$out['pages'] = $pages;
 		}
@@ -135,7 +135,8 @@ class raster_describe
 		}
 
 		if ($want('lint')) {
-			$problems = $inspector->lint(array($inspector->theme));
+			// the site's theme and the ones its routes serve views from
+			$problems = $inspector->lint();
 			$errors = array_values(array_filter($problems, function ($p) { return $p['severity'] === 'error'; }));
 			$out['lint'] = array(
 				'errors' => count($errors),

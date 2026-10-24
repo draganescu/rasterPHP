@@ -71,8 +71,10 @@ class cms
 	}
 
 	// The slug identifies which page's content a URL shows. Pagination and
-	// filter segments are not part of it, so /news/news_page/2 and
-	// /news/news_items/tag/x show the same page fields as /news.
+	// filter segments are not part of it, so /news/news_page, /news/news_page/2
+	// and /news/news_items/tag/x show the same page fields as /news: the
+	// URLs route() sends to news.html, because it renders render.cms.news.
+	// /landing_page is the view landing_page.html, a page of its own (#132).
 	// Item URLs (/news/news_item/3) share one slug per collection.
 	// A URL a literal route matched is that route's page, so parameters
 	// don't make pages: /blog/post/id/7 shows the fields of /blog/post.
@@ -81,8 +83,11 @@ class cms
 		if ($slug === '/' || $slug === '/'.config::get('default_view', 'index')) return 'home';
 		$routed = cms::route_slug($route);
 		if ($routed !== null) return $routed;
-		if (preg_match('#^(/.*?)?/([a-z0-9_]+)_(page|items)(/.*)?$#', $slug, $m)) {
-			$slug = $m[1] !== '' ? $m[1] : '/'.$m[2];
+		if (preg_match('#^/(.+?)/([a-z0-9_]+)_(page|items)(/.*)?$#', $slug, $m) && cms::renders_collection($m[1], $m[2])) {
+			$slug = '/'.$m[1];
+		} elseif (preg_match('#^/([a-z0-9_]+)_(page|items)/.+$#', $slug, $m)) {
+			// a list on the home page has no page of its own (/news_page/2)
+			$slug = '/'.$m[1];
 		} elseif (preg_match('#^(?:/.*?)?/([a-z0-9_]+)_item(/.*)?$#', $slug, $m)) {
 			// an item shown by the collection's own view (no news_item.html)
 			// shares that view's page fields
@@ -152,6 +157,15 @@ class cms
 		return isset($defaults[$name][$field]) ? $defaults[$name][$field] : null;
 	}
 
+	// Does a view render the collection (render.cms.<name>)? Then
+	// /<view>/<name>_page and /<view>/<name>_items are its list URLs: route()
+	// sends them to the view, and slug_for_uri() gives them its page fields.
+	static function renders_collection($view, $name) {
+		if (strpos($view, '..') !== false || controller::is_partial($view)) return false;
+		$file = controller::build_view_path($view);
+		return file_exists($file) && strpos(file_get_contents($file), '<!-- render.cms.'.$name) !== false;
+	}
+
 	// custom cms routes for admin panels and collection URLs
 	public function route() {
 		include __DIR__.'/routes.php';
@@ -165,10 +179,8 @@ class cms
 			if ($m[3] === 'item' && $m[1] !== $m[2]) return;
 			$candidates = $m[3] === 'item' ? array($m[2].'_item', $m[1]) : array($m[1]);
 			foreach ($candidates as $view) {
-				if (strpos($view, '..') !== false || controller::is_partial($view)) continue;
-				$file = controller::build_view_path($view);
 				// only views that actually render this collection
-				if (file_exists($file) && strpos(file_get_contents($file), '<!-- render.cms.'.$m[2]) !== false) {
+				if (cms::renders_collection($view, $m[2])) {
 					controller::route(preg_quote($m[1].'/'.$m[2].'_'.$m[3], '%').'(/|$)')->to($view);
 					break;
 				}

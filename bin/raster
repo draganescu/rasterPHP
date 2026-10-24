@@ -186,7 +186,9 @@ switch ($command) {
 
 	case 'lint':
 		$inspector = new raster_inspector(null, isset($options['theme']) && is_string($options['theme']) ? $options['theme'] : null);
-		$themes = null;
+		// the site's theme and the ones its routes serve views from; --theme
+		// is that theme alone, --all-themes every folder under views/
+		$themes = isset($options['theme']) ? array($inspector->theme) : $inspector->themes();
 		if (isset($options['all-themes'])) {
 			$themes = array_values(array_filter(scandir($inspector->views_dir), function ($d) use ($inspector) {
 				return $d[0] !== '.' && is_dir($inspector->views_dir.'/'.$d);
@@ -195,8 +197,8 @@ switch ($command) {
 		// --fix repairs what is mechanical (a directive the engine can't read
 		// because of its spacing, a misspelled keyword) and then reports what
 		// is left, which needs a decision
-		$fixed = isset($options['fix']) ? $inspector->fix($themes ?: array($inspector->theme)) : array();
-		$problems = $inspector->lint($themes ?: array($inspector->theme));
+		$fixed = isset($options['fix']) ? $inspector->fix($themes) : array();
+		$problems = $inspector->lint($themes);
 		$errors = count(array_filter($problems, function ($p) { return $p['severity'] === 'error'; }));
 		if (isset($options['json'])) {
 			$json(array('errors' => $errors, 'warnings' => count($problems) - $errors, 'fixed' => $fixed, 'problems' => $problems));
@@ -209,7 +211,7 @@ switch ($command) {
 				$label = $p['severity'] === 'error' ? $paint('error', '31') : $paint('warning', '33');
 				echo "{$p['file']}:{$p['line']}:{$p['column']}: $label: {$p['message']}\n";
 			}
-			$names = $themes ?: array($inspector->theme);
+			$names = $themes;
 			$views = 0;
 			foreach ($names as $name) $views += count($inspector->views($name));
 			echo $problems ? "\n" : '';
@@ -239,6 +241,8 @@ switch ($command) {
 			echo '      '.$rules['what']."\n";
 			foreach ($rules['examples'] as $example) echo '      '.$example."\n";
 		}
+		echo "\n  ".$paint('names', '1')." (the characters of each kind; dry fills in {$grammar['dry_depth']} levels)\n";
+		foreach ($grammar['names'] as $kind => $class) echo '      '.str_pad($kind, 11).$class."\n";
 		echo "\n";
 		foreach ($grammar['structure'] as $rule) echo '  '.$rule."\n";
 		exit(0);
@@ -718,9 +722,10 @@ Raster command line
 
   php bin/raster serve [--port=8000]     run the site with PHP's built in server
         --host=localhost                 the address to listen on
-  php bin/raster lint [--json]           check every view for annotation errors
+  php bin/raster lint [--json]           check every view for annotation errors, in the site's
+                                         theme and the themes its routes serve views from
         --fix                            repair what is mechanical (spacing, misspelled keywords)
-        --theme=name, --all-themes       another theme than the site's, or every theme
+        --theme=name, --all-themes       that one theme alone, or every theme
   php bin/raster annotations [--json]    the annotation grammar, as data
   php bin/raster vocabulary [--json]     every name a template may call: models, methods and
                                          their signatures, SQL queries, events, reserved names

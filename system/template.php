@@ -15,6 +15,25 @@ class template {
   // the annotations the engine sees.
   static $script_form = array('/*-' => '<!--', '-*/' => '-->');
 
+  // The characters each kind of name is made of, as regex character
+  // classes. The patterns below are built from these, and
+  // system/tools/annotations.php hands the same list to the inspector
+  // ('names'), so lint and the engine accept the same names (#28).
+  // - model: print.<model>.method
+  // - key: what follows print. inside a render block: line2, line-2,
+  //   @data-id.key, @aria-label.key, +class.state, @xlink:href.url
+  // - field: one row key on its own (line2, line-2)
+  // - attribute: the attribute of print.@<attribute>.x (data-id, xlink:href)
+  // - view and res: dry.<view>.<res>, res.<res> (nav2, _layout, docs/menu)
+  static $names = array(
+  	'model' => '[a-z0-9_\-]',
+  	'key' => '[@+a-zA-Z0-9_.:\-]',
+  	'field' => '[A-Za-z0-9_\-]',
+  	'attribute' => '[a-zA-Z0-9_\-:]',
+  	'view' => '[a-z0-9_\-\/]',
+  	'res' => '[a-z0-9_\-]',
+  );
+
   static function unscript($html) {
   	return str_replace(array_keys(self::$script_form), array_values(self::$script_form), $html);
   }
@@ -265,7 +284,8 @@ class template {
 		$template->remove();
 		$template->index_forms();
 
-		$res = preg_match_all('/<!-- ((print|render)\.(([a-z,_,-,0-9]*)\.(.*?))) (\/?)-->/', $template->output, $methodstarts);
+		$n = self::$names;
+		$res = preg_match_all('/<!-- ((print|render)\.(('.$n['model'].'*)\.(.*?))) (\/?)-->/', $template->output, $methodstarts);
 		$template->models = array_unique($methodstarts[4]);
 
 		foreach ($methodstarts[2] as $k=>$v) {
@@ -275,7 +295,7 @@ class template {
 				$template->models_methods_print[] = array($methodstarts[4][$k],$methodstarts[5][$k]);
 		}
 		// a model value in an attribute: <!-- print.@src.cms.photo --><img src="a.jpg"><!-- /print.@src.cms.photo -->
-		preg_match_all('/<!-- print\.([@+][a-zA-Z0-9_\-:]+)\.([a-z0-9_\-]+)\.([^\s]+?) -->/', $template->output, $attrstarts);
+		preg_match_all('/<!-- print\.([@+]'.$n['attribute'].'+)\.('.$n['model'].'+)\.([^\s]+?) -->/', $template->output, $attrstarts);
 		foreach ($attrstarts[0] as $k => $v) {
 			$template->models[] = $attrstarts[2][$k];
 			$template->models_methods_print[] = array($attrstarts[2][$k], $attrstarts[3][$k], $attrstarts[1][$k]);
@@ -364,7 +384,7 @@ class template {
 			
 			$render_template = substr($this->output, $pos1+strlen($start), $pos2 - strlen($start) - strlen($end));
 			$this->current_block = $render_template;
-			$res = preg_match_all('/<!-- print\.([@\+,a-z,A-Z,_,-,\.,0-9]*) (\/?)-->/', $render_template, $datastarts);
+			$res = preg_match_all('/<!-- print\.('.self::$names['key'].'*) (\/?)-->/', $render_template, $datastarts);
 			$this->current_params['render_template'] = $render_template;
 			$this->current_params['pos1'] = $pos1;
 			$this->current_params['pos2'] = $pos2;
@@ -769,7 +789,8 @@ class template {
     // (raster_record, from cms_records::listed) are marked either way.
     // $nested: a list inside a row, whose rows are joined as they are.
     function render_rows($render_template, $rows, $list = null, $marking = false, $nested = false) {
-		preg_match_all('/<!-- print\.([@\+,a-z,A-Z,_,-,\.,0-9]*) (\/?)-->/', $render_template, $datastarts);
+		$n = self::$names;
+		preg_match_all('/<!-- print\.('.$n['key'].'*) (\/?)-->/', $render_template, $datastarts);
 		$rendered_data = '';
 		// the mock-up of each field, for the editor: what it saves comes back
 		// printed the way this template prints it (4.5 as 4.50)
@@ -805,7 +826,7 @@ class template {
 			// a list inside the row (a day's bookings) renders its block once per
 			// row of the list, through this same function, marks included
 			foreach ($data as $nested_key => $nested_rows) {
-				if (!is_array($nested_rows) || !preg_match('/^[A-Za-z0-9_\-]+$/', (string)$nested_key)) continue;
+				if (!is_array($nested_rows) || !preg_match('/^'.$n['field'].'+$/', (string)$nested_key)) continue;
 				$open = "<!-- print.$nested_key -->";
 				$close = "<!-- /print.$nested_key -->";
 				while (($at = strpos($rendered_tpl, $open)) !== false && ($to = strpos($rendered_tpl, $close, $at)) !== false) {
@@ -858,6 +879,8 @@ class template {
 
 		            // lists inside the row were rendered above
 		            if(array_key_exists($datakey, $data) && is_array($data[$datakey])) continue;
+		            // a plain key is a field name: print.a:b is not one, as lint says
+		            if(!$is_attr && !preg_match('/^'.$n['field'].'+$/', $datakey)) continue;
 
 		            if(!array_key_exists($datakey, $data)) {	
 		            	continue;
@@ -928,7 +951,7 @@ class template {
 		            }
 			}
 			// keys the row doesn't have keep their mock-up content, without the tags
-			$rendered_tpl = preg_replace_callback('/<!-- \/?print\.([@+][a-zA-Z0-9_\-:]+\.)?([A-Za-z0-9_\-]+) \/?-->/', function ($m) {
+			$rendered_tpl = preg_replace_callback('/<!-- \/?print\.([@+]'.$n['attribute'].'+\.)?('.$n['field'].'+) \/?-->/', function ($m) {
 				return $m[2] === '' ? $m[0] : '';
 			}, $rendered_tpl);
 			if ($item_mark !== null) $rendered_tpl = '<!--raster:s '.$item_mark.'-->'.$rendered_tpl.'<!--raster:e '.$item_mark.'-->';
@@ -965,17 +988,18 @@ class template {
     // attribute fields <!--raster:ma name attr--> before their tag.
     function mockup($html) {
       $fields = array();
-      $html = preg_replace_callback('/<!-- print\.([@+])([a-zA-Z0-9_\-:]+)\.([A-Za-z0-9_\-@]+) -->(.*?)<!-- \/print\.\1\2\.\3 -->/s', function ($m) use (&$fields) {
+      $n = self::$names;
+      $html = preg_replace_callback('/<!-- print\.([@+])('.$n['attribute'].'+)\.((?:'.$n['field'].'|@)+) -->(.*?)<!-- \/print\.\1\2\.\3 -->/s', function ($m) use (&$fields) {
         if (strpos($m[3], 'raster_') === 0) return $m[4];
         $fields[$m[3]] = self::get_attribute($m[4], $m[2]);
         return '<!--raster:ma '.$m[3].' '.$m[2].'-->'.$m[4];
       }, $html);
-      $html = preg_replace_callback('/<!-- print\.([A-Za-z0-9_\-]+) -->(.*?)<!-- \/print\.\1 -->/s', function ($m) use (&$fields) {
+      $html = preg_replace_callback('/<!-- print\.('.$n['field'].'+) -->(.*?)<!-- \/print\.\1 -->/s', function ($m) use (&$fields) {
         if (strpos($m[1], 'raster_') === 0) return $m[2];
         if (!isset($fields[$m[1]])) $fields[$m[1]] = trim($m[2]);
         return '<!--raster:m '.$m[1].'-->'.$m[2].'<!--raster:/m-->';
       }, $html);
-      $html = preg_replace_callback('/<!-- print\.([A-Za-z0-9_\-]+) \/-->/', function ($m) use (&$fields) {
+      $html = preg_replace_callback('/<!-- print\.('.$n['field'].'+) \/-->/', function ($m) use (&$fields) {
         if (!isset($fields[$m[1]])) $fields[$m[1]] = '';
         return '<!--raster:m '.$m[1].'--><!--raster:/m-->';
       }, $html);
@@ -988,14 +1012,33 @@ class template {
     	return APPBASE.config::get('views_path').DIRECTORY_SEPARATOR.$this->theme.DIRECTORY_SEPARATOR.$view.$this->view_ext;
     }
     
+    // A res may hold dry tags of its own. They are filled in too, level by
+    // level, up to DRY_DEPTH levels deep, the way lint, schema and MCP read
+    // a view (raster_inspector::expand), so a field they list is one the
+    // page shows (#36). A deeper dry stays in the page as a comment.
+    const DRY_DEPTH = 5;
+
     function dry_template(){
 
     	$this->current_action = 'dry';
 		event::dispatch('before_drying');
 
-		$this->output = preg_replace('/<!-- (\/?)res\.([a-z,_,-]*) -->/', "", $this->output);
-		$res = preg_match_all('/<!-- dry\.([a-z,_,-,\/]*)\.([a-z,_,-]*) (\/?)-->/', $this->output, $datastarts);
+		$dry = '/<!-- dry\.('.self::$names['view'].'*)\.('.self::$names['res'].'*) (\/?)-->/';
 		$loaded_files = array();
+		// the page's own res marks go; a fragment keeps the marks inside it,
+		// on every level, as it did when there was one
+		$this->output = preg_replace('/<!-- (\/?)res\.('.self::$names['res'].'*) -->/', "", $this->output);
+		for ($level = 0; $level < self::DRY_DEPTH; $level++) {
+			// after the page's own, a level only when a fragment brought dry tags
+			if ($level > 0 && !preg_match($dry, $this->output)) break;
+			$this->dry_level($dry, $loaded_files);
+		}
+		event::dispatch('after_drying');
+    }
+
+    // fills every dry tag in the output with its fragment, once
+    function dry_level($dry, &$loaded_files) {
+		$res = preg_match_all($dry, $this->output, $datastarts);
 		arsort($datastarts);
 		foreach ($datastarts[0] as $key => $value) {					
 
@@ -1034,7 +1077,6 @@ class template {
 			$this->output = substr_replace($this->output, $data, $pos1, $pos2);
 
 		}
-		event::dispatch('after_drying');
     }
     
     public static function set($property)

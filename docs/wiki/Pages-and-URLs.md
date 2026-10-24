@@ -120,7 +120,7 @@ How routes match:
 - The pattern is a **regular expression**, matched from the **start** of the path. `blog` matches `/blog` and `/blog/post/1`, but not `/my-blog`. Escape special characters (`.`, `?`, `+`) if you mean them literally.
 - Routes are tried in the order they are written. The first match wins, and a matching route wins over a file with the same name.
 - A routed URL is a page of its own: CMS page fields on `/specials` are stored separately from those on `/menu`.
-- `->from('theme')` renders the view from another theme folder, for example a print-friendly version of a page.
+- `->from('theme')` renders the view from another theme folder, for example a print-friendly version of a page. `lint` checks that theme too, and the page's fields are known to `schema`, `describe` and MCP like any other page's.
 - A routed URL with an extension renders the view's file in that format: `/news/news_page/2.rss` is page 2 of `news.rss`. When the view has no such file (`/specials.json` with no `menu.json`), the answer is the 404 page.
 
 Most sites need no routes at all. CMS collection URLs such as `/news/news_item/3` and `/news/news_page/2` are routed automatically; see [The CMS](The-CMS).
