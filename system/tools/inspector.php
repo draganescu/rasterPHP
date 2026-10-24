@@ -755,8 +755,8 @@ class raster_inspector {
 	function admin_view($view) {
 		$name = preg_replace('#^.*/views/[^/]+/#', '', (string)$view);
 		$name = preg_replace('/\.[a-z]+$/', '', $name);
-		foreach ((array)config::get('protected', array()) as $pattern => $role) {
-			if (in_array($role, array('editor', 'edit', 'admin'), true) && preg_match('%^/'.ltrim($pattern, '/').'%i', '/'.$name)) return true;
+		foreach (authentication::protection($name) as $role) {
+			if (in_array($role, array('editor', 'edit', 'admin'), true)) return true;
 		}
 		return false;
 	}
@@ -1229,16 +1229,47 @@ class raster_inspector {
 				$problems = array_merge($problems, $this->lint_file($view, $theme), $this->lint_address($view, $theme));
 			}
 		}
-		return array_merge($problems, $this->lint_routes(), $this->lint_events(), $this->lint_queries(), $this->lint_types(), $this->lint_api(), $this->lint_models());
+		return array_merge($problems, $this->lint_routes(), $this->lint_events(), $this->lint_queries(), $this->lint_types(), $this->lint_collections($themes), $this->lint_api(), $this->lint_models());
+	}
+
+	// Two collections whose names differ only by what a table name drops
+	// (team_members and teammembers) share one table, teammembersdata: each
+	// list shows the other's items (#33).
+	function lint_collections($themes = null) {
+		$problems = array();
+		$tables = array();
+		foreach ($themes ?: $this->themes() as $theme) {
+			foreach ($this->content_model($theme)['collections'] as $name => $collection) {
+				if (!isset($tables[$collection['type']][$name])) $tables[$collection['type']][$name] = $collection['views'] ? array($theme, $collection['views'][0]) : null;
+			}
+		}
+		foreach ($tables as $table => $names) {
+			if (count($names) < 2) continue;
+			$list = array_keys($names);
+			foreach (array_slice($list, 1) as $name) {
+				// where the second name is rendered, or the model that declares it
+				$info = cms_records::info($name);
+				$file = $info ? (new ReflectionClass($info['class']))->getFileName() : APPBASE.'models';
+				$at = array('file' => self::short($file), 'line' => 1, 'column' => 1);
+				if ($names[$name]) {
+					list($theme, $view) = $names[$name];
+					$html = (string)file_get_contents($this->theme_dir($theme).'/'.$view);
+					$offset = strpos($html, '<!-- render.cms.'.$name);
+					$at = array('file' => self::short($this->theme_dir($theme).'/'.$view)) + ($offset === false ? array('line' => 1, 'column' => 1) : self::position($html, $offset));
+				}
+				$problems[] = $at + array('severity' => 'error', 'message' => "The collections '{$list[0]}' and '$name' share one table, $table, so each shows the other's items: give one of them another name");
+			}
+		}
+		return $problems;
 	}
 
 	// A view whose address the server refuses: the rules that keep an app's
 	// config/, models/, data/ and i18n/ private apply to the second segment
 	// of every URL, so docs/config.html is a page nobody can open (#98).
 	function lint_address($view, $theme) {
-		if (preg_match('#(^|/)_#', $view)) return array();
-		$url = '/'.(substr($view, -strlen($this->ext)) === $this->ext ? substr($view, 0, -strlen($this->ext)) : $view);
-		if ($url === '/index') $url = '/';
+		if (controller::is_partial($view)) return array();
+		// a feed (news.rss) is its file's own address
+		$url = cms::page_path($view, $this->ext) ?: '/'.$view;
 		require_once BASE.'private_paths.php';
 		if (!private_paths::blocked($url)) return array();
 		return array(array('file' => self::short($this->theme_dir($theme).'/'.$view), 'line' => 1, 'column' => 1, 'severity' => 'warning',
@@ -1387,7 +1418,7 @@ class raster_inspector {
 	function slug_for_view($view) {
 		$name = substr($view, 0, -strlen($this->ext));
 		if (preg_match('/^(?:(.*)\/)?([a-z0-9_]+)_item$/', $name, $m)) {
-			return '/'.$m[2].'/'.$m[2].'_item';
+			return cms::item_path($m[2]);
 		}
 		return cms::slug_for_uri('/'.$name);
 	}
@@ -1395,7 +1426,8 @@ class raster_inspector {
 	function url_for_view($view) {
 		$slug = $this->slug_for_view($view);
 		if ($slug === 'home') return '/';
-		if (preg_match('#^/([a-z0-9_]+)/\1_item$#', $slug, $m)) return '/'.$m[1].'/'.$m[1].'_item/{id}';
+		$url = cms::collection_uri($slug);
+		if ($url && $url['kind'] === 'item' && $slug === cms::item_path($url['name'])) return cms::item_path($url['name'], '{slug}');
 		return $slug;
 	}
 
@@ -1427,8 +1459,7 @@ class raster_inspector {
 		$cms = $this->model_info('cms');
 		$reserved = $cms ? $cms['methods'] : array();
 		foreach ($this->views($theme) as $view) {
-			if (preg_match('#(^|/)_#', $view)) continue; // partials and _email/
-			if (substr($view, -strlen($this->ext)) !== $this->ext) continue; // feeds
+			if (cms::page_path($view, $this->ext) === null) continue; // partials, _email/ and feeds
 			$html = $this->expand(file_get_contents($this->theme_dir($theme).'/'.$view), $theme);
 			list($blocks) = self::blocks($html);
 			$fields = array();
@@ -1499,7 +1530,7 @@ class raster_inspector {
 		if (!in_array($route['theme'], $this->themes(), true)) return;
 		$view = $route['view'].$this->ext;
 		$file = $this->theme_dir($route['theme']).'/'.$view;
-		if (preg_match('#(^|/)_#', $view) || !is_file($file)) return;
+		if (controller::is_partial($view) || !is_file($file)) return;
 		list($blocks) = self::blocks($this->expand(file_get_contents($file), $route['theme']));
 		$fields = array();
 		$this->collect_content($blocks, $fields, $collections, $route['theme'].'/'.$view, $reserved);

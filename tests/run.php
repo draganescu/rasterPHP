@@ -8249,6 +8249,234 @@ test('P0.A a routed view of another theme is linted, gets its table and MCP edit
 	}
 });
 
+// ## P0.B: one place parses collection and item URLs (#40 #37 #33)
+
+$p0b_events = array();
+function test_p0b_event($payload) {
+	global $p0b_events;
+	$p0b_events[] = $payload['collection'];
+}
+
+test('P0.B collection URLs: one parser, and what it reads', function () {
+	same(array('path' => '/news', 'name' => 'news', 'kind' => 'page', 'rest' => array('2')), cms::collection_uri('/news/news_page/2'));
+	same(array('path' => '/news', 'name' => 'news', 'kind' => 'items', 'rest' => array('tag', 'php', 'news_page', '2')), cms::collection_uri('/news/news_items/tag/php/news_page/2'));
+	same(array('path' => '/', 'name' => 'landing', 'kind' => 'page', 'rest' => array()), cms::collection_uri('/landing_page'));
+	same(null, cms::collection_uri('/about'));
+	// a list is on a page: the first segment counts last, as cms::route() and slug_for_uri() read it (#132)
+	same(array('path' => '/landing_page', 'name' => 'landing', 'kind' => 'page', 'rest' => array('2')), cms::collection_uri('/landing_page/landing_page/2'));
+	same(2, cms::collection_request('landing', '/landing_page/landing_page/2')['page']);
+	same(null, cms::collection_uri('/'));
+	// a slug or a filter value after it is not read as another list
+	same('news', cms::collection_uri('/news/news_items/tag/my_page')['name']);
+	same(array('item' => 'raster-runs', 'filters' => array(), 'page' => 0), cms::collection_request('news', '/news/news_item/raster-runs'));
+	same(array('item' => null, 'filters' => array('tag' => 'php'), 'page' => 2), cms::collection_request('news', '/news/news_items/tag/php/news_page/2'));
+	// a page is the list's wherever it shows; an item and filters are under its own name
+	same(array('item' => null, 'filters' => array(), 'page' => 2), cms::collection_request('news', '/archive/news_page/2'));
+	same(array('item' => null, 'filters' => array(), 'page' => 0), cms::collection_request('news', '/archive/news_item/3'));
+	same(array('item' => null, 'filters' => array(), 'page' => 0), cms::collection_request('events', '/news/news_item/3'));
+	same('/news/news_item', cms::item_path('news'));
+	same('/team_members/team_members_item/{slug}', cms::item_path('team_members', '{slug}'));
+	same('/', cms::page_path('index.html'));
+	same('/docs/setup', cms::page_path('docs/setup.html'));
+	same(null, cms::page_path('_layout.html'));
+	same(null, cms::page_path('_email/welcome.html'));
+	same(null, cms::page_path('news.rss'));
+});
+
+// the parsers of 2.2.45, kept here to prove the one parser reads every
+// address the site's links spell as they did
+test('P0.B off is identical: the old copies and the one parser agree', function () {
+	$segments = function ($uri) {
+		$s = explode('/', rtrim($uri, '/'));
+		array_shift($s);
+		return $s ?: array('');
+	};
+	$param = function ($s, $name, $v = false) {
+		$value = false;
+		if (in_array($name, $s) && array_key_exists(array_search($name, $s) + 1, $s)) $value = $s[array_search($name, $s) + 1];
+		return $value ?: $v;
+	};
+	$old_slug = function ($uri) {
+		$slug = '/'.trim(preg_replace('#/+#', '/', (string)$uri), '/');
+		if ($slug === '/' || $slug === '/'.config::get('default_view', 'index')) return 'home';
+		if (preg_match('#^(/.*?)?/([a-z0-9_]+)_(page|items)(/.+)$#', $slug, $m)) {
+			$slug = $m[1] !== '' ? $m[1] : '/'.$m[2];
+		} elseif (preg_match('#^(?:/.*?)?/([a-z0-9_]+)_item(/.*)?$#', $slug, $m)) {
+			$slug = file_exists(controller::build_view_path($m[1].'_item')) ? '/'.$m[1].'/'.$m[1].'_item' : '/'.$m[1];
+		}
+		return $slug;
+	};
+	$old_route = function ($uri) {
+		if (!preg_match('#^/(.+?)/([a-z0-9_]+)_(item|items|page)(/|$)#', $uri, $m)) return null;
+		return array($m[1], $m[2], $m[3]);
+	};
+	$old_canonical = function ($segments, $name) {
+		$segments[count($segments) - 1] = preg_replace('/\.(rss|atom|xml|json|txt)$/', '', (string)end($segments));
+		$page = function ($value) { return (bool)preg_match('/^[1-9][0-9]*$/', $value) && $value !== '1'; };
+		foreach ($segments as $i => $segment) {
+			$rest = array_slice($segments, $i + 1);
+			if ($segment === $name.'_page') return count($rest) === 1 && $page($rest[0]);
+			if ($segment === $name.'_item') return count($rest) === 1 && (!ctype_digit($rest[0]) || $rest[0] === (string)(int)$rest[0]);
+			if ($segment === $name.'_items') {
+				if (count($rest) % 2) return false;
+				$seen = array();
+				for ($j = 0; $j < count($rest); $j += 2) {
+					if (isset($seen[$rest[$j]])) return false;
+					$seen[$rest[$j]] = true;
+					if ($rest[$j] === $name.'_page') return $j + 2 === count($rest) && $page($rest[$j + 1]);
+				}
+				return true;
+			}
+		}
+		return true;
+	};
+	$urls = array('/', '/index', '/about', '/docs/setup', '/news', '/news/news_page/2', '/news/news_page/02', '/news/news_page/1', '/news/news_page',
+		'/news/news_items/tag/php', '/news/news_items/tag/php/news_page/2', '/news/news_items/headline/Filler%201', '/news/news_items/tag/php/tag/js',
+		'/news/news_items/tag', '/news/news_item/3', '/news/news_item/007', '/news/news_item/raster-runs', '/news/news_item', '/news/news_item/a/b',
+		'/landing_page', '/landing_items/', '/docs/news_page', '/archive/news_page/2', '/events/events_item/jazz-night', '/events/events_items/date/2026-10-10',
+		'/menu/menu_items/price/14.50', '/news/news_page/2.rss', '/journal/journal_page/2.rss', '/team_members/team_members_item/ada', '/news_page/2');
+	$uri_segments = config::get('uri_segments');
+	try {
+		foreach ($urls as $url) {
+			same($old_slug($url), cms::slug_for_uri($url), "slug of $url");
+			$parsed = cms::collection_uri($url);
+			$route = $parsed && $parsed['path'] !== '/' ? array(ltrim($parsed['path'], '/'), $parsed['name'], $parsed['kind']) : null;
+			same($old_route($url), $route, "route of $url");
+			$s = $segments($url);
+			config::set('uri_segments')->to($s);
+			foreach (array('news', 'events', 'menu', 'journal', 'team_members', 'landing') as $name) {
+				same($old_canonical($s, $name), cms::canonical_uri($name), "$name kept at $url");
+				$asked = cms::collection_request($name, $url);
+				same((int)$param($s, $name.'_page', 0), $asked['page'], "$name page at $url");
+				same($param($s, $name) == $name.'_item' ? (string)$param($s, $name.'_item') : null, $asked['item'], "$name item at $url");
+				$filters = array();
+				if ($param($s, $name) == $name.'_items') {
+					$start = array_search($name.'_items', $s);
+					foreach ($s as $key => $value) if ($key > $start && ($key - $start) % 2 == 0) $filters[$s[$key - 1]] = $value;
+					unset($filters[$name.'_page']);
+				}
+				same($filters, $asked['filters'], "$name filters at $url");
+			}
+		}
+	} finally {
+		config::set('uri_segments')->to($uri_segments);
+	}
+	// item links: the slug, encoded, else the id
+	foreach (array(array('id' => 3, 'slug' => 'raster-runs'), array('id' => 4, 'slug' => ''), array('id' => 5, 'slug' => 'a b/ç')) as $item) {
+		same(config::get('link_uri').'news/news_item/'.(!empty($item['slug']) ? rawurlencode($item['slug']) : $item['id']), cms::item_url('news', $item));
+		same(rtrim(config::get('link_uri'), '/').'/news/news_item/'.(!empty($item['slug']) ? rawurlencode($item['slug']) : $item['id']), cms::item_url('news', $item));
+	}
+});
+
+test('P0.B a page with a list, its pager, filters and item links renders as it did', function () use ($base) {
+	$made = array();
+	for ($i = 1; $i <= 11; $i++) $made[] = mcp_call('create_item', array('collection' => 'news', 'fields' => array('headline' => "P0B filler $i")))['structuredContent']['id'];
+	try {
+		list(, $body) = http('GET', "$base/news");
+		check(preg_match('#href="[^"]*/news/news_page/2"#', $body), 'page 2 link');
+		check(preg_match('#href="[^"]*/news/news_item/[a-z0-9-]+"#', $body), 'item links');
+		list($status, $body) = http('GET', "$base/news/news_page/2");
+		same(200, $status);
+		check(strpos($body, 'class="page current"') !== false, 'current page');
+		list($status) = http('GET', "$base/news/news_item/no-such-post");
+		same(404, $status);
+		list(, $body) = http('GET', "$base/news/news_items/headline/P0B%20filler%201");
+		check(strpos($body, 'P0B filler 1<') !== false && strpos($body, 'P0B filler 2<') === false, 'the filter: '.$body);
+		check(strpos($body, 'news_page/2') === false, 'a filtered list has one page');
+	} finally {
+		foreach ($made as $id) mcp_call('delete_item', array('collection' => 'news', 'id' => $id));
+	}
+});
+
+test('P0.B one placeholder for item URLs: {slug} in describe, MCP and the inspector (#37)', function () use ($root) {
+	$inspector = new raster_inspector();
+	same('/news/news_item/{slug}', $inspector->url_for_view('news_item.html'));
+	$overview = mcp_call('site_overview')['structuredContent'];
+	foreach ($overview['collections'] as $collection) same('/'.$collection['name'].'/'.$collection['name'].'_item/{slug}', $collection['item_url'], 'MCP');
+	require_once BASE.'tools/describe.php';
+	foreach (raster_describe::site(array('collections'))['collections'] as $collection) {
+		same('/'.$collection['name'].'/'.$collection['name'].'_item/{slug}', $collection['item_url'], 'describe');
+	}
+	$agents = file_get_contents("$root/AGENTS.md");
+	check(strpos($agents, '<slug or id>') === false && strpos($agents, '_item/<slug>') === false && strpos($agents, '_item/{id}') === false, 'AGENTS.md');
+});
+
+test('P0.B the pattern Faq protects /faq, and the sitemap, the Admin menu and lint agree (#40)', function () use ($root) {
+	$theme = "$root/application/views/default";
+	test_fixture("$theme/zzp0bfaq.html");
+	file_put_contents("$theme/zzp0bfaq.html", '<html><head><title>Staff FAQ</title></head><body><p>Answers</p></body></html>');
+	$config = APPBASE.'config/the_app.php';
+	$original = file_get_contents($config);
+	$protected = config::get('protected');
+	try {
+		config::set('protected')->to(array('account' => 'member', 'Zzp0bfaq' => 'editor'));
+		same(array('Zzp0bfaq' => 'editor'), authentication::protection('/zzp0bfaq'));
+		same(array('Zzp0bfaq' => 'editor'), authentication::protection('zzp0bfaq/more'));
+		same(array(), authentication::protection('/about'));
+		same(false, authentication::may_open('/zzp0bfaq'));
+		$urls = array_column((new feed())->pages(), 'url');
+		same(array(), array_values(preg_grep('#zzp0bfaq#i', $urls)), 'the sitemap leaves it out: '.json_encode($urls));
+		$admin = array_column(authentication::all_admin_pages(), 'role', 'view');
+		same('editor', isset($admin['zzp0bfaq']) ? $admin['zzp0bfaq'] : null, 'the Admin menu lists it: '.json_encode($admin));
+		check((new raster_inspector())->admin_view('zzp0bfaq.html'), 'lint reads it as an admin page');
+		require_once BASE.'tools/describe.php';
+		$described = array_column(raster_describe::site(array('admin_pages'))['admin_pages'], 'url', 'view');
+		same('/zzp0bfaq', isset($described['zzp0bfaq']) ? $described['zzp0bfaq'] : null, 'describe lists it');
+		// and the page itself sends a visitor to the login page
+		file_put_contents($config, $original."\nconfig::set('protected')->to(array('account' => 'member', 'Zzp0bfaq' => 'editor'));\n");
+		$page = contact_render('/zzp0bfaq');
+		check(strpos($page, 'HTTP 303') !== false && strpos($page, 'Answers') === false, $page);
+		$page = contact_render('/zzp0bfaq', 'editor');
+		check(strpos($page, 'Answers') !== false, $page);
+	} finally {
+		file_put_contents($config, $original);
+		config::set('protected')->to($protected);
+		@unlink("$theme/zzp0bfaq.html");
+	}
+});
+
+test('P0.B saving a team_members item sends collection team_members, and lint flags teammembers beside it (#33)', function () use ($root) {
+	global $p0b_events;
+	$theme = "$root/application/views/default";
+	test_fixture("$theme/zzp0bteam.html");
+	test_fixture("$theme/zzp0bteam2.html");
+	file_put_contents("$theme/zzp0bteam.html", '<html><head><title>Team</title></head><body><!-- render.cms.zzp0b_members --><h2><!-- print.name -->Ada<!-- /print.name --></h2><!-- /render.cms.zzp0b_members --></body></html>');
+	$p0b_events = array();
+	event::bind('cms.item_saved')->to(null, 'test_p0b_event');
+	event::bind('cms.item_deleted')->to(null, 'test_p0b_event');
+	try {
+		same(array(), (new raster_inspector())->lint_collections(), 'one name, one table');
+		$mcp = new mcp();
+		$answer = $mcp->call_tool('create_item', array('collection' => 'zzp0b_members', 'fields' => array('name' => 'Grace')));
+		check(empty($answer['isError']), json_encode($answer));
+		$id = json_decode($answer['content'][0]['text'], true)['id'];
+		$mcp->call_tool('update_item', array('collection' => 'zzp0b_members', 'id' => $id, 'fields' => array('name' => 'Grace H')));
+		$mcp->call_tool('delete_item', array('collection' => 'zzp0b_members', 'id' => $id));
+		same(array('zzp0b_members', 'zzp0b_members', 'zzp0b_members'), $p0b_events, 'MCP');
+		// the model's own code, and code that only has the table
+		$p0b_events = array();
+		$item = cms_store::save_item('zzp0bmembersdata', 0, array('name' => 'Linus'), array('name'), 'editor', 'zzp0b_members');
+		cms_store::delete_item('zzp0bmembersdata', $item['id'], 'zzp0b_members');
+		cms_store::save_item('zzp0bmembersdata', 0, array('name' => 'Bare'), array('name'));
+		same(array('zzp0b_members', 'zzp0b_members', 'zzp0bmembers'), $p0b_events, 'cms_store');
+		// a second name for the same table is an error, next to the first
+		file_put_contents("$theme/zzp0bteam2.html", "<html><head><title>Team 2</title></head><body>\n<!-- render.cms.zzp0bmembers --><h2><!-- print.name -->Ada<!-- /print.name --></h2><!-- /render.cms.zzp0bmembers --></body></html>");
+		$problems = (new raster_inspector())->lint_collections();
+		same(1, count($problems), json_encode($problems));
+		same('error', $problems[0]['severity']);
+		check(strpos($problems[0]['message'], "'zzp0b_members' and 'zzp0bmembers' share one table, zzp0bmembersdata") !== false, $problems[0]['message']);
+		same(array('application/views/default/zzp0bteam2.html', 2), array($problems[0]['file'], $problems[0]['line']));
+		check(has_problem((new raster_inspector())->lint(), 'share one table'), 'lint reports it');
+	} finally {
+		event::unbind('cms.item_saved')->from(null, 'test_p0b_event');
+		event::unbind('cms.item_deleted')->from(null, 'test_p0b_event');
+		@unlink("$theme/zzp0bteam.html");
+		@unlink("$theme/zzp0bteam2.html");
+		cms_store::connect();
+		R::exec('DROP TABLE IF EXISTS zzp0bmembersdata');
+	}
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";
 foreach ($skipped as $skip) echo "  - $skip\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";

@@ -179,6 +179,7 @@ Visitors don't see drafts or scheduled items, on lists, detail pages, feeds or s
 - Reserved field names: `slug`, `id`, `updated_at`, `enabled`, `published_at`, and the names of the `cms` model's own methods (`style`, `login`, `logout`, `route`, `setup`, and others).
 - Reserved collection names: `users`, `raster`.
 - Words SQL keeps for itself (`when`, `from`, `group`, `order`) are fine as field names: lists sort and filter by them like any other field.
+- A collection's table leaves out the `_`s: `team_members` is stored in `teammembersdata`. So `team_members` and `teammembers` would share one table and each show the other's items; `lint` reports that as an error.
 
 `lint` reports a reserved or invalid name with its file and line.
 

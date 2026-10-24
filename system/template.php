@@ -972,7 +972,8 @@ class template {
 		$mockup = $this->mockup($render_template);
 		$mark = array('kind' => 'collection', 'collection' => $list['collection'], 'list' => $list['argument'], 'filters' => $list['filters'], 'fields' => $mockup['fields']);
 		// the card for a new item: never on an item's own page
-		$mark['addable'] = !preg_match('#_item(/|$)#', (string)config::get('uri_string'));
+		$url = cms::collection_uri(config::get('uri_string'));
+		$mark['addable'] = !$url || $url['kind'] !== 'item';
 		if ($record) {
 			$locked = array_merge($record['readonly'], $record['hidden'], array('owner', 'created_at'));
 			$mark = array_merge($mark, array('record' => true, 'readonly' => $locked, 'lists' => $record['lists'], 'addable' => $mark['addable'] && cms_records::addable($record)));

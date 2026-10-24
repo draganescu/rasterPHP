@@ -424,19 +424,20 @@ class cms_store {
 	// may write. $who is who asks: editor (the in-page editor and MCP), visitor
 	// (a form) or model (the model's own code, which may write readonly and
 	// hidden fields and the owner). Records of a declared type go through the
-	// model's check() first.
-	static function save_item($type, $id, $values, $allowed, $who = 'editor') {
+	// model's check() first. $name is the collection's own name, for the
+	// event (team_members, whose table is teammembersdata).
+	static function save_item($type, $id, $values, $allowed, $who = 'editor', $name = null) {
 		$info = cms_records::for_table($type);
 		if ($info) cms_records::ensure($info);
 		// the checks and the write happen together, so two bookings can't
 		// both take the last seats, and two items with one title can't both
 		// take its slug
-		return cms_records::transaction(function () use ($type, $id, $values, $allowed, $who, $info) {
-			return cms_store::store_item($type, $id, $values, $allowed, $who, $info);
+		return cms_records::transaction(function () use ($type, $id, $values, $allowed, $who, $info, $name) {
+			return cms_store::store_item($type, $id, $values, $allowed, $who, $info, $name);
 		});
 	}
 
-	static function store_item($type, $id, $values, $allowed, $who, $info) {
+	static function store_item($type, $id, $values, $allowed, $who, $info, $name = null) {
 		if ($info) {
 			$allowed = $who === 'model' ? array_merge(array_keys($info['fields']), array('owner')) : array_values(array_intersect($allowed, cms_records::writable($info)));
 		}
@@ -522,15 +523,15 @@ class cms_store {
 		util::content_changed();
 		$item = self::export_item($bean);
 		if ($info) $item = cms_records::decode($info, $item);
-		cms_records::dispatch('cms.item_saved', array('collection' => self::collection_of($type), 'created' => !$id, 'item' => $item));
+		cms_records::dispatch('cms.item_saved', array('collection' => self::collection_of($type, $name), 'created' => !$id, 'item' => $item));
 		return $info && $who !== 'model' ? cms_records::shown($info, $item) : $item;
 	}
 
-	static function delete_item($type, $id) {
-		return cms_records::transaction(function () use ($type, $id) { return cms_store::remove_item($type, $id); });
+	static function delete_item($type, $id, $name = null) {
+		return cms_records::transaction(function () use ($type, $id, $name) { return cms_store::remove_item($type, $id, $name); });
 	}
 
-	static function remove_item($type, $id) {
+	static function remove_item($type, $id, $name = null) {
 		$bean = self::table_exists($type) ? R::findOne($type, ' id = ? ', array((int)$id)) : null;
 		if (!$bean) return false;
 		$item = self::export_item($bean);
@@ -541,13 +542,18 @@ class cms_store {
 		}
 		R::trash($bean);
 		util::content_changed();
-		cms_records::dispatch('cms.item_deleted', array('collection' => self::collection_of($type), 'item' => $item));
+		cms_records::dispatch('cms.item_deleted', array('collection' => self::collection_of($type, $name), 'item' => $item));
 		return true;
 	}
 
-	// newsdata -> news
-	static function collection_of($type) {
-		return preg_replace('/data$/', '', $type);
+	// The collection whose item an event is about: the name the caller
+	// knows, else a declared type's own. Only code that passes a bare table
+	// gets its name back from the table (newsdata -> news), which has lost
+	// any underscores (teammembersdata, #33).
+	static function collection_of($type, $name = null) {
+		if ($name !== null) return $name;
+		$info = cms_records::for_table($type);
+		return $info ? $info['name'] : preg_replace('/data$/', '', $type);
 	}
 
 	// ##Users (kept for older code; see the authentication model)

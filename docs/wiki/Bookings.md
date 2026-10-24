@@ -140,7 +140,7 @@ Protect the staff pages by their own names, never by `booking` (that prefix woul
 config::set('protected')->to(array('staff' => 'editor', 'booking_item' => 'editor'));
 ```
 
-A `booking_item.html` view that renders `render.cms.booking` is each booking's own page (`/booking/booking_item/<slug>`).
+A `booking_item.html` view that renders `render.cms.booking` is each booking's own page (`/booking/booking_item/{slug}`).
 
 **Needs attention.** Staff may close a day, change the hours or lower a limit even where bookings already sit. Nothing is refused or cancelled; the bookings that no longer fit show in `render.booking.attention` and the agenda, with the reason: `closed`, `resource_inactive`, `service_unavailable`, `not_a_slot` or `over_capacity`. Confirming one is refused with that reason; cancelling, declining or moving it is not.
 

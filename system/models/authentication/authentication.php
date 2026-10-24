@@ -380,9 +380,7 @@ class authentication
 		// a pattern protects the URLs and the views it matches, in any case:
 		// /Staff on a disk that ignores case still renders staff.html
 		$view = '/'.controller::instance()->current_view;
-		foreach ((array)config::get('protected', array()) as $pattern => $role) {
-			$match = '%^/'.ltrim($pattern, '/').'%i';
-			if (!preg_match($match, $uri) && ($view === '/' || !preg_match($match, $view))) continue;
+		foreach (self::protection($uri) + ($view === '/' ? array() : self::protection($view)) as $pattern => $role) {
 			if (self::can($role)) continue;
 			if ($user) {
 				http_response_code(403);
@@ -396,11 +394,23 @@ class authentication
 	// whether the person asking may open the page at $uri: the 'protected'
 	// patterns setup() checks, for the in-page editor's saves
 	static function may_open($uri) {
-		$uri = '/'.ltrim((string)$uri, '/');
-		foreach ((array)config::get('protected', array()) as $pattern => $role) {
-			if (preg_match('%^/'.ltrim($pattern, '/').'%i', $uri) && !self::can($role)) return false;
+		foreach (self::protection($uri) as $role) {
+			if (!self::can($role)) return false;
 		}
 		return true;
+	}
+
+	// The 'protected' patterns that keep $path, pattern => role. A pattern
+	// matches the start of the path, in any case: 'Faq' keeps /faq and
+	// /faq/x, 'staff' keeps /staff and /staff/rota. The one place they are
+	// matched: pages, the editor's saves, the Admin menu, the sitemap and lint (#40).
+	static function protection($path) {
+		$path = '/'.ltrim((string)$path, '/');
+		$found = array();
+		foreach ((array)config::get('protected', array()) as $pattern => $role) {
+			if (preg_match('%^/'.ltrim($pattern, '/').'%i', $path)) $found[$pattern] = $role;
+		}
+		return $found;
 	}
 
 	// on the command line only `raster render` follows it: the page ends
@@ -630,21 +640,21 @@ class authentication
 		require_once BASE.'tools/inspector.php';
 		$inspector = new raster_inspector();
 		$link = rtrim((string)config::get('link_uri'), '/');
-		$protected = (array)config::get('protected', array());
 		$pages = array();
 		foreach ($inspector->views() as $view) {
-			if (preg_match('#(^|/)_#', $view) || substr($view, -strlen($inspector->ext)) !== $inspector->ext) continue;
+			$path = cms::page_path($view, $inspector->ext);
+			if ($path === null) continue;
 			$name = substr($view, 0, -strlen($inspector->ext));
 			if (preg_match('/_item$/', $name)) continue;
 			$role = null;
-			foreach ($protected as $pattern => $needs) {
+			foreach (self::protection('/'.$name) as $needs) {
 				if ($needs === 'edit') $needs = 'editor';
-				if (!isset(self::$roles[$needs]) || !preg_match('%^/'.ltrim($pattern, '/').'%', '/'.$name)) continue;
+				if (!isset(self::$roles[$needs])) continue;
 				if ($role === null || self::$roles[$needs] > self::$roles[$role]) $role = $needs;
 			}
 			if ($role === null || self::$roles[$role] < self::$roles['editor']) continue;
 			$pages[] = array(
-				'url' => $name === config::get('default_view', 'index') ? $link.'/' : $link.'/'.$name,
+				'url' => $link.$path,
 				'view' => $name,
 				'title' => self::view_title($inspector->theme_dir().'/'.$view, $name),
 				'role' => $role,
