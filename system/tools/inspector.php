@@ -911,7 +911,9 @@ class raster_inspector {
 		// html_lang_fixed: <html lang="en"> is the mock-up a print.@lang.i18n.language replaces
 		if (preg_match_all('/<html\b[^>]*>/i', $html, $tags, PREG_OFFSET_CAPTURE)) {
 			foreach ($tags[0] as $tag) {
-				if (preg_match('/<!-- print\.@lang\.i18n\.language -->(\s*<!--[^>]*-->)*\s*$/', substr($html, max(0, $tag[1] - 400), min($tag[1], 400)))) continue;
+				// only openings and plain comments between the two: a print
+				// closed before the <html> sets nothing on it
+				if (preg_match('/<!-- print\.@lang\.i18n\.language -->(\s*<!--(?!\s*\/)[^>]*?(?<!\/)-->)*\s*$/', substr($html, max(0, $tag[1] - 400), min($tag[1], 400)))) continue;
 				$problems[] = self::problem_at('warning', $html, $tag[1], "{$tag[0]} names one language on every language's pages: wrap it in <!-- print.@lang.i18n.language -->{$tag[0]}<!-- /print.@lang.i18n.language --> so each page says its own");
 			}
 		}
@@ -921,7 +923,8 @@ class raster_inspector {
 	// untranslatable_text: words in the markup that no annotation prints,
 	// so every language shows them as written. What a print replaces (its
 	// mock-up), a print.@alt's alt, comments, scripts and styles are not
-	// read; nor are numbers, punctuation and lone symbols (14:00, ©, →).
+	// read; nor are numbers, punctuation and lone symbols (14:00, ©, →),
+	// an email or a web address alone, and code (<pre>, <code>).
 	// One warning per line, at most ten per file.
 	protected function lint_untranslatable($html, $blocks, &$problems) {
 		$text = $html;
@@ -953,8 +956,12 @@ class raster_inspector {
 			}
 		};
 		$walk($blocks);
-		$text = preg_replace_callback('/<!--.*?-->|<(script|style)\b[^>]*>.*?<\/\1\s*>/is', function ($m) { return preg_replace('/[^\n]/', ' ', $m[0]); }, $text);
-		$words = function ($value) { return preg_match('/\p{L}{2,}/u', html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8')) === 1; };
+		$text = preg_replace_callback('/<!--.*?-->|<(script|style|pre|code)\b[^>]*>.*?<\/\1\s*>/is', function ($m) { return preg_replace('/[^\n]/', ' ', $m[0]); }, $text);
+		$words = function ($value) {
+			$value = trim(html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+			if (preg_match('~^([^\s@]+@[^\s@]+\.[^\s@]+|(https?:)?//\S+|www\.\S+|mailto:\S+|tel:\S+)$~i', $value)) return false;
+			return preg_match('/\p{L}{2,}/u', $value) === 1;
+		};
 		$found = array();
 		$parts = preg_split('/(<[^>]*>)/', $text, -1, PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_OFFSET_CAPTURE);
 		foreach ($parts as $part) {
@@ -965,7 +972,9 @@ class raster_inspector {
 				continue;
 			}
 			// the attributes that hold words (D7); a meta's content when it is a description or title
-			$names = 'alt|title|placeholder|aria-label'.(preg_match('/^<meta\b/i', $value) && preg_match('/\s(name|property)\s*=\s*["\']?[^"\'>]*(description|title)/i', $value) ? '|content' : '');
+			$names = 'alt|title|placeholder|aria-label'.(preg_match('/^<meta\b/i', $value) && preg_match('/\s(name|property)\s*=\s*["\']?[^"\'>]*(description|title)/i', $value) ? '|content' : '')
+				// a button's words
+				.(preg_match('/^<input\b/i', $value) && preg_match('/\stype\s*=\s*["\']?(submit|button|reset)\b/i', $value) ? '|value' : '');
 			if (preg_match_all('/\s('.$names.')\s*=\s*("([^"]*)"|\'([^\']*)\')/i', $value, $attributes, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
 				foreach ($attributes as $attribute) {
 					$said = $attribute[3][0] !== '' ? $attribute[3][0] : (isset($attribute[4]) ? $attribute[4][0] : '');
