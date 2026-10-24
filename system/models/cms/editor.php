@@ -361,7 +361,13 @@ class cms_editor {
 		return is_array($examples) ? array_filter($examples, 'is_string') : array();
 	}
 
-	// collection, id (0 for a new item), fields[name]=value
+	// collection, id (0 for a new item), fields[name]=value, and lang when
+	// multilingual. In a translation, a field with a translation is saved
+	// in the page's language and a shared one (a photo, a price) as the one
+	// value of every language, as save_field does; a new item is made in
+	// the default language, the only text it has until it is translated.
+	// copy (a stored item's id) makes the new item a copy of that one, in
+	// every language
 	static function save_item() {
 		cms::require_admin(true);
 		if ($bad = self::one_value()) return $bad;
@@ -375,10 +381,61 @@ class cms_editor {
 		$fields = util::post('fields');
 		if (!is_array($fields)) $fields = array();
 		unset($fields['id'], $fields['updated_at']);
-		$allowed = $record ? cms_records::writable($record) : array_diff(array_keys($columns), array('id', 'updated_at'));
+		// name__ro is a language's column, and saved_lang Raster's, never fields
+		$allowed = $record ? cms_records::writable($record) : array_values(array_filter(array_diff(array_keys($columns), array('id', 'updated_at', 'saved_lang')), function ($column) { return strpos($column, '__') === false; }));
+		$lang = self::language();
+		if ($lang === false) return self::fail('This page is in '.i18n::current().': reload it');
+		$id = (int)util::post('id');
+		$write = $lang !== null && !i18n::is_default($lang) && $id ? $lang : null;
+		$every = $record ? cms_records::translated_fields($record) : cms_types::translated($type);
+		$translated = $write === null ? array() : $every;
+		// a new item: a copy of a stored one (Duplicate), or one brought back
+		// (undo after Delete), comes with every language's text as stored,
+		// never as the page showed it
+		$translations = array();
+		if (!$id) {
+			$copy = (int)util::post('copy');
+			if ($copy) {
+				$from = cms_store::get_item($type, $copy);
+				if (!$from) return self::fail('No such item', 404);
+				foreach (array('id', 'updated_at', 'slug', 'created_at', 'owner', 'saved_lang') as $own) unset($from[$own]);
+				$fields = $from + $fields;
+			}
+			unset($fields['saved_lang']);
+			foreach ($fields as $key => $value) {
+				if (strpos($key, '__') === false) continue;
+				unset($fields[$key]);
+				foreach (i18n::enabled() ? i18n::available() : array() as $code) {
+					$suffix = i18n::suffix($code);
+					$base = substr($key, 0, -strlen($suffix));
+					if ($suffix !== '' && $base.$suffix === $key && in_array($base, $every, true) && in_array($base, $allowed, true)) $translations[$code][$base] = $value;
+				}
+			}
+			if ($copy) $fields = array_intersect_key($fields, array_flip($allowed));
+		}
+		// production before schema --apply made the language's columns: a
+		// text field would land in the default language's column
+		if ($write !== null && database::$frozen && !self::has_language($type, $write)) {
+			$types = cms_types::of_table($type);
+			foreach (array_keys($fields) as $field) {
+				if (!in_array($field, $every, true) && (!isset($types[$field]) || $types[$field] === 'text') && !in_array($field, array('enabled', 'published_at'), true)) return self::refused(new cms_refused(array('translation_columns_missing')));
+			}
+		}
+		$own = array_intersect_key($fields, array_flip($translated));
+		$shared = array_diff_key($fields, $own);
 		try {
-			// the page prints text, so the editor gets the item as text too
-			return cms_types::show_row(cms_store::save_item($type, (int)util::post('id'), $fields, $allowed, 'editor', $collection), self::examples());
+			// every part or none
+			$saved = !$own && !$translations ? cms_store::save_item($type, $id, $shared, $allowed, 'editor', $collection) : cms_records::transaction(function () use ($type, $id, $own, $shared, $allowed, $collection, $write, $translations) {
+				$saved = $shared || !$own ? cms_store::save_item($type, $id, $shared, $allowed, 'editor', $collection) : null;
+				if ($own) $saved = cms_store::save_item($type, $id, $own, $allowed, 'editor', $collection, $write);
+				foreach ($translations as $code => $values) {
+					if (implode('', array_map('strval', $values)) !== '') cms_store::save_item($type, (int)$saved['id'], $values, $allowed, 'editor', $collection, $code);
+				}
+				return $translations ? cms_store::get_item($type, (int)$saved['id']) : $saved;
+			});
+			// the page prints text, so the editor gets the item as text too,
+			// in the page's language
+			return cms_types::show_row($lang === null ? $saved : cms_store::localized($saved, $type, $lang), self::examples());
 		} catch (cms_refused $e) {
 			return self::refused($e);
 		} catch (cms_type_error $e) {

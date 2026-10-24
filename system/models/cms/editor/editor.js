@@ -696,7 +696,7 @@
 	function saveValue(field, value) {
 		working(1);
 		var request = field.item
-			? call('editor_save_item', { collection: field.item.info.collection, id: field.item.info.id, fields: obj(field.info.field, value), examples: field.item.info.examples }).then(function (item) { field.item.info.values = item; return item[field.info.field]; })
+			? call('editor_save_item', withLang({ collection: field.item.info.collection, id: field.item.info.id, fields: obj(field.info.field, value), examples: field.item.info.examples })).then(function (item) { field.item.info.values = item; return item[field.info.field]; })
 			: call('editor_save_field', withLang({ type: field.info.type, slug: field.info.slug, field: field.info.field, value: value, example: field.info.default })).then(function (r) { field.info.value = r.value; return r.value; });
 		return request.then(function (saved) { working(-1); return saved; }, function (e) { working(-1); throw e; });
 	}
@@ -1092,7 +1092,7 @@
 
 	function saveItem(item, values) {
 		working(1);
-		return call('editor_save_item', { collection: item.info.collection, id: item.info.id, fields: values, examples: item.info.examples }).then(function (saved) {
+		return call('editor_save_item', withLang({ collection: item.info.collection, id: item.info.id, fields: values, examples: item.info.examples })).then(function (saved) {
 			working(-1);
 			item.info.values = saved;
 			item.info.enabled = saved.enabled;
@@ -1127,7 +1127,7 @@
 			toast(t('deleted', { name: itemName(item) }), item.info.record ? null : function () {
 				var values = writable(item.info, result.item);
 				['id', 'updated_at', 'created_at', 'owner'].forEach(function (k) { delete values[k]; });
-				return call('editor_save_item', { collection: item.info.collection, id: 0, fields: values, examples: item.info.examples }).then(function (saved) {
+				return call('editor_save_item', withLang({ collection: item.info.collection, id: 0, fields: values, examples: item.info.examples })).then(function (saved) {
 					item.info.id = saved.id;
 					item.info.values = saved;
 					if (putBack) putBack();
@@ -1139,11 +1139,11 @@
 			});
 		}, function (e) { working(-1); item.el.classList.remove('raster-leaving'); failed(e); });
 	}
+	// the server copies the stored item, every language of it (the page
+	// shows only its own)
 	function duplicate(item) {
-		var values = Object.assign({}, item.info.values);
-		['id', 'updated_at', 'slug'].forEach(function (k) { delete values[k]; });
 		working(1);
-		call('editor_save_item', { collection: item.info.collection, id: 0, fields: values, examples: item.info.examples }).then(function (saved) {
+		call('editor_save_item', withLang({ collection: item.info.collection, id: 0, copy: item.info.id, examples: item.info.examples })).then(function (saved) {
 			working(-1);
 			var copy = cloneItem(item, saved);
 			clearFloats();
@@ -1404,7 +1404,7 @@
 			fieldsOut[name] = node.getAttribute('data-raster-edit') === 'text' ? node.innerText.replace(/\s+/g, ' ').trim() : clean(node.innerHTML, !holdsBlocks(node)).trim();
 		});
 		working(1);
-		call('editor_save_item', { collection: list.info.collection, id: 0, fields: fieldsOut, examples: list.info.fields }).then(function (saved) {
+		call('editor_save_item', withLang({ collection: list.info.collection, id: 0, fields: fieldsOut, examples: list.info.fields })).then(function (saved) {
 			working(-1);
 			var el = ghost.el;
 			if (ghost.bar) ghost.bar.remove();

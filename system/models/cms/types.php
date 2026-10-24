@@ -167,6 +167,8 @@ class cms_types {
 					if ($column === $field || array_key_exists($column, $now)) continue;
 					R::getDatabaseAdapter()->exec("ALTER TABLE `$table` ADD `$column` ".self::sql($type));
 					$now[$column] = $type;
+					// each language's slug is looked up as the slug is
+					if ($field === 'slug') self::index_slug($table, $column);
 				}
 			}
 		}
@@ -206,19 +208,22 @@ class cms_types {
 	// An index on the slug, so opening an item and picking a free slug don't
 	// read the whole table. Made with a new table, and by schema --apply for
 	// tables made before 2.1.10. True when it was missing and is made now.
-	static function index_slug($table) {
+	// $column is the slug column (slug__ro has one of its own, named
+	// <table>_slug__ro).
+	static function index_slug($table, $column = 'slug') {
 		if (!preg_match('/^[a-z0-9_]+$/', $table)) throw new InvalidArgumentException("Invalid table '$table'");
+		if (!preg_match('/^slug(__[a-z0-9_]+)?$/', $column)) throw new InvalidArgumentException("Invalid slug column '$column'");
 		$adapter = R::getDatabaseAdapter();
 		if ($adapter->getDatabase()->getDatabaseType() !== 'mysql') {
-			if ($adapter->getCell("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?", array("{$table}_slug"))) return false;
-			$adapter->exec("CREATE INDEX IF NOT EXISTS `{$table}_slug` ON `$table` (slug)");
+			if ($adapter->getCell("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?", array("{$table}_{$column}"))) return false;
+			$adapter->exec("CREATE INDEX IF NOT EXISTS `{$table}_{$column}` ON `$table` ($column)");
 			return true;
 		}
 		$where = 'table_schema = DATABASE() AND table_name = ? AND column_name = ?';
-		if ($adapter->getCell("SELECT COUNT(*) FROM information_schema.statistics WHERE $where", array($table, 'slug'))) return false;
+		if ($adapter->getCell("SELECT COUNT(*) FROM information_schema.statistics WHERE $where", array($table, $column))) return false;
 		// MySQL indexes a TEXT column by its start; a slug is at most 80 characters
-		$kind = strtolower((string)$adapter->getCell("SELECT data_type FROM information_schema.columns WHERE $where", array($table, 'slug')));
-		$adapter->exec("CREATE INDEX `{$table}_slug` ON `$table` (slug".(strpos($kind, 'text') !== false ? '(191)' : '').')');
+		$kind = strtolower((string)$adapter->getCell("SELECT data_type FROM information_schema.columns WHERE $where", array($table, $column)));
+		$adapter->exec("CREATE INDEX `{$table}_{$column}` ON `$table` ($column".(strpos($kind, 'text') !== false ? '(191)' : '').')');
 		return true;
 	}
 
