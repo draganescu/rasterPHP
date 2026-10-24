@@ -38,7 +38,7 @@ class pagination
 			// a private type's records for whoever may read them (#88)
 			$list = cms_store::list_options($filter);
 			list($perpage, $limited) = cms_store::page_size($name, $list['options']);
-			$where = cms_store::table_exists($type) ? cms_store::list_where($name, $list['conditions'], $filters, $filters) : null;
+			$where = cms_store::table_exists($type) ? cms_store::list_where($name, $list['conditions'], $filters, $filters, i18n::current()) : null;
 			$total = $where === null ? 0 : (int)R::count($type, $where[0], $where[1]);
 			// a limit list is one page
 			if ($limited) $total = min($total, $perpage);

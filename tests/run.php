@@ -11082,6 +11082,316 @@ test('P3 kickoff: off, list_where and index_slug send the SQL they always did', 
 	}
 });
 
+// ## P3.A: items in a language, translated sort and filter
+
+// a cms.item_saved listener, bound once
+function p3a_saved($payload) { $GLOBALS['p3a_events'][] = $payload; }
+function p3a_events() {
+	static $bound = false;
+	if (!$bound) event::bind('cms.item_saved')->to(null, 'p3a_saved');
+	$bound = true;
+	$GLOBALS['p3a_events'] = array();
+}
+// the SQL $fn sends, with the clock taken out (updated_at differs a second later)
+function p3a_sql($fn) {
+	return preg_replace('/\d{4}-\d\d-\d\d \d\d:\d\d:\d\d/', 'T', json_encode(p2a_sql($fn)));
+}
+// a model declaring three record types: one names its translated fields,
+// one its shared ones, one neither
+function p3a_model($fn) {
+	global $root;
+	$dir = "$root/application/models/zzp3a";
+	temp_model($dir, array('zzp3a.php' => '<?php class zzp3a { static function types() { return array('
+		.'"zzp3adish" => array("fields" => array("name" => "", "description" => "", "price" => 0, "lines" => array(), "email" => ""), "public" => true, "translate" => array("name", "description", "price", "lines", "nonsense")),'
+		.'"zzp3aguest" => array("fields" => array("name" => "", "email" => "", "secret" => "", "lines" => array(), "seats" => 0), "hidden" => array("secret"), "shared" => array("email")),'
+		.'"zzp3abook" => array("fields" => array("name" => "", "note" => ""))'
+		.'); } }'));
+	cms_records::forget();
+	try {
+		return $fn();
+	} finally {
+		@unlink("$dir/zzp3a.php");
+		@rmdir($dir);
+		cms_store::connect();
+		foreach (array('zzp3adishdata', 'zzp3aguestdata', 'zzp3abookdata') as $table) R::getDatabaseAdapter()->exec("DROP TABLE IF EXISTS `$table`");
+		cms_records::forget();
+		cms_store::forget();
+	}
+}
+
+test('P3.A: a translation language sorts and filters by COALESCE(NULLIF(x__ro, \'\'), x); off and the default, today\'s strings', function () {
+	$columns = array('id' => 'INTEGER', 'slug' => 'TEXT', 'slug__ro' => 'TEXT', 'name' => 'TEXT', 'name__ro' => 'TEXT', 'name__pt_br' => 'TEXT', 'note' => 'TEXT', 'price' => 'INT', 'published_at' => 'DATETIME', 'updated_at' => 'DATETIME');
+	$conditions = array(array('name', '=', 'Flat white'), array('price', '>', '4'), array('name', '!=', 'x'), array('slug', '=', 'flat-white'), array('note', '=', 'hot'), array('name', '=', ''));
+	$today = array(" AND `name` = :c0_name  AND `price` > :c1_price  AND (`name` IS NULL OR `name` != :c2_name)  AND `slug` = :c3_slug  AND `note` = :c4_note  AND `name` = :c5_name ", array(':c0_name' => 'Flat white', ':c1_price' => 4, ':c2_name' => 'x', ':c3_slug' => 'flat-white', ':c4_note' => 'hot', ':c5_name' => ''));
+	$order = '`name` ASC, `note` DESC, CASE WHEN published_at IS NULL THEN updated_at ELSE published_at END DESC, id DESC';
+	foreach (array(array('multilingual' => false, 'languages' => array()), array('multilingual' => false, 'languages' => array('en', 'ro')), p2a_on(array('en'))) as $settings) {
+		with_settings($settings, function () use ($columns, $conditions, $today, $order) {
+			foreach (array(null, 'en', 'ro', 'pt-br') as $lang) {
+				same($today, cms_store::conditions_sql($conditions, $columns, 'c', $lang));
+				same($order, cms_store::order_sql('name,-note,newest', $columns, $lang));
+				same('`name`', cms_store::field_sql('name', $columns, $lang));
+			}
+		});
+	}
+	with_settings(p2a_on(array('en', 'ro', 'pt-br')), function () use ($columns, $conditions, $today, $order) {
+		foreach (array(null, 'en', 'EN') as $lang) {
+			same($today, cms_store::conditions_sql($conditions, $columns, 'c', $lang), var_export($lang, true));
+			same($order, cms_store::order_sql('name,-note,newest', $columns, $lang));
+		}
+		// the translation where there is one, the default's value where it
+		// is empty; a field without a column in the language as today; the
+		// bindings as they were
+		$ro = "COALESCE(NULLIF(`name__ro`, ''), `name`)";
+		same(array(" AND $ro = :c0_name  AND `price` > :c1_price  AND ($ro IS NULL OR $ro != :c2_name)  AND COALESCE(NULLIF(`slug__ro`, ''), `slug`) = :c3_slug  AND `note` = :c4_note  AND $ro = :c5_name ", $today[1]),
+			cms_store::conditions_sql($conditions, $columns, 'c', 'ro'));
+		same("$ro ASC, `note` DESC, CASE WHEN published_at IS NULL THEN updated_at ELSE published_at END DESC, id DESC", cms_store::order_sql('name,-note,newest', $columns, 'ro'));
+		same("$ro DESC, id ASC", cms_store::order_sql('-name', $columns, 'ro'));
+		same("COALESCE(NULLIF(`name__pt_br`, ''), `name`) ASC, `slug` ASC, id ASC", cms_store::order_sql('name,slug', $columns, 'pt-br'), 'pt-br has no slug column');
+		same('`name`', cms_store::field_sql('name', $columns, 'de'), 'a language the site doesn\'t list');
+		same(array(" AND COALESCE(NULLIF(`name__ro`, ''), `name`) = :f0_name ", array(':f0_name' => 'Cafea')), cms_store::conditions_sql(array(array('name', '=', 'Cafea')), $columns, 'f', 'ro'));
+	});
+});
+
+test('P3.A: types() translate and shared: translated_fields, the content model, ensure', function () {
+	p3a_model(function () {
+		same(array('name', 'description'), cms_records::translated_fields(cms_records::info('zzp3adish')), 'translate: its text fields, no int, no list, nothing unknown');
+		same(array('name'), cms_records::translated_fields(cms_records::info('zzp3aguest')), 'shared: every other text field but lists and hidden ones');
+		same(array(), cms_records::translated_fields(cms_records::info('zzp3abook')), 'neither: none');
+		same(array(), cms_records::info('zzp3adish')['unknown'], 'translate and shared are known keys');
+		$fields = (new raster_inspector())->content_model()['collections']['zzp3adish']['fields'];
+		same(array('name' => true, 'description' => true, 'price' => false, 'lines' => false, 'email' => false), array_map(function ($f) { return $f['translate']; }, $fields));
+		cms_store::connect();
+		// off: the columns it always had, and the same SQL
+		$off = p3a_sql(function () { cms_records::ensure(cms_records::info('zzp3adish')); });
+		same(array('id', 'name', 'description', 'price', 'lines', 'email', 'slug', 'enabled', 'published_at', 'updated_at', 'created_at'), p2a_columns('zzp3adishdata'));
+		R::getDatabaseAdapter()->exec('DROP TABLE zzp3adishdata');
+		cms_store::forget();
+		same($off, with_settings(array('multilingual' => false, 'languages' => array('en', 'ro')), function () { return p3a_sql(function () { cms_records::ensure(cms_records::info('zzp3adish')); }); }));
+		// on: a column per language for the translated ones
+		with_settings(p2a_on(), function () {
+			cms_records::ensure(cms_records::info('zzp3adish'));
+			$columns = p2a_columns('zzp3adishdata');
+			check(in_array('name__ro', $columns) && in_array('description__ro', $columns) && !in_array('email__ro', $columns) && !in_array('price__ro', $columns), implode(', ', $columns));
+			$again = p2a_sql(function () { cms_records::ensure(cms_records::info('zzp3adish')); });
+			same(array(), preg_grep('/ALTER/i', $again), 'nothing the second time');
+		});
+	});
+});
+
+test('P3.A: save_item in a language writes its column, refuses a shared field, keeps saved_lang and sends lang; off as before', function () {
+	cms_store::connect();
+	$type = 'zzp3amenudata';
+	p3a_events();
+	try {
+		cms_types::ensure($type, array('slug' => 'text', 'enabled' => 'bool', 'published_at' => 'datetime', 'updated_at' => 'datetime', 'name' => 'text', 'photo' => 'text'));
+		$allowed = array('name', 'photo');
+		// off: lang changes no SQL, no saved_lang, the event as it was
+		$item = cms_store::save_item($type, 0, array('name' => 'Flat white', 'photo' => 'a.jpg'), $allowed, 'editor', 'zzp3a_menu');
+		$id = $item['id'];
+		foreach (array(array('multilingual' => false, 'languages' => array()), array('multilingual' => false, 'languages' => array('en', 'ro'))) as $settings) {
+			with_settings($settings, function () use ($type, $id, $allowed) {
+				$plain = p3a_sql(function () use ($type, $id, $allowed) { cms_store::save_item($type, $id, array('name' => 'Flat white'), $allowed); });
+				same($plain, p3a_sql(function () use ($type, $id, $allowed) { cms_store::save_item($type, $id, array('name' => 'Flat white'), $allowed, 'editor', null, 'ro'); }));
+				check(strpos($plain, 'saved_lang') === false && strpos($plain, '__ro') === false, $plain);
+			});
+		}
+		same(array('id', 'slug', 'enabled', 'published_at', 'updated_at', 'name', 'photo'), p2a_columns($type), 'off: no columns added');
+		foreach ($GLOBALS['p3a_events'] as $event) same(array('collection', 'created', 'item'), array_keys($event));
+		$GLOBALS['p3a_events'] = array();
+		with_settings(p2a_on(), function () use ($type, $id, $allowed) {
+			cms_types::ensure($type, array(), array('name'));
+			$en = cms_store::save_item($type, $id, array('photo' => 'b.jpg'), $allowed, 'editor', 'zzp3a_menu');
+			same('en', $en['saved_lang'], 'saved_lang, made in development');
+			$ro = cms_store::save_item($type, $id, array('name' => 'Cafea cu lapte'), $allowed, 'editor', 'zzp3a_menu', 'ro');
+			same(array('Flat white', 'Cafea cu lapte', 'ro', 'b.jpg'), array($ro['name'], $ro['name__ro'], $ro['saved_lang'], $ro['photo']));
+			same(array(array('zzp3a_menu', 'en'), array('zzp3a_menu', 'ro')), array_map(function ($e) { return array($e['collection'], $e['lang']); }, $GLOBALS['p3a_events']));
+			// a shared field in a translation: refused, nothing stored
+			try {
+				cms_store::save_item($type, $id, array('name' => 'X', 'photo' => 'c.jpg'), $allowed, 'editor', null, 'ro');
+				check(false, 'a shared field in ro');
+			} catch (cms_refused $e) {
+				same(array('field_shared'), $e->problems);
+			}
+			try {
+				cms_store::save_item($type, $id, array('name' => 'X'), $allowed, 'editor', null, 'xx');
+				check(false, 'an unknown language');
+			} catch (InvalidArgumentException $e) {
+				check(strpos($e->getMessage(), 'Unknown language') !== false, $e->getMessage());
+			}
+			// a translation column is no field of its own
+			try {
+				cms_store::save_item($type, $id, array('name__ro' => 'X'), $allowed);
+				check(false, 'name__ro');
+			} catch (InvalidArgumentException $e) {
+				check(true);
+			}
+			$row = cms_store::get_item($type, $id);
+			same(array('Flat white', 'Cafea cu lapte', 'b.jpg'), array($row['name'], $row['name__ro'], $row['photo']));
+			// shown in Romanian, the default's value when the translation is empty
+			same('Cafea cu lapte', cms_store::localized($row, $type, 'ro')['name']);
+			cms_store::save_item($type, $id, array('name' => ''), $allowed, 'editor', null, 'ro');
+			same('Flat white', cms_store::localized(cms_store::get_item($type, $id), $type, 'ro')['name']);
+		});
+	} finally {
+		R::getDatabaseAdapter()->exec("DROP TABLE IF EXISTS $type");
+		cms_store::forget();
+	}
+});
+
+test('P3.A: a record in a language: save_item, and find() filters and sorts by the translation; off its SQL is today\'s', function () {
+	p3a_model(function () {
+		cms_store::connect();
+		$sql = function ($fn) {
+			$logs = p3a_sql($fn);
+			preg_match_all('/SELECT [^"]*?zzp3adishdata[^"]*/', $logs, $m);
+			return $m[0];
+		};
+		$find = function () { cms_records::find('zzp3adish', array('name' => 'Ciorbă'), 'name'); cms_records::find('zzp3adish', 'name=Ciorbă&order=-name'); };
+		cms_records::ensure(cms_records::info('zzp3adish'));
+		$today = $sql($find);
+		check(count($today) === 2 && strpos($today[0], ' AND `name` = :f_name  ORDER BY `name` ASC, id ASC') !== false && strpos($today[1], ' AND `name` = :c0_name  ORDER BY `name` DESC, id ASC') !== false, json_encode($today));
+		same($today, with_settings(array('multilingual' => false, 'languages' => array('en', 'ro')), function () use ($sql, $find) { return $sql(function () use ($find) { i18n::with('ro', $find); }); }), 'languages, switch off');
+		with_settings(p2a_on(), function () use ($sql, $find, $today) {
+			cms_records::ensure(cms_records::info('zzp3adish'));
+			same($today, $sql($find), 'on, the default language');
+			$ro = $sql(function () use ($find) { i18n::with('ro', $find); });
+			$coalesce = "COALESCE(NULLIF(`name__ro`, ''), `name`)";
+			check(strpos($ro[0], " AND $coalesce = :f_name  ORDER BY $coalesce ASC, id ASC") !== false && strpos($ro[1], " AND $coalesce = :c0_name  ORDER BY $coalesce DESC, id ASC") !== false, json_encode($ro));
+			$writable = cms_records::writable(cms_records::info('zzp3adish'));
+			$soup = cms_store::save_item('zzp3adishdata', 0, array('name' => 'Soup', 'email' => 'a@example.test'), $writable);
+			$bread = cms_store::save_item('zzp3adishdata', 0, array('name' => 'Bread'), $writable);
+			cms_store::save_item('zzp3adishdata', 0, array('name' => 'Apple pie'), $writable);
+			cms_store::save_item('zzp3adishdata', $soup['id'], array('name' => 'Ciorbă'), $writable, 'editor', null, 'ro');
+			cms_store::save_item('zzp3adishdata', $bread['id'], array('name' => 'Pâine'), $writable, 'editor', null, 'ro');
+			try {
+				cms_store::save_item('zzp3adishdata', $soup['id'], array('email' => 'b@example.test'), $writable, 'editor', null, 'ro');
+				check(false, 'email is shared');
+			} catch (cms_refused $e) {
+				same(array('field_shared'), $e->problems);
+			}
+			$names = function ($rows) { return array_map(function ($r) { return $r['name']; }, $rows); };
+			// Romanian: Apple pie (no Romanian), Ciorbă, Pâine
+			same(array($soup['id']), array_map(function ($r) { return $r['id']; }, i18n::with('ro', function () { return cms_records::find('zzp3adish', array('name' => 'Ciorbă')); })), 'a filter matches Romanian text');
+			same(array(), i18n::with('ro', function () { return cms_records::find('zzp3adish', 'name=Soup'); }), 'not its English');
+			same(array('Apple pie'), $names(i18n::with('ro', function () { return cms_records::find('zzp3adish', 'name=Apple pie'); })), 'an untranslated one by its English');
+			same(array('Apple pie', 'Soup', 'Bread'), $names(i18n::with('ro', function () { return cms_records::find('zzp3adish', array(), 'name'); })), 'sorted by the Romanian (rows as stored)');
+			same(array('Apple pie', 'Bread', 'Soup'), $names(cms_records::find('zzp3adish', array(), 'name')), 'and by the English');
+		});
+	});
+});
+
+test('P3.A: on /ro/ a list sorts by the Romanian name, a filter matches Romanian text, an untranslated item shows English; the editor saves Romanian', function () {
+	$type = 'zzp3amenudata';
+	try {
+		p2b_site(function ($dir) use ($type) {
+			$view = "$dir/application/views/default/zzp3amenu.html";
+			file_put_contents($view, '<!doctype html><html><head><title>Menu</title></head><body><ul>'
+				."<!-- render.cms.zzp3a_menu('name=?name&order=name') --><li><b><!-- print.name -->Zz seed<!-- /print.name --></b>"
+				.'<!-- print.@src.photo --><img src="seed.jpg" alt=""><!-- /print.@src.photo --></li>'
+				."<!-- /render.cms.zzp3a_menu('name=?name&order=name') --></ul></body></html>");
+			$feed = "$dir/application/views/default/zzp3afeed.html";
+			file_put_contents($feed, "<!doctype html><html><head><title>F</title></head><body><!-- render.feed.items('zzp3a_menu') --><i><!-- print.name -->x<!-- /print.name --></i><!-- /render.feed.items('zzp3a_menu') --></body></html>");
+			p2b_server($dir, function ($base) use ($type) {
+				$names = function ($path) use ($base) {
+					list($status, $body) = http('GET', $base.$path);
+					same(200, $status, $path);
+					preg_match_all('#<b>(.*?)</b>#', (string)$body, $m);
+					return $m[1];
+				};
+				// the first request makes the table, and, multilingual, the
+				// name's Romanian column; the photo is shared
+				same(array('Zz seed'), $names('/zzp3amenu'));
+				cms_store::forget();
+				$columns = cms_store::columns($type);
+				check(isset($columns['name__ro']) && !isset($columns['photo__ro']), implode(', ', array_keys($columns)));
+				R::exec("DELETE FROM $type");
+				$ids = with_settings(p2a_on(), function () use ($type) {
+					$ids = array();
+					foreach (array('Apple' => 'Măr', 'Banana' => 'Banană', 'Cherry' => null) as $en => $ro) {
+						$item = cms_store::save_item($type, 0, array('name' => $en, 'photo' => strtolower($en).'.jpg'), array('name', 'photo'));
+						if ($ro !== null) cms_store::save_item($type, $item['id'], array('name' => $ro), array('name', 'photo'), 'editor', null, 'ro');
+						$ids[$en] = $item['id'];
+					}
+					return $ids;
+				});
+				same(array('Apple', 'Banana', 'Cherry'), $names('/zzp3amenu'), 'English, by the English name');
+				same(array('Banană', 'Cherry', 'Măr'), $names('/ro/zzp3amenu'), 'Romanian, by the Romanian name; Cherry in English');
+				same(array('Măr'), $names('/ro/zzp3amenu?name='.rawurlencode('Măr')), 'a filter matches Romanian text');
+				same(array(), $names('/ro/zzp3amenu?name=Apple'), 'and not the English of a translated item');
+				same(array('Cherry'), $names('/ro/zzp3amenu?name=Cherry'), 'an untranslated item by its English');
+				same(array('Apple'), $names('/zzp3amenu?name=Apple'), 'English as always');
+				// feeds in the page's language too
+				$feed = http('GET', "$base/ro/zzp3afeed")[1];
+				check(strpos($feed, '<i>Măr</i>') !== false && strpos($feed, '<i>Cherry</i>') !== false, $feed);
+				// the editor on /ro/ writes the Romanian name, and the photo for every language
+				$editor = p2b_login($base);
+				list($config) = p2b_config("$base/ro/zzp3amenu", $editor);
+				$post = function ($fields, $lang = 'ro') use ($base, $editor, $config) {
+					list($status, $body) = form_post("$base/ro/api/cms/editor_save_item", $fields + array('csrf' => $config['csrf']), array("Cookie: $editor"));
+					return array($status, json_decode($body, true), $body);
+				};
+				$cherry = array('collection' => 'zzp3a_menu', 'id' => $ids['Cherry']);
+				list($status, $json, $body) = $post($cherry + array('fields' => array('name' => 'Cireșe', 'photo' => 'cirese.jpg'), 'lang' => 'ro'));
+				same(200, $status, $body);
+				same(array('Cireșe', 'cirese.jpg'), array($json['name'], $json['photo']), 'the item as /ro/ shows it');
+				same(array('Banană', 'Cireșe', 'Măr'), $names('/ro/zzp3amenu'));
+				same(array('Apple', 'Banana', 'Cherry'), $names('/zzp3amenu'), 'the English stays');
+				check(strpos(http('GET', "$base/zzp3amenu")[1], 'cirese.jpg') !== false, 'the photo is everyone\'s');
+				list($status) = $post($cherry + array('fields' => array('name' => 'Wrong'), 'lang' => 'en'));
+				same(400, $status, 'a page open in another language');
+				list($status) = $post($cherry + array('fields' => array('name' => 'Wrong')));
+				same(400, $status, 'no lang');
+				list($status) = $post($cherry + array('fields' => array('name__ro' => 'Wrong'), 'lang' => 'ro'));
+				same(400, $status, 'a language\'s column is no field');
+				check(strpos(http('GET', "$base/ro/zzp3amenu")[1], 'Wrong') === false, 'nothing refused was stored');
+			});
+		});
+	} finally {
+		cms_store::connect();
+		R::getDatabaseAdapter()->exec("DROP TABLE IF EXISTS $type");
+		cms_store::forget();
+	}
+});
+
+test('P3.A: schema knows item and record translations: missing ones are drift, --apply adds them', function () use ($root) {
+	$view = "$root/application/views/default/zzp3aschema.html";
+	test_fixture($view);
+	file_put_contents($view, '<html><head><title>S</title></head><body><!-- render.cms.zzp3a_list --><p><!-- print.title -->Hello<!-- /print.title --><!-- print.@href.link --><a href="/x">x</a><!-- /print.@href.link --></p><!-- /render.cms.zzp3a_list --></body></html>');
+	$changes = array();
+	try {
+		p3a_model(function () use (&$changes) {
+			$schema = new raster_schema();
+			$table = function ($status, $name) {
+				foreach ($status['tables'] as $t) if ($t['table'] === $name) return $t;
+				return null;
+			};
+			$changes = $schema->apply();
+			$off = $table($schema->status(), 'zzp3alistdata');
+			check(!array_key_exists('missing_translations', $off) && !array_key_exists('translated', $off), 'off: as 2.2.45');
+			with_settings(p2a_on(), function () use ($schema, $table, &$changes) {
+				$status = $schema->status();
+				$list = $table($status, 'zzp3alistdata');
+				same(array('title'), $list['translated']);
+				same(array('title__ro', 'saved_lang'), $list['missing_translations']);
+				$dish = $table($status, 'zzp3adishdata');
+				same(array('name', 'description'), $dish['translated']);
+				same(array('name__ro', 'description__ro', 'saved_lang'), $dish['missing_translations']);
+				same(true, $status['drift']);
+				$applied = $schema->apply();
+				$changes = array_merge($changes, $applied);
+				foreach (array('zzp3alistdata.title__ro', 'zzp3alistdata.saved_lang', 'zzp3adishdata.name__ro', 'zzp3adishdata.description__ro', 'zzp3adishdata.saved_lang') as $column) check(in_array("added $column", $applied, true), "$column: ".json_encode($applied));
+				$status = $schema->status();
+				same(array(), $table($status, 'zzp3alistdata')['missing_translations']);
+				same(array(), $table($status, 'zzp3adishdata')['missing_translations']);
+				same(array(), $table($status, 'zzp3adishdata')['orphans']);
+			});
+		});
+	} finally {
+		@unlink($view);
+		p2a_undo($changes, array('zzp3alistdata'));
+	}
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";
 foreach ($skipped as $skip) echo "  - $skip\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";

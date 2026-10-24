@@ -60,7 +60,7 @@ Nothing to set up per field: Raster reads from the markup which fields hold word
 
 On `/ro/about`, the in-page editor edits the Romanian. A field nobody has translated yet shows the default language's words, so a new language starts complete and fills in as it is translated. A shared field is changed on the default language's page. The editor's own buttons follow the person, not the page: pick their language in the editor's dock.
 
-This covers page fields and the `site_` fields every page shares. Collection items (news posts, menu dishes) keep one value for every language for now.
+This covers page fields, the `site_` fields every page shares, and collection items (news posts, menu dishes): on `/ro/menu` each dish shows its Romanian name, or its English one until it has a Romanian one, and a list sorted or filtered by name (`order=name`) goes by the names it shows. A type a model declares (a booking, an inquiry) keeps one value for every language unless its `types()` says `'translate' => array('name', 'description')`, or `'shared' => array('email')` for every other text field.
 
 Behind the scenes a translated field `headline` keeps its Romanian in a column `headline__ro` (`pt-br` gives `headline__pt_br`). That's why field and collection names may not contain two underscores in a row. In development the columns appear on their own; on a production server, run `php bin/raster schema --apply` after adding a language. Turning multilingual off keeps every translation, ready for when it's turned on again.
 

@@ -81,7 +81,7 @@ These are sent whatever caused the change: a form, the in-page editor, the JSON 
 | `newsletter.subscribed` | `email`, `name`, `status` (`pending` or `confirmed`), `source`. Sent after the commit; the framework's listener `newsletter.confirmation_mail` sends a pending address its confirmation email |
 | `newsletter.confirmed`, `newsletter.unsubscribed` | `email`, `name` |
 | `rsvp.replied`, `rsvp.changed`, `rsvp.promoted` | a reply to an event was made, changed, or moved in from the waitlist: its fields (never the link), `who` (`guest`, `staff` or `waitlist`), `event_title`, `event_date`, `event_starts`; `rsvp.changed` adds `was` and `was_people`. After the commit (see [Event replies (RSVP)](RSVP)) |
-| `cms.item_saved` | `collection` (the collection's own name, `team_members`), `created` (`true` for a new item), `item` (all its fields) |
+| `cms.item_saved` | `collection` (the collection's own name, `team_members`), `created` (`true` for a new item), `item` (all its fields); on a multilingual site also `lang` (the language the save changed) |
 | `cms.item_deleted` | `collection`, `item` |
 | `cms.page_saved` | `type` (the page's table), `slug`, `changed` (names of changed fields), `fields` (the saved page: `revision`, `updated_at`, and `fields` with the values, so `$payload['fields']['fields']['headline']`) |
 | `content_changed` | none (sent by `util::content_changed()`; inside a transaction, once after the commit) |

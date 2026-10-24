@@ -29,11 +29,12 @@ class feed
 		$columns = cms_store::columns($type);
 		list($sql, $bindings) = cms_store::published_sql($columns);
 		$limit = (int)($limit ?: config::get('feed_limit', 20));
-		$sql .= ' ORDER BY '.cms_store::order_sql('newest', $columns).' LIMIT '.max(1, $limit);
+		$sql .= ' ORDER BY '.cms_store::order_sql('newest', $columns, i18n::current()).' LIMIT '.max(1, $limit);
 		$rows = array();
 		$record = cms_records::info($collection);
 		foreach (R::find($type, $sql, $bindings) as $bean) {
-			$item = cms_store::export_item($bean);
+			// in the feed's language: a translation, else the default's text
+			$item = cms_store::localized(cms_store::export_item($bean), $type);
 			// feeds print text; a public record type also has its lists
 			// decoded, hidden fields out, and what visitors typed escaped
 			$item = $record ? cms_records::for_template($record, cms_records::shown($record, cms_records::decode($record, $item))) : cms_types::show_row($item);
