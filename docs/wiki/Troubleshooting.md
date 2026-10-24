@@ -34,11 +34,11 @@ The template calls a method with fewer (or more) arguments than its PHP signatur
 
 ## My CSS or images don't load on some pages
 
-Asset paths are relative to the **theme folder**: write `href="style.css"`, not `href="../style.css"` or `href="/style.css"`. Raster adds a `<base>` tag that makes this work on every URL. The tag is only added when your `<head>` tag is written exactly as `<head>`, without attributes. See [Pages and URLs](Pages-and-URLs#assets-css-images-scripts).
+Asset paths are relative to the **theme folder**: write `href="style.css"`, not `href="../style.css"` or `href="/style.css"`. Raster adds a `<base>` tag that makes this work on every URL, right after your `<head>` tag (with attributes or without, `<head prefix="og: …">` too). See [Pages and URLs](Pages-and-URLs#assets-css-images-scripts).
 
 ## In-page anchor links (`href="#section"`) go to the wrong place
 
-Because of that same `<base>` tag, `#section` points at the theme folder. Write `href="about.html#section"` or `href="/about#section"`.
+Because of that same `<base>` tag, `#section` points at the theme folder, and so does `href="?sort=price"`. Write `href="about.html#section"` (or `about.html?sort=price`), or `href="/about#section"`. `lint` warns about such links.
 
 ## My form doesn't do anything when sent
 

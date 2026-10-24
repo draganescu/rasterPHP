@@ -5013,6 +5013,15 @@ test('S7', 'a member sees their replies on /account and changes one without a to
 	has(http('GET', "$base/account", null, $h)[1], 'no, 2 people: no');
 });
 
+// ## P1.C: head tags, html lang and dir, the switcher (#117 #138)
+
+test(array('J1', 'J2', 'J3'), 'the café\'s Romanian pages say lang="ro" (#138)', function () use ($base) {
+	has(http('GET', "$base/about")[1], "<!doctype html>\n<html lang=\"en\" dir=\"ltr\">");
+	has(http('GET', "$base/about?lang=ro")[1], '<html lang="ro" dir="ltr">');
+	has(http('GET', "$base/menu", null, array('Cookie: cafe_lang=ro'))[1], '<html lang="ro" dir="ltr">');
+	lacks(http('GET', "$base/menu?lang=ro")[1], 'hreflang', 'template-only languages: no language links in <head>');
+});
+
 // ## No PHP warnings, notices or deprecations on any request
 
 $log = is_file("$tmp/php-errors.log") ? file_get_contents("$tmp/php-errors.log") : '';
