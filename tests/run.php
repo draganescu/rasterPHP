@@ -13650,6 +13650,160 @@ test('P4.C: tools/list grows by the translation_status words only; the recipe st
 	});
 });
 
+// ## P4 review: frozen lang, more off comparisons, send by language
+
+// $fn on a frozen connection, as production runs, put back after
+function p4r_frozen($fn) {
+	$was = database::$frozen;
+	database::$frozen = true;
+	R::freeze(true);
+	cms_store::forget();
+	try {
+		return $fn();
+	} finally {
+		database::$frozen = $was;
+		R::freeze($was);
+		cms_store::forget();
+	}
+}
+
+test('P4 review: a frozen database without the lang column still takes bookings and contact messages (D13)', function () {
+	$on = array('multilingual' => true, 'languages' => array('en', 'ro'));
+	$off = array('multilingual' => false, 'languages' => array());
+	booking_site(function () use ($on, $off) {
+		// the tables as a release before the column made them
+		$date = with_settings($off, function () {
+			cms_records::forget();
+			$date = booking_cafe();
+			cms_records::ensure(cms_records::info('booking'), true);
+			return $date;
+		});
+		check(!array_key_exists('lang', cms_store::columns('bookingdata')), 'the fixture has no lang column');
+		$booking = with_settings($on, function () use ($date) {
+			cms_records::forget();
+			return p4r_frozen(function () use ($date) {
+				return i18n::with('ro', function () use ($date) { return booking_guest(array('date' => $date, 'time' => '19:00', 'people' => 2)); });
+			});
+		});
+		check(!empty($booking['id']), 'the booking went in');
+		check(!array_key_exists('lang', cms_store::columns('bookingdata')), 'and made no column');
+		cms_records::forget();
+	});
+	contact_site(function () use ($on, $off) {
+		with_settings($off, function () {
+			cms_records::forget();
+			cms_records::ensure(cms_records::info('contactmessage'), true);
+		});
+		$message = with_settings($on, function () {
+			cms_records::forget();
+			return p4r_frozen(function () {
+				return i18n::with('ro', function () {
+					return cms_store::save_item('contactmessagedata', 0, array('email' => 'frozen@example.test', 'message' => 'Bună'), cms_records::writable(cms_records::info('contactmessage')), 'editor');
+				});
+			});
+		});
+		check(!empty($message['id']), 'the message went in');
+		check(!array_key_exists('lang', cms_store::columns('contactmessagedata')));
+		cms_records::forget();
+	});
+});
+
+// the password reset form, sent in this process for $email: the mails it sent
+function p4r_forgot($email) {
+	$template = template::instance();
+	$kept = array($_SERVER, $_POST, $template->current_call, $template->forms);
+	try {
+		return booking_mails(function () use ($email, $template) {
+			$_SERVER['REQUEST_METHOD'] = 'POST';
+			$_SERVER['REMOTE_ADDR'] = '203.0.113.7';
+			$_POST = array('raster_form' => 'authentication.forgot', 'raster_ts' => stamp_for_tests(60), 'email' => $email);
+			$template->current_call = 'authentication.forgot';
+			$template->forms['authentication.forgot'] = array('email' => array('type' => 'email', 'required' => true));
+			unset(controller::instance()->objects['validation']);
+			spam_clear();
+			(new authentication())->forgot();
+		});
+	} finally {
+		list($_SERVER, $_POST, $template->current_call, $template->forms) = $kept;
+		unset(controller::instance()->objects['validation']);
+	}
+}
+
+test('P4 review: off, the password reset email is what it was, byte for byte (D13)', function () {
+	cms_store::connect();
+	$email = 'zzp4r-reset@example.test';
+	$id = authentication::create_user($email, 'a long password', 'member', 'Ana');
+	try {
+		foreach (array('none' => array('multilingual' => false, 'languages' => array())) + p4_off_settings() as $what => $setting) {
+			with_settings($setting, function () use ($what, $email, $id) {
+				R::exec('UPDATE user SET reset_hash = NULL, reset_expires = NULL WHERE id = ?', array($id));
+				$mails = p4r_forgot($email);
+				same(1, count($mails), "$what: one mail");
+				check(preg_match('/token=([a-f0-9]{48})/', $mails[0]['text'], $t) === 1, "$what: the link");
+				// what 2.2.50 sent: the link and the name, as send_view gets them
+				$then = booking_mails(function () use ($email, $t) {
+					mail::send_view('_email/password_reset', $email, array('reset_url' => util::url(config::get('reset_page', 'reset'), array('token' => $t[1])), 'name' => 'Ana'));
+				});
+				same(p4a_shape($then[0]['raw']), p4a_shape($mails[0]['raw']), $what);
+			});
+		}
+	} finally {
+		R::exec('DELETE FROM user WHERE id = ?', array($id));
+	}
+});
+
+test('P4 review: dates with a two-digit year are day first too, as PHP reads the century (D14)', function () {
+	with_settings(array('multilingual' => true, 'languages' => array('en', 'ro')), function () {
+		same('2026-10-05', cms_types::clean('date', '5/10/26', 'when'));
+		same('1975-10-05', cms_types::clean('date', '5/10/75', 'when'));
+		same('2026-10-05 19:30:00', cms_types::clean('datetime', '5/10/26 19:30', 'when'));
+		same(null, cms_types::parse_date('31/02/26'));
+	});
+	with_settings(array('multilingual' => true, 'languages' => array('en-us', 'ro')), function () {
+		same('2026-05-10', date('Y-m-d', cms_types::parse_date('5/10/26', 'en-us')), 'en-us');
+	});
+	with_settings(array('multilingual' => false, 'languages' => array()), function () {
+		same('2026-05-10', cms_types::clean('date', '5/10/26', 'when'), 'no languages: as before');
+	});
+});
+
+test('P4 review: raster send skips a language already sent, and refuses a language domain as the address (#200)', function () use ($root, $db, $maildir, $base, $p1b_on) {
+	$theme = "$root/application/views/default";
+	test_fixture("$theme/zzp4r_issue.html");
+	file_put_contents("$theme/zzp4r_issue.html", '<!doctype html><html><head><title><!-- print.i18n.zzp1b(\'hello\') -->Hello<!-- /print.i18n.zzp1b(\'hello\') --></title></head><body>'
+		.'<p>Issue</p><a href="<!-- print.newsletter.unsubscribe_url /-->">Unsubscribe</a></body></html>');
+	$send = function ($args, $url = null) use ($db, $maildir, $root, $base) {
+		$env = 'RASTER_DB='.escapeshellarg($db).' RASTER_MAIL='.escapeshellarg("log://$maildir").' RASTER_URL='.escapeshellarg($url ?: "$base/");
+		return shell_exec("$env ".php_cmd().' '.escapeshellarg("$root/bin/raster").' send '.$args.' 2>&1; echo "exit=$?"');
+	};
+	try {
+		p4b_subscribers(function ($add) use ($p1b_on, $send) {
+			$add('en@example.test', array('lang' => 'en'));
+			$add('ro@example.test', array('lang' => 'ro'));
+			p1b_site($p1b_on, function () use ($send) {
+				$out = $send('/zzp4r_issue --lang=en');
+				check(strpos($out, 'Sent "Hello" (en) to 1 subscriber(s)') !== false && strpos($out, 'exit=0') !== false, "en first: $out");
+				// the run for every language: English is skipped, Romanian goes, and that is a success
+				$out = $send('/zzp4r_issue');
+				check(strpos($out, 'Skipped (en): /zzp4r_issue was already sent') !== false && strpos($out, 'Sent "Bună ziua" (ro) to 1 subscriber(s)') !== false && strpos($out, 'exit=0') !== false, "the rest: $out");
+				// everything sent: nothing to do, as off
+				$out = $send('/zzp4r_issue');
+				check(strpos($out, 'already sent in every language') !== false && strpos($out, 'exit=1') !== false, "all sent: $out");
+			});
+			// RASTER_URL a language's domain: two languages, one address
+			p1b_site($p1b_on."\nconfig::set('domain_language')->to(array('zzp4r.example.ro' => 'ro'));\nconfig::set('site_url')->to('http://zzp4r.example.com/');", function () use ($send) {
+				$out = $send('/zzp4r_issue --again --dry-run', 'http://zzp4r.example.ro/');
+				check(strpos($out, 'more than one language on this host') !== false && strpos($out, 'exit=2') !== false, "a language domain: $out");
+			});
+		});
+	} finally {
+		@unlink("$theme/zzp4r_issue.html");
+		cms_store::connect();
+		if (cms_store::table_exists('newsletterissue') && cms_store::table_exists('newsletterdelivery')) R::exec("DELETE FROM newsletterdelivery WHERE issue IN (SELECT id FROM newsletterissue WHERE url LIKE '%zzp4r_issue')");
+		if (cms_store::table_exists('newsletterissue')) R::exec("DELETE FROM newsletterissue WHERE url LIKE '%zzp4r_issue'");
+	}
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";
 foreach ($skipped as $skip) echo "  - $skip\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";
