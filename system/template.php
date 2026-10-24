@@ -37,6 +37,36 @@ class template {
   static function unscript($html) {
   	return str_replace(array_keys(self::$script_form), array_values(self::$script_form), $html);
   }
+
+  // $tags right after the first <head>, attributes or not (<head prefix="og: …">)
+  static function insert_in_head($html, $tags) {
+  	if (!preg_match('/<head(\s[^>]*)?>/i', $html, $m, PREG_OFFSET_CAPTURE)) return $html;
+  	$at = $m[0][1] + strlen($m[0][0]);
+  	return substr($html, 0, $at)."\n".$tags.substr($html, $at);
+  }
+
+  // In multilingual mode the page's canonical address and its address in
+  // every language (hreflang, x-default the default language's), for <head>.
+  // '' when off. What the page writes itself ($html has a canonical or an
+  // hreflang link) is left to it.
+  static function language_links($html = '') {
+  	if (!i18n::enabled()) return '';
+  	$current = strtolower(i18n::current());
+  	$default = strtolower(i18n::default_language());
+  	$canonical = '';
+  	$links = '';
+  	$fallback = '';
+  	foreach (i18n::alternates() as $row) {
+  		$url = htmlspecialchars($row['url'], ENT_QUOTES);
+  		$links .= "\n<link rel=\"alternate\" hreflang=\"".htmlspecialchars($row['lang'], ENT_QUOTES)."\" href=\"$url\">";
+  		if (strtolower($row['lang']) === $current) $canonical = $url;
+  		if (strtolower($row['lang']) === $default) $fallback = $url;
+  	}
+  	if ($fallback !== '') $links .= "\n<link rel=\"alternate\" hreflang=\"x-default\" href=\"$fallback\">";
+  	if (preg_match('/<link\b[^>]*\shreflang\s*=/i', $html)) $links = '';
+  	if (preg_match('/<link\b[^>]*\srel\s*=\s*["\']?canonical\b/i', $html)) $canonical = '';
+  	return ($canonical !== '' ? "\n<link rel=\"canonical\" href=\"$canonical\">" : '').$links;
+  }
   
 
   public $replace = array();
@@ -277,8 +307,10 @@ class template {
 			$base = $script;
 		
 		if ($template->format === 'html' && !$template->is_email) {
-			$template->output = str_replace('<head>', "<head>\n".$base, $template->output);
+			$template->output = self::insert_in_head($template->output, $base.self::language_links($template->output));
 		}
+		// print.if.languages: the language switcher has somewhere to go
+		if (!array_key_exists('languages', $template->vars)) $template->vars['languages'] = count(i18n::available()) > 1;
 		
 		// mock-up content goes first, so models inside it are never called
 		$template->remove();

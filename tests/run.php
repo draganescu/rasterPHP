@@ -8855,6 +8855,152 @@ test('P0.B saving a team_members item sends collection team_members, and lint fl
 	}
 });
 
+// ## P1.C: head tags, html lang and dir, the switcher (#117 #138)
+
+// multilingual on, as config::initialize() leaves it on /ro/menu (P1.B)
+function p1c_on($settings = array()) {
+	return $settings + array('multilingual' => true, 'languages' => array('en', 'ro'), 'url_language' => 'ro',
+		'link_base' => 'http://cafe.test/', 'link_uri' => 'http://cafe.test/ro/', 'uri_string' => '/menu');
+}
+// i18n::detect() as a new request starts it
+function p1c_forget_language() {
+	$detected = new ReflectionProperty('i18n', 'detected');
+	$detected->setAccessible(true);
+	$detected->setValue(null, null);
+}
+
+test('P1.C: in multilingual mode <head> gets the canonical link, one hreflang per language and x-default; nothing when off', function () {
+	$links = function () { return template::language_links(); };
+	same("\n<link rel=\"canonical\" href=\"http://cafe.test/ro/menu\">"
+		."\n<link rel=\"alternate\" hreflang=\"en\" href=\"http://cafe.test/menu\">"
+		."\n<link rel=\"alternate\" hreflang=\"ro\" href=\"http://cafe.test/ro/menu\">"
+		."\n<link rel=\"alternate\" hreflang=\"x-default\" href=\"http://cafe.test/menu\">", with_settings(p1c_on(), $links));
+	// the default language's page is its own canonical, and the home page is /ro/
+	check(strpos(with_settings(p1c_on(array('url_language' => '', 'link_uri' => 'http://cafe.test/')), $links), "\n<link rel=\"canonical\" href=\"http://cafe.test/menu\">\n") === 0, 'default language');
+	check(strpos(with_settings(p1c_on(array('uri_string' => '/')), $links), '<link rel="canonical" href="http://cafe.test/ro/">') !== false, 'home page');
+	// a page that writes its own keeps them
+	same('', with_settings(p1c_on(), function () { return template::language_links('<head><link rel="canonical" href="/x"><link rel="alternate" hreflang="en" href="/y">'); }));
+	// off, with languages too, and one language only (D1): nothing
+	same('', with_settings(p1c_on(array('multilingual' => false)), $links));
+	same('', with_settings(p1c_on(array('languages' => array('en'))), $links));
+});
+
+test('P1.C: the base goes after any <head …> tag, and an exact <head> gets what 2.2.45 gave it (#117)', function () {
+	$base = "<base href='/v/' />\n<script>var BASE = \"/\"</script>";
+	$page = "<!doctype html>\n<html lang=\"en\">\n<head>\n<title>x</title></head><body><header>h</header></body></html>";
+	same(str_replace('<head>', "<head>\n".$base, $page), template::insert_in_head($page, $base));
+	same('<head prefix="og: http://ogp.me/ns#">'."\n$base<title>x</title>", template::insert_in_head('<head prefix="og: http://ogp.me/ns#"><title>x</title>', $base));
+	same("<HEAD>\n$base", template::insert_in_head('<HEAD>', $base));
+	same('<header>h</header>', template::insert_in_head('<header>h</header>', $base));
+});
+
+test('P1.C: a page with <head prefix=…> gets its base, and //host links are left as written (#117)', function () use ($base, $root) {
+	$view = "$root/application/views/default/zzp1c_head.html";
+	test_fixture($view);
+	file_put_contents($view, "<!doctype html>\n<html lang=\"en\">\n<head prefix=\"og: http://ogp.me/ns#\">\n<link rel=\"stylesheet\" href=\"style.css\"><title>x</title></head>\n<body>"
+		.'<a href="//cdn.example.com/guide.html">g</a> <a href="//cdn.example.com/x.html?su=1">x</a> <img src="//cdn.example.com/p.png"> <a href="about.html">a</a> <a href="about.html#team">t</a></body></html>');
+	try {
+		list($status, $html) = http('GET', "$base/zzp1c_head");
+		same(200, $status, $html);
+		check(strpos($html, "<head prefix=\"og: http://ogp.me/ns#\">\n<base href='$base/application/views/default/' />") !== false, $html);
+		check(preg_match('/href="style\.css\?v=[0-9a-f]{8}"/', $html) === 1, 'the stylesheet resolves: '.$html);
+		check(strpos($html, '<a href="//cdn.example.com/guide.html">g</a> <a href="//cdn.example.com/x.html?su=1">x</a> <img src="//cdn.example.com/p.png">') !== false, $html);
+		check(strpos($html, '<a href="'.$base.'/about">a</a> <a href="'.$base.'/about#team">t</a>') !== false, 'the workaround for #anchors: '.$html);
+		same(false, strpos($html, 'hreflang'), 'off: no language links');
+	} finally {
+		@unlink($view);
+	}
+});
+
+test('P1.C: print.i18n.dir, and <html lang dir> follows the language on the starter', function () use ($base) {
+	same('ltr', i18n::dir('en'));
+	same('rtl', i18n::dir('ar'));
+	same('rtl', i18n::dir('he-IL'));
+	same('ltr', (new i18n())->dir('ro'));
+	// off: the mock-up's, and no switcher
+	$home = http('GET', "$base/")[1];
+	check(strpos($home, "<!doctype html>\n<html lang=\"en\" dir=\"ltr\">\n<head>") === 0, $home);
+	same(false, strpos($home, '?lang='), 'no switcher with no languages');
+	p0c_settings("config::set('languages')->to(array('en', 'ro', 'ar'));", function () use ($base) {
+		list(, $ro) = http('GET', "$base/?lang=ro");
+		check(strpos($ro, '<html lang="ro" dir="ltr">') !== false, $ro);
+		list(, $ar) = http('GET', "$base/about?lang=ar");
+		check(strpos($ar, '<html lang="ar" dir="rtl">') !== false, $ar);
+		// the starter's switcher, now that there is more than one language
+		check(strpos($ar, '<a class="nav-link" href="'.$base.'/about?lang=en" hreflang="en">en</a>') !== false, $ar);
+		check(strpos($ar, '<a class="nav-link active" href="'.$base.'/about?lang=ar" hreflang="ar">ar</a>') !== false, $ar);
+		same(false, strpos($ar, 'hreflang="x-default"'), 'template-only languages: no language links in <head>');
+	});
+	p0c_settings("config::set('languages')->to(array('en'));", function () use ($base) {
+		same(false, strpos(http('GET', "$base/")[1], '?lang='), 'one language: no switcher');
+	});
+});
+
+test('P1.C: the switcher\'s rows have url and current: the language\'s own address when multilingual, ?lang= otherwise', function () {
+	$rows = with_settings(p1c_on(), function () { return (new i18n())->languages(); });
+	same(array(
+		array('code' => 'en', 'url' => 'http://cafe.test/menu', 'state' => '', 'current' => false),
+		array('code' => 'ro', 'url' => 'http://cafe.test/ro/menu', 'state' => 'active', 'current' => true),
+	), $rows);
+	$get = $_GET;
+	$_GET['lang'] = 'ro';
+	p1c_forget_language();
+	try {
+		$rows = with_settings(array('multilingual' => false, 'languages' => array('en', 'ro'), 'link_uri' => 'http://cafe.test/', 'uri_string' => '/menu'), function () { return (new i18n())->languages(); });
+	} finally {
+		$_GET = $get;
+		p1c_forget_language();
+	}
+	same(array(
+		array('code' => 'en', 'url' => 'http://cafe.test/menu?lang=en', 'state' => '', 'current' => false),
+		array('code' => 'ro', 'url' => 'http://cafe.test/menu?lang=ro', 'state' => 'active', 'current' => true),
+	), $rows);
+});
+
+test('P1.C: off is identical: starter pages are as 2.2.45 made them, the html tag\'s dir aside', function () use ($base, $root) {
+	$theme = "$root/application/views/default";
+	$kept = array();
+	foreach (array('_layout.html', 'index.html', 'about.html') as $file) $kept[$file] = file_get_contents("$theme/$file");
+	// the views as 2.2.45 had them: <html lang="en">, and no switcher
+	$old = array();
+	foreach ($kept as $file => $view) {
+		$old[$file] = str_replace('<!-- print.@lang.i18n.language --><!-- print.@dir.i18n.dir --><html lang="en" dir="ltr"><!-- /print.@dir.i18n.dir --><!-- /print.@lang.i18n.language -->', '<html lang="en">', $view);
+		$old[$file] = preg_replace('#<!-- print\.if\.languages -->.*?<!-- /print\.if\.languages -->#', '', $old[$file]);
+	}
+	check($old['_layout.html'] !== $kept['_layout.html'] && strpos($old['index.html'], '<html lang="en">') !== false, 'the starter has the switcher and the annotated html tag');
+	$clean = function ($html) { return preg_replace('/name="raster_ts" value="[^"]*"/', '', $html); };
+	$pages = array('/', '/about');
+	$before = array();
+	try {
+		foreach ($old as $file => $view) file_put_contents("$theme/$file", $view);
+		foreach ($pages as $page) $before[$page] = $clean(http('GET', $base.$page)[1]);
+	} finally {
+		foreach ($kept as $file => $view) file_put_contents("$theme/$file", $view);
+	}
+	foreach ($pages as $page) {
+		list($status, $now) = http('GET', $base.$page);
+		same(200, $status);
+		check(substr_count($now, '<html lang="en" dir="ltr">') === 1, $now);
+		same($before[$page], str_replace('<html lang="en" dir="ltr">', '<html lang="en">', $clean($now)), "$page byte for byte");
+	}
+});
+
+test('P1.C: lint warns on href="#…" and href="?…", which leave the page (anchor_link, #117)', function () use ($root) {
+	$p = lint_html("<p>\n<a href=\"#prices\">Prices</a> <a class=\"x\" href='?sort=price'>Sort</a></p>");
+	same(2, count($p), json_encode($p));
+	check(has_problem($p, 'href="#prices" leaves the page', 2) && has_problem($p, '<page>.html#prices'), json_encode($p));
+	check(has_problem($p, 'href="?sort=price" leaves the page') && has_problem($p, '<page>.html?sort=price'), json_encode($p));
+	same('warning', $p[0]['severity']);
+	// a link a print sets, mock-up content and page links are fine
+	same(array(), lint_html('<!-- render.site.nav --><!-- print.+class.state --><!-- print.@href.url --><a class="page" href="#">1</a><!-- /print.@href.url --><!-- /print.+class.state --><!-- /render.site.nav -->'));
+	same(array(), lint_html('<!-- remove --><a href="#x">x</a><!-- /remove --><a href="about.html#team">t</a> <a href="/about?x=1">a</a> <a href="https://example.com/#x">e</a>'));
+	// the hint names the view
+	$inspector = new raster_inspector();
+	check(has_problem($inspector->lint_source('<a href="#team">Team</a>', 'application/views/default/docs/setup.html'), 'Write href="docs/setup.html#team"'), 'the view\'s own name');
+	// emails have no <base>
+	same(array(), $inspector->lint_source('<a href="#x">x</a>', 'application/views/default/_email/welcome.html'));
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";
 foreach ($skipped as $skip) echo "  - $skip\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";

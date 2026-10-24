@@ -629,6 +629,7 @@ class raster_inspector {
 		list($blocks, $problems) = self::blocks($html);
 		$this->lint_blocks($blocks, $problems, null, $theme);
 		$this->lint_forms($html, $problems, $theme);
+		$this->lint_anchor_links($html, $problems);
 		usort($problems, function ($a, $b) { return $a['line'] <=> $b['line'] ?: $a['column'] <=> $b['column']; });
 		foreach ($problems as &$problem) {
 			$problem['file'] = $name;
@@ -866,6 +867,22 @@ class raster_inspector {
 	// ##Forms
 	// Post forms, validation regions and alerts follow conventions the
 	// engine relies on; these checks catch the mistakes that fail silently.
+	// anchor_link: the <base> points at the theme folder, so href="#prices"
+	// and href="?sort=price" open that folder, not the page (#117). A link a
+	// print.@href sets, mock-up content and emails (no <base>) are left out.
+	protected function lint_anchor_links($html, &$problems) {
+		if (preg_match('#(^|/)_email/|\.(rss|atom|xml|json|txt)$#', $this->linting)) return;
+		$html = preg_replace_callback('/<!-- remove -->.*?<!-- \/remove -->/s', function ($m) { return preg_replace('/[^\n]/', ' ', $m[0]); }, $html);
+		if (!preg_match_all('/<(a|area)\b[^>]*?\shref\s*=\s*(["\'])([#?][^"\']*)\2/i', $html, $links, PREG_OFFSET_CAPTURE | PREG_SET_ORDER)) return;
+		$page = preg_match('#/views/[^/]+/(.+)\.html$#', $this->linting, $m) ? $m[1] : '<page>';
+		foreach ($links as $link) {
+			$at = $link[0][1];
+			if (preg_match('/<!-- print\.[@+]href\.[^>]*-->(\s*<!--[^>]*-->)*\s*$/', substr($html, max(0, $at - 400), min($at, 400)))) continue;
+			$href = $link[3][0];
+			$problems[] = self::problem_at('warning', $html, $at, "href=\"$href\" leaves the page: the <base> points at the theme folder, so the link opens that folder. Write href=\"$page.html$href\", which links to this page");
+		}
+	}
+
 	protected function lint_forms($html, &$problems, $theme) {
 		// render blocks
 		preg_match_all('/<!-- (\/?)render\.([a-z0-9_\-]+\.[^ ]*(?:\([^)]*\))?) -->/', $html, $tags, PREG_OFFSET_CAPTURE | PREG_SET_ORDER);

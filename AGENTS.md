@@ -91,6 +91,16 @@ media/                        uploads from the CMS
 - Link to pages by file name, `href="about.html"`. Raster rewrites that to
   `/about`, and `index.html` becomes `/`, so the file still works as a static
   mock-up. Asset paths are relative to the theme folder.
+- **The `<base>` tag.** Every HTML page but an email gets
+  `<base href=".../views/<theme>/">` right after its `<head>` tag, with
+  attributes or without (`<head prefix="og: …">`), unless it has a
+  `<base>` of its own; that is what makes asset paths work on every URL. So
+  `href="#prices"` and `href="?sort=price"` open the theme folder, not the
+  page: write `href="about.html#prices"` (it becomes `/about#prices`) or
+  `href="about.html?sort=price"`. `lint` warns about the short forms
+  (`anchor_link`), except on a link a `print.@href` sets. A link to another
+  site without its scheme (`href="//cdn.example.com/guide.html"`) is left
+  as written.
 - **Asset versions.** A relative URL to a real file in the theme
   (`href="style.css"`, `src`, `srcset`, `poster`) gets `?v=<version>`, made
   from the file's time and size, so it changes when the file does
@@ -2021,8 +2031,25 @@ use `'model.method'`: `method(true)` returns
   `domain_language`.
 - The language comes from `?lang=` (remembered in a cookie), the domain, the
   cookie, then the browser.
-- `print.i18n.language` gives the current language; `render.i18n.languages`
-  gives a switcher with `code`, `url` and `state`.
+- `print.i18n.language` gives the current language (`false` when the site
+  has no `languages`, so the mock-up's value stays), and `print.i18n.dir`
+  `rtl` for a language written right to left (Arabic, Hebrew, Persian,
+  Urdu, …), else `ltr`. Every view in the starter, the demo and the shop
+  starts with them, emails included, so the mock-up reads `lang="en"`:
+  `<!-- print.@lang.i18n.language --><!-- print.@dir.i18n.dir --><html lang="en" dir="ltr"><!-- /print.@dir.i18n.dir --><!-- /print.@lang.i18n.language -->`.
+- `render.i18n.languages` gives a switcher with `code`, `url` (this page in
+  that language), `state` (`active` for the current one) and `current`
+  (true for it). With `multilingual` on, `url` is the language's own
+  address (`/ro/menu`, from `i18n::alternates()`); otherwise it is the page
+  with `?lang=xx`. The flag `if.languages` is true when the site has more
+  than one language: the starter's `_layout.html` shows its switcher inside
+  `print.if.languages`.
+- With `multilingual` on, Raster also puts into `<head>`, after the
+  `<base>`: `<link rel="canonical">` (the page in its own language), one
+  `<link rel="alternate" hreflang="xx">` per language, and
+  `hreflang="x-default"` (the default language's address). A page that
+  writes its own canonical or hreflang links keeps them instead. Off,
+  nothing is added.
 
 ## Environments and cache
 

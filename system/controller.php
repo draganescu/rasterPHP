@@ -725,8 +725,9 @@ class controller {
 		$template = template::instance();
 		// links to the default view go to the site root
 		$template->output = preg_replace("/(href|action)=(\"|')".preg_quote(config::get('default_view'), '/')."\.html(\"|')/", '$1=$2'.template::get('link_uri').'$3', $template->output);
-		$template->output = preg_replace("/(href|action|src)=(\"|')([a-zA-Z0-9\-\._\?\,\'\/\\\+&amp;%\$#\=~]*)\?".template::get('tpl_uri')."=(.*?)(\"|')/", '$1="'.template::get('link_uri').'$4"', $template->output);
-		$template->output = preg_replace("/(href|action|src)=(\"|')([a-zA-Z0-9\-\._\?\,\'\/\\\+&amp;%\$#\=~]*)\.html/", '$1=$2'.template::get('link_uri').'$3', $template->output);
+		// a //host/… link is another site's, left as written (#117)
+		$template->output = preg_replace("/(href|action|src)=(\"|')(?!\/\/)([a-zA-Z0-9\-\._\?\,\'\/\\\+&amp;%\$#\=~]*)\?".template::get('tpl_uri')."=(.*?)(\"|')/", '$1="'.template::get('link_uri').'$4"', $template->output);
+		$template->output = preg_replace("/(href|action|src)=(\"|')(?!\/\/)([a-zA-Z0-9\-\._\?\,\'\/\\\+&amp;%\$#\=~]*)\.html/", '$1=$2'.template::get('link_uri').'$3', $template->output);
 		// links to feed and data views: href="news.rss" -> /news.rss
 		$template->output = preg_replace_callback('/(href)=(["\'])([a-zA-Z0-9\-_\/]+\.(rss|atom|xml|json|txt))\2/', function ($m) {
 			return file_exists(controller::build_view_path(substr($m[3], 0, -strlen($m[4]) - 1), '.'.$m[4])) ? $m[1].'='.$m[2].template::get('link_uri').$m[3].$m[2] : $m[0];
