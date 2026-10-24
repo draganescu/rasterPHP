@@ -151,12 +151,16 @@ class i18n
 	}
 
 	// where a language's pages start: link_base and its prefix on this
-	// host. A language with its own domain_language host is there, and on
-	// such a host the others are on the site's own address (site_url), the
-	// host that takes prefixes; both keep the folder and the index file
-	// (config::language_of_url redirects there too). On a language's
-	// domain without a site address to send the others to, they have
-	// none: null (`doctor` fails on that).
+	// host. A language with its own domain_language host is there, but only
+	// seen from the site's own address (config site_url, else RASTER_URL) or
+	// from a language's domain: any other host (a preview or staging copy
+	// whose RASTER_URL isn't the site_url, localhost) serves every language
+	// under its prefix. On a language's
+	// domain the others are on the site's address (RASTER_URL, site_url),
+	// the host that takes prefixes. Both keep the folder and the index file;
+	// config::language_of_url redirects there too. On a language's domain
+	// without a site address to send the others to, they have none: null
+	// (`doctor` fails on that).
 	static function address($lang) {
 		$base = (string)(config::get('link_base') ?: config::get('link_uri'));
 		if (!self::enabled()) return $base;
@@ -164,11 +168,14 @@ class i18n
 		$host = self::host();
 		$protocol = (string)config::get('protocol');
 		$after_host = substr($base, strlen($protocol.'://'.config::get('host')));
+		$on_domain = isset($domains[$host]) && self::known($domains[$host]) !== null;
+		$home = strtolower((string)parse_url((string)(config::get('site_url') ?: getenv('RASTER_URL')), PHP_URL_HOST));
+		if (!$on_domain && $home !== $host) return $base.self::prefix($lang);
 		foreach ($domains as $domain => $language) {
 			if (strtolower($language) !== strtolower($lang) || self::known($language) === null) continue;
 			return $domain === $host ? $base : $protocol.'://'.$domain.$after_host;
 		}
-		if (isset($domains[$host]) && self::known($domains[$host]) !== null) {
+		if ($on_domain) {
 			$site = parse_url((string)(getenv('RASTER_URL') ?: config::get('site_url')));
 			if (empty($site['host']) || isset($domains[strtolower($site['host'])])) return null;
 			return $protocol.'://'.strtolower($site['host']).(isset($site['port']) ? ':'.$site['port'] : '').$after_host.(self::is_default($lang) ? '' : strtolower($lang).'/');

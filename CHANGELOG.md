@@ -3,6 +3,17 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.49
+
+Nothing for most sites to do. Two things `doctor` may now say:
+
+- **A site with `languages` and no `multilingual`** (template-only translation, with `?lang=` and the cookie) gets a deprecation hint: it keeps working until 3.0.0, and `multilingual` is the way forward (below). Keep it on purpose with `allow_deprecated` (`'template-only-languages' => true`).
+- **A dictionary that sets `$lang = array(…)` instead of returning its array** is deprecated (#44). `php bin/raster update` (its upgrade step) adds `return $lang;` to such files.
+
+- **One switch for multilingual sites: `multilingual`, off by default** (#200). With `config::set('multilingual')->to(true)` and two or more `languages` (the first is the default), the URL alone says the language: the default language has no prefix (`/menu`), the others are under their code (`/ro/menu`, a language's home is `/ro/`), and a host listed in `domain_language` is its language with no prefix. `/ro` answers 301 to `/ro/`, `/en/menu` (the default's code) 301 to `/menu`, and `?lang=ro` 301 to the same page in that language. A language with its own domain lives only there. The prefix is taken off in `config::initialize()` before anything reads the path, so routes, `protected` pages (`/ro/staff` goes to `/ro/login` and back), `/ro/api` and `/ro/mcp` work as without it, and every link Raster builds keeps the language: `link_uri` carries the prefix, and on a `/ro/` page hand-written root links to pages (`href="/menu"`, `action`, `formaction`) get it too, while links to files don't. Pages and feeds answer `Content-Language`, kept with the cached copy; the page cache keeps one copy per URL, and no `lang` cookie is set. A site under a path (`RASTER_URL=https://host/preview/abc/`) serves `/preview/abc/ro/menu`. With `multilingual` off nothing of this happens, and output, headers and cache keys are as before.
+- **The language API for every model** (`system/models/i18n/i18n.php`): `i18n::enabled()`, `default_language()`, `current()`, `is_default()`, `suffix()`, `prefix()`, `address()`, `with($lang, $fn)`, `dir()`, `date_order()` and `alternates()`. Raster's own code reads language state only through it. `i18n` can't be overridden by a `the_i18n` for these calls (AGENTS.md, Extending).
+- **`doctor` checks the languages**: `multilingual` with fewer than two languages (the site behaves as off), a language code Raster can't read, and `domain_language` with multilingual but no site address.
+
 ## 2.2.48
 
 `php bin/raster update` does what sites need: its upgrade step adds the `no_database` and `no_users` alerts after `<!-- print.cms.login_message /-->` in a site's login view, since that tag now prints nothing. To word the refusals, a site can set `error_document_403` and `error_document_500` views (below). A listener or script that read `{"error":"cross-site"}` from `/api` now gets `cross_site`.

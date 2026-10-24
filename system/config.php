@@ -224,8 +224,10 @@ class config {
 			$rest = isset($m[2]) ? $m[2] : '';
 			if ($index > 0) $config->url_language = $languages[$index];
 			// the default language has no prefix, a language with its own
-			// domain lives there, and a language's home is /ro/
-			if ($index === 0 || isset($domain_of[$m[1]]) || $rest === '') $redirect = i18n::address($m[1]);
+			// domain lives there (seen from the site's own address, see
+			// i18n::address), and a language's home is /ro/
+			$target = i18n::address($m[1]);
+			if ($index === 0 || (isset($domain_of[$m[1]]) && $target !== $config->link_base.$m[1].'/') || $rest === '') $redirect = $target;
 			$path = $rest === '' ? '/' : $rest;
 		}
 		$config->link_uri = $config->link_base.i18n::prefix($config->url_language);
