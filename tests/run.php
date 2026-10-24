@@ -10302,7 +10302,9 @@ test('P2.C: tools/list and describe grow by less than 1,000 characters (#161)', 
 			same(array(), array_values(array_diff(array_column($list['tools'], 'name'), $kickoff, $added)), 'a tool this baseline does not know: move the baseline (see above)');
 			$tools = strlen(json_encode($list, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
 			$languages = strlen(json_encode(array('languages' => $mcp->call('describe', array('sections' => array('languages')))['languages']), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)) - 2;
-			$growth = $tools - 10954 + $languages;
+			// P3.D's lang on the item tools (46 characters) is P3's growth,
+			// held to its own budget by its test
+			$growth = $tools - 10954 - 46 + $languages;
 			check($growth < 1000, "tools/list is $tools characters and the languages block $languages: $growth more than at the kickoff");
 			$instructions = $mcp->message('initialize')['result']['instructions'];
 			check(strpos($instructions, 'Making a site multilingual') !== false && strpos($instructions, 'write_asset') !== false, 'the recipe and the asset tools');
@@ -11797,7 +11799,9 @@ test('P3.D: create_item takes no translation; update_item with lang refuses shar
 });
 
 test('P3.D: tools/list grows by less than 100 characters with lang on the item tools (#161)', function () {
-	// tools/list over stdio at the P3 kickoff (43aa961): 11739 characters
+	// tools/list over stdio once P2 and its review fixes are in (ml/p2
+	// 0f00c7b, what P3 builds on): 11805 characters; at the P3 kickoff
+	// (43aa961), before those fixes, it was 11739
 	p3d_site(function ($db) {
 		p2c_session(array('RASTER_DB' => $db), function ($mcp) {
 			$tools = $mcp->message('tools/list')['result']['tools'];
@@ -11805,7 +11809,7 @@ test('P3.D: tools/list grows by less than 100 characters with lang on the item t
 				if (in_array($tool['name'], array('list_items', 'get_item', 'create_item', 'update_item'), true)) check(isset($tool['inputSchema']['properties']['lang']), $tool['name']);
 			}
 			$size = strlen(json_encode(array('tools' => $tools), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
-			check($size - 11739 < 100, "tools/list is $size characters, ".($size - 11739).' more than at the P3 kickoff');
+			check($size - 11805 < 100, "tools/list is $size characters, ".($size - 11805).' more than P2 left it');
 		});
 	});
 });

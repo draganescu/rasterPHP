@@ -234,15 +234,19 @@ class raster_describe
 			$select = array('id');
 			foreach ($fields as $field) {
 				$select[] = $field;
-				if (array_key_exists(cms_types::column($field, $lang), $columns)) $select[] = cms_types::column($field, $lang);
+				foreach ($langs as $lang) {
+					if (array_key_exists(cms_types::column($field, $lang), $columns)) $select[] = cms_types::column($field, $lang);
+				}
 			}
 			foreach (R::getAll('SELECT `'.implode('`, `', array_unique($select)).'` FROM `'.$collection['type'].'` ORDER BY id') as $item) {
 				foreach ($fields as $field) {
 					$value = (string)$item[$field];
 					if (trim($value) === '') continue;
-					$column = cms_types::column($field, $lang);
-					$done = $column !== $field && isset($item[$column]) && trim((string)$item[$column]) !== '';
-					$rows[] = array('kind' => isset($collection['model']) ? 'record' : 'item', 'where' => $collection['name'].'/'.$item['id'], 'field' => $field, 'default_value' => $value, 'done' => $done);
+					foreach ($langs as $lang) {
+						$column = cms_types::column($field, $lang);
+						$done = $column !== $field && isset($item[$column]) && trim((string)$item[$column]) !== '';
+						$rows[$lang][] = array('kind' => isset($collection['model']) ? 'record' : 'item', 'where' => $collection['name'].'/'.$item['id'], 'field' => $field, 'default_value' => $value, 'done' => $done);
+					}
 				}
 			}
 		}
