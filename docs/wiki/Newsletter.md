@@ -88,6 +88,7 @@ RASTER_URL=https://example.com/ php bin/raster send /news/news_item/our-new-offi
 | `--to=address` | sends only to that address, as a test |
 | `--subject="…"` | a subject other than the page's `<title>` |
 | `--again` | sends a page that was already sent to everyone again (each page is sent once otherwise) |
+| `--lang=code` | on a multilingual site, sends only that language's version |
 
 What happens:
 
@@ -96,6 +97,8 @@ What happens:
 3. Links and images become absolute addresses on your site.
 4. The page's `<title>` becomes the subject (or `--subject`). A page without a title isn't sent.
 5. Each confirmed subscriber gets their own copy with their own unsubscribe link, all over one connection to the mail server.
+
+On a [multilingual site](Translations) each language gets its own issue: the page is rendered at each language's address (`/news/…`, `/ro/news/…`) and each rendering goes to the subscribers who read that language, with its own title as the subject. A subscriber is stored with the language of the page they signed up on; one from before that (or in a language the site no longer has) gets the default language. `--lang=ro` sends just one language, and `--to` sends the default language's version unless you add `--lang`. If one language's page fails to render, the others are still sent and the command exits with 1.
 
 If the run stops part way (a dropped SSH session, a crash) or some addresses fail (a greylisting server), run the same command again: it mails only the subscribers who don't have the issue yet, and says how many it reached in all. Each address is written down as its mail is handed over. Once a run has reached everyone, the page counts as sent and the command refuses to send it again without `--again`. The one exception: a mail handed over at the very moment the process was killed isn't written down yet, so that reader may get it twice.
 
