@@ -12,17 +12,17 @@
       <!-- print.if.static --><p><!-- print.i18n.visit('call_us_on') -->Call us on<!-- /print.i18n.visit('call_us_on') --> <a href="tel:+40721000000">+40 721 000 000</a> <!-- print.i18n.visit('and_we_ll_keep_a') -->and we'll keep a table for you.<!-- /print.i18n.visit('and_we_ll_keep_a') --></p><!-- /print.if.static -->
       <!-- print.if.live -->
       <!-- print.cms.intro --><p>Two sittings, at 19:00 and 21:00, Tuesday to Sunday. Pick a day, then a time. A booking is a request until we confirm it, and every email we send has a link to change or cancel it.</p><!-- /print.cms.intro -->
-      <!-- print.validation.alert('booked') --><p class="notice">Thank you, we have your request. We emailed you a link to change or cancel it, and we'll write again once we confirm it.</p><!-- /print.validation.alert('booked') -->
-      <!-- print.validation.alert('fully_booked') --><p class="error">That sitting is full now. Try the other one or another day, or call us.</p><!-- /print.validation.alert('fully_booked') -->
-      <!-- print.validation.alert('not_open') --><p class="error">We aren't taking bookings online yet. Call us on +40 721 000 000.</p><!-- /print.validation.alert('not_open') -->
-      <!-- print.validation.alert('not_a_slot') --><p class="error">Pick one of the times shown for an open day: we are closed on Mondays.</p><!-- /print.validation.alert('not_a_slot') -->
-      <!-- print.validation.alert('too_soon') --><p class="error">That is too soon to book online. Call us and we'll see what we can do.</p><!-- /print.validation.alert('too_soon') -->
-      <!-- print.validation.alert('too_far') --><p class="error">We take bookings up to two months ahead.</p><!-- /print.validation.alert('too_far') -->
-      <!-- print.validation.alert('too_many') --><p class="error">For groups over 8, please call us.</p><!-- /print.validation.alert('too_many') -->
-      <!-- print.validation.alert('people_invalid') --><p class="error">We seat whole people: how many are coming?</p><!-- /print.validation.alert('people_invalid') -->
-      <!-- print.validation.alert('already_booked') --><p class="notice">You have already booked that time: check your email.</p><!-- /print.validation.alert('already_booked') -->
-      <!-- print.validation.alert('name_invalid') --><p class="error">Tell us your name.</p><!-- /print.validation.alert('name_invalid') -->
-      <!-- print.validation.alert('email_invalid') --><p class="error">We need a valid email to confirm.</p><!-- /print.validation.alert('email_invalid') -->
+      <!-- print.validation.alert('booked') --><p class="notice"><!-- print.i18n.visit('thank_you_we_have_your') -->Thank you, we have your request. We emailed you a link to change or cancel it, and we'll write again once we confirm it.<!-- /print.i18n.visit('thank_you_we_have_your') --></p><!-- /print.validation.alert('booked') -->
+      <!-- print.validation.alert('fully_booked') --><p class="error"><!-- print.i18n.visit('that_sitting_is_full_now') -->That sitting is full now. Try the other one or another day, or call us.<!-- /print.i18n.visit('that_sitting_is_full_now') --></p><!-- /print.validation.alert('fully_booked') -->
+      <!-- print.validation.alert('not_open') --><p class="error"><!-- print.i18n.visit('we_arent_taking_bookings_online') -->We aren't taking bookings online yet. Call us on +40 721 000 000.<!-- /print.i18n.visit('we_arent_taking_bookings_online') --></p><!-- /print.validation.alert('not_open') -->
+      <!-- print.validation.alert('not_a_slot') --><p class="error"><!-- print.i18n.visit('pick_one_of_the_times') -->Pick one of the times shown for an open day: we are closed on Mondays.<!-- /print.i18n.visit('pick_one_of_the_times') --></p><!-- /print.validation.alert('not_a_slot') -->
+      <!-- print.validation.alert('too_soon') --><p class="error"><!-- print.i18n.visit('that_is_too_soon_to') -->That is too soon to book online. Call us and we'll see what we can do.<!-- /print.i18n.visit('that_is_too_soon_to') --></p><!-- /print.validation.alert('too_soon') -->
+      <!-- print.validation.alert('too_far') --><p class="error"><!-- print.i18n.visit('we_take_bookings_up_to') -->We take bookings up to two months ahead.<!-- /print.i18n.visit('we_take_bookings_up_to') --></p><!-- /print.validation.alert('too_far') -->
+      <!-- print.validation.alert('too_many') --><p class="error"><!-- print.i18n.visit('for_groups_over_8_please') -->For groups over 8, please call us.<!-- /print.i18n.visit('for_groups_over_8_please') --></p><!-- /print.validation.alert('too_many') -->
+      <!-- print.validation.alert('people_invalid') --><p class="error"><!-- print.i18n.visit('we_seat_whole_people_how') -->We seat whole people: how many are coming?<!-- /print.i18n.visit('we_seat_whole_people_how') --></p><!-- /print.validation.alert('people_invalid') -->
+      <!-- print.validation.alert('already_booked') --><p class="notice"><!-- print.i18n.visit('you_have_already_booked_that') -->You have already booked that time: check your email.<!-- /print.i18n.visit('you_have_already_booked_that') --></p><!-- /print.validation.alert('already_booked') -->
+      <!-- print.validation.alert('name_invalid') --><p class="error"><!-- print.i18n.visit('tell_us_your_name') -->Tell us your name.<!-- /print.i18n.visit('tell_us_your_name') --></p><!-- /print.validation.alert('name_invalid') -->
+      <!-- print.validation.alert('email_invalid') --><p class="error"><!-- print.i18n.visit('we_need_a_valid_email') -->We need a valid email to confirm.<!-- /print.i18n.visit('we_need_a_valid_email') --></p><!-- /print.validation.alert('email_invalid') -->
       <form method="get" class="filters">
         <label><!-- print.i18n.visit('day') -->Day<!-- /print.i18n.visit('day') --> <input type="date" name="date"></label>
         <label><!-- print.i18n.visit('people') -->People<!-- /print.i18n.visit('people') --> <input type="number" name="people" min="1" max="8"></label>
@@ -72,12 +72,12 @@
       <!-- print.if.static --><p><!-- print.i18n.visit('write_to') -->Write to<!-- /print.i18n.visit('write_to') --> <a href="mailto:hello@cafe.test">hello@cafe.test</a>.</p><!-- /print.if.static -->
       <!-- print.if.live -->
       <p class="error-count"><!-- print.cafe.problem_count -->0<!-- /print.cafe.problem_count --> <!-- print.i18n.visit('problems') -->problems<!-- /print.i18n.visit('problems') --></p>
-      <!-- print.validation.alert('sent') --><p class="notice">Thanks, we will write back soon.</p><!-- /print.validation.alert('sent') -->
-      <!-- print.validation.alert('name_invalid') --><p class="error">That name has characters we can't use.</p><!-- /print.validation.alert('name_invalid') -->
-      <!-- print.validation.alert('email_invalid') --><p class="error">We need a valid email to write back.</p><!-- /print.validation.alert('email_invalid') -->
-      <!-- print.validation.alert('phone_invalid') --><p class="error">That phone number has characters we can't use.</p><!-- /print.validation.alert('phone_invalid') -->
-      <!-- print.validation.alert('subject_invalid') --><p class="error">Keep the subject short, on one line.</p><!-- /print.validation.alert('subject_invalid') -->
-      <!-- print.validation.alert('message_invalid') --><p class="error">Write us a message, but not a novel.</p><!-- /print.validation.alert('message_invalid') -->
+      <!-- print.validation.alert('sent') --><p class="notice"><!-- print.i18n.visit('thanks_we_will_write_back') -->Thanks, we will write back soon.<!-- /print.i18n.visit('thanks_we_will_write_back') --></p><!-- /print.validation.alert('sent') -->
+      <!-- print.validation.alert('name_invalid') --><p class="error"><!-- print.i18n.visit('tell_us_your_name') -->Tell us your name.<!-- /print.i18n.visit('tell_us_your_name') --></p><!-- /print.validation.alert('name_invalid') -->
+      <!-- print.validation.alert('email_invalid') --><p class="error"><!-- print.i18n.visit('we_need_a_valid_email') -->We need a valid email to confirm.<!-- /print.i18n.visit('we_need_a_valid_email') --></p><!-- /print.validation.alert('email_invalid') -->
+      <!-- print.validation.alert('phone_invalid') --><p class="error"><!-- print.i18n.visit('that_phone_number_has_characters') -->That phone number has characters we can't use.<!-- /print.i18n.visit('that_phone_number_has_characters') --></p><!-- /print.validation.alert('phone_invalid') -->
+      <!-- print.validation.alert('subject_invalid') --><p class="error"><!-- print.i18n.visit('keep_the_subject_short_on') -->Keep the subject short, on one line.<!-- /print.i18n.visit('keep_the_subject_short_on') --></p><!-- /print.validation.alert('subject_invalid') -->
+      <!-- print.validation.alert('message_invalid') --><p class="error"><!-- print.i18n.visit('write_us_a_message_but') -->Write us a message, but not a novel.<!-- /print.i18n.visit('write_us_a_message_but') --></p><!-- /print.validation.alert('message_invalid') -->
       <!-- render.contact.form -->
       <form method="post" class="stack">
         <label><!-- print.i18n.visit('name') -->Name<!-- /print.i18n.visit('name') --> <input type="text" name="name" maxlength="80"></label>

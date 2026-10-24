@@ -287,6 +287,7 @@ RASTER_ENV=production php demo/seed.php                              # the Roman
 | J13 | emails in the guest's language: a booking, a reply or a sign-up made on `/ro/` is mailed in Romanian, with `/ro/` links; staff get theirs in English |
 | J14 | the sitemap lists every language's address with its hreflang alternates |
 | J15 | MCP translation: `translation_status`, `update_page` and `update_item` with `lang`, `write_strings`, `render_url /ro/…` |
+| J16 | an evening's Romanian page (at its Romanian slug, `/ro/events/events_item/seara-de-jazz…`) takes replies, and every alert of the café's visitor pages is worded in Romanian |
 | K1 | a model that paginates itself (?page=) |
 | L1 | servers.php: whole names, loopback only from this machine |
 | L2 | RASTER_ENV |

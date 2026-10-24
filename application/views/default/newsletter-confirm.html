@@ -7,8 +7,8 @@
 <body>
   <!-- dry._layout.header /-->
   <main class="narrow">
-    <!-- print.validation.alert('confirmed') --><h1>You are subscribed</h1><p>Thanks for confirming. The next issue will reach you by email.</p><!-- /print.validation.alert('confirmed') -->
-    <!-- print.validation.alert('confirm_invalid') --><h1>Link not valid</h1><p>This confirmation link is not valid any more. Subscribe again from the form below.</p><!-- /print.validation.alert('confirm_invalid') -->
+    <!-- print.validation.alert('confirmed') --><h1><!-- print.i18n.newsletter_confirm('you_are_subscribed') -->You are subscribed<!-- /print.i18n.newsletter_confirm('you_are_subscribed') --></h1><p><!-- print.i18n.newsletter_confirm('thanks_for_confirming_the_next') -->Thanks for confirming. The next issue will reach you by email.<!-- /print.i18n.newsletter_confirm('thanks_for_confirming_the_next') --></p><!-- /print.validation.alert('confirmed') -->
+    <!-- print.validation.alert('confirm_invalid') --><h1><!-- print.i18n.newsletter_confirm('link_not_valid') -->Link not valid<!-- /print.i18n.newsletter_confirm('link_not_valid') --></h1><p><!-- print.i18n.newsletter_confirm('this_confirmation_link_is_not') -->This confirmation link is not valid any more. Subscribe again from the form below.<!-- /print.i18n.newsletter_confirm('this_confirmation_link_is_not') --></p><!-- /print.validation.alert('confirm_invalid') -->
     <!-- render.newsletter.confirm --><p class="meta"><!-- print.i18n.newsletter_confirm('subscribed_as') -->Subscribed as<!-- /print.i18n.newsletter_confirm('subscribed_as') --> <!-- print.email -->you@example.com<!-- /print.email --></p><!-- /render.newsletter.confirm -->
   </main>
   <!-- dry._layout.footer /-->

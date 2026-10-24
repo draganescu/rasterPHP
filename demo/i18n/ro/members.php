@@ -7,4 +7,6 @@ return array (
   'members_get_the_tenth_coffee' => 'Membrii primesc a zecea cafea gratis. Arată pagina aceasta la tejghea.',
   'your_card_is_active' => 'Cardul tău este activ.',
   'you_run_this_place' => 'Tu conduci locul acesta.',
+  'welcome_your_account_is_ready' => 'Bine ai venit! Contul tău e gata.',
+  'your_password_was_changed' => 'Parola ta a fost schimbată.',
 );

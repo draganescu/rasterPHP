@@ -150,6 +150,40 @@ class cms_store {
 		return self::$slug_items[$key] = $row ?: null;
 	}
 
+	// The item an item URL's $key names (/events/events_item/<key>) in
+	// $lang (null: i18n::current()), as render.cms finds it: array('id' =>
+	// n), or array('slug' => $key) for the item whose default slug it is.
+	// Multilingual, in a translation language, the item whose slug there
+	// it is, or that is at its default slug there while it has none
+	// (slug_item); then, as always, its default slug, and a number no item
+	// has as its slug is an id (#90). Another language's slug or an old one
+	// is answered 301 by cms::route() before a page asks. $columns: the
+	// table's, when the caller has them. The one place an item's address
+	// is read: a model finds its item through this, or item_id(), never by
+	// a slug query of its own.
+	static function item_at($type, $key, $lang = null, $columns = null) {
+		$key = (string)$key;
+		$lang = $lang === null ? i18n::current() : (string)$lang;
+		if (i18n::enabled() && !i18n::is_default($lang) && ($row = self::slug_item($type, $key, $lang)) !== null) return array('id' => (int)$row['id']);
+		if (!ctype_digit($key)) return array('slug' => $key);
+		$columns = $columns === null ? self::columns($type) : $columns;
+		if (array_key_exists('slug', $columns) && R::getCell('SELECT COUNT(*) FROM `'.$type.'` WHERE slug = ?', array($key))) return array('slug' => $key);
+		return array('id' => (int)$key);
+	}
+
+	// the id of the item at $key (item_at()), or null: one at its default
+	// slug looked up, a number that is no item's slug taken as an id. Off,
+	// and in the default language, it asks what it always asked: the item
+	// at that slug, else the number as an id
+	static function item_id($type, $key, $lang = null) {
+		$lang = $lang === null ? i18n::current() : (string)$lang;
+		$at = i18n::enabled() && !i18n::is_default($lang) ? self::item_at($type, $key, $lang) : array('slug' => (string)$key);
+		if (isset($at['id'])) return $at['id'];
+		$bean = self::table_exists($type) ? R::findOne($type, ' slug = ? ', array($at['slug'])) : null;
+		if ($bean) return (int)$bean->id;
+		return ctype_digit($at['slug']) ? (int)$at['slug'] : null;
+	}
+
 	// Gives the item $bean the slug it lacks in each translation language,
 	// made from its translated title, headline or name (slug__ro from
 	// title__ro), once it has one: an item with no translated text keeps its

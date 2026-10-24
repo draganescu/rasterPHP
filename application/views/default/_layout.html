@@ -26,8 +26,8 @@
       <!-- print.if.logged_in --><a class="nav-link" href="account.html"><!-- print.i18n.common('account') -->Account<!-- /print.i18n.common('account') --></a><!-- /print.if.logged_in --><!-- print.if.languages --><!-- render.i18n.languages --><!-- print.+class.state --><!-- print.@href.url --><!-- print.@hreflang.code --><a class="nav-link" href="#" hreflang="en"><!-- print.code -->en<!-- /print.code --></a><!-- /print.@hreflang.code --><!-- /print.@href.url --><!-- /print.+class.state --><!-- /render.i18n.languages --><!-- /print.if.languages -->
     </nav>
   </header>
-  <!-- print.validation.alert('try_again') --><p class="error">That went too quickly. Wait a moment and send it again.</p><!-- /print.validation.alert('try_again') -->
-  <!-- print.validation.alert('slow_down') --><p class="error">Too many tries from here. Try again in an hour.</p><!-- /print.validation.alert('slow_down') -->
+  <!-- print.validation.alert('try_again') --><p class="error"><!-- print.i18n.common('that_went_too_quickly_wait') -->That went too quickly. Wait a moment and send it again.<!-- /print.i18n.common('that_went_too_quickly_wait') --></p><!-- /print.validation.alert('try_again') -->
+  <!-- print.validation.alert('slow_down') --><p class="error"><!-- print.i18n.common('too_many_tries_from_here') -->Too many tries from here. Try again in an hour.<!-- /print.i18n.common('too_many_tries_from_here') --></p><!-- /print.validation.alert('slow_down') -->
   <!-- /res.header -->
 
   <!-- res.footer -->
@@ -35,7 +35,7 @@
     <section class="signup">
       <h2><!-- print.i18n.common('get_new_posts_by_email') -->Get new posts by email<!-- /print.i18n.common('get_new_posts_by_email') --></h2>
       <p><!-- print.i18n.common('one_email_when_something_new') -->One email when something new goes up. Unsubscribe any time.<!-- /print.i18n.common('one_email_when_something_new') --></p>
-      <!-- print.validation.alert('check_email') --><p class="notice">Almost there: check your inbox to confirm.</p><!-- /print.validation.alert('check_email') -->
+      <!-- print.validation.alert('check_email') --><p class="notice"><!-- print.i18n.common('almost_there_check_your_inbox') -->Almost there: check your inbox to confirm.<!-- /print.i18n.common('almost_there_check_your_inbox') --></p><!-- /print.validation.alert('check_email') -->
       <!-- render.newsletter.signup -->
       <form method="post" class="inline-form">
         <label for="signup-email" class="visually-hidden"><!-- print.i18n.common('email') -->Email<!-- /print.i18n.common('email') --></label>

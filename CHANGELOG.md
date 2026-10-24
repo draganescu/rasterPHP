@@ -3,6 +3,20 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.52
+
+What sites need to do: a multilingual site may see new `untranslatable_text` warnings for plain words inside alerts; move them into a `print.i18n` key inside the alert.
+
+**On a multilingual site an event's page in another language now takes replies.** The Romanian page of an evening (`/ro/events/events_item/seara-de-poezie`, its Romanian slug) said "this evening doesn't take replies here" while the English page took them: the rsvp model looked the event up by its default slug only. It now finds it as the list does, through the new `cms_store::item_at()` and `item_id()`: the language's slug, else the default slug, else a number as an id. That is now the one place an item's address is read (`render.cms` uses it too), and a test checks no other bundled model writes a slug lookup of its own. AGENTS.md has a short "Writing a model for a multilingual site" with the four core calls a model uses.
+
+**`/ro/login` shows the layout's site fields in Romanian.** The login page never read CMS fields; on a multilingual site its `site_*` fields (the tagline, the footer) now follow the page's language as on every other page. Off, the login page is as it was.
+
+**Lint reads an alert's words** (multilingual on). A `print.validation.alert` block prints its words as written, so on a multilingual site every language showed them in the default language and lint said nothing. `untranslatable_text` now reports them, and says to put a `print.i18n.<file>('key')` inside the alert. Off, lint is as it was. The starter's alerts are dictionary keys now, with the English as the default, so its pages are byte for byte what they were.
+
+**Lint warns about one alert name worded twice** (`alert_twice`, always). Two `print.validation.alert('x')` blocks with different words in one view show the first one's words in both places.
+
+**The demo café words every alert in Romanian.** The booking, reply, contact, account and newsletter alerts of the visitor pages are dictionary keys now, with their Romanian in `demo/i18n/ro/`. The contact form's `name_invalid` and `email_invalid` share the booking form's words: one alert name shows one text on a page.
+
 ## 2.2.51
 
 **Multilingual sites** (#200). A site can now serve its template text and everything editors write in several languages, behind one setting that is off by default. A site that doesn't turn it on renders as before.

@@ -8,7 +8,7 @@
   <!-- dry._layout.header /-->
   <main class="narrow">
     <h1><!-- print.i18n.forgot('forgot_your_password_2') -->Forgot your password?<!-- /print.i18n.forgot('forgot_your_password_2') --></h1>
-    <!-- print.validation.alert('reset_sent') --><p class="notice">If there is an account with that email, a reset link is on its way.</p><!-- /print.validation.alert('reset_sent') -->
+    <!-- print.validation.alert('reset_sent') --><p class="notice"><!-- print.i18n.forgot('if_there_is_an_account') -->If there is an account with that email, a reset link is on its way.<!-- /print.i18n.forgot('if_there_is_an_account') --></p><!-- /print.validation.alert('reset_sent') -->
     <!-- render.authentication.forgot -->
     <form method="post" class="stack">
       <label><!-- print.i18n.forgot('email') -->Email<!-- /print.i18n.forgot('email') --> <input type="email" name="email" required></label>

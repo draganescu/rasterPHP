@@ -544,7 +544,12 @@ of your own. Staff read the feedback on a page that renders
 - **`print.validation.alert('name')`** is hidden until a model calls
   `validation::get()->raise('name')`, or until the page loads with
   `?done=name` (which `util::done('name')` does). Alerts work anywhere on the
-  page.
+  page. Its words print as written; on a multilingual site make them a
+  dictionary key inside the block
+  (`<!-- print.validation.alert('sent') --><p><!-- print.i18n.feedback('thanks') -->Thanks.<!-- /print.i18n.feedback('thanks') --></p><!-- /print.validation.alert('sent') -->`),
+  as the starter and the demo do. One name is one block of words on a
+  page: a view with two blocks of one name and different words shows the
+  first one's in both places, and `lint` warns (`alert_twice`).
 - **`template::instance()->form_state($data)`** fills the form: input values,
   checked boxes, selected options and textarea text. Passwords are never
   filled.
@@ -1841,8 +1846,9 @@ from `php demo/seed.php`, and are the worked example of all of it.
   `rsvp.promoted` with `who` `staff`.
 - `render.rsvp.event`: one row for the page's event, on its item page
   (`/events/events_item/{slug}`, found as `render.cms.events` finds
-  it) or on any page by `?event=<id>`: `event` (its id), `places` and
-  `left` (`''` for no limit), `going` (people), `waiting` (replies),
+  it, `cms_store::item_id()`: on `/ro/` by its Romanian slug) or on any
+  page by `?event=<id>`: `event` (its id), `places` and `left` (`''` for
+  no limit), `going` (people), `waiting` (replies),
   `state` (`open`; `full`, a yes goes on the waitlist; `closed`, past the
   deadline; `over`, it has started) and `deadline` (`2026-11-20 18:00`).
   Nothing for an event visitors can't see (editors get it). Never
@@ -2291,7 +2297,9 @@ every language is **Multilingual sites**, below).
   as written (make them `print.cms.<name>` for words editors change, or
   `print.i18n.<file>('key')` for fixed words; what a print replaces,
   comments, `remove`, scripts, styles, numbers, punctuation and lone
-  symbols are left out; `_email/` views are read too, since each email
+  symbols are left out; the words of a `print.validation.alert` block are
+  read, since they show as written, and the warning says to put a
+  `print.i18n` key inside the alert; `_email/` views are read too, since each email
   goes out in its recipient's language; one per line, at most ten per
   view and a count of the rest); `missing_translation_key`, a
   `print.i18n.<file>('key')` some language's dictionary has no entry for;
@@ -2379,6 +2387,7 @@ as a one-language site. Each part is described where it lives:
 | which fields are translated, columns (`headline__ro`), fallback, `update_page($…, $lang)` | **The CMS**: Translations, Page fields in a language |
 | items in a language: display, sort and filter, `save_item($…, $lang)`; a record type's `translate`/`shared` | **The CMS**: Items in a language; **Records**: Languages |
 | item slugs per language (`slug__ro`), `slughistory`, 301s from old and other languages' slugs | **The CMS**: Item addresses |
+| a model of your own: the language, an item from its address, a row in the language, mail (`i18n::current()`, `cms_store::item_at()`, `localized()`, `send_view($…, $lang)`) | **Multilingual sites**: Writing a model for a multilingual site |
 | translation columns in `schema`, kept translations | **The CMS**: Changing fields |
 | `untranslatable_text`, `missing_translation_key`, `html_lang_fixed` | **i18n**: Lint, multilingual on |
 | the language emails go out in, the stored `lang` of rows that email | **mail** |
@@ -2405,6 +2414,37 @@ as a one-language site. Each part is described where it lives:
   `by_card` and `on_delivery` and words them with `print.if`; the demo's
   opening hours are a `render.cms.hours` list, content rather than code,
   translated as any collection's items are.
+- **Writing a model for a multilingual site.** A model, bundled or the
+  site's own, gets the language and its data from four core calls, never
+  from its own query or setting, so it works the same on `/ro/` and with
+  multilingual off:
+  - `i18n::current()`, the request's language, and `i18n::of($row)`, the
+    language a stored row (a booking, a reply) was made in;
+  - `cms_store::item_at($type, $key, $lang = null)`: the item an item
+    URL's key names, as `render.cms` finds it (on `/ro/` its Romanian
+    slug, else its default slug, else a number as its id), as
+    `array('id' => n)` or `array('slug' => $key)`; `cms_store::item_id()`
+    gives its id, or null, drafts included. No bundled model writes a
+    slug query of its own (a test checks it);
+  - `cms_store::localized($row, $type)`: a stored row as the visitor's
+    language shows it (each translation, else the default's words);
+  - `mail::send_view($view, $to, $vars, $headers, $lang)`, inside
+    `mail::in_language($lang, …)`, so a guest's mail is in their language.
+
+  ```php
+  function event() {                                   // render.party.event
+      $key = cms::collection_request('party')['item'];   // /party/party_item/<key>
+      $id = $key === null ? null : cms_store::item_id('partydata', $key);
+      $row = $id ? cms_store::get_item('partydata', $id) : null;   // drafts and scheduled items too
+      $live = $row && $row['enabled'] !== false && (string)$row['enabled'] !== '0' && ((string)$row['published_at'] === '' || $row['published_at'] <= date('Y-m-d H:i:s'));
+      return $live ? array(cms_store::localized($row, 'partydata')) : array();
+  }
+  ```
+
+  `get_item()` reads any item, a draft or a scheduled one too, so a
+  model that shows one to visitors checks `enabled` and `published_at`
+  itself, as `rsvp::item()`'s `visible` does.
+
 - **Making a site multilingual, as an agent** (MCP):
   1. `set_languages` with `["en", "ro"]`, the default first.
   2. Words editors change become CMS fields, fixed words dictionary keys

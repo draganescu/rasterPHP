@@ -31,4 +31,13 @@ return array (
   'your_account' => 'contul tău',
   'lists_your_replies' => 'îți arată răspunsurile.',
   'all_events' => '&larr; Toate evenimentele',
+  'youre_in_weve_emailed_you' => 'Ești pe listă. Ți-am trimis pe email un link ca să-ți schimbi răspunsul.',
+  'its_full_so_youre_on' => 'E plin, așa că ești pe lista de așteptare. Îți scriem imediat ce se eliberează un loc.',
+  'thanks_for_letting_us_know' => 'Mulțumim că ne-ai anunțat.',
+  'youve_replied_already_weve_emailed' => 'Ai răspuns deja: ți-am trimis pe email un link ca să-ți schimbi răspunsul.',
+  'replies_are_closed_call_us' => 'Răspunsurile s-au închis. Sună-ne la +40 721 000 000.',
+  'its_full_and_there_is' => 'E plin și nu avem listă de așteptare.',
+  'for_more_than_6_call' => 'Pentru mai mult de 6, sună-ne și vedem ce putem face.',
+  'how_many_of_you_are' => 'Câți veniți?',
+  'this_evening_doesnt_take_replies' => 'La seara aceasta nu se răspunde aici. Sună-ne.',
 );

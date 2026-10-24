@@ -630,6 +630,7 @@ class raster_inspector {
 		$this->lint_blocks($blocks, $problems, null, $theme);
 		$this->lint_forms($html, $problems, $theme);
 		$this->lint_anchor_links($html, $problems);
+		$this->lint_alert_twice($html, $problems);
 		$this->lint_languages($html, $blocks, $problems);
 		usort($problems, function ($a, $b) { return $a['line'] <=> $b['line'] ?: $a['column'] <=> $b['column']; });
 		foreach ($problems as &$problem) {
@@ -900,6 +901,22 @@ class raster_inspector {
 		return "'$name' has __ in it, which Raster keeps for translation columns (headline__ro holds headline in Romanian): give the $what a name without __";
 	}
 
+	// alert_twice: one alert name is one block of words on a page. Two
+	// print.validation.alert('x') blocks with different words show the
+	// first one's words in both places, so the second's never shows
+	protected function lint_alert_twice($html, &$problems) {
+		if (!preg_match_all("/<!-- print\.validation\.alert\('([a-z0-9_]+)'\) -->(.*?)<!-- \/print\.validation\.alert\('\\1'\) -->/s", $html, $alerts, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) return;
+		$first = array();
+		foreach ($alerts as $alert) {
+			$name = $alert[1][0];
+			if (!isset($first[$name])) {
+				$first[$name] = $alert[2][0];
+			} elseif ($alert[2][0] !== $first[$name]) {
+				$problems[] = self::problem_at('warning', $html, $alert[0][1], "print.validation.alert('$name') is in this view twice with different words: the page shows the first one's words in both places. Give both the same words, or keep one");
+			}
+		}
+	}
+
 	// ##Languages
 	// Multilingual on (i18n::enabled()), a page has to say each language's
 	// words: untranslatable_text, html_lang_fixed and (lint_model_call)
@@ -926,13 +943,16 @@ class raster_inspector {
 	// mock-up), a print.@alt's alt, comments, scripts and styles are not
 	// read; nor are numbers, punctuation and lone symbols (14:00, ©, →),
 	// an email or a web address alone, and code (<pre>, <code>).
-	// One warning per line, at most ten per file.
+	// A print.validation.alert's words are shown as written, so they are
+	// read too. One warning per line, at most ten per file.
 	protected function lint_untranslatable($html, $blocks, &$problems) {
 		$text = $html;
 		$blank = function (&$text, $from, $length) {
 			if ($length > 0) $text = substr_replace($text, preg_replace('/[^\n]/', ' ', substr($text, $from, $length)), $from, $length);
 		};
-		$walk = function ($blocks) use (&$walk, &$text, $blank) {
+		// where the alerts' words are: [from, to)
+		$alerts = array();
+		$walk = function ($blocks) use (&$walk, &$text, $blank, &$alerts) {
 			foreach ($blocks as $block) {
 				if (empty($block['end'])) continue;
 				$from = $block['offset'] + strlen($block['raw']);
@@ -948,6 +968,8 @@ class raster_inspector {
 					if ($attribute !== null) {
 						// the attribute it sets is the mock-up; the rest is shown
 						if (preg_match('/\s'.preg_quote($attribute, '/').'\s*=\s*("[^"]*"|\'[^\']*\')/i', substr($text, $from, $length), $m, PREG_OFFSET_CAPTURE)) $blank($text, $from + $m[1][1], strlen($m[1][0]));
+					} elseif (strpos($block['ref'], 'validation.alert(') === 0) {
+						$alerts[] = array($from, $from + $length);
 					} elseif (strpos($block['ref'], 'if.') !== 0) {
 						$blank($text, $from, $length);
 						continue;
@@ -995,6 +1017,12 @@ class raster_inspector {
 				break;
 			}
 			$quote = mb_strlen($word[1]) > 40 ? mb_substr($word[1], 0, 39).'…' : $word[1];
+			$in_alert = false;
+			foreach ($alerts as $alert) if ($word[0] >= $alert[0] && $word[0] < $alert[1]) $in_alert = true;
+			if ($in_alert) {
+				$problems[] = self::problem_at('warning', $html, $word[0], "'$quote' is the same in every language: an alert shows its words as written. Put them in a dictionary inside the alert: <!-- print.validation.alert('…') --><p><!-- print.i18n.<file>('key') -->…<!-- /print.i18n.<file>('key') --></p><!-- /print.validation.alert('…') -->");
+				continue;
+			}
 			$problems[] = self::problem_at('warning', $html, $word[0], "'$quote' is the same in every language: no annotation prints it. Make it <!-- print.cms.<name> -->…<!-- /print.cms.<name> --> for words editors change, or <!-- print.i18n.<file>('key') -->…<!-- /print.i18n.<file>('key') --> for fixed words");
 		}
 	}

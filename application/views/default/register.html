@@ -8,8 +8,8 @@
   <!-- dry._layout.header /-->
   <main class="narrow">
     <h1><!-- print.i18n.register('create_an_account') -->Create an account<!-- /print.i18n.register('create_an_account') --></h1>
-    <!-- print.validation.alert('email_taken') --><p class="error">There is already an account with that email. <a href="login.html">Log in</a> instead?</p><!-- /print.validation.alert('email_taken') -->
-    <!-- print.validation.alert('password_short') --><p class="error">Use at least 8 characters for your password.</p><!-- /print.validation.alert('password_short') -->
+    <!-- print.validation.alert('email_taken') --><p class="error"><!-- print.i18n.register('there_is_already_an_account') -->There is already an account with that email. <a href="login.html">Log in</a> instead?<!-- /print.i18n.register('there_is_already_an_account') --></p><!-- /print.validation.alert('email_taken') -->
+    <!-- print.validation.alert('password_short') --><p class="error"><!-- print.i18n.register('use_at_least_8_characters_2') -->Use at least 8 characters for your password.<!-- /print.i18n.register('use_at_least_8_characters_2') --></p><!-- /print.validation.alert('password_short') -->
     <!-- render.authentication.register -->
     <form method="post" class="stack">
       <label><!-- print.i18n.register('name') -->Name<!-- /print.i18n.register('name') --> <input type="text" name="name" autocomplete="name" maxlength="100"></label>

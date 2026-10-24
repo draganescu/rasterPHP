@@ -8,8 +8,8 @@
   <!-- dry._layout.header /-->
   <main class="narrow">
     <h1><!-- print.i18n.password_new('choose_a_new_password') -->Choose a new password<!-- /print.i18n.password_new('choose_a_new_password') --></h1>
-    <!-- print.validation.alert('reset_invalid') --><p class="error">This link has expired or was already used.</p><!-- /print.validation.alert('reset_invalid') -->
-    <!-- print.validation.alert('password_short') --><p class="error">Use at least 8 characters.</p><!-- /print.validation.alert('password_short') -->
+    <!-- print.validation.alert('reset_invalid') --><p class="error"><!-- print.i18n.password_new('this_link_has_expired_or') -->This link has expired or was already used.<!-- /print.i18n.password_new('this_link_has_expired_or') --></p><!-- /print.validation.alert('reset_invalid') -->
+    <!-- print.validation.alert('password_short') --><p class="error"><!-- print.i18n.password_new('use_at_least_8_characters') -->Use at least 8 characters.<!-- /print.i18n.password_new('use_at_least_8_characters') --></p><!-- /print.validation.alert('password_short') -->
     <!-- render.authentication.reset -->
     <form method="post" class="stack">
       <label><!-- print.i18n.password_new('new_password') -->New password<!-- /print.i18n.password_new('new_password') --> <input type="password" name="password" required minlength="10"></label>

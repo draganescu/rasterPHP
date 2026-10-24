@@ -26,4 +26,7 @@ return array (
   'hours_as_text' => 'Programul ca text',
   'from_the_bits_partial' => 'Din fragmentul _bits.',
   'opening_hours_text' => 'Programul Raster Café',
+  'that_went_by_a_bit' => 'A mers cam repede. Mai așteaptă o clipă și trimite încă o dată.',
+  'thats_a_lot_from_one' => 'Sunt multe de la un singur loc. Încearcă din nou peste o oră sau sună-ne.',
+  'almost_there_check_your_inbox' => 'Aproape gata: uită-te în inbox ca să confirmi.',
 );

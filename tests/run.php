@@ -13919,6 +13919,285 @@ test('Final review: a site\'s own record table with a lang column it no longer d
 	});
 });
 
+// ## 2.2.52: items found by their language's slug
+
+// the events table with its Romanian columns, as a multilingual site's
+// development makes them, and events with a Romanian title (so a slug__ro)
+// and without one
+function v2252_events() {
+	return with_settings(p2a_on(), function () {
+		cms_types::ensure('eventsdata', array('title' => 'text', 'date' => 'date', 'starts' => 'time', 'places' => 'int', 'rsvp_until' => 'datetime',
+			'slug' => 'text', 'enabled' => 'bool', 'published_at' => 'datetime', 'updated_at' => 'datetime'), array('title', 'slug'));
+		cms_store::forget();
+		$poetry = rsvp_event(array('title' => 'Poetry evening', 'places' => 4));
+		cms_store::save_item('eventsdata', $poetry['id'], array('title' => 'Seara de poezie'), array('title'), 'editor', 'events', 'ro');
+		$quiz = rsvp_event(array('title' => 'Quiz night'));
+		cms_store::forget();
+		$poetry = R::getRow('SELECT * FROM eventsdata WHERE id = ?', array($poetry['id']));
+		same(array('poetry-evening', 'seara-de-poezie'), array($poetry['slug'], $poetry['slug__ro']));
+		return array($poetry, R::getRow('SELECT * FROM eventsdata WHERE id = ?', array($quiz['id'])));
+	});
+}
+
+test('2.2.52: an event\'s page on /ro/, at its Romanian slug, takes a reply; the English page and a /ro/ page at the default slug too', function () use ($booking_base, $p1b_on) {
+	p1b_site($p1b_on, function () use ($booking_base) {
+		rsvp_site(function () use ($booking_base) {
+			spam_clear();
+			$history = cms_store::table_exists('slughistory');
+			try {
+				list($poetry, $quiz) = v2252_events();
+				$pages = array(
+					'ro' => array("$booking_base/ro/events/events_item/seara-de-poezie", $poetry, 'ana.ro'),
+					'en' => array("$booking_base/events/events_item/poetry-evening", $poetry, 'ana.en'),
+					'ro at the default slug' => array("$booking_base/ro/events/events_item/quiz-night", $quiz, 'ana.quiz'),
+				);
+				foreach ($pages as $what => $page) {
+					list($url, $event, $who) = $page;
+					list($status, $body) = http('GET', $url);
+					same(200, $status, "$what: $body");
+					check(strpos($body, 'ALERT not_open') === false && strpos($body, "event={$event['id']} ") !== false, "$what: the page's event: $body");
+					list($status, , $location) = rsvp_post($url, array('name' => 'Ana', 'email' => "$who@example.test"));
+					same(array(303, "$url?done=going"), array($status, $location), $what);
+					$reply = cms_records::find('rsvp', array('email' => "$who@example.test"));
+					same(array(1, (int)$event['id'], 'going'), array(count($reply), $reply ? (int)$reply[0]['event'] : null, $reply ? $reply[0]['status'] : null), $what);
+				}
+				same('ro', cms_records::find('rsvp', array('email' => 'ana.ro@example.test'))[0]['lang'], 'the reply made on /ro/ is Romanian');
+			} finally {
+				if (!$history) R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS slughistory');
+				cms_store::forget();
+			}
+		});
+	});
+});
+
+test('2.2.52: cms_store::item_at and item_id find an item by its language\'s slug, as render.cms does; rsvp::page_event uses them', function () {
+	rsvp_site(function () {
+		$history = cms_store::table_exists('slughistory');
+		try {
+			list($poetry, $quiz) = v2252_events();
+			$at = function ($key, $lang) { return with_settings(p2a_on() + array('url_language' => $lang === 'en' ? '' : $lang), function () use ($key) { cms_store::$slug_items = array(); return cms_store::item_at('eventsdata', $key); }); };
+			same(array('id' => (int)$poetry['id']), $at('seara-de-poezie', 'ro'), 'its Romanian slug');
+			same(array('id' => (int)$quiz['id']), $at('quiz-night', 'ro'), 'no Romanian slug: its default one');
+			same(array('slug' => 'poetry-evening'), $at('poetry-evening', 'ro'), 'the English slug of one with a Romanian slug: render.cms finds it by its default slug (a GET is answered 301 first)');
+			same(array('slug' => 'seara-de-poezie'), $at('seara-de-poezie', 'en'), 'in English a Romanian slug is a slug no item has');
+			same(array('slug' => 'poetry-evening'), $at('poetry-evening', 'en'));
+			same(array('id' => (int)$quiz['id']), $at((string)$quiz['id'], 'en'), 'a number no item has as its slug is an id');
+			foreach (array('ro' => array('seara-de-poezie', $poetry), 'en' => array('poetry-evening', $poetry)) as $lang => $case) {
+				$id = with_settings(p2a_on() + array('url_language' => $lang === 'en' ? '' : $lang, 'uri_string' => '/events/events_item/'.$case[0]), function () {
+					cms_store::$slug_items = array();
+					rsvp::forget();
+					$event = rsvp::page_event();
+					return $event ? $event['id'] : null;
+				});
+				same((int)$case[1]['id'], $id, "page_event in $lang");
+			}
+			same((int)$quiz['id'], cms_store::item_id('eventsdata', 'quiz-night'));
+			same(null, cms_store::item_id('eventsdata', 'nothing-here'));
+		} finally {
+			if (!$history) R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS slughistory');
+			cms_store::forget();
+			rsvp::forget();
+		}
+	});
+});
+
+test('2.2.52: multilingual off, rsvp::page_event and an item URL\'s lookup send the SQL 2.2.51 sent', function () {
+	rsvp_site(function () {
+		$event = rsvp_event(array('title' => 'Poetry evening'));
+		foreach (array('off' => array('multilingual' => false, 'languages' => array()), 'languages, switch off' => array('multilingual' => false, 'languages' => array('en', 'ro'))) as $what => $off) {
+			with_settings($off + array('uri_string' => '/events/events_item/poetry-evening'), function () use ($what, $event) {
+				rsvp::forget();
+				$now = p2a_sql(function () use ($event) { same((int)$event['id'], rsvp::page_event()['id']); });
+				// 2.2.51's page_event: the default slug, then the item
+				rsvp::forget();
+				$was = p2a_sql(function () use ($event) {
+					$bean = cms_store::table_exists('eventsdata') ? R::findOne('eventsdata', ' slug = ? ', array('poetry-evening')) : null;
+					same((int)$event['id'], (int)$bean->id);
+					rsvp::item((int)$bean->id);
+				});
+				same($was, $now, "$what: page_event");
+				check(!preg_grep('/slug__|slughistory/', $now), "$what: ".implode(' | ', $now));
+				// a number: the item at that slug first, then the number as an id
+				foreach (array('99999', (string)$event['id']) as $number) {
+					$now = with_settings(array('uri_string' => "/events/events_item/$number"), function () use ($number) {
+						rsvp::forget();
+						return p2a_sql(function () { rsvp::page_event(); });
+					});
+					rsvp::forget();
+					$was = p2a_sql(function () use ($number) {
+						$bean = cms_store::table_exists('eventsdata') ? R::findOne('eventsdata', ' slug = ? ', array($number)) : null;
+						rsvp::item($bean ? (int)$bean->id : (int)$number);
+					});
+					same($was, $now, "$what: page_event at $number");
+				}
+				// render.cms: a slug is a filter, no query of its own; a number
+				// is asked for as a slug first, with 2.2.51's query
+				same(array(), p2a_sql(function () { same(array('slug' => 'poetry-evening'), cms_store::item_at('eventsdata', 'poetry-evening')); }), "$what: item_at, a slug");
+				$columns = cms_store::columns('eventsdata');
+				same(array('SELECT COUNT(*) FROM `eventsdata` WHERE slug = ?'), array_values(preg_grep('/^SELECT/', p2a_sql(function () use ($columns) { same(array('id' => 7), cms_store::item_at('eventsdata', '7', null, $columns)); }))), "$what: item_at, a number");
+			});
+		}
+		rsvp::forget();
+	});
+});
+
+// one way to find an item from its address: a bundled model asks
+// cms_store::item_at() / item_id(), and no model but the CMS writes a slug
+// lookup of its own (nor shares one with another model)
+test('2.2.52: no bundled model but cms finds an item by a slug query of its own', function () use ($root) {
+	$found = array();
+	foreach (glob("$root/system/models/*", GLOB_ONLYDIR) as $dir) {
+		if (basename($dir) === 'cms') continue;
+		$files = array_merge(glob("$dir/*.php"), glob("$dir/sql/*.sql") ?: array());
+		foreach ($files as $file) {
+			// the whole file, so a call split over lines is seen too
+			$code = file_get_contents($file);
+			// SQL comparing a slug column (slug, slug__ro; not $slug = or
+			// ->slug =), a find with a slug filter, or the CMS's own slug calls
+			$lookup = '/(?<![$>\w])slug(__[a-z_]+)?`?\s*(=(?![=>])|LIKE\b|GLOB\b|IN\b)|find(One|All)?\s*\([^;]*?[\'"]slug(__[a-z_]+)?[\'"]\s*=>|slug_item\s*\(|resolve_slug\s*\(/s';
+			if (preg_match_all($lookup, $code, $m, PREG_OFFSET_CAPTURE)) {
+				foreach ($m[0] as $hit) $found[] = substr($file, strlen($root) + 1).':'.(substr_count(substr($code, 0, $hit[1]), "\n") + 1).': '.trim(preg_replace('/\s+/', ' ', $hit[0]));
+			}
+		}
+	}
+	same(array(), $found);
+	// the CMS's own list and rsvp ask the one method
+	check(strpos(file_get_contents("$root/system/models/cms/cms.php"), 'cms_store::item_at(') !== false, 'cms::collection asks item_at');
+	check(strpos(file_get_contents("$root/system/models/rsvp/rsvp.php"), 'cms_store::item_id(') !== false, 'rsvp::page_event asks item_id');
+	same(1, substr_count(file_get_contents("$root/system/models/cms/cms.php").file_get_contents("$root/system/models/cms/store.php"), 'WHERE slug = ?\', array($key)'), 'one number-is-a-slug query');
+});
+
+test('2.2.52: multilingual, /ro/login shows the layout\'s site fields in Romanian; off, /login keeps the template\'s words as it always did', function () use ($p1b_on) {
+	cms_store::connect();
+	$made = !cms_store::table_exists('sitepage');
+	if ($made) cms_types::ensure('sitepage', array('slug' => 'text', 'site_name' => 'text', 'updated_at' => 'datetime'));
+	$had = array_key_exists('site_name__ro', cms_store::columns('sitepage'));
+	if (!$had) cms_types::ensure('sitepage', array('site_name__ro' => 'text'));
+	cms_store::forget();
+	$row = R::dispense('sitepage');
+	$row->slug = 'site';
+	$row->site_name = 'Zz2252 Cafe';
+	$row->site_name__ro = 'Zz2252 Cafeneaua';
+	$row->updated_at = R::isoDateTime();
+	R::store($row);
+	try {
+		p1b_site($p1b_on, function () {
+			p1b_server(array(), function ($port) {
+				list($status, $body) = http('GET', "http://127.0.0.1:$port/ro/login");
+				same(200, $status);
+				check(strpos($body, 'Zz2252 Cafeneaua') !== false, '/ro/login: '.$body);
+				check(strpos($body, 'raster-editor') === false, 'no editor on the login page');
+				list(, $body) = http('GET', "http://127.0.0.1:$port/login");
+				check(strpos($body, 'Zz2252 Cafe') !== false && strpos($body, 'Cafeneaua') === false, '/login: '.$body);
+			});
+		});
+		p1b_site("config::set('languages')->to(array('en', 'ro'));", function () {
+			p1b_server(array(), function ($port) {
+				list($status, $body) = http('GET', "http://127.0.0.1:$port/login");
+				same(200, $status);
+				check(strpos($body, 'Zz2252') === false, 'off: the template\'s words: '.$body);
+			});
+		});
+	} finally {
+		R::trash($row);
+		if ($made) R::exec('DROP TABLE IF EXISTS sitepage');
+		elseif (!$had) R::exec('ALTER TABLE sitepage DROP COLUMN site_name__ro');
+		cms_store::forget();
+	}
+});
+
+// an alert's words are shown as written: lint reads them (multilingual
+// on), and a dictionary key inside the alert says them in each language
+test('2.2.52: lint, multilingual on, reports the words of an alert and of a field message, and suggests a dictionary key inside the alert; off, nothing', function () {
+	$view = '<!doctype html><!-- print.@lang.i18n.language --><html lang="en"><!-- /print.@lang.i18n.language --><body>'
+		."\n<!-- print.validation.alert('sent') --><p class=\"notice\">Thanks, we read every one.</p><!-- /print.validation.alert('sent') -->"
+		."\n<!-- print.validation.alert('done') --><p><!-- print.i18n.zz2252('done') -->Done.<!-- /print.i18n.zz2252('done') --></p><!-- /print.validation.alert('done') -->"
+		."\n<!-- render.zz2252.form --><form method=\"post\"><input name=\"x\" required>\n<!-- render.validation.field('x') --><p>Fill it in.</p><!-- /render.validation.field('x') --></form><!-- /render.zz2252.form -->"
+		."\n<!-- print.if.live --><p class=\"notice\">Live words.</p><!-- /print.if.live --></body></html>";
+	$said = function ($problems) {
+		$words = array();
+		foreach ($problems as $p) if (strpos($p['message'], 'is the same in every language') !== false) $words[$p['line']] = $p['message'];
+		return $words;
+	};
+	$on = with_settings(p2a_on(), function () use ($view, $said) { return $said((new raster_inspector())->lint_source($view, 'view', 'default')); });
+	// the alert, the field's message, and what print.if shows (as before)
+	same(array(2, 5, 6), array_keys($on), json_encode($on));
+	check(strpos($on[2], "'Thanks, we read every one.'") === 0 && strpos($on[2], "an alert shows its words as written") !== false && strpos($on[2], "<!-- print.validation.alert('…') --><p><!-- print.i18n.<file>('key') -->") !== false, $on[2]);
+	check(strpos($on[5], "'Fill it in.'") === 0 && strpos($on[5], 'no annotation prints it') !== false, $on[5]);
+	foreach (p4_off_settings() as $what => $setting) {
+		same(array(), with_settings($setting, function () use ($view, $said) { return $said((new raster_inspector())->lint_source($view, 'view', 'default')); }), $what);
+	}
+});
+
+test('2.2.52: lint warns about an alert name a view has twice with different words, always; the same words twice are fine', function () {
+	$twice = "<!-- print.validation.alert('name_invalid') --><p>Tell us your name.</p><!-- /print.validation.alert('name_invalid') -->\n"
+		."<!-- print.validation.alert('name_invalid') --><p>That name has characters we can't use.</p><!-- /print.validation.alert('name_invalid') -->\n";
+	$found = function ($html) {
+		return array_values(array_filter((new raster_inspector())->lint_source($html, 'view', 'default'), function ($p) { return strpos($p['message'], 'twice with different words') !== false; }));
+	};
+	foreach (array('off' => array('multilingual' => false, 'languages' => array()), 'on' => p2a_on()) as $what => $setting) {
+		with_settings($setting, function () use ($twice, $found, $what) {
+			$problems = $found($twice);
+			same(1, count($problems), $what);
+			same(array('warning', 2), array($problems[0]['severity'], $problems[0]['line']), $what);
+			same(array(), $found(str_replace("That name has characters we can't use.", 'Tell us your name.', $twice)), "$what: the same words");
+		});
+	}
+});
+
+// the starter's alerts are dictionary keys: with multilingual on a fresh
+// site has no words lint calls untranslatable (the Final review test), and
+// its pages render as v2.2.45's did (the byte-for-byte test)
+test('2.2.52: every alert of the starter and of the demo\'s visitor pages is worded through a dictionary key', function () use ($root) {
+	$plain = array();
+	foreach (array('application/views/default', 'demo/views/cafe') as $dir) {
+		$files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator("$root/$dir", FilesystemIterator::SKIP_DOTS));
+		foreach ($files as $file) {
+			$path = substr($file->getPathname(), strlen("$root/"));
+			if (substr($path, -5) !== '.html') continue;
+			// the demo's staff pages and the lab stay English (demo/README.md)
+			if (strpos($path, 'demo/') === 0 && preg_match('#/(staff/.*|staff|lab|[a-z]+_item)\.html$#', $path) && !preg_match('#/(menu|events|journal|faq)_item\.html$#', $path)) continue;
+			preg_match_all("/<!-- print\.validation\.alert\('([a-z0-9_]+)'\) -->(.*?)<!-- \/print\.validation\.alert\('\\1'\) -->/s", file_get_contents($file->getPathname()), $alerts, PREG_SET_ORDER);
+			foreach ($alerts as $alert) {
+				$words = trim(strip_tags(preg_replace('/<!-- print\.i18n\.([a-z0-9_]+)\(\'([a-z0-9_.-]+)\'\) -->.*?<!-- \/print\.i18n\.\1\(\'\2\'\) -->|<code>.*?<\/code>/s', '', $alert[2])));
+				if (preg_match('/\p{L}{2,}/u', $words)) $plain[] = "$path {$alert[1]}: $words";
+			}
+		}
+	}
+	same(array(), $plain);
+});
+
+// the starter's alerts, now dictionary keys, print 2.2.51's bytes when
+// they show, multilingual off
+test('2.2.52: a new starter site prints its alerts with 2.2.51\'s bytes', function () use ($root) {
+	$tmp = sys_get_temp_dir().'/raster-2252-'.getmypid();
+	@mkdir($tmp, 0775, true);
+	$site = "$tmp/site";
+	exec(php_cmd().' '.escapeshellarg("$root/bin/raster").' new '.escapeshellarg($site).' 2>&1', $out, $code);
+	same(0, $code, implode("\n", $out));
+	try {
+		$alerts = array(
+			'/login?done=login_failed' => '<!-- print.validation.alert(\'login_failed\') --><p class="error">Wrong email or password.</p><!-- /print.validation.alert(\'login_failed\') -->',
+			'/reset?done=reset_invalid' => '<p class="error">This link has expired or was already used. <a href="http://localhost:8000/forgot">Get a new one</a>.</p>',
+			'/register?done=email_taken' => '<p class="error">There is already an account with that email. <a href="http://localhost:8000/login">Log in</a> instead?</p>',
+			'/newsletter-confirm?done=confirmed' => '<h1>You are subscribed</h1><p>Thanks for confirming. The next issue will reach you by email.</p>',
+			'/?done=check_email' => '<p class="notice">Almost there: check your inbox to confirm.</p>',
+		);
+		foreach ($alerts as $page => $bytes) {
+			$db = "$tmp/".md5($page).'.sqlite';
+			$env = 'RASTER_APP=application RASTER_ENV= RASTER_DB='.escapeshellarg($db).' RASTER_URL=http://localhost:8000/';
+			$now = shell_exec('cd '.escapeshellarg($site).' && '.$env.' '.php_cmd().' bin/raster render '.escapeshellarg($page).' 2>&1');
+			@unlink($db);
+			// 2.2.51 printed the alert's block as it is in the view, its annotations gone
+			$bytes = preg_replace('/<!-- \/?print\.validation\.alert\(\'[a-z_]+\'\) -->/', '', $bytes);
+			check(strpos($now, "    $bytes\n") !== false || strpos($now, "  $bytes\n") !== false || strpos($now, "      $bytes\n") !== false, "$page: $bytes in ".$now);
+			check(strpos($now, 'print.i18n') === false, "$page: no annotation left");
+		}
+	} finally {
+		remove_dir($tmp);
+	}
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";
 foreach ($skipped as $skip) echo "  - $skip\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";

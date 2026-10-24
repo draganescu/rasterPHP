@@ -8,10 +8,10 @@
   <!-- dry._layout.header /-->
   <main class="narrow">
     <h1><!-- print.i18n.account('your_account') -->Your account<!-- /print.i18n.account('your_account') --></h1>
-    <!-- print.validation.alert('account_saved') --><p class="notice">Saved.</p><!-- /print.validation.alert('account_saved') -->
-    <!-- print.validation.alert('registered') --><p class="notice">Welcome! Your account is ready.</p><!-- /print.validation.alert('registered') -->
-    <!-- print.validation.alert('current_password_wrong') --><p class="error">Your current password is not right.</p><!-- /print.validation.alert('current_password_wrong') -->
-    <!-- print.validation.alert('email_taken') --><p class="error">Another account uses that email.</p><!-- /print.validation.alert('email_taken') -->
+    <!-- print.validation.alert('account_saved') --><p class="notice"><!-- print.i18n.account('saved') -->Saved.<!-- /print.i18n.account('saved') --></p><!-- /print.validation.alert('account_saved') -->
+    <!-- print.validation.alert('registered') --><p class="notice"><!-- print.i18n.account('welcome_your_account_is_ready') -->Welcome! Your account is ready.<!-- /print.i18n.account('welcome_your_account_is_ready') --></p><!-- /print.validation.alert('registered') -->
+    <!-- print.validation.alert('current_password_wrong') --><p class="error"><!-- print.i18n.account('your_current_password_is_not') -->Your current password is not right.<!-- /print.i18n.account('your_current_password_is_not') --></p><!-- /print.validation.alert('current_password_wrong') -->
+    <!-- print.validation.alert('email_taken') --><p class="error"><!-- print.i18n.account('another_account_uses_that_email') -->Another account uses that email.<!-- /print.i18n.account('another_account_uses_that_email') --></p><!-- /print.validation.alert('email_taken') -->
     <!-- render.authentication.me --><p><!-- print.i18n.account('logged_in_as') -->Logged in as<!-- /print.i18n.account('logged_in_as') --> <strong><!-- print.name -->Ada<!-- /print.name --></strong> (<!-- print.role -->member<!-- /print.role -->).</p><!-- /render.authentication.me -->
     <!-- render.authentication.account -->
     <form method="post" class="stack">
