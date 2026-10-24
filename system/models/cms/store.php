@@ -436,10 +436,10 @@ class cms_store {
 			$page->$field = cms_types::clean(isset($types[$field]) ? $types[$field] : 'text', $value, $field);
 		}
 		// the language the revision changed: the default's code for a save
-		// without one, '' without languages. Written once the table has the
-		// column, so a site without languages stores what it always did
+		// without one. Only while multilingual and once the table has the
+		// column, so off a save stores what it always did
 		$saved_lang = $lang !== '' ? $lang : i18n::default_language();
-		if (isset($types['saved_lang'])) $page->saved_lang = $saved_lang;
+		if (i18n::enabled() && isset($types['saved_lang'])) $page->saved_lang = $saved_lang;
 		$page->updated_at = R::isoDateTime();
 		R::store($page);
 		util::content_changed();
@@ -450,13 +450,12 @@ class cms_store {
 		return $saved;
 	}
 
-	// the page's revisions, newest first; each says the language it
-	// changed (saved_lang, '' for one older than languages) once the
-	// table keeps it or the site is multilingual
+	// the page's revisions, newest first; multilingual, each says the
+	// language it changed (saved_lang, '' for one older than languages)
 	static function page_history($type, $limit = 20) {
 		if (!self::table_exists($type)) return array();
 		$revisions = R::find($type, ' ORDER BY id DESC LIMIT '.max(1, (int)$limit));
-		$languages = i18n::enabled() || ($revisions && array_key_exists('saved_lang', reset($revisions)->getProperties()));
+		$languages = i18n::enabled();
 		$history = array();
 		foreach ($revisions as $revision) {
 			$values = cms_types::read_row($type, $revision->export());
