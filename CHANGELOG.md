@@ -3,6 +3,13 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.48
+
+`php bin/raster update` does what sites need: its upgrade step adds the `no_database` and `no_users` alerts after `<!-- print.cms.login_message /-->` in a site's login view, since that tag now prints nothing. To word the refusals, a site can set `error_document_403` and `error_document_500` views (below). A listener or script that read `{"error":"cross-site"}` from `/api` now gets `cross_site`.
+
+- **The framework prints no English to visitors** (#38). Every refusal goes through `controller::refuse($code, $alert)`: it renders the site's `error_document_<code>` view, with an alert the view words (`cross_site`, `form_expired`, `not_allowed`), or answers the bare status (`<h1>403</h1>`) with no sentences. That covers a post from another site, a stale form, a protected page someone without the role asks for, the 404, the 500 outside development and the 503. The refused post is never handled, error pages are never cached, and they keep the page's flags (`if.logged_in`, `if.live`). On `/api` the answer is JSON with `problems`. The login page's notices are alerts, and an email without a `<title>` gets the site's name (or the host) as its subject.
+- **The in-page editor's refusals are names, worded in the editor's language** (#128). Type errors answer `problems: ['type_<type>']`, uploads `upload_missing`, `upload_too_big` (also over PHP's `post_max_size`), `upload_not_a_picture` and `upload_not_stored`. English and Romanian ship; a site rewords any of them in `i18n/<lang>/raster_editor.php`.
+
 ## 2.2.47
 
 Nothing for most sites to do. A listener of `cms.item_saved` or `cms.item_deleted` that compared `collection` with a name rebuilt from the table (`teammembers` for a `team_members` collection) now gets the collection's own name.
