@@ -749,6 +749,7 @@ class cms
 				// language gets one of its own there
 				if ($lacks || $made) cms_store::translate_slugs($this->data_name, $bean, $skip);
 				R::store($bean);
+				cms_store::$slug_items = array();
 				cms_store::record_slugs($this->data_name, $bean, $source);
 				// shown as the row shows it: this language's slug, else the default's
 				$data[$key]['slug'] = $column !== 'slug' && !empty($bean->$column) ? $bean->$column : $bean->slug;
