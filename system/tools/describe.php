@@ -69,7 +69,7 @@ class raster_describe
 					'/about renders about'.config::get('views_ext', '.html').', /docs/setup renders docs/setup'.config::get('views_ext', '.html'),
 					'/news.rss renders the view news.rss; also .atom, .xml, .json, .txt',
 					'views and folders starting with _ are never pages (_layout, _email/)',
-					'a collection adds /<name>/<name>_item/<slug>, /<name>/<name>_page/<n> and /<name>/<name>_items/<field>/<value>',
+					'a collection adds /<name>/<name>_item/{slug} (the id when an item has no slug), /<name>/<name>_page/<n> and /<name>/<name>_items/<field>/<value>',
 					'anything else is 404',
 				),
 				'extra_routes' => $routes,
@@ -86,7 +86,7 @@ class raster_describe
 				foreach ($page['fields'] as $name => $field) {
 					$fields[$name] = self::clip($field['default'], $limits['default']);
 				}
-				$pages[] = array('url' => $page['url'], 'view' => $page['view'], 'table' => $page['type'], 'fields' => $fields) + self::types($page['fields']);
+				$pages[] = array('url' => $page['url'], 'view' => $page['view']) + (isset($page['theme']) ? array('theme' => $page['theme']) : array()) + array('table' => $page['type'], 'fields' => $fields) + self::types($page['fields']);
 			}
 			$out['pages'] = $pages;
 		}
@@ -95,7 +95,7 @@ class raster_describe
 		if ($want('admin_pages')) {
 			$out['admin_pages'] = array();
 			foreach (authentication::all_admin_pages() as $page) {
-				$out['admin_pages'][] = array('url' => '/'.($page['view'] === config::get('default_view', 'index') ? '' : $page['view']), 'view' => $page['view'], 'title' => $page['title'], 'role' => $page['role']);
+				$out['admin_pages'][] = array('url' => cms::page_path($page['view'].config::get('views_ext', '.html')), 'view' => $page['view'], 'title' => $page['title'], 'role' => $page['role']);
 			}
 		}
 
@@ -112,7 +112,7 @@ class raster_describe
 				) + self::types($collection['fields']) + array(
 					'used_in' => $collection['views'],
 					'items' => self::count_items($collection['type']),
-					'item_url' => '/'.$collection['name'].'/'.$collection['name'].'_item/{slug}',
+					'item_url' => cms::item_path($collection['name'], '{slug}'),
 					'page_size' => (int)config::get($collection['name'].'_page_size', config::get('raster_page_size', 10)),
 				);
 				// a type a model declares: who may see, create and act on its records
@@ -135,7 +135,8 @@ class raster_describe
 		}
 
 		if ($want('lint')) {
-			$problems = $inspector->lint(array($inspector->theme));
+			// the site's theme and the ones its routes serve views from
+			$problems = $inspector->lint();
 			$errors = array_values(array_filter($problems, function ($p) { return $p['severity'] === 'error'; }));
 			$out['lint'] = array(
 				'errors' => count($errors),

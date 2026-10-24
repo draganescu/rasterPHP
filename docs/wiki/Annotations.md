@@ -25,6 +25,8 @@ Most annotations have the shape `keyword.model.method`:
 - **model**: the name of a PHP class in `models/<name>/<name>.php`, in lowercase letters, digits and `_`
 - **method**: a public method of that class
 
+Row keys inside a render block are letters, digits, `_` and `-` (`print.line2`, `print.line-2`), and an attribute may have dashes and colons too (`print.@data-id.key`, `print.@aria-label.key`). The engine and `lint` read these from one list, `names` in `php bin/raster annotations --json`.
+
 `print.products.count` calls `products::count()` (on an instance of the class, not statically).
 
 ## The full list
@@ -232,7 +234,7 @@ Insert it in another with `dry.<view>.<fragment>`:
 <!-- dry._layout.header /-->
 ```
 
-The view name can include folders: `dry.partials/nav.main`. Keep names simple: view names may only use lowercase letters, `_` and `/`, fragment names lowercase letters, `_` and `-`. Digits don't work in either. A `dry` block can also wrap placeholder content, which is replaced by the fragment:
+The view name can include folders: `dry.partials/nav.main`. View names use lowercase letters, digits, `_`, `-` and `/`, fragment names lowercase letters, digits, `_` and `-` (`dry._layout.nav2`). A `dry` block can also wrap placeholder content, which is replaced by the fragment:
 
 ```html
 <!-- dry._layout.header --><header>Mock-up header</header><!-- /dry._layout.header -->
@@ -241,7 +243,7 @@ The view name can include folders: `dry.partials/nav.main`. Keep names simple: v
 Things to know:
 
 - Fragments are inserted **before** anything else happens, so they can contain any annotation.
-- Insertion happens **once**: a `dry` inside an inserted fragment isn't expanded. Keep fragments one level deep.
+- A `dry` inside an inserted fragment is expanded too, up to five levels deep, the way `lint` and `schema` read it. A deeper one stays in the page as a comment.
 - The `res` markers themselves are removed from the output, so a page can define fragments and still show them.
 - `lint` reports a `dry` that names a missing file or fragment.
 

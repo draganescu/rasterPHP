@@ -3,6 +3,27 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.47
+
+Nothing for most sites to do. A listener of `cms.item_saved` or `cms.item_deleted` that compared `collection` with a name rebuilt from the table (`teammembers` for a `team_members` collection) now gets the collection's own name.
+
+- **One place reads and writes collection and item URLs** (#40). `cms::collection_uri()` parses `/<view>/<name>_item|_items|_page/…`, `cms::collection_request()` says what a list is asked for, and `cms::item_url()`, `cms::page_link()` and `cms::filter_link()` build the links. The router, page fields, pagination, feed, the sitemap, records, RSVP, the inspector, `describe` and MCP all call them, so the URLs a site's links write render as before. On a page with two paginated lists, each pager now keeps the other's page, and `/landing_page/landing_page/2` shows page 2.
+- **One place matches `protected` paths**, `authentication::protection($path)`, ignoring case. The page check, the sitemap, the Admin menu, lint and `describe` agree: `Faq` protects `/faq` and the Admin menu now lists it.
+- **Item URLs are written `/<name>/<name>_item/{slug}` everywhere** (#37): `describe`, MCP's `site_overview` and the inspector said `{id}`.
+- **`cms.item_saved` and `cms.item_deleted` carry the collection's own name** (#33), and lint reports two collection names that share one table (`team_members` and `teammembers`) as an error.
+
+## 2.2.46
+
+Two things for some sites to check, after `php bin/raster update`:
+
+- **A view named like `<name>_page.html` or `<name>_items.html`** (say `landing_page.html`) now keeps its own fields. Before, it read and saved them under another page (`/landing`), so text an editor wrote on it seems to disappear: copy it again on that page.
+- **A site with a route into another theme** (`->from('print')`) whose views print `print.cms` fields: `schema --check` and `doctor` now see those fields, so run `php bin/raster schema --apply` once.
+
+- **Lint, schema and the page agree on every name** (#28). The characters a model, key, field, attribute, view and `res`/`dry` name may use are one list in the engine (`template::$names`, printed by `raster annotations`), and lint reads the same list. `print.@data-x.key`, `print.@aria-label.key` and `print.line2` inside a render block now print, and `dry._layout.nav2` inserts `res.nav2`. A row key the engine can't read is a lint error.
+- **A `dry` inside a fragment is filled in**, up to five levels, as lint already read it (#36). The page, lint, `schema` and MCP list the same fields. A page with no nested `dry` renders as before.
+- **`/landing_page` is its own page** (#132). `<name>_page` and `<name>_items` are list segments only where the router serves the list (`/news/news_page/2`, `/news/news_items`), and the inspector uses the same rule as the page.
+- **Views a route serves from another theme are linted and get their tables** (#133). `lint`, MCP `lint_templates`, `describe` and `schema` include every theme a route names; `lint --theme=<name>` checks that theme alone and `--all-themes` works as before.
+
 ## 2.2.45
 
 Nothing for existing sites to do. This changes only what a new site starts with (`php bin/raster new`).

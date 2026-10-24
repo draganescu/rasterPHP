@@ -126,7 +126,15 @@ because it may be an ordinary comment.
 
 The grammar is also data: `system/tools/annotations.php`, printed by
 `php bin/raster annotations [--json]`. It is what `lint` checks against, so
-an agent can read it and be sure.
+an agent can read it and be sure. Its `names` are the characters each kind
+of name is made of, and the engine builds its patterns from the same list
+(`template::$names`), so a name lint accepts is one the page reads: model
+names are lowercase letters, digits and `_`, as PHP class names are (a
+name with `-` is read as one, and lint reports no such model); row keys letters, digits,
+`_` and `-` (`print.line2`, `print.line-2`); attributes may have dashes and
+colons too (`print.@data-id.key`, `print.@aria-label.key`,
+`print.@xlink:href.url`); views and `res` names lowercase letters, digits,
+`_` and `-` (`dry._layout.nav2`, `res.nav2`).
 
 | Form | Meaning |
 |---|---|
@@ -136,7 +144,7 @@ an agent can read it and be sure.
 | `<!-- render.model.method --> … <!-- /render.model.method -->` | Repeated once per row the method returns. Inside, `print.key` is a key of the row. |
 | `<!-- remove --> … <!-- /remove -->` | Mock-up content. Removed before anything runs, so fields and collections inside it are not part of the content model. Can't be nested. |
 | `<!-- res.name --> … <!-- /res.name -->` | A reusable fragment. |
-| `<!-- dry.view.name /-->` | Inserts fragment `res.name` from `view.html` (e.g. `dry._layout.header`). |
+| `<!-- dry.view.name /-->` | Inserts fragment `res.name` from `view.html` (e.g. `dry._layout.header`). A `dry` inside the fragment is filled in too, up to five levels deep, as `lint`, `schema` and MCP read it; a deeper one stays a comment. |
 | `<!-- print.if.flag --> … <!-- /print.if.flag -->` | Shown only when the template flag is true (`template::set('flag')->to(true)`). `if.live` is true on the running site and `if.static` in a static export. |
 | `<!-- print.self.name /-->` | A value set on the template, for example in emails. |
 | `<!-- print.session.key /-->` | `$_SESSION['key']`. |
@@ -164,7 +172,8 @@ in, so write the short form if it is quicker and let the fix finish it.
 <!-- /render.cms.team -->
 ```
 
-- `print.key` is replaced by the row's value.
+- `print.key` is replaced by the row's value. Keys are letters, digits, `_`
+  and `-`; `lint` reports one with any other character, which never prints.
 - `print.model.method` and `print.if.flag` work inside a render block too:
   the method is called once and every row gets the same value (or hides
   the block), however long the list.
@@ -385,7 +394,7 @@ alike:
 | `rsvp.replied` | a reply to an event was made (by a guest on the form, or by staff in the page, over MCP or in model code): its fields but `token_hashes` and `link_sent_at`, `who` (`guest`, `staff` or `waitlist`), `event_title`, `event_date`, `event_starts`. After the commit, as are the two below |
 | `rsvp.changed` | the same, after its `answer`, `people` or `event` changed, with `was` and `was_people` (the status and party before) |
 | `rsvp.promoted` | the same, after a waiting reply was moved in (`who` `waitlist`; `staff` by the `promote` action) |
-| `cms.item_saved` | `collection`, `created` (true for new items), `item` |
+| `cms.item_saved` | `collection` (its own name, `team_members`), `created` (true for new items), `item` |
 | `cms.item_deleted` | `collection`, `item` |
 | `cms.page_saved` | `type`, `slug`, `changed` (field names), `fields` |
 | `content_changed` | none (sent by `util::content_changed()`; inside a transaction, once after the commit) |
@@ -685,19 +694,31 @@ mock-up is stored only when the collection's table is made.
 - **Names:** lowercase letters, digits and `_`, starting with a letter.
   Reserved: CMS method names (`style`, `login`, …), `slug`, `id`,
   `updated_at`, `enabled` and `published_at` for fields; `users` and `raster`
-  for collections. `lint` reports these. Words SQL keeps for itself
+  for collections. `lint` reports these. A collection's table drops the
+  `_`s (`team_members` is stored in `teammembersdata`), so `team_members`
+  and `teammembers` would share one table and show each other's items:
+  `lint` reports that as an error. Words SQL keeps for itself
   (`when`, `from`, `group`, `order`) are fine: lists sort and filter by them
   like any other field.
 - **Site-wide fields:** a field whose name starts with `site_`
   (`print.cms.site_name`) is shared by every page. Put these in `_layout.html`.
 - **Collection URLs** are routed to views that render that collection:
-  - `/news/news_item/<slug or id>` renders `news_item.html` (or `news.html`)
-    with that item. If there's no such item, the response is a 404. A
+  - `/news/news_item/{slug}` renders `news_item.html` (or `news.html`)
+    with that item; an item with no slug is at its id. `{slug}` is how
+    `describe` and MCP's `site_overview` write an item's address too. If
+    there's no such item, the response is a 404. A
     number is a slug first: an item titled `1984` opens at
     `/news/news_item/1984`, and a number no item has as its slug is an id.
   - `/news/news_page/2` is page 2. The page size comes from `news_page_size` or
     `raster_page_size` (10).
   - `/news/news_items/tag/php` lists the items where `tag` is `php`.
+    Filters count only under the collection's own name, as its filter
+    links write them; the list and its pager read them the same way.
+  - `<name>_page` and `<name>_items` are these only after a page whose
+    view renders the list (`/news/news_page` is `news.html`'s, with its
+    page fields), or with something after them: `/landing_page` is the
+    view `landing_page.html`, a page with fields of its own, apart from
+    `/landing`'s.
 - **Options:** `render.cms.news('featured=1&order=newest&limit=3')`, pairs
   joined by `&`. They work the same in `pagination.links('cms.news', '…')`:
   the list and its pager are built from the same conditions, so the pager
@@ -958,7 +979,7 @@ own: the bundled booking model has the type, its rules and its emails (see
      the record's page, not from a model view. The bundled booking model's
      `render.booking.agenda` and `render.booking.attention` work this way.
   3. **Links to each record's own page**, `print.@href.raster_detail_link`
-     (`/inquiry/inquiry_item/<slug>`, shown by a view that renders
+     (`/inquiry/inquiry_item/{slug}`, shown by a view that renders
      `render.cms.inquiry`), where editors edit it. Every listed row has one.
   4. Ask only when none of these can show what is needed.
 
@@ -1058,8 +1079,9 @@ bundled model declares none of its types, and `lint` warns.
 - Roles: `admin`, `editor` (edits content), `member`.
 - Settings: `config::set('protected')->to(array('account' => 'member'))`
   (each pattern matches the start of the URL and of the view it renders,
-  ignoring case; a view protected for `editor` or `admin` is an admin page,
-  see **Editors and agents**),
+  ignoring case: `Faq` protects `/faq`. The Admin menu, the sitemap, the
+  editor's saves and `lint` match it the same way. A view protected for
+  `editor` or `admin` is an admin page, see **Editors and agents**),
   `registration` (false turns sign-up off), `login_page`, `after_login`,
   `password_min_length` (8).
 - A protected page answers a visitor with a 303 to the login page, and
@@ -1428,7 +1450,7 @@ its setup from `php demo/seed.php`, and is the worked example of all of it.
      renders `render.cms.bookingresource`, `bookinghours`, `bookingclosed`
      and `bookingservice` for the setup, and `booking_item.html` renders
      `render.cms.booking` for a booking's own page
-     (`/booking/booking_item/<slug>`, where `raster_detail_link` goes).
+     (`/booking/booking_item/{slug}`, where `raster_detail_link` goes).
      Never protect `booking`: as a prefix it takes the guest's `/booking`
      too, and `lint` warns.
   5. What can be booked: staff add the resources and hours on the setup
@@ -1638,7 +1660,7 @@ from `php demo/seed.php`, and are the worked example of all of it.
   queue in order; `not_waiting` on one that isn't waiting). It sends
   `rsvp.promoted` with `who` `staff`.
 - `render.rsvp.event`: one row for the page's event, on its item page
-  (`/events/events_item/<slug or id>`, found as `render.cms.events` finds
+  (`/events/events_item/{slug}`, found as `render.cms.events` finds
   it) or on any page by `?event=<id>`: `event` (its id), `places` and
   `left` (`''` for no limit), `going` (people), `waiting` (replies),
   `state` (`open`; `full`, a yes goes on the waitlist; `closed`, past the
@@ -1930,7 +1952,7 @@ from `php demo/seed.php`, and are the worked example of all of it.
      places, the date and the deadline are the event's own fields, edited
      on its page; raising `places` there moves the waitlist in.
      `rsvp_item.html` rendering `render.cms.rsvp` is a reply's own page
-     (`/rsvp/rsvp_item/<slug>`, where `raster_detail_link` goes). The
+     (`/rsvp/rsvp_item/{slug}`, where `raster_detail_link` goes). The
      counts take values only, so a count for the chosen event is the
      event's row, not `count('…&event=?event')`.
   6. On `/account`, `render.cms.rsvp('owner=me&order=-created_at')` lists a
@@ -2318,6 +2340,12 @@ of lists and filter pages come along; drafts and the editor don't.
   `'__' => true` next to its rows is rendered but not printed; read the HTML later from
   `template::instance()->render_results['model']['method']`.
 - **A route to another theme:** `controller::route('print/menu')->to('menu')->from('print')`.
+  `lint` (and MCP `lint_templates`, `describe`) checks the site's theme and
+  every theme a route serves views from; `--theme=name` checks that one
+  alone and `--all-themes` every folder under `views/`. A literal route's
+  view there is a page of the site like any other: `schema` (and
+  `--apply`), `describe` and MCP `get_page`/`update_page` know its fields
+  (`/print/menu`), and `describe` names its `theme`.
 - **Error pages.** The framework prints no words of its own to visitors:
   every refusal goes through `controller::refuse($code, $alert)`, which
   sets the status and renders the site's view for it,

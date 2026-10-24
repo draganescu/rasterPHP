@@ -36,7 +36,7 @@ day before, so the waitlist is easy to see.
 | `/staff`, `/staff/setup`, `/staff/bookings`, `/booking/booking_item/<slug>` | the staff page from the Records recipe (counts, needs attention, requests, the agenda with the places left, the past, and the contact messages: new, spam, done), the booking setup, every booking, one booking; `/contactmessage/contactmessage_item/<slug>` is one message |
 | `/events/events_item/<slug>` | an evening's page: the places left, and the reply form (yes with a party, maybe, no), with the waitlist when it is full |
 | `/rsvp` | the guest's reply, by the link in their emails (`?token=`) or from /account: change the answer or the party |
-| `/staff/events`, `/rsvp/rsvp_item/<slug>` | the replies' staff page: counts, needs attention, every evening to come with its replies and the waitlist's Promote button, and one evening's replies with the card for a phone reply; one reply |
+| `/staff/events`, `/rsvp/rsvp_item/{slug}` | the replies' staff page: counts, needs attention, every evening to come with its replies and the waitlist's Promote button, and one evening's replies with the card for a phone reply; one reply |
 | `/members`, `/account`, `/login`, `/register`, `/forgot`, `/password/new` | accounts, roles and protected pages; members see their bookings and replies on /account |
 | `/lab` | the engine's edge cases, one section each |
 | `/journal.rss`, `/journal.atom`, `/feed.json`, `/sitemap.xml`, `/hours.txt` | formats |

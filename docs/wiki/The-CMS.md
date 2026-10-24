@@ -121,9 +121,9 @@ Each collection gets URLs without any routing work:
 
 **Item URLs** always start with the collection's own name: `/<collection>/<collection>_item/…`. `/news/news_item/…` uses `news_item.html` if it exists, otherwise `news.html`, and one of them must exist and contain `render.cms.news`. Either way, that block shows just the one item. An item that doesn't exist gives a **404**. So if your team list is on `people.html`, create `team_item.html` for the detail pages (or name the list page `team.html`).
 
-**List URLs** (`_page` and `_items`) start with the page that shows the list: `/news/news_page/2` for `news.html`, `/archive/news_page/2` for `archive.html`. A collection listed on the home page is an exception: `/news_page/2` has no page to attach to and gives a 404, so put long, paginated lists on a page of their own.
+**List URLs** (`_page` and `_items`) start with the page that shows the list: `/news/news_page/2` for `news.html`, `/archive/news_page/2` for `archive.html`. Filters count only under the collection's own name, as the site's filter links write them: `/news/news_items/tag/php` filters the list, while `/archive/news_items/tag/php` shows `archive.html` with the whole list, and its pager counts the whole list too. A collection listed on the home page is an exception: `/news_page/2` has no page to attach to and gives a 404, so put long, paginated lists on a page of their own.
 
-**Page fields on these URLs.** List pages (`/news/news_page/2`, `/news/news_items/tag/php`) share their page fields with `/news`. All item pages of a collection share one set of page fields (for example a common sidebar text): their own when `news_item.html` exists, otherwise those of `/news`.
+**Page fields on these URLs.** List pages (`/news/news_page/2`, `/news/news_items/tag/php`) share their page fields with `/news`. So do `/news/news_page` and `/news/news_items` with nothing after them: a `_page` or `_items` segment is a list URL when the page before it (`news.html`) renders the list. `/landing_page` is the view `landing_page.html`, with page fields of its own. All item pages of a collection share one set of page fields (for example a common sidebar text): their own when `news_item.html` exists, otherwise those of `/news`.
 
 ### Links to items: `raster_detail_link`
 
@@ -179,6 +179,7 @@ Visitors don't see drafts or scheduled items, on lists, detail pages, feeds or s
 - Reserved field names: `slug`, `id`, `updated_at`, `enabled`, `published_at`, and the names of the `cms` model's own methods (`style`, `login`, `logout`, `route`, `setup`, and others).
 - Reserved collection names: `users`, `raster`.
 - Words SQL keeps for itself (`when`, `from`, `group`, `order`) are fine as field names: lists sort and filter by them like any other field.
+- A collection's table leaves out the `_`s: `team_members` is stored in `teammembersdata`. So `team_members` and `teammembers` would share one table and each show the other's items; `lint` reports that as an error.
 
 `lint` reports a reserved or invalid name with its file and line.
 

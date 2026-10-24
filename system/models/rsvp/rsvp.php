@@ -504,7 +504,7 @@ class rsvp
 				'rsvp_until' => isset($item['rsvp_until']) ? (string)$item['rsvp_until'] : '',
 				'visible' => (!isset($item['enabled']) || ($item['enabled'] !== false && (string)$item['enabled'] !== '0')) && ($published === '' || $published <= date('Y-m-d H:i:s')),
 				'starts_at' => strtotime($item['date'].' '.$starts),
-				'url' => util::url(self::collection().'/'.self::collection().'_item/'.$item['slug']),
+				'url' => cms::item_url(self::collection(), $item),
 			);
 			if ($event['starts_at'] === false) $event = null;
 			else $event['deadline'] = self::deadline($event);
@@ -528,8 +528,8 @@ class rsvp
 			self::$page = null;
 			$collection = self::collection();
 			$table = self::table();
-			if ($collection !== null && util::param($collection) === $collection.'_item') {
-				$wanted = (string)util::param($collection.'_item');
+			$wanted = $collection !== null ? cms::collection_request($collection)['item'] : null;
+			if ($wanted !== null) {
 				$bean = cms_store::table_exists($table) ? R::findOne($table, ' slug = ? ', array($wanted)) : null;
 				if ($bean) self::$page = (int)$bean->id;
 				elseif (ctype_digit($wanted)) self::$page = (int)$wanted;

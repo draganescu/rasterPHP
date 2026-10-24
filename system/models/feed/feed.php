@@ -39,7 +39,7 @@ class feed
 			$item = $record ? cms_records::for_template($record, cms_records::shown($record, cms_records::decode($record, $item))) : cms_types::show_row($item);
 			$date = !empty($item['published_at']) ? $item['published_at'] : (!empty($item['updated_at']) ? $item['updated_at'] : 'now');
 			$time = strtotime($date) ?: time();
-			$item['url'] = rtrim(config::get('link_uri'), '/').'/'.$collection.'/'.$collection.'_item/'.(!empty($item['slug']) ? rawurlencode($item['slug']) : $item['id']);
+			$item['url'] = cms::item_url($collection, $item);
 			$item['date_rfc822'] = date(DATE_RSS, $time);
 			$item['date_iso'] = date(DATE_ATOM, $time);
 			$rows[] = $item;
@@ -58,26 +58,22 @@ class feed
 		// a page that needs an account isn't listed, nor are the items of a
 		// collection whose item page does: matched as authentication::setup()
 		// matches, by URL and by view, in any case
-		$protected = (array)config::get('protected', array());
-		$open = function ($path) use ($protected) {
-			foreach ($protected as $pattern => $role) {
-				if (preg_match('%^/'.ltrim($pattern, '/').'%i', $path)) return false;
-			}
-			return true;
-		};
+		$open = function ($path) { return !authentication::protection($path); };
 		$rows = array();
 		$item_views = $closed = array();
 		foreach ($inspector->views() as $view) {
-			if (preg_match('#(^|/)_#', $view) || substr($view, -strlen($inspector->ext)) !== $inspector->ext) continue;
+			$path = cms::page_path($view, $inspector->ext);
+			if ($path === null) continue;
 			$name = substr($view, 0, -strlen($inspector->ext));
-			if (preg_match('/^([a-z0-9_]+)_item$/', basename($name), $m)) {
-				if ($open('/'.$name) && $open('/'.$m[1].'/'.$m[1].'_item')) $item_views[] = $m[1]; else $closed[] = $m[1];
+			$collection = cms::item_view($name);
+			if ($collection !== null) {
+				if ($open('/'.$name) && $open(cms::item_path($collection))) $item_views[] = $collection; else $closed[] = $collection;
 				continue;
 			}
 			if (in_array($name, $skip)) continue;
 			if (!$open('/'.$name)) continue;
 			$updated = date('Y-m-d', filemtime($inspector->theme_dir().'/'.$view));
-			$rows[] = array('url' => $name === config::get('default_view', 'index') ? $link.'/' : $link.'/'.$name, 'updated' => $updated);
+			$rows[] = array('url' => $link.$path, 'updated' => $updated);
 		}
 		database::instance();
 		if (database::configured()) {
