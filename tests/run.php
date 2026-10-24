@@ -9753,7 +9753,8 @@ test('P1.A: doctor fails on multilingual without two languages and on a code it 
 		return with_settings($settings, function () use ($root) {
 			$found = array();
 			foreach (raster_project::doctor($root, 'application', 'development') as $c) {
-				if (preg_match('/language|multilingual/i', $c['title'])) $found[] = $c['status'].' '.$c['title'];
+				// (the missing language columns are P5.B's check, tested on its own)
+				if (preg_match('/language|multilingual/i', $c['title']) && strpos($c['title'], 'column') === false) $found[] = $c['status'].' '.$c['title'];
 			}
 			return $found;
 		});
@@ -10050,7 +10051,9 @@ test('P2.C: read_strings and write_strings: the agent sends words, Raster writes
 			unlink(APPBASE.'i18n/ro/raster_editor.php');
 			// translation_status counts the dictionary
 			$status = $mcp->call('translation_status', array('lang' => 'ro'));
-			check(!in_array('strings', array_column($status['missing'], 'kind'), true), 'translated words are done: '.json_encode($status));
+			// (the starter's own words are keys too, untranslated here)
+			$left = array_filter($status['missing'], function ($row) { return $row['kind'] === 'strings' && $row['where'] === 'zzp2c'; });
+			same(array(), array_values($left), 'translated words are done');
 			check(isset($mcp->call('translation_status', array('lang' => 'en'))['error']), 'the default language is refused');
 			check(isset($mcp->call('translation_status', array('lang' => 'de'))['error']), 'a language the site lacks too');
 		});
