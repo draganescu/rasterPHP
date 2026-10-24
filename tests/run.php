@@ -14088,6 +14088,67 @@ test('2.2.52: multilingual, /ro/login shows the layout\'s site fields in Romania
 	}
 });
 
+// an alert's words are shown as written: lint reads them (multilingual
+// on), and a dictionary key inside the alert says them in each language
+test('2.2.52: lint, multilingual on, reports the words of an alert and of a field message, and suggests a dictionary key inside the alert; off, nothing', function () {
+	$view = '<!doctype html><!-- print.@lang.i18n.language --><html lang="en"><!-- /print.@lang.i18n.language --><body>'
+		."\n<!-- print.validation.alert('sent') --><p class=\"notice\">Thanks, we read every one.</p><!-- /print.validation.alert('sent') -->"
+		."\n<!-- print.validation.alert('done') --><p><!-- print.i18n.zz2252('done') -->Done.<!-- /print.i18n.zz2252('done') --></p><!-- /print.validation.alert('done') -->"
+		."\n<!-- render.zz2252.form --><form method=\"post\"><input name=\"x\" required>\n<!-- render.validation.field('x') --><p>Fill it in.</p><!-- /render.validation.field('x') --></form><!-- /render.zz2252.form -->"
+		."\n<!-- print.if.live --><p class=\"notice\">Live words.</p><!-- /print.if.live --></body></html>";
+	$said = function ($problems) {
+		$words = array();
+		foreach ($problems as $p) if (strpos($p['message'], 'is the same in every language') !== false) $words[$p['line']] = $p['message'];
+		return $words;
+	};
+	$on = with_settings(p2a_on(), function () use ($view, $said) { return $said((new raster_inspector())->lint_source($view, 'view', 'default')); });
+	// the alert, the field's message, and what print.if shows (as before)
+	same(array(2, 5, 6), array_keys($on), json_encode($on));
+	check(strpos($on[2], "'Thanks, we read every one.'") === 0 && strpos($on[2], "an alert shows its words as written") !== false && strpos($on[2], "<!-- print.validation.alert('…') --><p><!-- print.i18n.<file>('key') -->") !== false, $on[2]);
+	check(strpos($on[5], "'Fill it in.'") === 0 && strpos($on[5], 'no annotation prints it') !== false, $on[5]);
+	foreach (p4_off_settings() as $what => $setting) {
+		same(array(), with_settings($setting, function () use ($view, $said) { return $said((new raster_inspector())->lint_source($view, 'view', 'default')); }), $what);
+	}
+});
+
+test('2.2.52: lint warns about an alert name a view has twice with different words, always; the same words twice are fine', function () {
+	$twice = "<!-- print.validation.alert('name_invalid') --><p>Tell us your name.</p><!-- /print.validation.alert('name_invalid') -->\n"
+		."<!-- print.validation.alert('name_invalid') --><p>That name has characters we can't use.</p><!-- /print.validation.alert('name_invalid') -->\n";
+	$found = function ($html) {
+		return array_values(array_filter((new raster_inspector())->lint_source($html, 'view', 'default'), function ($p) { return strpos($p['message'], 'twice with different words') !== false; }));
+	};
+	foreach (array('off' => array('multilingual' => false, 'languages' => array()), 'on' => p2a_on()) as $what => $setting) {
+		with_settings($setting, function () use ($twice, $found, $what) {
+			$problems = $found($twice);
+			same(1, count($problems), $what);
+			same(array('warning', 2), array($problems[0]['severity'], $problems[0]['line']), $what);
+			same(array(), $found(str_replace("That name has characters we can't use.", 'Tell us your name.', $twice)), "$what: the same words");
+		});
+	}
+});
+
+// the starter's alerts are dictionary keys: with multilingual on a fresh
+// site has no words lint calls untranslatable (the Final review test), and
+// its pages render as v2.2.45's did (the byte-for-byte test)
+test('2.2.52: every alert of the starter and of the demo\'s visitor pages is worded through a dictionary key', function () use ($root) {
+	$plain = array();
+	foreach (array('application/views/default', 'demo/views/cafe') as $dir) {
+		$files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator("$root/$dir", FilesystemIterator::SKIP_DOTS));
+		foreach ($files as $file) {
+			$path = substr($file->getPathname(), strlen("$root/"));
+			if (substr($path, -5) !== '.html') continue;
+			// the demo's staff pages and the lab stay English (demo/README.md)
+			if (strpos($path, 'demo/') === 0 && preg_match('#/(staff/.*|staff|lab|[a-z]+_item)\.html$#', $path) && !preg_match('#/(menu|events|journal|faq)_item\.html$#', $path)) continue;
+			preg_match_all("/<!-- print\.validation\.alert\('([a-z0-9_]+)'\) -->(.*?)<!-- \/print\.validation\.alert\('\\1'\) -->/s", file_get_contents($file->getPathname()), $alerts, PREG_SET_ORDER);
+			foreach ($alerts as $alert) {
+				$words = trim(strip_tags(preg_replace('/<!-- print\.i18n\.([a-z0-9_]+)\(\'([a-z0-9_.-]+)\'\) -->.*?<!-- \/print\.i18n\.\1\(\'\2\'\) -->|<code>.*?<\/code>/s', '', $alert[2])));
+				if (preg_match('/\p{L}{2,}/u', $words)) $plain[] = "$path {$alert[1]}: $words";
+			}
+		}
+	}
+	same(array(), $plain);
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";
 foreach ($skipped as $skip) echo "  - $skip\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";

@@ -11,6 +11,10 @@ Nothing for sites to do.
 
 **`/ro/login` shows the layout's site fields in Romanian.** The login page never read CMS fields; on a multilingual site its `site_*` fields (the tagline, the footer) now follow the page's language as on every other page. Off, the login page is as it was.
 
+**Lint reads an alert's words** (multilingual on). A `print.validation.alert` block prints its words as written, so on a multilingual site every language showed them in the default language and lint said nothing. `untranslatable_text` now reports them, and says to put a `print.i18n.<file>('key')` inside the alert. Off, lint is as it was. The starter's alerts are dictionary keys now, with the English as the default, so its pages are byte for byte what they were.
+
+**Lint warns about one alert name worded twice** (`alert_twice`, always). Two `print.validation.alert('x')` blocks with different words in one view show the first one's words in both places.
+
 **The demo café words every alert in Romanian.** The booking, reply, contact, account and newsletter alerts of the visitor pages are dictionary keys now, with their Romanian in `demo/i18n/ro/`. The contact form's `name_invalid` and `email_invalid` share the booking form's words: one alert name shows one text on a page.
 
 ## 2.2.51

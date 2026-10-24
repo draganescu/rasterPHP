@@ -544,7 +544,12 @@ of your own. Staff read the feedback on a page that renders
 - **`print.validation.alert('name')`** is hidden until a model calls
   `validation::get()->raise('name')`, or until the page loads with
   `?done=name` (which `util::done('name')` does). Alerts work anywhere on the
-  page.
+  page. Its words print as written; on a multilingual site make them a
+  dictionary key inside the block
+  (`<!-- print.validation.alert('sent') --><p><!-- print.i18n.feedback('thanks') -->Thanks.<!-- /print.i18n.feedback('thanks') --></p><!-- /print.validation.alert('sent') -->`),
+  as the starter and the demo do. One name is one block of words on a
+  page: a view with two blocks of one name and different words shows the
+  first one's in both places, and `lint` warns (`alert_twice`).
 - **`template::instance()->form_state($data)`** fills the form: input values,
   checked boxes, selected options and textarea text. Passwords are never
   filled.
@@ -2291,7 +2296,9 @@ every language is **Multilingual sites**, below).
   as written (make them `print.cms.<name>` for words editors change, or
   `print.i18n.<file>('key')` for fixed words; what a print replaces,
   comments, `remove`, scripts, styles, numbers, punctuation and lone
-  symbols are left out; `_email/` views are read too, since each email
+  symbols are left out; the words of a `print.validation.alert` block are
+  read, since they show as written, and the warning says to put a
+  `print.i18n` key inside the alert; `_email/` views are read too, since each email
   goes out in its recipient's language; one per line, at most ten per
   view and a count of the rest); `missing_translation_key`, a
   `print.i18n.<file>('key')` some language's dictionary has no entry for;
