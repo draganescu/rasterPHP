@@ -869,9 +869,10 @@ class raster_inspector {
 	// engine relies on; these checks catch the mistakes that fail silently.
 	// anchor_link: the <base> points at the theme folder, so href="#prices"
 	// and href="?sort=price" open that folder, not the page (#117). A link a
-	// print.@href sets, mock-up content and emails (no <base>) are left out.
+	// print.@href sets, mock-up content, emails (no <base>) and a page with
+	// a <base> of its own are left out.
 	protected function lint_anchor_links($html, &$problems) {
-		if (preg_match('#(^|/)_email/|\.(rss|atom|xml|json|txt)$#', $this->linting)) return;
+		if (preg_match('#(^|/)_email/|\.(rss|atom|xml|json|txt)$#', $this->linting) || stripos($html, '<base') !== false) return;
 		$html = preg_replace_callback('/<!-- remove -->.*?<!-- \/remove -->/s', function ($m) { return preg_replace('/[^\n]/', ' ', $m[0]); }, $html);
 		if (!preg_match_all('/<(a|area)\b[^>]*?\shref\s*=\s*(["\'])([#?][^"\']*)\2/i', $html, $links, PREG_OFFSET_CAPTURE | PREG_SET_ORDER)) return;
 		$page = preg_match('#/views/[^/]+/(.+)\.html$#', $this->linting, $m) ? $m[1] : '<page>';

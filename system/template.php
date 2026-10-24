@@ -38,19 +38,32 @@ class template {
   	return str_replace(array_keys(self::$script_form), array_values(self::$script_form), $html);
   }
 
-  // $tags right after the first <head>, attributes or not (<head prefix="og: …">)
+  // $tags right after the first <head>, attributes or not (<head prefix="og: …">),
+  // that isn't inside a comment or a script
   static function insert_in_head($html, $tags) {
-  	if (!preg_match('/<head(\s[^>]*)?>/i', $html, $m, PREG_OFFSET_CAPTURE)) return $html;
-  	$at = $m[0][1] + strlen($m[0][0]);
-  	return substr($html, 0, $at)."\n".$tags.substr($html, $at);
+  	$from = 0;
+  	while (preg_match('/<!--|<script\b|<head(\s[^>]*)?>/i', $html, $m, PREG_OFFSET_CAPTURE, $from)) {
+  		$at = $m[0][1];
+  		if (stripos($m[0][0], '<head') === 0) {
+  			$at += strlen($m[0][0]);
+  			return substr($html, 0, $at)."\n".$tags.substr($html, $at);
+  		}
+  		$end = $m[0][0] === '<!--' ? strpos($html, '-->', $at + 4) : stripos($html, '</script', $at);
+  		if ($end === false) return $html;
+  		$from = $end + 3;
+  	}
+  	return $html;
   }
 
   // In multilingual mode the page's canonical address and its address in
   // every language (hreflang, x-default the default language's), for <head>.
   // '' when off. What the page writes itself ($html has a canonical or an
-  // hreflang link) is left to it.
+  // hreflang link) is left to it. None on a refusal (a 404), nor on a URL
+  // with a query (?page=2 of a model's list): its address isn't the page's
   static function language_links($html = '') {
   	if (!i18n::enabled()) return '';
+  	$status = http_response_code();
+  	if (($status && $status !== 200) || $_GET) return '';
   	$current = strtolower(i18n::current());
   	$default = strtolower(i18n::default_language());
   	$canonical = '';

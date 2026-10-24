@@ -24,7 +24,7 @@
 * from ?lang=xx (remembered in a cookie), then the domain, the cookie, the
 * browser's Accept-Language, then the default.
 *
-*   <html lang="<!-- print.i18n.language /-->">
+*   <!-- print.@lang.i18n.language --><!-- print.@dir.i18n.dir --><html lang="en" dir="ltr"><!-- /print.@dir.i18n.dir --><!-- /print.@lang.i18n.language -->
 *   <!-- render.i18n.languages --><!-- print.+class.state --><!-- print.@href.url --><a href="#"><!-- print.code -->en<!-- /print.code --></a><!-- /print.@href.url --><!-- /print.+class.state --><!-- /render.i18n.languages -->
 */
 class i18n

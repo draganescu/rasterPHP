@@ -67,7 +67,7 @@ The cookie is the only cookie a visitor gets without logging in, and only after 
 <!-- print.@lang.i18n.language --><!-- print.@dir.i18n.dir --><html lang="en" dir="ltr"><!-- /print.@dir.i18n.dir --><!-- /print.@lang.i18n.language -->
 ```
 
-The mock-up still says `lang="en"`, and the page says the language it is shown in. `print.i18n.dir` is `rtl` for languages written right to left (Arabic, Hebrew, Persian, Urdu, …) and `ltr` for the rest. Every view of the starter, the demo and the shop starts this way, emails too.
+The mock-up still says `lang="en"`, and the page says the language it is shown in. `print.i18n.dir` is `rtl` for languages written right to left (Arabic, Hebrew, Persian, Urdu, …) and `ltr` for the rest. Every page of the starter, the demo and the shop starts this way. Emails keep `lang="en"` as written for now.
 
 ```html
 <!-- print.if.languages -->
@@ -79,7 +79,7 @@ The mock-up still says `lang="en"`, and the page says the language it is shown i
 <!-- /print.if.languages -->
 ```
 
-`render.i18n.languages` returns one row per language with `code`, `url` (the current page with `?lang=…`), `state` (`active` for the current one) and `current` (true for the current one). The flag `if.languages` is true when the site has more than one language, so the list shows only then; the starter's `_layout.html` has the switcher this way.
+`render.i18n.languages` returns one row per language with `code`, `url` (the current page in that language: its own address, `/ro/menu`, on a multilingual site, else the page with `?lang=…`), `state` (`active` for the current one) and `current` (true for the current one). The flag `if.languages` is true when the site has more than one language, so the list shows only then; the starter's `_layout.html` has the switcher this way.
 
 ## CMS content and translations
 

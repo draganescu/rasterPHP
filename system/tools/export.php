@@ -59,6 +59,7 @@ class raster_export {
 	protected $default_language = '';
 	protected $multilingual = false;
 	protected $prefixes = array(); // language => its address under the site's (multilingual only)
+	protected $domains = array();  // language => its own domain_language host (multilingual only)
 	protected $raw = array();     // path|lang => response body
 	protected $output = array();  // relative file => array('body' => …) or array('from' => file)
 
@@ -99,6 +100,13 @@ class raster_export {
 					$prefix = i18n::prefix($language);
 					$this->prefixes[$language] = ($prefix === '' && !i18n::is_default($language)) ? strtolower($language).'/' : $prefix;
 				}
+				// a language with its own domain answers only there: its pages
+				// are asked for on that host, and still written in ro/
+				foreach ((array)config::get('domain_language', array()) as $domain => $language) {
+					foreach ($this->languages as $code) {
+						if (strtolower($code) === strtolower($language) && !i18n::is_default($code) && !isset($this->domains[$code])) $this->domains[$code] = strtolower($domain);
+					}
+				}
 				foreach ($this->prefixes as $prefix) foreach ($this->seeds() as $path) $this->enqueue('/'.$prefix.ltrim($path, '/'));
 			} else {
 				foreach ($this->seeds() as $path) $this->enqueue($path);
@@ -135,6 +143,13 @@ class raster_export {
 		if ($missing) $this->warnings[] = 'Pages link to what the export leaves out: '.implode(', ', array_slice($missing, 0, 8)).(count($missing) > 8 ? ', …' : '');
 		if ($this->queries) {
 			$this->warnings[] = 'Links with a query string point to the same static page: '.implode(', ', array_slice(array_unique($this->queries), 0, 8)).(count(array_unique($this->queries)) > 8 ? ', …' : '');
+		}
+		if ($this->multilingual) {
+			// a language on its own domain is linked at that domain, not in this folder
+			$own = array();
+			foreach ($this->domains as $language => $domain) $own[] = "$language ($domain)";
+			if ($own) $this->warnings[] = 'Languages with their own domain: '.implode(', ', $own).'. Their pages are in their folder (ro/), and links and hreflang point at the domain: publish that folder there, or take them out of domain_language';
+			if ($this->url[0] === '/') $this->warnings[] = 'No --url, RASTER_URL or site_url: the canonical and hreflang links are root-relative, and search engines want them absolute. Export with --url=https://example.com/';
 		}
 		return $this;
 	}
@@ -223,6 +238,15 @@ class raster_export {
 		return $this->default_language;
 	}
 
+	// a link to a language's own domain as a crawled path: http://ro.example/menu
+	// is /ro/menu; null for any other link
+	protected function on_domain($link) {
+		foreach ($this->domains as $language => $domain) {
+			if (preg_match('#^https?://'.preg_quote($domain, '#').'(:\d+)?(/.*)?$#i', $link, $m)) return '/'.$this->prefixes[$language].ltrim(isset($m[2]) ? $m[2] : '', '/');
+		}
+		return null;
+	}
+
 	// the path without its language prefix: /ro/menu is /menu
 	protected function unprefixed($path) {
 		$prefix = isset($this->prefixes[$this->language_of($path)]) ? $this->prefixes[$this->language_of($path)] : '';
@@ -248,6 +272,11 @@ class raster_export {
 		}
 		// a language's home page is /ro/ (D5)
 		$address = ($this->multilingual && $path !== '/' && $path === '/'.rtrim($this->prefixes[$language], '/')) ? $path.'/' : $path;
+		// on its own domain, without the prefix
+		if (isset($this->domains[$language])) {
+			$headers[] = 'Host: '.$this->domains[$language];
+			$address = $this->unprefixed($path);
+		}
 		list($status, $body, $type) = $this->fetch($address, $headers);
 		if ($status !== 200) {
 			// a page that breaks or doesn't answer is an error in any language:
@@ -269,6 +298,7 @@ class raster_export {
 		foreach ($links[2] as $link) {
 			$link = html_entity_decode($link, ENT_QUOTES);
 			if (strpos($link, $this->base) === 0) $link = '/'.substr($link, strlen($this->base));
+			elseif (($on = $this->on_domain($link)) !== null) $link = $on;
 			elseif (!preg_match('#^/[^/]#', $link)) continue;
 			$bare = $this->normalize($link);
 			if ($bare === null || $this->asset_path($bare)) continue;
@@ -293,7 +323,8 @@ class raster_export {
 		// a multilingual site has one in each language: ro/404.html
 		foreach ($this->prefixes as $language => $prefix) {
 			if ($prefix === '') continue;
-			list($status, $body, $type) = $this->fetch('/'.$prefix.'raster-export-'.bin2hex(random_bytes(4)));
+			$missing = 'raster-export-'.bin2hex(random_bytes(4));
+			list($status, $body, $type) = isset($this->domains[$language]) ? $this->fetch('/'.$missing, array('Host: '.$this->domains[$language])) : $this->fetch('/'.$prefix.$missing);
 			if ($status === 0 || $status >= 500) {
 				$this->errors[] = "The 404 page ($language)".($status ? " answered $status" : ' did not answer');
 				continue;
@@ -345,6 +376,9 @@ class raster_export {
 		// root-relative addresses (uploads, say) belong to the site's address too
 		$url = $this->url;
 		$body = preg_replace_callback('#(\s(?:href|src)=["\'])/(?!/)#i', function ($m) use ($url) { return $m[1].$url; }, $body);
+		// a language's own domain, as the site's address says it: https when it is
+		$scheme = preg_match('#^(https?)://#i', $this->url, $m) ? strtolower($m[1]) : 'http';
+		foreach ($this->domains as $domain) $body = preg_replace('#https?://'.preg_quote($domain, '#').'(:\d+)?/#i', $scheme.'://'.$domain.'/', $body);
 		$escaped = str_replace('/', '\\/', $base);
 		return str_replace(array($base, $escaped, rtrim($base, '/')), array($this->url, str_replace('/', '\\/', $this->url), rtrim($this->url, '/')), $body);
 	}

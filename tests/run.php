@@ -9233,6 +9233,21 @@ test('P1.C: in multilingual mode <head> gets the canonical link, one hreflang pe
 	// off, with languages too, and one language only (D1): nothing
 	same('', with_settings(p1c_on(array('multilingual' => false)), $links));
 	same('', with_settings(p1c_on(array('languages' => array('en'))), $links));
+	// a refusal (the 404 page) and a URL with a query (?page=2) are no page's address
+	$status = http_response_code();
+	http_response_code(404);
+	try {
+		same('', with_settings(p1c_on(), $links), 'a 404');
+	} finally {
+		http_response_code($status ?: 200);
+	}
+	$get = $_GET;
+	$_GET = array('page' => '2');
+	try {
+		same('', with_settings(p1c_on(), $links), '?page=2');
+	} finally {
+		$_GET = $get;
+	}
 });
 
 test('P1.C: the base goes after any <head …> tag, and an exact <head> gets what 2.2.45 gave it (#117)', function () {
@@ -9242,6 +9257,9 @@ test('P1.C: the base goes after any <head …> tag, and an exact <head> gets wha
 	same('<head prefix="og: http://ogp.me/ns#">'."\n$base<title>x</title>", template::insert_in_head('<head prefix="og: http://ogp.me/ns#"><title>x</title>', $base));
 	same("<HEAD>\n$base", template::insert_in_head('<HEAD>', $base));
 	same('<header>h</header>', template::insert_in_head('<header>h</header>', $base));
+	// a <head> in a comment or a script before the real one is not it
+	same("<!-- <head> --><script>var t = '<head>';</script><head>\n$base<title>x</title>", template::insert_in_head("<!-- <head> --><script>var t = '<head>';</script><head><title>x</title>", $base));
+	same('<!-- <head> unclosed', template::insert_in_head('<!-- <head> unclosed', $base));
 });
 
 test('P1.C: a page with <head prefix=…> gets its base, and //host links are left as written (#117)', function () use ($base, $root) {
@@ -9349,6 +9367,34 @@ test('P1.C: lint warns on href="#…" and href="?…", which leave the page (anc
 	check(has_problem($inspector->lint_source('<a href="#team">Team</a>', 'application/views/default/docs/setup.html'), 'Write href="docs/setup.html#team"'), 'the view\'s own name');
 	// emails have no <base>
 	same(array(), $inspector->lint_source('<a href="#x">x</a>', 'application/views/default/_email/welcome.html'));
+	// nor a page with a <base> of its own
+	same(array(), lint_html('<head><base href="/"></head><a href="#x">x</a>'));
+});
+
+test('P1.C: off is identical for an email: its <html> is the mock-up\'s, whatever language the visitor picked', function () use ($root) {
+	$view = "$root/application/views/default/_email/password_reset.html";
+	$now = file_get_contents($view);
+	check(strpos($now, "<!doctype html>\n<html lang=\"en\" dir=\"ltr\">\n<head>") === 0 && strpos($now, 'i18n') === false, 'no language annotations in emails');
+	$vars = array('name' => 'Ana', 'reset_url' => 'https://cafe.test/reset?token=x');
+	$render = function () use ($vars) { return controller::render_view('_email/password_reset', $vars); };
+	$html = $render();
+	test_fixture($view);
+	file_put_contents($view, str_replace('<html lang="en" dir="ltr">', '<html lang="en">', $now));
+	try {
+		same($render(), str_replace('<html lang="en" dir="ltr">', '<html lang="en">', $html), 'as 2.2.45 rendered it, the dir aside');
+	} finally {
+		file_put_contents($view, $now);
+	}
+	// a visitor reading in Romanian doesn't change a staff email's lang (P4 gives emails their language)
+	$get = $_GET;
+	$_GET['lang'] = 'ro';
+	p1c_forget_language();
+	try {
+		same($html, with_settings(array('languages' => array('en', 'ro')), $render));
+	} finally {
+		$_GET = $get;
+		p1c_forget_language();
+	}
 });
 
 test('P1.C: a /ro/ page links to the other languages from <head> and the switcher, and BASE is its language\'s address, where /api answers too', function () use ($base, $p1b_on) {
@@ -9366,6 +9412,11 @@ test('P1.C: a /ro/ page links to the other languages from <head> and the switche
 		// the same answer, with its own address in the language (/ro/api/cms/style/output/true)
 		same(array($plain[0], $plain[1]), array($ro[0], str_replace('\\/ro\\/', '\\/', $ro[1])), 'BASE + api/… answers as /api/… does');
 		// the default language: canonical is its own address, BASE the site's
+		// none on the 404 page, nor on an address with a query
+		list($status, $missing) = http('GET', "$base/ro/zzp1c_nothing");
+		same(404, $status);
+		same(false, strpos($missing, 'hreflang'), $missing);
+		same(false, strpos(http('GET', "$base/ro/zzp1b_about?x=1")[1], 'rel="canonical"'), 'a query');
 		list(, $en) = http('GET', "$base/zzp1b_about");
 		check(strpos($en, "<link rel=\"canonical\" href=\"$base/zzp1b_about\">") !== false && strpos($en, '<script>var BASE = "'.$base.'/"</script>') !== false, $en);
 	});

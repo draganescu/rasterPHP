@@ -97,8 +97,8 @@ media/                        uploads from the CMS
   `<base>` of its own; that is what makes asset paths work on every URL. So
   `href="#prices"` and `href="?sort=price"` open the theme folder, not the
   page: write `href="about.html#prices"` (it becomes `/about#prices`) or
-  `href="about.html?sort=price"`. `lint` warns about the short forms
-  (`anchor_link`), except on a link a `print.@href` sets. A link to another
+  `href="about.html?sort=price"`. `lint` warns about the short forms,
+  except on a link a `print.@href` sets and on a page with its own `<base>`. A link to another
   site without its scheme (`href="//cdn.example.com/guide.html"`) is left
   as written.
   Next to it a script sets `BASE`, the site's address for scripts; on a
@@ -2049,8 +2049,9 @@ use `'model.method'`: `method(true)` returns
 - `print.i18n.language` gives the current language (`false` when the site
   has no `languages`, so the mock-up's value stays), and `print.i18n.dir`
   `rtl` for a language written right to left (Arabic, Hebrew, Persian,
-  Urdu, …), else `ltr`. Every view in the starter, the demo and the shop
-  starts with them, emails included, so the mock-up reads `lang="en"`:
+  Urdu, …), else `ltr`. Every page in the starter, the demo and the shop
+  starts with them, so the mock-up reads `lang="en"` (emails say
+  `lang="en"` as written for now):
   `<!-- print.@lang.i18n.language --><!-- print.@dir.i18n.dir --><html lang="en" dir="ltr"><!-- /print.@dir.i18n.dir --><!-- /print.@lang.i18n.language -->`.
 - `render.i18n.languages` gives a switcher with `code`, `url` (this page in
   that language), `state` (`active` for the current one) and `current`
@@ -2257,10 +2258,14 @@ of lists and filter pages come along; drafts and the editor don't.
   `site_url`), else they are root-relative.
 - Every language after the first goes in `/<lang>/`: `/ro/` becomes
   `ro/index.html` and `/ro/menu` `ro/menu/index.html`. A multilingual site
-  (`multilingual` on) is crawled from each language's own address (`/`,
-  `/ro/`), following the links its pages carry, so a language's pages are
-  the ones it links to, and each language gets its own `404.html`
-  (`ro/404.html`). With languages but `multilingual` off, each page is
+  (`multilingual` on) is crawled at each language's own addresses: every
+  view is started in every language (`/menu` and `/ro/menu`), and the links
+  its pages carry are followed from there. Each language gets its own
+  `404.html` (`ro/404.html`). It warns when the links are root-relative (no
+  `--url` or site address: search engines want absolute `hreflang` and
+  canonical links) and when a language has its own `domain_language` host:
+  its pages are asked for on that host and written in its folder (`ro/`),
+  and links to them point at the domain, so publish that folder there. With languages but `multilingual` off, each page is
   fetched again in every other language, and the export rewrites its links
   and the language switcher's `?lang=` links to `/<lang>/`.
 - **Forms need PHP**, so a page that still shows one stops the export and

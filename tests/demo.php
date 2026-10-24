@@ -5026,12 +5026,12 @@ test(array('J1', 'J2', 'J3'), 'the café\'s Romanian pages say lang="ro" (#138)'
 
 // a stand-in for the live site with /<lang>/ addresses (P1.B), so the crawl
 // is tested on its own: the export's server is replaced by canned pages
-function p1d_fake_export($root, $out, $multilingual) {
+function p1d_fake_export($root, $out, $multilingual, $url = 'https://cafe.example/', $php = '') {
 	global $tmp;
 	$script = "$tmp/p1d-export.php";
 	file_put_contents($script, '<?php require '.var_export("$root/system/boot.php", true).'; boot::$appname = "demo"; boot::cli();'
 		.' require_once BASE."tools/inspector.php"; require_once BASE."tools/export.php";'
-		.' config::set("multilingual")->to('.var_export($multilingual, true).');'
+		.' config::set("multilingual")->to('.var_export($multilingual, true).'); config::set("domain_language")->to(array()); '.$php
 		.' class p1d_export extends raster_export {'
 		.'  public $asked = array();'
 		.'  protected function start_server() { $this->base = "http://127.0.0.1:9/"; }'
@@ -5048,8 +5048,8 @@ function p1d_fake_export($root, $out, $multilingual) {
 		.'  }'
 		.' }'
 		.' @mkdir('.var_export($out, true).', 0775, true);'
-		.' $e = (new p1d_export('.var_export($root, true).', '.var_export($out, true).', "https://cafe.example/"))->run();'
-		.' echo json_encode(array("errors" => $e->errors, "asked" => $e->asked));');
+		.' $e = (new p1d_export('.var_export($root, true).', '.var_export($out, true).', '.var_export($url, true).'))->run();'
+		.' echo json_encode(array("errors" => $e->errors, "warnings" => $e->warnings, "asked" => $e->asked));');
 	list($code, $output) = raster_php($script);
 	same(0, $code, $output);
 	$result = json_decode($output, true);
@@ -5089,7 +5089,8 @@ test('N9', 'P1.D export: multilingual off still fetches the pages again with the
 test('N9', 'P1.D export: the demo in multilingual mode stays in /ro/ (needs the live prefixes)', function () use ($root, $tmp) {
 	$config = "$root/demo/config/the_app.php";
 	$out = "$tmp/p1d-demo";
-	with_file($config, file_get_contents($config)."\nconfig::set('multilingual')->to(true);\n", function () use ($out) {
+	// ro on the site's own address, /ro/ (the café's ro.localhost is the next test)
+	with_file($config, file_get_contents($config)."\nconfig::set('multilingual')->to(true);\nconfig::set('domain_language')->to(array());\n", function () use ($out) {
 		list($code, $output) = raster(array('export', $out, '--url=https://cafe.example/'));
 		same(0, $code, $output);
 		foreach (array('index.html', 'menu/index.html', 'ro/index.html', 'ro/menu/index.html', 'ro/about/index.html', '404.html') as $file) check(is_file("$out/$file"), "missing $file");
@@ -5103,6 +5104,33 @@ test('N9', 'P1.D export: the demo in multilingual mode stays in /ro/ (needs the 
 		}
 		has(file_get_contents("$out/ro/menu/index.html"), 'href="https://cafe.example/ro/about"');
 		lacks(file_get_contents("$out/index.html"), 'href="https://cafe.example/ro/menu/menu_item/', 'the English pages link in English');
+	});
+});
+test('N9', 'P1.D export: a multilingual export warns about root-relative language links and languages on their own domain', function () use ($root, $tmp) {
+	$result = p1d_fake_export($root, "$tmp/p1d-warn", true, '/', ' config::set("domain_language")->to(array("cafe.ro" => "ro"));');
+	same(array(), $result['errors']);
+	$warnings = implode("\n", $result['warnings']);
+	has($warnings, 'Languages with their own domain: ro (cafe.ro)');
+	has($warnings, 'No --url, RASTER_URL or site_url: the canonical and hreflang links are root-relative');
+	// without domains, and with an address, neither
+	$warnings = implode("\n", p1d_fake_export($root, "$tmp/p1d-warn2", true)['warnings']);
+	lacks($warnings, 'own domain');
+	lacks($warnings, 'root-relative');
+	lacks(implode("\n", p1d_fake_export($root, "$tmp/p1d-warn3", false, '/')['warnings']), 'root-relative', 'multilingual off: no language links');
+});
+test('N9', 'P1.D export: a language on its own domain is asked for there, written in its folder, and linked at its domain', function () use ($root, $tmp) {
+	$config = "$root/demo/config/the_app.php";
+	$out = "$tmp/p1d-domain";
+	with_file($config, file_get_contents($config)."\nconfig::set('multilingual')->to(true);\n", function () use ($out) {
+		list($code, $output) = raster(array('export', $out, '--url=https://cafe.example/'));
+		same(0, $code, $output);
+		has($output, 'Languages with their own domain: ro (ro.localhost)');
+		foreach (array('index.html', 'menu/index.html', 'ro/index.html', 'ro/menu/index.html', 'ro/about/index.html', 'ro/404.html') as $file) check(is_file("$out/$file"), "missing $file");
+		$ro = file_get_contents("$out/ro/menu/index.html");
+		has($ro, '<html lang="ro"');
+		has($ro, 'href="https://ro.localhost/about"');
+		lacks($ro, '127.0.0.1', 'no address of the export\'s own server');
+		has(file_get_contents("$out/menu/index.html"), 'hreflang="ro" href="https://ro.localhost/menu"');
 	});
 });
 test('N9', 'P1.D export: the site\'s address comes from site_url when --url and RASTER_URL are not set (#137)', function () use ($tmp) {
