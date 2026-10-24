@@ -425,9 +425,28 @@ class controller {
 			exit;
 		}
 		util::session();
+		// a picture over post_max_size arrives as an empty post, with no
+		// token: the editor is told it is too big, not that its page is stale
+		if (!$_POST && !$_FILES && implode('/', array_slice((array)config::get('uri_segments'), 0, 3)) === 'api/cms/editor_upload'
+			&& controller::too_big_to_post()) {
+			controller::refuse(400, 'upload_too_big');
+		}
 		if (!empty($_SESSION['uid']) && !util::csrf_valid(isset($_POST['csrf']) ? $_POST['csrf'] : null)) {
 			controller::refuse(403, 'form_expired');
 		}
+	}
+
+	// is the request's body larger than PHP's post_max_size (8M, 512K, 0 for
+	// no limit), so PHP dropped it?
+	static function too_big_to_post() {
+		$length = isset($_SERVER['CONTENT_LENGTH']) ? (int)$_SERVER['CONTENT_LENGTH'] : 0;
+		$max = trim((string)ini_get('post_max_size'));
+		$bytes = (int)$max;
+		$unit = strtolower(substr($max, -1));
+		if ($unit === 'g') $bytes *= 1073741824;
+		elseif ($unit === 'm') $bytes *= 1048576;
+		elseif ($unit === 'k') $bytes *= 1024;
+		return $bytes > 0 && $length > $bytes;
 	}
 
 	// Renders a view into a string without touching the page being built,
@@ -459,10 +478,11 @@ class controller {
 		}
 	}
 
-	// Sets the status and gives the view for it (config error_document_403,
-	// error_document_404, error_document_500, error_document_503), or false
-	// when the site has none. It prints nothing: the session may not have
-	// started yet. controller::refuse() shows it.
+	// The first step of a refusal, used inside the framework: sets the
+	// status and gives the path of the view for it (config
+	// error_document_403, _404, _500, _503), or false when the site has
+	// none. It prints nothing: the session may not have started yet. To
+	// answer a refusal, call controller::refuse(), which shows that view.
 	public static function error($error, $document = false) {
 		if (!headers_sent()) {
 			http_response_code((int)$error);
@@ -489,20 +509,30 @@ class controller {
 		$segments = (array)config::get('uri_segments');
 		if (isset($segments[0]) && $segments[0] === 'api') {
 			if (!headers_sent()) header('Content-Type: application/json');
-			exit(json_encode($alert ? array('error' => $alert, 'problems' => array($alert)) : array('error' => (int)$code)));
+			exit(json_encode($alert ? array('error' => $alert, 'problems' => array($alert)) : array('error' => 'refused')));
 		}
 		if ($document && file_exists($document) && config::get('format', 'html') === 'html' && !self::$refusing) {
 			self::$refusing = true;
 			$_POST = array();
 			$_FILES = array();
+			$_REQUEST = $_GET;
 			$_SERVER['REQUEST_METHOD'] = 'GET';
 			if ($alert) validation::get()->raise($alert);
-			// a page half made is dropped; the flags set for it (if.live,
-			// if.logged_in) stay
+			// a page half made is dropped; what was set on it stays: its
+			// flags and values (if.logged_in, print.self.x, kept in vars)
+			// and its replacements
 			$made = template::swap(null);
+			$template = template::instance();
 			if ($made) {
-				$kept = array_diff_key(get_object_vars($made), get_class_vars(get_class($made))) + array('replace' => $made->replace);
-				foreach ($kept as $name => $value) template::set($name)->to($value);
+				$template->vars = $made->vars;
+				$template->replace = $made->replace;
+			}
+			// a post refused before the route was found (guard_post) has no
+			// if.live or if.static yet
+			if (!isset($template->vars['live'])) {
+				$static = (bool)getenv('RASTER_EXPORT');
+				template::set('live')->to(!$static);
+				template::set('static')->to($static);
 			}
 			// the refused page's fields aren't the view's: a new cms shows
 			// the view as it is written, without the editor

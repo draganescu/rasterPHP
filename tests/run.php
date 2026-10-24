@@ -767,11 +767,11 @@ test('staff /api methods refuse cross-site requests on every verb (#122)', funct
 		foreach (array('Origin: https://evil.test', 'Origin: null', 'Sec-Fetch-Site: cross-site', 'Referer: https://evil.test/page') as $header) {
 			list($status, $body) = http('GET', "$base/api/zzstaff/close_day", null, array("Cookie: $cookie", $header));
 			same(403, $status, "GET with $header");
-			same(array('error' => 'cross-site'), json_decode($body, true), "GET with $header");
+			same(array('error' => 'cross_site', 'problems' => array('cross_site')), json_decode($body, true), "GET with $header");
 		}
 		list($status, $body) = http('DELETE', "$base/api/zzstaff/close_day", null, array("Cookie: $cookie", 'Origin: https://evil.test'));
 		same(403, $status, 'DELETE');
-		same(array('error' => 'cross-site'), json_decode($body, true), 'DELETE');
+		same(array('error' => 'cross_site', 'problems' => array('cross_site')), json_decode($body, true), 'DELETE');
 		same(403, http('POST', "$base/api/zzstaff/close_day", '', array("Cookie: $cookie", 'Origin: https://evil.test'))[0], 'POST');
 		// the same site, as staff
 		same(array(200, '"closed"'), array_slice(http('GET', "$base/api/zzstaff/close_day", null, array("Cookie: $cookie")), 0, 2), 'same-site GET');
@@ -8074,6 +8074,8 @@ test('P0.C: without a view, a refusal is the bare status with no words (#38)', f
 			same(array(403, p0c_bare(403)), array($status, $body), 'a post from another site');
 			list($status, $body) = http('GET', "$base/zzp0c-nothing-here");
 			same(array(404, p0c_bare(404)), array($status, $body), 'a 404');
+			list($status, $body) = http('GET', "$base/application/config/the_app.php");
+			same(array(403, p0c_bare(403)), array($status, $body), 'a private file (index.php)');
 			$member = p0c_login($base, 'member');
 			list($status, $body) = http('GET', "$base/zzp0c_staff", null, array("Cookie: $member"));
 			same(array(403, p0c_bare(403)), array($status, $body), 'a page the account may not open');
@@ -8102,6 +8104,8 @@ test('P0.C: a site words its 403 and 500 pages with a view, an alert for each re
 		'zzp0c_staff.html' => '<!doctype html><html><head><title>Rota</title></head><body><p>Rota</p></body></html>',
 		// a form on the 403 page never sees the post that was refused
 		'zzp0c_403.html' => '<!doctype html><html><head><title>No</title></head><body><h1>zz our own 403</h1>'.$alerts
+			.'<!-- print.if.logged_in --><p>zz signed in</p><!-- /print.if.logged_in --><!-- print.if.logged_out --><p>zz signed out</p><!-- /print.if.logged_out -->'
+			.'<!-- print.if.live --><p>zz live</p><!-- /print.if.live -->'
 			.'<!-- render.newsletter.signup --><form method="post"><input type="email" name="email" required><button>Join</button></form><!-- /render.newsletter.signup --></body></html>',
 		'zzp0c_500.html' => '<!doctype html><html><head><title>Oops</title></head><body><h1>zz our own 500</h1></body></html>',
 		'zzp0c_broken.html' => '<!doctype html><html><head><title>Broken</title></head><body><p><!-- render.cms.zzp0cnope -->unclosed</p></body></html>',
@@ -8117,6 +8121,7 @@ test('P0.C: a site words its 403 and 500 pages with a view, an alert for each re
 			list($status, $body) = form_post("$base/about", array('raster_form' => 'newsletter.signup', 'email' => 'zzp0c-refused@example.test'), array('Origin: https://evil.example'));
 			same(403, $status);
 			$shows($body, 'zz from elsewhere');
+			check(strpos($body, '<p>zz live</p>') !== false, 'if.live, refused before the route was found: '.$body);
 			cms_store::connect();
 			same(0, (int)R::count('subscriber', ' email = ? ', array('zzp0c-refused@example.test')), 'the refused post signed nobody up');
 			$member = p0c_login($base, 'member');
@@ -8127,6 +8132,8 @@ test('P0.C: a site words its 403 and 500 pages with a view, an alert for each re
 			list($status, $body) = http('GET', "$base/zzp0c_staff", null, array("Cookie: $member"));
 			same(403, $status);
 			$shows($body, 'zz not for your account');
+			// the flags the page had stay on its 403 page
+			check(strpos($body, '<p>zz signed in</p>') !== false && strpos($body, 'zz signed out') === false && strpos($body, '<p>zz live</p>') !== false, 'the member\'s flags: '.$body);
 			// a page that breaks in production: the site's 500 page, no details
 			list($prod) = b_server(array('RASTER_ENV' => 'production', 'RASTER_DB' => $b_db));
 			list($status, $body) = http('GET', "$prod/zzp0c_broken");
@@ -8251,11 +8258,13 @@ test('P0.C: the editor\'s refusals are names it words, in Romanian too, and a si
 			same(array(400, array('error' => 'upload_not_a_picture', 'problems' => array('upload_not_a_picture'))), $upload(array('notes.png', '<?php echo 1;'), $base), 'not a picture');
 			// over PHP's own limit, the file never arrives whole: too big, not missing
 			$port = free_port();
-			$small = proc_open(php_argv('-d', 'upload_max_filesize=1K', '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root,
+			$small = proc_open(php_argv('-d', 'upload_max_filesize=1K', '-d', 'post_max_size=2K', '-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root,
 				array('RASTER_DB' => $db, 'RASTER_SECRET' => 'test-secret', 'PATH' => getenv('PATH')));
 			try {
 				for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
-				same(array(400, array('error' => 'upload_too_big', 'problems' => array('upload_too_big'))), $upload(array('big.png', str_repeat('x', 4096)), "http://127.0.0.1:$port"), 'too big');
+				same(array(400, array('error' => 'upload_too_big', 'problems' => array('upload_too_big'))), $upload(array('big.png', str_repeat('x', 1400)), "http://127.0.0.1:$port"), 'too big');
+				// over post_max_size PHP drops the whole post, the token too: still too big, not a stale page
+				same(array(400, array('error' => 'upload_too_big', 'problems' => array('upload_too_big'))), $upload(array('huge.png', str_repeat('x', 4096)), "http://127.0.0.1:$port"), 'over post_max_size');
 			} finally {
 				proc_terminate($small); proc_close($small);
 			}
@@ -8279,6 +8288,26 @@ test('P0.C: the editor\'s refusals are names it words, in Romanian too, and a si
 		cms_store::connect();
 		R::exec('DROP TABLE IF EXISTS zzp0cmenudata');
 		R::exec('DROP TABLE IF EXISTS zzp0cmenupage');
+	}
+});
+
+test('P0.C: a 503 page keeps its if.live block (#38)', function () use ($root) {
+	$theme = "$root/application/views/default";
+	test_fixture("$theme/zzp0c_503.html");
+	file_put_contents("$theme/zzp0c_503.html", '<!doctype html><html><head><title>Back soon</title></head><body><h1>zz back soon</h1><!-- print.if.live --><p>zz call us</p><!-- /print.if.live --><!-- print.if.static --><p>zz static</p><!-- /print.if.static --></body></html>');
+	$gone = test_db(sys_get_temp_dir().'/raster-p0c-gone-'.getmypid().'.sqlite');
+	shell_exec('RASTER_ENV=production RASTER_DB='.escapeshellarg($gone).' '.php_cmd().' '.escapeshellarg("$root/bin/raster").' schema --apply 2>&1');
+	test_db_break($gone);
+	try {
+		p0c_settings("config::set('error_document_503')->to('zzp0c_503');", function () use ($gone) {
+			list($prod) = b_server(array('RASTER_ENV' => 'production', 'RASTER_DB' => $gone));
+			list($status, $body) = http('GET', "$prod/about");
+			same(503, $status, $body);
+			check(strpos($body, '<h1>zz back soon</h1>') !== false && strpos($body, '<p>zz call us</p>') !== false && strpos($body, 'zz static') === false, $body);
+		});
+	} finally {
+		@unlink("$theme/zzp0c_503.html");
+		if (strpos($gone, 'mysql://') !== 0) array_map('unlink', glob("$gone*") ?: array());
 	}
 });
 

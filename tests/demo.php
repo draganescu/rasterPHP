@@ -3034,7 +3034,7 @@ test('C48', '/api answers only what a model lists, for the roles it names', func
 	foreach (array('Origin: https://evil.test', 'Origin: null', 'Sec-Fetch-Site: cross-site', 'Referer: https://evil.test/') as $header) {
 		list($status, $body) = http('GET', "$base/api/cafe/bookings/$day", null, array("Cookie: $staff", $header));
 		same(403, $status, "staff GET with $header");
-		same(array('error' => 'cross-site'), json_decode($body, true));
+		same(array('error' => 'cross_site', 'problems' => array('cross_site')), json_decode($body, true));
 	}
 	same(200, http('GET', "$base/api/cafe/hours", null, array('Origin: https://evil.test'))[0], 'a visitor method answers other sites');
 	// the vocabulary tells agents what each model offers

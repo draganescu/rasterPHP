@@ -16,6 +16,8 @@ register_shutdown_function(function () use ($tmp) { exec('rm -rf '.escapeshellar
 $passed = 0; $failed = array();
 function test($name, $fn) {
 	global $passed, $failed;
+	// RASTER_TEST_ONLY=<words> runs only the tests whose name has them
+	if (getenv('RASTER_TEST_ONLY') && stripos($name, getenv('RASTER_TEST_ONLY')) === false) return;
 	try { $fn(); $passed++; echo '.'; }
 	catch (Throwable $e) { $failed[] = "$name: ".$e->getMessage().' (line '.$e->getLine().')'; echo 'F'; }
 }
@@ -549,6 +551,36 @@ test('update downloads a release over HTTP and reads its status (#113)', functio
 
 // ## 2.1.8 batch H: row loop
 // (batch H adds its tests here)
+
+// ## P0.C: the framework prints no English (#38 #128)
+
+test('P0.C: an older login view gets the no_database and no_users alerts login_message now raises', function () use ($repo, $tmp) {
+	$site = "$tmp/site-p0c";
+	same(0, raster($repo, array('new', $site))[0]);
+	// the step's version is its file's name (given at release)
+	$file = current(array_filter(glob("$repo/system/upgrades/*.php"), function ($f) { return strpos(file_get_contents($f), "'login-message-alerts'") !== false; }));
+	check($file !== false, 'the upgrade step');
+	$version = basename($file, '.php');
+	if (version_compare(trim(file_get_contents("$site/system/VERSION")), $version, '<')) file_put_contents("$site/system/VERSION", "$version\n");
+	file_put_contents("$site/application/config/raster-version", "2.2.45\n");
+	$view = "$site/application/views/default/editor-login.html";
+	file_put_contents($view, "<html><body>\n  <!-- print.cms.login_message /-->\n  <!-- render.authentication.login --><form method=\"post\"><input name=\"login\"><input type=\"password\" name=\"password\"></form><!-- /render.authentication.login -->\n</body></html>\n");
+	$starter = file_get_contents("$site/application/views/default/login.html");
+	list($code, $out) = raster($site, array('upgrade', '--dry-run'));
+	has($out, "$version login-message-alerts");
+	list($code, $out) = raster($site, array('upgrade'));
+	same(0, $code, $out);
+	has($out, 'changed application/views/default/editor-login.html');
+	lacks($out, 'default/login.html', 'the starter\'s already has them');
+	same($starter, file_get_contents("$site/application/views/default/login.html"));
+	$html = file_get_contents($view);
+	has($html, "<!-- print.cms.login_message /--><!-- print.validation.alert('no_database') --><p class=\"notice\">No database is configured");
+	has($html, "<!-- print.validation.alert('no_users') --><p class=\"notice\">There are no users yet.");
+	// once is enough
+	file_put_contents("$site/application/config/raster-version", "2.2.45\n");
+	list($code, $out) = raster($site, array('upgrade', '--dry-run'));
+	lacks($out, 'login-message-alerts');
+});
 
 echo "\n\n$passed passed, ".count($failed)." failed\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";

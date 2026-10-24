@@ -24,7 +24,8 @@ if (PHP_SAPI === 'cli-server') {
 	require_once __DIR__.'/system/private_paths.php';
 	if (private_paths::blocked($path)) {
 		http_response_code(403);
-		exit('Forbidden');
+		// the bare status, as Raster's own refusals without a view (controller::refuse)
+		exit("<!doctype html><meta charset='utf-8'><title>403</title><h1>403</h1>");
 	}
 	if ($path !== '/' && is_file(__DIR__.$path) && strpos(realpath(__DIR__.$path), __DIR__.'/') === 0) {
 		// sent from here, not by PHP's server: it would look for the file under

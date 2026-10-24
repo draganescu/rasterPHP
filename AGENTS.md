@@ -427,7 +427,7 @@ model's, so the editor's endpoints stay. Posts
 there pass the same site check as forms, but they are not form submissions:
 `validation::get()->submitted()` is false, so form models do nothing over
 `/api`. A method listed for any role but `visitor` answers 403
-`{"error":"cross-site"}` to a request another site started, on every verb,
+`{"error":"cross_site","problems":["cross_site"]}` to a request another site started, on every verb,
 GET too: the session cookie (SameSite=Lax) comes along when someone follows
 a link from another site. The browser says so with `Origin` (`Origin: null`
 counts, unless `Sec-Fetch-Site` says it is this site), `Sec-Fetch-Site` or
@@ -1072,7 +1072,7 @@ bundled model declares none of its types, and `lint` warns.
   `print.cms.login_message` raises (it prints nothing itself):
   `no_database` (none is configured for this environment) and `no_users`
   (make one with `php bin/raster user`). The starter's `login.html` words
-  both.
+  both, and `raster upgrade` adds them to an older view that has the tag.
 - Five wrong passwords lock an account for 15 minutes, at the login and
   in the account form's `current_password` alike. Once 15 minutes have
   passed since the last wrong one, counting starts again from zero. Each
@@ -2207,7 +2207,8 @@ of lists and filter pages come along; drafts and the editor don't.
     `type_<type>` (`type_int`, `type_number`, `type_bool`, `type_date`,
     `type_datetime`, `type_time`, `type_text`), with `field`, which the
     words print as `{field}` (`'problem_type_number' => '{field} needs a
-    number, like 4.50'`); a picture is `upload_too_big`, `upload_missing`
+    number, like 4.50'`); a picture is `upload_too_big` (also over PHP's
+    `upload_max_filesize` or `post_max_size`), `upload_missing`
     (it didn't arrive whole), `upload_not_a_picture` (also for a file the
     browser can't show) or `upload_not_stored`; `form_expired` (the session
     token is stale: reload) and `not_allowed` (not logged in as staff) come
@@ -2338,7 +2339,10 @@ of lists and filter pages come along; drafts and the editor don't.
 
   A 403, 500 or 503 page is rendered as written: its `cms` fields show
   their defaults, there is no in-page editor, and it is never cached. On `/api` the answer
-  is JSON instead, `{"error":"not_allowed","problems":["not_allowed"]}`.
+  is JSON instead, `{"error":"not_allowed","problems":["not_allowed"]}`
+  (`{"error":"refused"}` for a refusal without an alert). A file the
+  server never serves (`system/private_paths.php`) gets the same bare 403
+  from `index.php` under `php -S`.
 - **A page for a database outage:** `config::set('error_document_503')->to('503')`
   renders `503.html` with status 503 when the database can't be reached
   (see **Environments and cache**). Keep it to models that don't need the
