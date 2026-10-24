@@ -13,10 +13,11 @@ class cafe
 
 	// opening hours: day, time, state (open or closed), from the about
 	// page's render.cms.hours list, which editors change; hours.txt, the lab
-	// and /api/cafe/hours read it here (models/cafe/sql/hours.sql)
+	// and /api/cafe/hours read it here (models/cafe/sql/hours.sql), without
+	// drafts and scheduled items, as the list shows them
 	function hours() {
 		try {
-			return database::instance('cafe')->hours();
+			return database::instance('cafe')->hours(array(':now' => date('Y-m-d H:i:s')));
 		} catch (Exception $e) {
 			return array();
 		}

@@ -140,8 +140,9 @@ class cms_types {
 	// also get a column per translation language when multilingual is on
 	// (headline__ro), of the field's type. Off it is ignored, so the SQL is
 	// what it always was. Raster declares a translation column before any
-	// value is stored in it: a column RedBean made itself for name__id would
-	// be read as a link to another table (an int, in MySQL).
+	// value is stored in it: a column RedBean makes itself takes its type
+	// from the value, and name__id would also get an index and an attempt
+	// at a foreign key to a table name_ (and, in MySQL, an int column).
 	static function ensure($table, $types, $translated = array()) {
 		if (!preg_match('/^[a-z0-9_]+$/', $table)) throw new InvalidArgumentException("Invalid table '$table'");
 		if (!cms_store::table_exists($table)) {

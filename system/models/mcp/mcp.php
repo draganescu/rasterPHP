@@ -240,7 +240,7 @@ class mcp
 	protected function tools() {
 		$page = array('type' => 'string', 'description' => 'The page: /about, about or aboutpage; site for the site_* fields');
 		$collection = array('type' => 'string', 'description' => 'news for render.cms.news');
-		$fields = array('type' => 'object', 'description' => 'Field => value, as its type: 4, 4.5, true, 2026-10-05, 19:30; text may be HTML. Empty clears it.', 'additionalProperties' => array('type' => array('string', 'number', 'boolean', 'null')));
+		$fields = array('type' => 'object', 'description' => 'Field => value, as its type: 4, 4.5, true, 2026-10-05, 2026-10-05 19:30, 19:30; text may be HTML. Empty clears it.', 'additionalProperties' => array('type' => array('string', 'number', 'boolean', 'null')));
 		$id = array('type' => 'integer', 'description' => 'Item id');
 		$theme = array('type' => 'string', 'description' => 'A folder directly under views/; the site\'s theme by default');
 		$read_only = array('readOnlyHint' => true, 'openWorldHint' => false);
@@ -279,7 +279,7 @@ class mcp
 			$tool('write_strings', 'Merges words into a dictionary; Raster writes the file. Not in production.',
 				array('file' => $dictionary, 'lang' => $lang, 'strings' => array('type' => 'object', 'additionalProperties' => array('type' => 'string'), 'description' => 'key => text; keys match ^[A-Za-z0-9_.-]+$')), array('file', 'lang', 'strings'), $write),
 			// ##Working on the site itself, not only its content
-			$tool('describe', 'The whole site in one answer: URLs to views, pages and collections, languages, settings, lint. Ask this first. The vocabulary only when a section names it.',
+			$tool('describe', 'The whole site in one answer: URLs to views, pages and collections, languages, settings, lint. Ask this first. The vocabulary only if sections lists it.',
 				array('sections' => array('type' => 'array', 'items' => array('type' => 'string', 'enum' => raster_describe::sections()), 'description' => 'Only these sections. All but vocabulary by default.')), array(), $read_only),
 			$tool('vocabulary', 'Every name a template may call (models, method signatures, SQL queries, events), read from the code. Use it instead of guessing.',
 				array(), array(), $read_only),
@@ -288,7 +288,7 @@ class mcp
 			$tool('list_views', 'A theme\'s view files, as paths inside it.', array('theme' => $theme), array(), $read_only),
 			$tool('read_view', 'The source of one view.', array('view' => array('type' => 'string', 'description' => 'Path inside the theme folder, e.g. about.html'), 'theme' => $theme), array('view'), $read_only),
 			$tool('check_view', 'Lints markup without writing it: the problems, with line and column. Use it on a draft before write_view.',
-				array('content' => array('type' => 'string', 'description' => 'The markup to check'), 'view' => array('type' => 'string', 'description' => 'Its file name, for the messages'), 'theme' => $theme), array('content'), $read_only),
+				array('content' => array('type' => 'string', 'description' => 'The markup to check'), 'view' => array('type' => 'string', 'description' => 'Its file name, for the messages and new_fields'), 'theme' => $theme), array('content'), $read_only),
 			$tool('write_view', 'Writes a view if it lints clean (on errors the file is untouched and the problems come back; warnings don\'t stop it), and says what it does to the content model.',
 				array('view' => array('type' => 'string', 'description' => 'Path inside the theme folder, e.g. about.html'), 'content' => array('type' => 'string'), 'theme' => $theme), array('view', 'content'), $write),
 			$tool('read_asset', 'A theme\'s CSS, JS or SVG file.', array('path' => $asset, 'theme' => $theme), array('path'), $read_only),
@@ -303,7 +303,7 @@ class mcp
 				array(), array(), array('readOnlyHint' => false, 'destructiveHint' => false, 'idempotentHint' => true, 'openWorldHint' => false)),
 		);
 		if (!self::may_write_views()) {
-			$tools = array_values(array_filter($tools, function ($t) { return !in_array($t['name'], array('write_view', 'write_asset'), true); }));
+			$tools = array_values(array_filter($tools, function ($t) { return !in_array($t['name'], array('write_view', 'write_asset', 'set_languages', 'write_strings'), true); }));
 		}
 		return $tools;
 	}
@@ -458,7 +458,10 @@ class mcp
 		return array_values(array_unique(array_merge($fields, array_intersect(cms_types::translated($page['type']), array_keys($page['fields'])))));
 	}
 
+	// a tool that writes the site's files: outside production, and over
+	// HTTP only with mcp_write_views, as write_view
 	protected function dev_only($tool) {
+		if (!self::may_write_views()) throw new RuntimeException("$tool writes the site's files, which is off over HTTP. Set config mcp_write_views to true to allow it, or use MCP over stdio on the machine with the files.");
 		if (config::get('environment') === 'production') throw new InvalidArgumentException("$tool only works outside production: change a development copy of the site and deploy it");
 	}
 
@@ -469,7 +472,7 @@ class mcp
 		$languages = array();
 		foreach ($codes as $code) {
 			$code = is_string($code) ? strtolower(trim($code)) : '';
-			if (!preg_match('/^[a-z]{2,3}(-[a-z0-9]{2,8})?$/', $code)) throw new InvalidArgumentException('A language code is two or three letters, with a region if needed: en, ro, pt-br ('.json_encode($codes).')');
+			if (!preg_match('/^[a-z]{2,3}(-[a-z0-9]{2,8})?$/D', $code)) throw new InvalidArgumentException('A language code is two or three letters, with a region if needed: en, ro, pt-br ('.json_encode($codes).')');
 			if (in_array($code, $languages, true)) throw new InvalidArgumentException("'$code' is listed twice");
 			$languages[] = $code;
 		}
@@ -480,8 +483,7 @@ class mcp
 			'languages' => "config::set('languages')->to(array('".implode("', '", $languages)."'));",
 		) : array('multilingual' => null, 'languages' => null);
 		$written = self::config_lines($source, $lines);
-		if ($written !== $source && file_put_contents($file, $written) === false) throw new RuntimeException('Could not write '.raster_inspector::short($file));
-		if (function_exists('opcache_invalidate')) @opcache_invalidate($file, true);
+		if ($written !== $source && !self::write_whole($file, $written)) throw new RuntimeException('Could not write '.raster_inspector::short($file));
 		// this process goes on with them; the next call reads the file again
 		config::set('multilingual')->to(count($languages) > 1);
 		config::set('languages')->to($languages ?: null);
@@ -499,46 +501,133 @@ class mcp
 		return array('enabled' => $described['enabled'], 'default' => $described['default'], 'languages' => $described['list'], 'urls' => $described['urls'], 'columns_added' => $added, 'missing' => $described['missing']);
 	}
 
-	// $source with each setting of $lines (name => its line, or null to
-	// remove it) written once: the first statement that sets it replaced,
-	// later ones removed, a missing one added at the end. Only statements
-	// of PHP count, so a commented-out example stays as it is.
-	static function config_lines($source, $lines) {
+	// The config::set(...) statements of a PHP file, in order: name (the
+	// setting, null when it isn't a plain string), start and end (bytes;
+	// the end after its ; or where a closing tag ends it), closed (ended by
+	// ;), alone (a statement of its own, not the body of an if or else
+	// without braces) and text.
+	static function config_statements($source) {
 		$tokens = token_get_all($source);
-		$found = array();
+		$statements = array();
+		$offsets = array();
 		$offset = 0;
-		$spans = array();
+		$braces = array();
+		$level = 0;
 		foreach ($tokens as $i => $token) {
+			$offsets[$i] = $offset;
+			$braces[$i] = $level;
 			$text = is_array($token) ? $token[1] : $token;
-			if (is_array($token) && $token[0] === T_STRING && strtolower($text) === 'config') {
-				// config :: set ( 'name'
-				$next = array();
-				for ($j = $i + 1; $j < count($tokens) && count($next) < 4; $j++) {
-					if (is_array($tokens[$j]) && $tokens[$j][0] === T_WHITESPACE) continue;
-					$next[] = $tokens[$j];
-				}
-				$name = count($next) === 4 && is_array($next[0]) && $next[0][0] === T_DOUBLE_COLON && is_array($next[1]) && strtolower($next[1][1]) === 'set' && $next[2] === '(' && is_array($next[3]) && $next[3][0] === T_CONSTANT_ENCAPSED_STRING ? substr($next[3][1], 1, -1) : null;
-				if ($name !== null && array_key_exists($name, $lines)) {
-					// the statement ends at the ; outside every bracket
-					$depth = 0;
-					$end = $offset;
-					for ($j = $i; $j < count($tokens); $j++) {
-						$t = is_array($tokens[$j]) ? $tokens[$j][1] : $tokens[$j];
-						$end += strlen($t);
-						if (in_array($t, array('(', '[', '{'), true)) $depth++;
-						if (in_array($t, array(')', ']', '}'), true)) $depth--;
-						if ($t === ';' && $depth === 0) break;
-					}
-					$spans[] = array($name, $offset, $end);
-				}
-			}
+			if ($text === '{' || (is_array($token) && in_array($token[0], array(T_CURLY_OPEN, T_DOLLAR_OPEN_CURLY_BRACES), true))) $level++;
+			if ($text === '}') $level--;
 			$offset += strlen($text);
 		}
-		// from the last to the first, so the offsets stay right
+		$offsets[count($tokens)] = $offset;
+		$significant = function ($from, $step) use ($tokens) {
+			for ($j = $from; $j >= 0 && $j < count($tokens); $j += $step) {
+				if (is_array($tokens[$j]) && in_array($tokens[$j][0], array(T_WHITESPACE, T_COMMENT, T_DOC_COMMENT), true)) continue;
+				return $j;
+			}
+			return null;
+		};
+		foreach ($tokens as $i => $token) {
+			if (!is_array($token) || !in_array($token[0], array(T_STRING, T_NAME_FULLY_QUALIFIED), true) || strtolower(ltrim($token[1], '\\')) !== 'config') continue;
+			if ($token[0] === T_STRING && strpos($token[1], '\\') !== false) continue;
+			$j = $significant($i + 1, 1);
+			if ($j === null || !is_array($tokens[$j]) || $tokens[$j][0] !== T_DOUBLE_COLON) continue;
+			$j = $significant($j + 1, 1);
+			if ($j === null || !is_array($tokens[$j]) || strtolower($tokens[$j][1]) !== 'set') continue;
+			$j = $significant($j + 1, 1);
+			if ($j === null || $tokens[$j] !== '(') continue;
+			$before = $significant($i - 1, -1);
+			// a method or property called config (->config::) is no statement of its own
+			if ($before !== null && is_array($tokens[$before]) && in_array($tokens[$before][0], array(T_OBJECT_OPERATOR, T_DOUBLE_COLON, T_NULLSAFE_OBJECT_OPERATOR, T_NEW), true)) continue;
+			$argument = $significant($j + 1, 1);
+			$name = null;
+			if ($argument !== null && is_array($tokens[$argument]) && $tokens[$argument][0] === T_CONSTANT_ENCAPSED_STRING) {
+				$after = $significant($argument + 1, 1);
+				if ($after !== null && $tokens[$after] === ')') $name = stripcslashes(substr($tokens[$argument][1], 1, -1));
+			}
+			// it ends at the ; outside every bracket, or where PHP stops
+			$depth = 0;
+			$end = count($tokens);
+			$closed = false;
+			for ($k = $i; $k < count($tokens); $k++) {
+				$t = $tokens[$k];
+				if (is_array($t) && $t[0] === T_CLOSE_TAG && $depth === 0) {
+					// after its last word, not the space before the tag
+					for ($end = $k; $end > $i && is_array($tokens[$end - 1]) && in_array($tokens[$end - 1][0], array(T_WHITESPACE, T_COMMENT, T_DOC_COMMENT), true); $end--);
+					break;
+				}
+				$text = is_array($t) ? $t[1] : $t;
+				if (in_array($text, array('(', '[', '{'), true) || (is_array($t) && in_array($t[0], array(T_CURLY_OPEN, T_DOLLAR_OPEN_CURLY_BRACES), true))) $depth++;
+				if (in_array($text, array(')', ']', '}'), true)) $depth--;
+				if ($text === ';' && $depth === 0) { $end = $k + 1; $closed = true; break; }
+			}
+			$alone = $before === null || $tokens[$before] === ';' || $tokens[$before] === '{' || $tokens[$before] === '}' || $tokens[$before] === ':' || (is_array($tokens[$before]) && in_array($tokens[$before][0], array(T_OPEN_TAG, T_CLOSE_TAG, T_INLINE_HTML), true));
+			$statements[] = array('name' => $name, 'start' => $offsets[$i], 'end' => $offsets[$end], 'closed' => $closed, 'alone' => $alone, 'nested' => $braces[$i] > 0, 'text' => substr($source, $offsets[$i], $offsets[$end] - $offsets[$i]));
+		}
+		return $statements;
+	}
+
+	// $source with each setting of $lines (name => its statement, or null
+	// to remove it) set once: the first statement that sets it replaced,
+	// later ones removed, a missing one added after the file's last
+	// config::set (or at the start of its PHP). Only PHP counts, so a
+	// commented-out example stays as it is. Refused, rather than guessed,
+	// when a statement can't be changed on its own (the body of an if
+	// without braces) or the result would change any other statement.
+	static function config_lines($source, $lines) {
+		$eol = strpos($source, "\r\n") !== false ? "\r\n" : "\n";
+		$statements = self::config_statements($source);
+		$others = array();
 		$first = array();
-		foreach ($spans as $span) if (!isset($first[$span[0]])) $first[$span[0]] = $span[1];
-		foreach (array_reverse($spans) as $span) {
-			list($name, $start, $end) = $span;
+		foreach ($statements as $statement) {
+			if ($statement['name'] === null || !array_key_exists($statement['name'], $lines)) {
+				$others[] = $statement['text'];
+				continue;
+			}
+			if (!$statement['alone']) throw new InvalidArgumentException("The config sets '{$statement['name']}' inside an if or else without braces; change it there by hand");
+			if (!isset($first[$statement['name']])) $first[$statement['name']] = $statement['start'];
+		}
+		$add = array();
+		foreach ($lines as $name => $line) {
+			if ($line !== null && !isset($first[$name])) $add[] = $line;
+		}
+		// the new ones go after the last config::set, or at the start of PHP
+		$insert = null;
+		$closed = true;
+		foreach ($statements as $statement) {
+			// not after a second copy, which goes
+			$ours = $statement['name'] !== null && array_key_exists($statement['name'], $lines);
+			if ($ours && $first[$statement['name']] !== $statement['start']) continue;
+			// nor inside a block, an if's
+			if ($statement['nested']) continue;
+			$insert = $statement['end'];
+			$closed = $statement['closed'];
+		}
+		$at_start = $insert === null;
+		if ($insert === null) {
+			foreach (token_get_all($source) as $token) {
+				if (is_array($token) && $token[0] === T_OPEN_TAG) { $insert = strpos($source, $token[1]) + strlen($token[1]); break; }
+			}
+			if ($insert === null) throw new InvalidArgumentException('The config file has no PHP to add the settings to');
+		}
+		// from the last change to the first, so the offsets stay right
+		$changes = array();
+		if ($add) {
+			$text = '';
+			foreach ($add as $line) $text .= $eol.$line;
+			// after a statement a closing tag ended, which had no ;
+			if (!$closed) $text = ';'.$text;
+			// at the start of PHP, on lines of their own
+			if ($at_start) $text = substr($text, strlen($eol)).$eol;
+			$changes[] = array($insert, $insert, $text);
+		}
+		foreach ($statements as $statement) {
+			$name = $statement['name'];
+			if ($name === null || !array_key_exists($name, $lines)) continue;
+			$start = $statement['start'];
+			$end = $statement['end'];
 			$line = $first[$name] === $start ? $lines[$name] : null;
 			if ($line === null) {
 				// the whole line goes when nothing else is on it
@@ -550,22 +639,45 @@ class mcp
 					$start = $before;
 					$end = $after;
 				}
-				$source = substr($source, 0, $start).substr($source, $end);
+				$changes[] = array($start, $end, '');
 			} else {
-				$source = substr($source, 0, $start).$line.substr($source, $end);
+				$changes[] = array($start, $end, $line);
 			}
-			$found[$name] = true;
 		}
-		$add = '';
+		usort($changes, function ($a, $b) { return $b[0] - $a[0] ?: $b[1] - $a[1]; });
+		$written = $source;
+		foreach ($changes as $change) $written = substr($written, 0, $change[0]).$change[2].substr($written, $change[1]);
+		// what was written is what was meant: every other statement as it
+		// was, and each setting once, as given
+		$after = self::config_statements($written);
+		// the ; added after a statement a closing tag ended is no change to it
+		$same = function ($text) { return rtrim(rtrim(rtrim($text), ';')); };
+		$others = array_map($same, $others);
+		$kept = array();
+		$set = array();
+		foreach ($after as $statement) {
+			if ($statement['name'] !== null && array_key_exists($statement['name'], $lines)) $set[$statement['name']][] = $statement['text'];
+			else $kept[] = $same($statement['text']);
+		}
 		foreach ($lines as $name => $line) {
-			if ($line !== null && !isset($found[$name])) $add .= $line."\n";
+			$expected = $line === null ? array() : array($line);
+			if ((isset($set[$name]) ? $set[$name] : array()) !== $expected) throw new InvalidArgumentException("The config file could not be changed safely ('$name'); change it by hand");
 		}
-		if ($add === '') return $source;
-		// before a closing tag the file ends with
-		if (preg_match('/\?>\s*$/', $source, $m, PREG_OFFSET_CAPTURE)) {
-			return rtrim(substr($source, 0, $m[0][1]))."\n".$add.substr($source, $m[0][1]);
+		if ($kept !== $others) throw new InvalidArgumentException('The config file could not be changed without changing other settings; change it by hand');
+		return $written;
+	}
+
+	// writes a file whole or not at all: a reader never sees half of it
+	static function write_whole($path, $content) {
+		$temp = @tempnam(dirname($path), '.raster-');
+		if ($temp === false) return false;
+		$mode = is_file($path) ? fileperms($path) & 0777 : 0666 & ~umask();
+		if (@file_put_contents($temp, $content) !== strlen($content) || !@chmod($temp, $mode) || !@rename($temp, $path)) {
+			@unlink($temp);
+			return false;
 		}
-		return rtrim($source)."\n".$add;
+		if (function_exists('opcache_invalidate')) @opcache_invalidate($path, true);
+		return true;
 	}
 
 	protected function tool_translation_status($arguments) {
@@ -586,7 +698,7 @@ class mcp
 	// the editor has words in, the others one of the site's
 	protected function dictionary_argument($arguments) {
 		$file = $this->arg($arguments, 'file');
-		if (!is_string($file) || !preg_match('/^[a-z0-9_]+$/', $file)) throw new InvalidArgumentException("'file' is a dictionary name: lowercase letters, digits and _ (home for print.i18n.home('key'))");
+		if (!is_string($file) || !preg_match('/^[a-z0-9_]+$/D', $file)) throw new InvalidArgumentException("'file' is a dictionary name: lowercase letters, digits and _ (home for print.i18n.home('key'))");
 		$lang = $this->arg($arguments, 'lang');
 		foreach (i18n::available() as $code) {
 			if (is_string($lang) && strtolower($code) === strtolower($lang)) return array($file, $code);
@@ -601,24 +713,36 @@ class mcp
 		return $languages;
 	}
 
-	// the keys a dictionary is for: what the views print, or for
-	// raster_editor the editor's own words
-	protected function used_keys($file) {
+	// the keys a dictionary is for, with the templates' text: what the
+	// views print, or for raster_editor the editor's own words
+	protected function used_strings($file) {
 		if ($file === 'raster_editor') {
 			$keys = array();
-			foreach (glob(BASE.'models/cms/editor/lang/*.php') ?: array() as $words) $keys = array_merge($keys, array_keys((array)raster_describe::dictionary_file($words)));
-			return array_values(array_unique($keys));
+			foreach (glob(BASE.'models/cms/editor/lang/*.php') ?: array() as $words) $keys += array_fill_keys(array_keys((array)raster_describe::dictionary_file($words)), '');
+			return $keys;
 		}
 		$used = raster_describe::strings_used(new raster_inspector());
-		return isset($used[$file]) ? array_map('strval', array_keys($used[$file])) : array();
+		return isset($used[$file]) ? $used[$file] : array();
+	}
+
+	protected function used_keys($file) {
+		return array_map('strval', array_keys($this->used_strings($file)));
 	}
 
 	protected function tool_read_strings($arguments) {
 		list($file, $lang) = $this->dictionary_argument($arguments);
 		$strings = raster_describe::dictionary($file, $lang);
-		$used = $this->used_keys($file);
-		// the default language is the templates' own text; the editor has its words
-		$missing = $file === 'raster_editor' || i18n::is_default($lang) ? array() : array_values(array_filter($used, function ($key) use ($strings) { return !isset($strings[$key]) || trim((string)$strings[$key]) === ''; }));
+		$used = $this->used_strings($file);
+		// the default language is the templates' own text; the editor has
+		// its words; a key with no text in the template has nothing to
+		// translate (as in translation_status)
+		$missing = array();
+		if ($file !== 'raster_editor' && !i18n::is_default($lang)) {
+			foreach ($used as $key => $default) {
+				if (trim($default) !== '' && (!isset($strings[$key]) || trim((string)$strings[$key]) === '')) $missing[] = (string)$key;
+			}
+		}
+		$used = array_map('strval', array_keys($used));
 		return array('file' => $file, 'lang' => $lang, 'strings' => (object)$strings, 'used_keys' => $used, 'missing_keys' => $missing);
 	}
 
@@ -628,16 +752,21 @@ class mcp
 		$strings = $this->arg($arguments, 'strings');
 		if (!is_array($strings) || !$strings || array_keys($strings) === range(0, count($strings) - 1)) throw new InvalidArgumentException("'strings' is an object of key => text, with at least one key");
 		foreach ($strings as $key => $value) {
-			if (!preg_match('/^[A-Za-z0-9_.-]+$/', (string)$key)) throw new InvalidArgumentException("'$key' is not a key: letters, digits, _, . and -");
+			if (!preg_match('/^[A-Za-z0-9_.-]+$/D', (string)$key)) throw new InvalidArgumentException("'$key' is not a key: letters, digits, _, . and -");
 			if (!is_string($value)) throw new InvalidArgumentException("The text of '$key' is a string");
 		}
 		$dir = APPBASE.'i18n/'.$lang;
 		$path = "$dir/$file.php";
 		if (!is_dir($dir) && !@mkdir($dir, 0775, true)) throw new RuntimeException('Could not make '.raster_inspector::short($dir));
+		// the dictionary stays in the app's i18n/<lang>/, wherever links lead
+		$root = realpath(APPBASE.'i18n');
+		$real = realpath($dir);
+		if ($root === false || $real === false || dirname($real) !== $root || is_link($path)) throw new InvalidArgumentException(raster_inspector::short($path).' links out of the app\'s i18n folder');
 		$merged = array_merge(raster_describe::dictionary($file, $lang), array_map('strval', $strings));
 		// Raster writes the PHP: the agent's words are values, never code
-		if (file_put_contents($path, '<?php'."\n".'return '.var_export($merged, true).";\n", LOCK_EX) === false) throw new RuntimeException('Could not write '.raster_inspector::short($path));
-		if (function_exists('opcache_invalidate')) @opcache_invalidate($path, true);
+		$php = '<?php'."\n".'return '.var_export($merged, true).";\n";
+		if (strlen($php) > self::DICTIONARY_BYTES) throw new InvalidArgumentException('A dictionary holds at most '.(self::DICTIONARY_BYTES >> 10).' KB; split the words into several files');
+		if (!self::write_whole($path, $php)) throw new RuntimeException('Could not write '.raster_inspector::short($path));
 		util::content_changed();
 		$used = $this->used_keys($file);
 		$unused = array_values(array_filter(array_map('strval', array_keys($strings)), function ($key) use ($used, $file) {
@@ -943,24 +1072,34 @@ class mcp
 		}
 		$problems = $inspector->lint_source($content, $name, $inspector->theme);
 		$errors = count(array_filter($problems, function ($p) { return $p['severity'] === 'error'; }));
-		return array('view' => $name, 'errors' => $errors, 'warnings' => count($problems) - $errors, 'problems' => $problems) + $this->new_fields($inspector, $content, $name);
+		return array('view' => $name, 'errors' => $errors, 'warnings' => count($problems) - $errors, 'problems' => $problems) + $this->new_fields($inspector, $content, array_key_exists('view', $arguments) ? $name : null);
 	}
 
 	// On a multilingual site, the fields markup declares that the content
 	// model doesn't have yet, each with whether it gets a translation per
 	// language (translate) or is shared by all of them, so an agent sees
 	// before writing that a phone number is shared and a heading translated.
+	// $view null (a draft without a name) compares with every page.
 	protected function new_fields($inspector, $content, $view) {
-		if (!i18n::enabled() || strpos($view, "\0") !== false) return array();
-		$view = ltrim(str_replace('\\', '/', $view), '/');
-		$model = $inspector->content_model();
+		if (!i18n::enabled() || ($view !== null && strpos($view, "\0") !== false)) return array();
+		$view = $view === null ? null : ltrim(str_replace('\\', '/', $view), '/');
+		// the site's content model, where a routed view of another theme is
+		// a page of its own (/print/menu)
+		$model = (new raster_inspector())->content_model();
+		$site_theme = config::get('theme', 'default');
 		$known = array();
+		$page_of_view = $view === null;
 		foreach ($model['pages'] as $page) {
-			if ($page['view'] === '*' || ($page['view'] === $view && !isset($page['theme']))) $known = array_merge($known, array_keys($page['fields']));
+			$theme = isset($page['theme']) ? $page['theme'] : $site_theme;
+			$is_view = $page['view'] === $view && $theme === $inspector->theme;
+			if ($page['view'] === '*' || $view === null || $is_view) $known = array_merge($known, array_keys($page['fields']));
+			if ($is_view) $page_of_view = true;
 		}
-		$draft = $inspector->fields_in($content, $view);
+		$draft = $inspector->fields_in($content, $view === null ? 'draft'.$inspector->ext : $view);
 		$new = array();
 		foreach ($draft['fields'] as $name => $field) {
+			// a view of another theme no route serves is no page: its fields are stored nowhere
+			if (!$page_of_view && $inspector->theme !== $site_theme && strpos($name, 'site_') !== 0) continue;
 			if (!in_array($name, $known, true)) $new[] = array('field' => $name, 'translate' => !empty($field['translate']));
 		}
 		foreach ($draft['collections'] as $name => $collection) {
@@ -1024,10 +1163,17 @@ class mcp
 
 	static $asset_extensions = array('css', 'js', 'svg');
 
+	// the most write_asset and write_strings write: a stylesheet, a script
+	// or a picture is far smaller, and so is a dictionary
+	const ASSET_BYTES = 2097152;
+	const DICTIONARY_BYTES = 1048576;
+
 	protected function asset_file($inspector, $path) {
 		$path = ltrim(str_replace('\\', '/', (string)$path), '/');
 		if ($path === '' || strpos($path, "\0") !== false) throw new InvalidArgumentException("'$path' is not a name inside the theme folder");
-		if (!preg_match('/\.([a-z0-9]+)$/', $path, $m) || !in_array($m[1], self::$asset_extensions, true)) throw new InvalidArgumentException('An asset ends in .'.implode(', .', self::$asset_extensions).'; views go through read_view and write_view');
+		if (!preg_match('/\.([a-z0-9]+)$/D', $path, $m) || !in_array($m[1], self::$asset_extensions, true)) throw new InvalidArgumentException('An asset ends in .'.implode(', .', self::$asset_extensions).'; views go through read_view and write_view');
+		// a server may run x.php.css as PHP
+		if (preg_match('/\.(php\d*|phtml|phar|pht)(\.|\/)/i', $path)) throw new InvalidArgumentException("'$path' names PHP; an asset's name has no .php in it");
 		$file = $inspector->theme_dir().'/'.$path;
 		if (!is_dir(dirname($file))) throw new InvalidArgumentException('There is no folder '.raster_inspector::short(dirname($file)).' to put it in');
 		if (!$this->in_theme($inspector, $file)) throw new InvalidArgumentException("'$path' is outside the theme folder, or links out of it");
@@ -1050,34 +1196,45 @@ class mcp
 		list($path, $file) = $this->asset_file($inspector, $this->arg($arguments, 'path'));
 		$content = $this->arg($arguments, 'content');
 		if (!is_string($content)) throw new InvalidArgumentException("'content' is the file's text");
+		if (strlen($content) > self::ASSET_BYTES) throw new InvalidArgumentException('An asset is at most '.(self::ASSET_BYTES >> 20).' MB');
 		if (substr($path, -4) === '.svg') {
 			$problem = self::svg_problem($content);
 			if ($problem !== null) throw new InvalidArgumentException("The SVG was not written: $problem");
 		}
 		$existed = is_file($file);
-		if (file_put_contents($file, $content) === false) throw new RuntimeException('Could not write '.raster_inspector::short($file));
+		if (!self::write_whole($file, $content)) throw new RuntimeException('Could not write '.raster_inspector::short($file));
 		util::content_changed();
 		return array('written' => true, 'path' => $path, 'created' => !$existed, 'bytes' => strlen($content));
 	}
 
 	// why an SVG may not be a theme's picture, or null: it must be XML,
-	// and run nothing when it is opened on its own (no script element, no
-	// on* attribute, no javascript: link)
+	// and run nothing when it is opened on its own: no DOCTYPE (entities),
+	// no processing instruction but the XML declaration, no script or
+	// foreignObject element, no on* or srcdoc attribute, no animation that
+	// sets a link, no javascript: in any value and no data: link
 	static function svg_problem($svg) {
 		if (!function_exists('xml_parser_create')) return 'checking it needs PHP\'s xml extension';
-		if (stripos($svg, '<!ENTITY') !== false) return 'it declares entities';
+		if (stripos($svg, '<!DOCTYPE') !== false || stripos($svg, '<!ENTITY') !== false) return 'it has a DOCTYPE';
 		$problem = null;
+		$local = function ($name) { return strtolower(substr((string)strrchr(':'.$name, ':'), 1)); };
 		$parser = xml_parser_create('UTF-8');
 		xml_parser_set_option($parser, XML_OPTION_CASE_FOLDING, 0);
-		xml_set_element_handler($parser, function ($parser, $name, $attributes) use (&$problem) {
-			$local = strtolower(substr((string)strrchr(':'.$name, ':'), 1));
-			if ($local === 'script') $problem = $problem ?: 'it has a <script> element';
+		xml_set_element_handler($parser, function ($parser, $name, $attributes) use (&$problem, $local) {
+			$element = $local($name);
+			if (in_array($element, array('script', 'foreignobject'), true)) $problem = $problem ?: "it has a <$element> element";
 			foreach ($attributes as $attribute => $value) {
-				$attribute = strtolower(substr((string)strrchr(':'.$attribute, ':'), 1));
-				if (strpos($attribute, 'on') === 0) $problem = $problem ?: "it has an event attribute ($attribute)";
-				if (preg_match('/^\s*javascript:/i', preg_replace('/[\x00-\x20]+/', '', (string)$value))) $problem = $problem ?: "it links to javascript: ($attribute)";
+				$attribute = $local($attribute);
+				$bare = strtolower(preg_replace('/[\x00-\x20\x7f]+/', '', (string)$value));
+				if (strpos($attribute, 'on') === 0 || $attribute === 'srcdoc') $problem = $problem ?: "it has a $attribute attribute";
+				if (strpos($bare, 'javascript:') !== false) $problem = $problem ?: "it has javascript: in $attribute";
+				if ($attribute === 'href' && strpos($bare, 'data:') === 0) $problem = $problem ?: 'it links to data:';
+				if (in_array($element, array('animate', 'set', 'animatetransform', 'animatemotion'), true) && $attribute === 'attributename' && $local($bare) === 'href') $problem = $problem ?: "it animates a link (<$element>)";
 			}
 		}, function ($parser, $name) {});
+		// the XML declaration is no processing instruction to expat
+		xml_set_processing_instruction_handler($parser, function ($parser, $target, $data) use (&$problem) {
+			$problem = $problem ?: "it has a processing instruction (<?$target)";
+		});
 		$parsed = xml_parse($parser, $svg, true);
 		if (!$parsed) $problem = 'it is not well-formed XML ('.xml_error_string(xml_get_error_code($parser)).' on line '.xml_get_current_line_number($parser).')';
 		return $problem;

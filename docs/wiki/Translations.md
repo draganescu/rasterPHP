@@ -58,7 +58,7 @@ Nothing to set up per field: Raster reads from the markup which fields hold word
 - A field printed as text, or into `alt`, `title`, `placeholder`, `aria-label` or `content`, is **translated**: one value per language.
 - Everything else is **shared**, one value for every language: photos (`print.@src`), links (`print.@href`), classes, numbers and dates. A picture or a price is set once.
 
-On `/ro/about`, the in-page editor edits the Romanian. A field nobody has translated yet shows the default language's words, so a new language starts complete and fills in as it is translated. A shared field is changed on the default language's page. The editor's own buttons follow the person, not the page: pick their language in the editor's dock.
+On `/ro/about`, the in-page editor edits the Romanian. A field nobody has translated yet shows the default language's words, so a new language starts complete and fills in as it is translated. A shared field, a photo say, can be changed from any language's page, and the change shows in every language. The editor's own buttons follow the person, not the page: pick their language in the editor's dock.
 
 This covers page fields and the `site_` fields every page shares. Collection items (news posts, menu dishes) keep one value for every language for now.
 
@@ -92,7 +92,7 @@ The mock-up still says `lang="en"`, and the page says the language it is shown i
 
 ## With an AI agent
 
-Over [MCP](Working-with-AI-Agents), an agent can do the whole job: `set_languages` turns languages on (and adds the columns), `translation_status` lists what a language still lacks, `update_page` with a `lang` writes a page's translation, `read_strings` and `write_strings` handle the dictionaries, and `render_url` with `/ro/…` shows the result. The tools that change settings or files refuse on a production server.
+Over [MCP](Working-with-AI-Agents), an agent can do the whole job: `set_languages` turns languages on (and adds the columns), `translation_status` lists what a language still lacks, `update_page` with a `lang` writes a page's translation, `read_strings` and `write_strings` handle the dictionaries, and `render_url` with `/ro/…` shows the result. `set_languages` and `write_strings` change the site's files, so they refuse on a production server, and over HTTP they are offered only when the site sets `config::set('mcp_write_views')->to(true)` (over stdio they always are).
 
 ## From a model
 

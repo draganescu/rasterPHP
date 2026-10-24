@@ -818,9 +818,11 @@ mock-up is stored only when the collection's table is made.
   Page tables and `sitepage` get them, and a `saved_lang` column (the
   language a revision was saved in, managed by Raster); collections' items
   come later. Raster makes a translation column before anything is stored
-  in it, which is what keeps `name__id` a plain text column: RedBean reads
-  `x_id` as a link and, on MySQL, would make a column it created itself an
-  int.
+  in it (every write path declares it first), which is what keeps
+  `name__id` a plain text column. A column RedBean creates itself takes its
+  type from the first value stored, and one ending in `_id` also gets an
+  index and an attempt at a foreign key to a table `name_`, and on MySQL
+  is made an integer column, which refuses text.
 - **Relationships are by value.** `print.@href.raster_filter@author` links to
   the items with the same `author`. For real references, write a model.
 - **Page edits are versioned:** every save is a new revision. Values can be
@@ -833,7 +835,8 @@ mock-up is stored only when the collection's table is made.
   field shows its Romanian, and the default language's value while that
   is empty (`cms_store::localized($row, $type, $lang)`, for showing only,
   never for a write). In development a field's first print makes its
-  translation columns. `cms_store::update_page($type, $slug, $values,
+  translation columns, when every place the page (and the layouts dried
+  into it) prints it is a place for words, as `schema` reads it. `cms_store::update_page($type, $slug, $values,
   $allowed, $lang)` writes `$values` (named by the fields themselves,
   `headline`) in `$lang`: a translated field into its column, and a shared
   one is refused with `field_shared`, nothing stored; without `$lang` it
@@ -2204,78 +2207,39 @@ URL alone says the content's language, so one URL is always one language.
 
 ## Multilingual sites
 
-With `multilingual` on and two or more `languages` (`i18n::enabled()`; the
-settings and the language API are under **i18n**), every language has its
-own addresses (**Multilingual URLs**) and page fields hold a value per
-language. Off, none of this happens: no columns, no prefixes, the same
-output as a one-language site.
+With `multilingual` on and two or more `languages` (`i18n::enabled()`),
+every language has its own addresses and page fields hold a value per
+language. Off, none of it happens: no columns, no prefixes, the same output
+as a one-language site. Each part is described where it lives:
+
+| What | Where |
+|---|---|
+| the settings and the language API (`i18n::current()`, `suffix()`, `with()`, …) | **i18n** |
+| addresses (`/ro/menu`), links, redirects, headers, cache | **Multilingual URLs** |
+| which fields are translated, columns (`headline__ro`), fallback, `update_page($…, $lang)` | **The CMS**: Translations, Page fields in a language |
+| translation columns in `schema`, kept translations | **The CMS**: Changing fields |
+| `untranslatable_text`, `missing_translation_key`, `html_lang_fixed` | **i18n**: Lint, multilingual on |
+| the editor on `/ro/…` and the editor's own language | **Editors and agents**: the in-page editor |
+| `set_languages`, `translation_status`, `read_strings`, `write_strings`, `lang` on the page tools | **Editors and agents**: Tools for languages |
 
 - **Words have one home each.** Words editors change are CMS fields
   (`print.cms.x`), with a value per language. Fixed words (a button, a
-  heading the site never changes) are dictionary keys,
+  label the site never changes) are dictionary keys,
   `print.i18n.common('menu')`. Words a model returns can't be translated,
   so a model returns data (addresses, states, flags) and the view words
   it: the starter's `site::nav()` gives each link its `url` and `state`
   and `_layout.html` says "Home"; the shop's order mail gets the flags
   `by_card` and `on_delivery` and words them with `print.if`; the demo's
-  opening hours are a `render.cms.hours` list.
-- **Which fields are translated** is read from where the markup prints
-  them. A `text` field printed as element content, or into `@alt`,
-  `@title`, `@placeholder`, `@aria-label` or `@content`, is translated.
-  Any other attribute (`@src`, `@href`, `@class`, `@data-*`) and every
-  other type (`int`, `number`, `date`, …) is shared: one value for every
-  language, so photos, links, prices and dates are set once. A field
-  printed in several places is translated only when every place is. The
-  content model marks each field `translate: true|false` (`check_view`
-  and `write_view` report it for new fields). This covers page fields and
-  `site_` fields; collection items and records keep one value for every
-  language for now.
-- **Columns.** A translated field `headline` keeps the default language
-  in `headline` and each other language in `headline__ro`: the code in
-  lowercase with `-` as `_` (`name__pt_br`, `name__id`). Code gets the name
-  from `cms_types::column('headline', 'ro')` and never builds it, and `__`
-  is reserved: a field or collection name with it is a `lint` error
-  (`double_underscore`). In development a field's first print adds its
-  columns; in production `schema --apply` does (`--check` counts a missing
-  one). Turning multilingual off keeps them: `schema` lists them as kept
-  translations, never as unused, and never drops them.
-- **Fallback.** An empty translation shows the default language's value
-  when the page is shown (`cms_store::localized($row, $type, $lang)`, for
-  display only); nothing is copied. A new language starts as the default
-  language's words and fills in as it is translated.
-- **Writing from code.** `cms_store::update_page($type, $slug, $values,
-  $allowed, $lang)` takes the base names (`headline`) and writes `$lang`'s
-  columns; without `$lang`, or with the default, it is as before. A shared
-  field written in another language is refused (`field_shared`): set it in
-  the default language. Every revision records `saved_lang`, and
-  `cms.page_saved` carries `lang`.
-- **The editor** edits the page's language: on `/ro/about` it changes the
-  Romanian, and a shared field changed there is refused (`field_shared`).
-  Its own words follow the person, not the page: the dock's language
-  picker stores `user.editor_lang`; without one, the browser's language,
-  then the default.
-- **Lint**, when on, also warns about words in markup outside any
-  annotation (`untranslatable_text`), a `print.i18n` key missing in some
-  language (`missing_translation_key`), and an `<html>` whose `lang` isn't
-  `print.i18n.language` (`html_lang_fixed`).
-- **Agents (MCP)**, making a site multilingual:
-  1. `set_languages` with `["en", "ro"]`, the default first, writes the two
-     settings to `config/the_app.php` and, in development, adds the
-     columns. One code sets `languages` with multilingual off; `[]` takes
-     both settings out. Nothing is dropped.
-  2. Words editors change become CMS fields, fixed words dictionary keys.
-  3. `translation_status` (`lang: "ro"`) lists what that language lacks:
-     page and `site` fields, and dictionary keys.
-  4. `update_page` with `lang` writes a page's translation; `write_strings`
-     a dictionary's (`read_strings` reads one, with the keys the views use
-     and the ones it lacks).
+  opening hours are a `render.cms.hours` list, content rather than code
+  (translated once collection items are, in a later release).
+- **Making a site multilingual, as an agent** (MCP):
+  1. `set_languages` with `["en", "ro"]`, the default first.
+  2. Words editors change become CMS fields, fixed words dictionary keys
+     (`check_view` and `write_view` say which new fields get a translation).
+  3. `translation_status` with `lang: "ro"` lists what Romanian lacks.
+  4. `update_page` with `lang` writes a page's translation, `write_strings`
+     a dictionary's.
   5. `render_url` with `/ro/…` shows the result.
-
-  `get_page` with `lang` gives each field as `{ value, default_value,
-  translated, shared }`, and `page_history` with `lang` the revisions saved
-  in it. `describe` and `site_overview` have a `languages` block
-  (`enabled`, `default`, `list`, `urls`, `missing`). `set_languages` and
-  `write_strings` refuse in production.
 
 ## Environments and cache
 
@@ -2490,8 +2454,14 @@ of lists and filter pages come along; drafts and the editor don't.
     to EN)"); a field with no Romanian yet shows the English and is
     marked, and the Page panel says which fields are not translated yet
     and which are the same in every language (a photo saved on `/ro/` is
-    the photo everywhere). The history says which language each revision
-    changed. The config's `lang` is the page's language, and it adds
+    the photo everywhere). An untranslated field holds nothing in that
+    language, so an undo there empties it again. The history says which
+    language each revision changed, and its Restore brings back every
+    language of that version, as it says. In production before
+    `schema --apply` has made a language's columns, a text field saved in
+    that language is refused (`translation_columns_missing`, worded "run
+    php bin/raster schema --apply") instead of landing in the default
+    language's column. The config's `lang` is the page's language, and it adds
     `editor_lang`, `languages` and `editor_languages`; off it is as it
     always was.
   - Its colours and fonts come from the page (body text, background, the
@@ -2505,7 +2475,8 @@ of lists and filter pages come along; drafts and the editor don't.
     Which language: without `multilingual`, the page's (`?lang=`, as
     detected). Multilingual, the editor's own, apart from the page's: the
     one the person chose with the dock's picker (kept on the account,
-    `user.editor_lang`, which `schema --apply` adds), else the first of
+    `user.editor_lang`, which `schema --apply` adds on a multilingual
+    site), else the first of
     the browser's languages it has words for, else the site's default
     language, else English. So an English owner fixing `/ro/` gets English
     words.
@@ -2564,13 +2535,21 @@ of lists and filter pages come along; drafts and the editor don't.
     `new_fields`: each field the markup adds, `{ field, translate }` (with
     `collection` for an item's), so an agent sees before writing that a
     heading gets a translation per language and a price or a link is shared.
+    The view's name says which page it is compared with (`check_view`
+    without one compares with every page); a view of a theme no route
+    serves is no page, so it has none.
   - `read_asset`, `write_asset` — the theme's files that aren't views:
     `.css`, `.js` and `.svg`, by their path inside the theme
     (`css/style.css`), with the view tools' checks (inside the theme, no link
-    out, the folder must exist). An SVG is written only when it is
-    well-formed XML with no `<script>` element, no `on…` attribute, no
-    `javascript:` link and no entity declarations; otherwise nothing is
-    written and the answer says why. `write_asset` clears the page cache.
+    out, the folder must exist), and no `.php` anywhere in the name
+    (`x.php.css`). An SVG is written only when it is well-formed XML that
+    runs nothing opened on its own: no DOCTYPE, no processing instruction
+    but the XML declaration, no `<script>` or `<foreignObject>`, no `on…` or
+    `srcdoc` attribute, no `<animate>` or `<set>` of a link, no
+    `javascript:` in any value and no `data:` link; otherwise nothing is
+    written and the answer says why. A file is at most 2 MB, and is
+    written whole (a temporary file renamed over it). `write_asset` clears
+    the page cache.
   - The six view and asset tools take an optional `theme`: the name of a folder
     directly under `views/` (letters, digits, `_` and `-`), the site's theme
     when left out. A path, or a folder that links out of `views/`, is
@@ -2588,8 +2567,9 @@ of lists and filter pages come along; drafts and the editor don't.
     cache. On a multilingual site, with `as` it also reports `editing_lang`,
     the language the in-page editor saves in there (the page's own).
   - `clear_cache` — throws the page cache away. Call it after changing
-    views, theme files, models or config any way but `write_view`, or the
-    database directly; Raster's own tools already clear it.
+    views, theme files, models or config any way but `write_view`,
+    `write_asset` and `write_strings`, or the database directly; Raster's
+    own tools already clear it.
 - **Tools for content:** `site_overview`, `get_page`, `update_page`,
   `page_history`, `list_items`, `get_item`, `create_item`, `update_item`,
   `delete_item`, `run_action` (records), `lint_templates`, `schema_status`.
@@ -2597,14 +2577,21 @@ of lists and filter pages come along; drafts and the editor don't.
   - `set_languages(languages)` writes `multilingual` and `languages` to
     `<app>/config/the_app.php` as `config::set('multilingual')->to(true);`
     and `config::set('languages')->to(array('en', 'ro'));`, replacing the
-    statements that set them (a commented-out example stays) or adding them
-    at the end, and nothing else. The default language is first; codes are
+    statements that set them (a commented-out example stays; a statement a
+    closing tag `?>` ends counts, and so does `\config::set`) or adding them
+    after the file's last `config::set`, and nothing else. It checks the
+    result changes no other `config::set` statement before it writes the
+    file (whole, by renaming a temporary one), and refuses, writing
+    nothing, when it would, or when a setting is the body of an `if` or
+    `else` without braces. Line endings stay as they were. The default language is first; codes are
     lowercased, and one that isn't a code (`en_US`) or is listed twice is
     refused. One code writes `languages` with `multilingual` false; `[]`
     takes both lines out. Nothing is dropped. In development it then adds the
     translation columns of every page table that exists. It answers
     `{ enabled, default, languages, urls, columns_added, missing }`. Refused
-    in production.
+    in production. Since `the_app.php` changed, the stdio server answers
+    every later call from a fresh process (see above); restart it to make
+    it fast again.
   - `translation_status(lang)`: what a language other than the default
     lacks, `{ lang, missing: [{ kind, where, field, default_value, length,
     shared }], total, done }`. `kind` is `page` (`where` its URL), `site`
@@ -2620,7 +2607,11 @@ of lists and filter pages come along; drafts and the editor don't.
     `print.i18n.<file>('key')`) and `missing_keys`. Writing merges, and
     Raster writes the file (`<?php return var_export(...)`): what the agent
     sends is only ever words. Keys are letters, digits, `_`, `.` and `-`,
-    values strings. A key no view prints comes back in `unused_keys`, a
+    values strings, and a dictionary is at most 1 MB. The file stays in the
+    app's `i18n/<lang>/` (a folder or file linking out of it is refused) and
+    is written whole. A key with no text in the template
+    (`<!-- print.i18n.home('x') /-->`) is in `used_keys` but never missing,
+    here or in `translation_status`. A key no view prints comes back in `unused_keys`, a
     warning. It clears the page cache, and is refused in production.
     `raster_editor` is the in-page editor's own words, in any language the
     editor has (`action_<name>` and `problem_<name>` keys are the site's
@@ -2647,7 +2638,8 @@ of lists and filter pages come along; drafts and the editor don't.
   same way.
 - **`write_view` edits code, not content**, since a template can call any
   model, and so does `write_asset`: a script runs in every visitor's
-  browser. Over stdio the agent is already on the machine with the files, so
+  browser. `set_languages` and `write_strings` change the site's files too.
+  Over stdio the agent is already on the machine with the files, so
   they are available. Over HTTP they are not offered until the site sets
   `config::set('mcp_write_views')->to(true)`.
 - Results come back as compact JSON, in `structuredContent` and as text.
@@ -2772,7 +2764,7 @@ Set in `config/the_app.php` with `config::set('name')->to(value)`.
 | `page_cache`, `page_cache_ttl`, `page_cache_skip` | on in production, 3600, none | |
 | `asset_versions` | true | false leaves theme asset URLs as they are written |
 | `mcp_token` | none | same as `RASTER_MCP_TOKEN` |
-| `mcp_write_views` | false | lets MCP over HTTP write templates and theme files (`write_view`, `write_asset`); over stdio it always can |
+| `mcp_write_views` | false | lets MCP over HTTP write templates, theme files, dictionaries and the languages setting (`write_view`, `write_asset`, `write_strings`, `set_languages`); over stdio it always can |
 | `api_system_models` | `cms` | system models reachable at `/api`, for what their `api()` lists |
 | `spam_min_seconds` | 3 | a post sooner than this after its form was shown is `too_fast`; false turns the stamp checks off |
 | `spam_max_age` | 86400 | a stamp older than this many seconds is `stamp_old`; false allows any age |

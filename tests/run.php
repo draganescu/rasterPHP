@@ -9770,14 +9770,530 @@ test('P1.A: doctor fails on multilingual without two languages and on a code it 
 	same(array('ok Multilingual: en, ro'), $titles(array('multilingual' => true, 'languages' => array('en', 'ro'), 'domain_language' => array('example.com' => 'en', 'example.ro' => 'ro'), 'site_url' => null)));
 });
 
+// ## P2.C: the coding MCP builds multilingual sites (#159)
+
+// The starter with a fixture page, its own database and the_app.php as it
+// was, put back afterwards: what an agent finds before it adds a language.
+// The page has a heading (translated), a price (an int: shared) and a
+// dictionary word.
+function p2c_site($fn) {
+	global $root;
+	$theme = "$root/application/views/default";
+	$views = array(
+		'zzp2c_menu' => '<!doctype html><!-- print.@lang.i18n.language --><html lang="en"><!-- /print.@lang.i18n.language --><head><title>Menu</title></head><body>'
+			.'<h1><!-- print.cms.zzp2c_heading -->Our menu<!-- /print.cms.zzp2c_heading --></h1>'
+			.'<p class="price"><!-- print.cms.zzp2c_price -->14<!-- /print.cms.zzp2c_price --></p>'
+			.'<button><!-- print.i18n.zzp2c(\'order\') -->Order now<!-- /print.i18n.zzp2c(\'order\') --></button>'
+			.'</body></html>',
+	);
+	foreach ($views as $name => $html) {
+		test_fixture("$theme/$name.html");
+		file_put_contents("$theme/$name.html", $html);
+	}
+	$config = APPBASE.'config/the_app.php';
+	$kept = file_get_contents($config);
+	// the dictionaries as they were: an agent may write any of them
+	$i18n = APPBASE.'i18n';
+	$made = !is_dir($i18n);
+	$dictionaries = array();
+	foreach (glob("$i18n/*/*.php") ?: array() as $file) $dictionaries[$file] = file_get_contents($file);
+	$db = sys_get_temp_dir().'/raster-p2c-'.getmypid().'.sqlite';
+	try {
+		return $fn($db);
+	} finally {
+		file_put_contents($config, $kept);
+		foreach (array_keys($views) as $name) @unlink("$theme/$name.html");
+		foreach (glob("$i18n/*/*.php") ?: array() as $file) {
+			if (!isset($dictionaries[$file])) unlink($file);
+		}
+		foreach ($dictionaries as $file => $source) file_put_contents($file, $source);
+		foreach (glob("$i18n/*", GLOB_ONLYDIR) ?: array() as $dir) @rmdir($dir);
+		if ($made) @rmdir($i18n);
+		array_map('unlink', glob("$db*") ?: array());
+	}
+}
+
+// MCP over stdio one call at a time, as an agent works: each answer can
+// decide the next call
+class p2c_mcp {
+	public $process, $pipes, $id = 100;
+	function __construct($env = array()) {
+		global $root, $db;
+		$env = $env + array('RASTER_DB' => $db, 'RASTER_SECRET' => 'test-secret', 'RASTER_ENV' => 'development', 'PATH' => getenv('PATH'));
+		$this->process = proc_open(php_argv("$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('file', '/dev/null', 'w')), $this->pipes, $root, $env);
+	}
+	function message($method, $params = array()) {
+		fwrite($this->pipes[0], json_encode(array('jsonrpc' => '2.0', 'id' => ++$this->id, 'method' => $method, 'params' => $params ?: new stdClass()))."\n");
+		fflush($this->pipes[0]);
+		$line = fgets($this->pipes[1]);
+		if ($line === false) throw new Exception("mcp $method: no answer");
+		return json_decode($line, true);
+	}
+	// the answer, or array('error' => the message) when the tool refused
+	function call($name, $arguments = array()) {
+		$result = $this->message('tools/call', array('name' => $name, 'arguments' => $arguments ?: new stdClass()))['result'];
+		return !empty($result['isError']) ? array('error' => $result['content'][0]['text']) : $result['structuredContent'];
+	}
+	function close() {
+		@fclose($this->pipes[0]);
+		@fclose($this->pipes[1]);
+		proc_close($this->process);
+	}
+}
+function p2c_session($env, $fn) {
+	$mcp = new p2c_mcp($env);
+	try {
+		return $fn($mcp);
+	} finally {
+		$mcp->close();
+	}
+}
+// the statements a config file runs, without its comments and blank lines
+function p2c_statements($source) {
+	$out = '';
+	foreach (token_get_all($source) as $token) {
+		if (is_array($token) && in_array($token[0], array(T_COMMENT, T_DOC_COMMENT, T_WHITESPACE, T_OPEN_TAG), true)) continue;
+		$out .= is_array($token) ? $token[1] : $token;
+	}
+	return $out;
+}
+
+test('P2.C: set_languages writes the two settings in their canonical form and leaves the rest of the file', function () {
+	$source = "<?php\n// config::set('languages')->to(array('fr'));\nconfig::set('theme')->to('default');\nconfig::set( 'languages' )->to(array(\n\t'en',\n\t'de', // German\n));\nconfig::set('protected')->to(array('x' => 'member'));\n";
+	$lines = array('multilingual' => "config::set('multilingual')->to(true);", 'languages' => "config::set('languages')->to(array('en', 'ro'));");
+	same("<?php\n// config::set('languages')->to(array('fr'));\nconfig::set('theme')->to('default');\nconfig::set('languages')->to(array('en', 'ro'));\nconfig::set('protected')->to(array('x' => 'member'));\nconfig::set('multilingual')->to(true);\n", mcp::config_lines($source, $lines), 'replaced where it was, the commented example kept, the missing one added');
+	same(mcp::config_lines($source, $lines), mcp::config_lines(mcp::config_lines($source, $lines), $lines), 'a second run changes nothing');
+	// a setting set twice keeps the first place, once
+	same("<?php\nconfig::set('languages')->to(array('en', 'ro'));\nconfig::set('multilingual')->to(true);\n\$x = 1;\n", mcp::config_lines("<?php\nconfig::set('languages')->to(array('ro'));\n\$x = 1;\nconfig::set(\"languages\")->to(array('de'));\n", $lines));
+	// null removes both, whole lines, and nothing else
+	same("<?php\nconfig::set('theme')->to('default');\n// config::set('multilingual')->to(true);\n", mcp::config_lines("<?php\nconfig::set('multilingual')->to(true);\nconfig::set('theme')->to('default');\n  config::set('languages')->to(array('en', 'ro'));\n// config::set('multilingual')->to(true);\n", array('multilingual' => null, 'languages' => null)));
+	// without a config::set, at the start of PHP: never after a return or a closing tag
+	same("<?php\nconfig::set('multilingual')->to(true);\nconfig::set('languages')->to(array('en', 'ro'));\n\$a = 1;\nreturn;\n?>\n<p>x</p>", mcp::config_lines("<?php\n\$a = 1;\nreturn;\n?>\n<p>x</p>", $lines));
+	// after the last config::set, inside PHP, when HTML follows
+	same("<?php\nconfig::set('db')->to('keep');\nconfig::set('multilingual')->to(true);\nconfig::set('languages')->to(array('en', 'ro'));\n?>\n<p>html</p>\n", mcp::config_lines("<?php\nconfig::set('db')->to('keep');\n?>\n<p>html</p>\n", $lines));
+	// a statement a closing tag ends is only that statement
+	$closed = "<?php config::set('languages')->to(array('en')) ?>\n<?php\nconfig::set('db')->to('keep');";
+	same("<?php config::set('languages')->to(array('en', 'ro')); ?>\n<?php\nconfig::set('db')->to('keep');\nconfig::set('multilingual')->to(true);", mcp::config_lines($closed, $lines));
+	same("<?php  ?>\n<?php\nconfig::set('db')->to('keep');", mcp::config_lines($closed, array('multilingual' => null, 'languages' => null)));
+	same("<?php config::set('db')->to('keep');\nconfig::set('multilingual')->to(true);\nconfig::set('languages')->to(array('en', 'ro')); ?>x", mcp::config_lines("<?php config::set('db')->to('keep') ?>x", $lines), 'a ; for the statement before');
+	// \config::set too, and the file's own line endings
+	same("<?php\r\nconfig::set('theme')->to('x');\r\nconfig::set('languages')->to(array('en', 'ro'));\r\nconfig::set('multilingual')->to(true);\r\n", mcp::config_lines("<?php\r\nconfig::set('theme')->to('x');\r\n\\config::set('languages')->to(array('de'));\r\n", $lines));
+	// refused rather than guessed: the body of an if or else without braces
+	foreach (array("<?php\nif (\$x) config::set('languages')->to(array('de'));\n", "<?php\nif (\$x) {} else config::set('multilingual')->to(true);\n") as $braceless) {
+		try {
+			mcp::config_lines($braceless, $lines);
+			check(false, 'changed: '.$braceless);
+		} catch (InvalidArgumentException $e) {
+			check(strpos($e->getMessage(), 'without braces') !== false, $e->getMessage());
+		}
+	}
+	same("<?php\nconfig::set('multilingual')->to(true);\nif (\$x) {\n\tconfig::set('languages')->to(array('en', 'ro'));\n}\n", mcp::config_lines("<?php\nif (\$x) {\n\tconfig::set('languages')->to(array('de'));\n}\n", $lines), 'inside braces it is a statement of its own; a new one never goes in the block');
+	// what PHP would make of each result: every other statement as it was
+	foreach (array($source, $closed, "<?php\nconfig::set('db')->to('keep');\n?>\n<p>html</p>\n") as $file) {
+		$after = mcp::config_lines($file, $lines);
+		same(array_values(array_filter(array_column(mcp::config_statements($file), 'name'), function ($n) { return !in_array($n, array('languages', 'multilingual'), true); })), array_values(array_filter(array_column(mcp::config_statements($after), 'name'), function ($n) { return !in_array($n, array('languages', 'multilingual'), true); })));
+		same(1, count(array_filter(mcp::config_statements($after), function ($s) { return $s['name'] === 'languages'; })));
+	}
+});
+
+test('P2.C: set_languages over MCP: on, one language, off; bad codes refused, production refuses', function () {
+	p2c_site(function ($db) {
+		$config = APPBASE.'config/the_app.php';
+		$before = file_get_contents($config);
+		p2c_session(array('RASTER_DB' => $db), function ($mcp) use ($config, $before) {
+			$on = $mcp->call('set_languages', array('languages' => array('EN', 'ro')));
+			check(!isset($on['error']), json_encode($on));
+			same(true, $on['enabled']);
+			same('en', $on['default']);
+			same(array('en', 'ro'), $on['languages']);
+			same(array('en' => '/', 'ro' => '/ro/'), $on['urls']);
+			check(is_int($on['columns_added']), 'columns_added');
+			check(array_key_exists('ro', $on['missing']), 'missing per translation language: '.json_encode($on['missing']));
+			$written = file_get_contents($config);
+			check(strpos($written, "config::set('multilingual')->to(true);\n") !== false && strpos($written, "config::set('languages')->to(array('en', 'ro'));\n") !== false, $written);
+			same(p2c_statements($before), str_replace(array("config::set('multilingual')->to(true);", "config::set('languages')->to(array('en','ro'));"), '', p2c_statements($written)), 'the rest of the file is as it was');
+			// the next call reads the file again
+			same(true, $mcp->call('describe', array('sections' => array('languages')))['languages']['enabled']);
+			// one language: languages set, multilingual off
+			$one = $mcp->call('set_languages', array('languages' => array('ro')));
+			same(false, $one['enabled']);
+			same('ro', $one['default']);
+			same(array(), $one['urls']);
+			$written = file_get_contents($config);
+			check(strpos($written, "config::set('multilingual')->to(false);") !== false && strpos($written, "config::set('languages')->to(array('ro'));") !== false, $written);
+			// [] takes both out; nothing else changed
+			same(false, $mcp->call('set_languages', array('languages' => array()))['enabled']);
+			same(p2c_statements($before), p2c_statements(file_get_contents($config)));
+			foreach (array(array('en', 'en'), array('english'), array('en_US'), array('en', ''), array('ro' => 'ro'), 'en,ro', array(array('en'))) as $bad) {
+				check(isset($mcp->call('set_languages', array('languages' => $bad))['error']), 'refused: '.json_encode($bad));
+			}
+			same(p2c_statements($before), p2c_statements(file_get_contents($config)), 'a refusal writes nothing');
+		});
+		// production refuses, and writes nothing
+		p2c_session(array('RASTER_DB' => $db, 'RASTER_ENV' => 'production'), function ($mcp) use ($config, $before) {
+			$refused = $mcp->call('set_languages', array('languages' => array('en', 'ro')));
+			check(isset($refused['error']) && strpos($refused['error'], 'production') !== false, json_encode($refused));
+			$refused = $mcp->call('write_strings', array('file' => 'zzp2c', 'lang' => 'ro', 'strings' => array('order' => 'Comandă')));
+			check(isset($refused['error']) && strpos($refused['error'], 'production') !== false, json_encode($refused));
+			same($before, file_get_contents($config));
+			check(!is_file(APPBASE.'i18n/ro/zzp2c.php'), 'no dictionary written');
+		});
+	});
+});
+
+test('P2.C: read_strings and write_strings: the agent sends words, Raster writes the PHP', function () {
+	p2c_site(function ($db) {
+		p2c_session(array('RASTER_DB' => $db), function ($mcp) {
+			$mcp->call('set_languages', array('languages' => array('en', 'ro')));
+			$read = $mcp->call('read_strings', array('file' => 'zzp2c', 'lang' => 'ro'));
+			same(array(), $read['strings']);
+			same(array('order'), $read['used_keys'], 'the keys the views print');
+			same(array('order'), $read['missing_keys']);
+			// words that look like PHP stay words
+			$php = "<?php system('id'); ?>";
+			$written = $mcp->call('write_strings', array('file' => 'zzp2c', 'lang' => 'ro', 'strings' => array('order' => 'Comandă acum', 'extra.key-1' => $php)));
+			same(array('written' => 2, 'unused_keys' => array('extra.key-1')), $written, 'a key no view prints is a warning');
+			$file = APPBASE.'i18n/ro/zzp2c.php';
+			$source = file_get_contents($file);
+			same("<?php\nreturn ".var_export(array('order' => 'Comandă acum', 'extra.key-1' => $php), true).";\n", $source, 'var_export, nothing else');
+			same(array('order' => 'Comandă acum', 'extra.key-1' => $php), include $file);
+			// it merges
+			$mcp->call('write_strings', array('file' => 'zzp2c', 'lang' => 'ro', 'strings' => array('order' => 'Comandă')));
+			$read = $mcp->call('read_strings', array('file' => 'zzp2c', 'lang' => 'ro'));
+			same(array('order' => 'Comandă', 'extra.key-1' => $php), $read['strings']);
+			same(array(), $read['missing_keys']);
+			// what is refused
+			foreach (array(
+				array('file' => '../zzp2c', 'lang' => 'ro', 'strings' => array('a' => 'b')),
+				array('file' => 'Zzp2c', 'lang' => 'ro', 'strings' => array('a' => 'b')),
+				array('file' => 'zzp2c', 'lang' => 'de', 'strings' => array('a' => 'b')),
+				array('file' => 'zzp2c', 'lang' => '../ro', 'strings' => array('a' => 'b')),
+				array('file' => 'zzp2c', 'lang' => 'ro', 'strings' => array('a b' => 'c')),
+				array('file' => 'zzp2c', 'lang' => 'ro', 'strings' => array("a'b" => 'c')),
+				array('file' => 'zzp2c', 'lang' => 'ro', 'strings' => array('a' => array('b'))),
+				array('file' => 'zzp2c', 'lang' => 'ro', 'strings' => array('a' => 3)),
+				array('file' => 'zzp2c', 'lang' => 'ro', 'strings' => array('x')),
+				array('file' => "zzp2c\n", 'lang' => 'ro', 'strings' => array('a' => 'b')),
+				array('file' => 'zzp2c', 'lang' => 'ro', 'strings' => array("a\n" => 'b')),
+				array('file' => 'zzp2c', 'lang' => 'ro', 'strings' => array('big' => str_repeat('x', 1048577))),
+				array('file' => 'zzp2c', 'lang' => 'ro', 'strings' => array()),
+			) as $arguments) {
+				check(isset($mcp->call('write_strings', $arguments)['error']), 'refused: '.json_encode($arguments));
+			}
+			same(array('order' => 'Comandă', 'extra.key-1' => $php), include $file, 'nothing written by a refusal');
+			check(!is_file(APPBASE.'i18n/de/zzp2c.php'));
+			check(isset($mcp->call('read_strings', array('file' => "zzp2c\n", 'lang' => 'ro'))['error']), 'a name ends where it ends');
+			// a dictionary or a language folder that links out of i18n/ is refused
+			$outside = sys_get_temp_dir().'/raster-p2c-i18n-'.getmypid();
+			@mkdir($outside);
+			symlink("$outside/target.php", APPBASE.'i18n/ro/zzp2clink.php');
+			try {
+				check(isset($mcp->call('write_strings', array('file' => 'zzp2clink', 'lang' => 'ro', 'strings' => array('order' => 'x')))['error']), 'a file linking out');
+				check(!file_exists("$outside/target.php"), 'nothing written through it');
+			} finally {
+				unlink(APPBASE.'i18n/ro/zzp2clink.php');
+			}
+			$real = APPBASE.'i18n/ro';
+			rename($real, "$real.zzkept");
+			@mkdir($outside);
+			symlink($outside, $real);
+			try {
+				check(isset($mcp->call('write_strings', array('file' => 'zzp2c', 'lang' => 'ro', 'strings' => array('order' => 'x')))['error']), 'a folder linking out');
+				same(array(), glob("$outside/*"), 'nothing written there');
+			} finally {
+				unlink($real);
+				rename("$real.zzkept", $real);
+				@rmdir($outside);
+			}
+			// a key with no text in the template: used, never missing, in both tools
+			file_put_contents(APPBASE.'views/default/zzp2c_empty.html', '<p><!-- print.i18n.zzp2c(\'blank\') /--></p>');
+			test_fixture(APPBASE.'views/default/zzp2c_empty.html');
+			try {
+				$read = $mcp->call('read_strings', array('file' => 'zzp2c', 'lang' => 'ro'));
+				check(in_array('blank', $read['used_keys'], true) && !in_array('blank', $read['missing_keys'], true), json_encode($read));
+				check(!in_array('blank', array_column($mcp->call('translation_status', array('lang' => 'ro'))['missing'], 'field'), true), 'nor in translation_status');
+			} finally {
+				unlink(APPBASE.'views/default/zzp2c_empty.html');
+			}
+			// the editor's own words
+			$editor = $mcp->call('read_strings', array('file' => 'raster_editor', 'lang' => 'ro'));
+			check(in_array('save', $editor['used_keys'], true), 'the editor\'s keys');
+			same(array(), $editor['missing_keys'], 'the editor has words of its own');
+			same(array(), $mcp->call('write_strings', array('file' => 'raster_editor', 'lang' => 'ro', 'strings' => array('save' => 'Păstrează', 'action_confirm' => 'Confirmă')))['unused_keys']);
+			same('Păstrează', (include APPBASE.'i18n/ro/raster_editor.php')['save']);
+			unlink(APPBASE.'i18n/ro/raster_editor.php');
+			// translation_status counts the dictionary
+			$status = $mcp->call('translation_status', array('lang' => 'ro'));
+			check(!in_array('strings', array_column($status['missing'], 'kind'), true), 'translated words are done: '.json_encode($status));
+			check(isset($mcp->call('translation_status', array('lang' => 'en'))['error']), 'the default language is refused');
+			check(isset($mcp->call('translation_status', array('lang' => 'de'))['error']), 'a language the site lacks too');
+		});
+	});
+});
+
+test('P2.C: off, the content tools answer as before', function () {
+	p2c_site(function ($db) {
+		p2c_session(array('RASTER_DB' => $db), function ($mcp) {
+			$page = $mcp->call('update_page', array('page' => '/zzp2c_menu', 'fields' => array('zzp2c_heading' => 'Lunch')));
+			same(array('url', 'view', 'revision', 'updated_at', 'fields'), array_keys($page));
+			same('Lunch', $page['fields']['zzp2c_heading']);
+			same(14, $page['fields']['zzp2c_price']);
+			check(isset($mcp->call('get_page', array('page' => '/zzp2c_menu', 'lang' => 'ro'))['error']), 'no other language to ask for');
+			check(isset($mcp->call('update_page', array('page' => '/zzp2c_menu', 'fields' => array('zzp2c_heading__ro' => 'x')))['error']), 'a translation column is never a field');
+			$check = $mcp->call('check_view', array('content' => '<h1><!-- print.cms.zzp2c_new -->New<!-- /print.cms.zzp2c_new --></h1>', 'view' => 'zzp2c_menu.html'));
+			same(array('view', 'errors', 'warnings', 'problems'), array_keys($check), 'no translate report');
+			same(array('enabled' => false, 'multilingual_setting' => false, 'default' => '', 'list' => array(), 'urls' => array(), 'missing' => array()), $mcp->call('describe', array('sections' => array('languages')))['languages']);
+		});
+		// no column for another language is made
+		$pdo = new PDO('sqlite:'.$db);
+		$table = $pdo->query("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'zzp2cmenu%page'")->fetchColumn();
+		$names = $pdo->query("PRAGMA table_info($table)")->fetchAll(PDO::FETCH_COLUMN, 1);
+		check($names && !preg_grep('/__/', $names), json_encode($names));
+	});
+});
+
+test('P2.C: an agent turns a one-language site into a bilingual one over MCP (needs P2.A, P2.B)', function () {
+	p2c_site(function ($db) {
+		p2c_session(array('RASTER_DB' => $db), function ($mcp) {
+			// the page exists, in English, before languages are turned on
+			$mcp->call('update_page', array('page' => '/zzp2c_menu', 'fields' => array('zzp2c_heading' => 'Our lunch menu')));
+			$on = $mcp->call('set_languages', array('languages' => array('en', 'ro')));
+			same(array('en' => '/', 'ro' => '/ro/'), $on['urls']);
+			check($on['columns_added'] > 0, 'translation columns: '.json_encode($on));
+			check($on['missing']['ro'] > 0, json_encode($on));
+			// the page says which field is translated and which is shared
+			$page = $mcp->call('get_page', array('page' => '/zzp2c_menu', 'lang' => 'ro'));
+			same(array('value' => '', 'default_value' => 'Our lunch menu', 'translated' => false, 'shared' => false), $page['fields']['zzp2c_heading']);
+			same(array('value' => 14, 'default_value' => 14, 'translated' => false, 'shared' => true), $page['fields']['zzp2c_price']);
+			$refused = $mcp->call('update_page', array('page' => '/zzp2c_menu', 'fields' => array('zzp2c_price' => 12), 'lang' => 'ro'));
+			same("'zzp2c_price' is shared by every language; update it without lang", isset($refused['error']) ? $refused['error'] : json_encode($refused));
+			// translate everything translation_status lists, a page at a time
+			$status = $mcp->call('translation_status', array('lang' => 'ro'));
+			same($on['missing']['ro'], $status['total']);
+			$kinds = array_unique(array_column($status['missing'], 'kind'));
+			foreach (array('page', 'site', 'strings') as $kind) check(in_array($kind, $kinds, true), "$kind is listed: ".json_encode($kinds));
+			$pages = array();
+			$strings = array();
+			$offset = 0;
+			do {
+				$batch = $mcp->call('translation_status', array('lang' => 'ro', 'limit' => 5, 'offset' => $offset));
+				foreach ($batch['missing'] as $missing) {
+					same(false, $missing['shared']);
+					same(mb_strlen($missing['default_value']) <= 300, true);
+					if ($missing['kind'] === 'strings') $strings[$missing['where']][$missing['field']] = 'RO '.$missing['default_value'];
+					else $pages[$missing['where']][$missing['field']] = 'RO '.$missing['default_value'];
+				}
+				$offset += 5;
+			} while ($offset < $batch['total']);
+			$pages['/zzp2c_menu']['zzp2c_heading'] = 'Meniul nostru de prânz';
+			$strings['zzp2c']['order'] = 'Comandă acum';
+			foreach ($pages as $where => $fields) {
+				$saved = $mcp->call('update_page', array('page' => $where, 'fields' => $fields, 'lang' => 'ro'));
+				check(!isset($saved['error']), "$where: ".json_encode($saved));
+			}
+			foreach ($strings as $file => $words) {
+				same(count($words), $mcp->call('write_strings', array('file' => $file, 'lang' => 'ro', 'strings' => $words))['written']);
+				// no PHP from the agent: the file is var_export's of its words
+				$path = APPBASE."i18n/ro/$file.php";
+				same("<?php\nreturn ".var_export(include $path, true).";\n", file_get_contents($path), $file);
+			}
+			// nothing left, and the English page is as it was
+			$status = $mcp->call('translation_status', array('lang' => 'ro'));
+			same(0, $status['total'], json_encode($status['missing']));
+			check($status['done'] > 0, 'done counts the translations');
+			same(array('ro' => 0), $mcp->call('describe', array('sections' => array('languages')))['languages']['missing']);
+			same('Our lunch menu', $mcp->call('get_page', array('page' => '/zzp2c_menu'))['fields']['zzp2c_heading']);
+			same(array('value' => 'Meniul nostru de prânz', 'default_value' => 'Our lunch menu', 'translated' => true, 'shared' => false), $mcp->call('get_page', array('page' => '/zzp2c_menu', 'lang' => 'ro'))['fields']['zzp2c_heading']);
+			// the Romanian revision, apart from the English ones
+			$history = $mcp->call('page_history', array('page' => '/zzp2c_menu', 'lang' => 'ro'));
+			same(array('ro'), array_values(array_unique(array_column($history['revisions'], 'saved_lang'))));
+			// /ro/ is Romanian, / still English
+			$ro = $mcp->call('render_url', array('url' => '/ro/zzp2c_menu'));
+			same(200, $ro['status']);
+			check(strpos($ro['html'], '<h1>Meniul nostru de prânz</h1>') !== false, 'the Romanian heading');
+			check(strpos($ro['html'], '<button>Comandă acum</button>') !== false, 'the Romanian word');
+			check(strpos($ro['html'], 'lang="ro"') !== false, 'html lang');
+			check(strpos($ro['html'], '>14<') !== false, 'the shared price');
+			$en = $mcp->call('render_url', array('url' => '/zzp2c_menu'));
+			check(strpos($en['html'], '<h1>Our lunch menu</h1>') !== false && strpos($en['html'], '<button>Order now</button>') !== false, 'English stays');
+			// as the editor sees it: the language its saves go to
+			same('ro', $mcp->call('render_url', array('url' => '/ro/zzp2c_menu', 'as' => 'editor'))['editing_lang']);
+			same('en', $mcp->call('render_url', array('url' => '/zzp2c_menu', 'as' => 'editor'))['editing_lang']);
+		});
+	});
+});
+
+test('P2.C: check_view and write_view say which new fields are translated (needs P2.A)', function () {
+	p2c_site(function ($db) {
+		$other = APPBASE.'views/zzp2ctheme';
+		test_fixture($other);
+		@mkdir($other);
+		p2c_session(array('RASTER_DB' => $db), function ($mcp) {
+			$mcp->call('set_languages', array('languages' => array('en', 'ro')));
+			$draft = '<!doctype html><html><head><title>Menu</title></head><body><h1><!-- print.cms.zzp2c_heading -->Our menu<!-- /print.cms.zzp2c_heading --></h1>'
+				.'<h2><!-- print.cms.zzp2c_sub -->Lunch<!-- /print.cms.zzp2c_sub --></h2><p><!-- print.cms.zzp2c_seats -->40<!-- /print.cms.zzp2c_seats --></p>'
+				.'<!-- print.@href.cms.zzp2c_map --><a href="https://maps.example/x">Map</a><!-- /print.@href.cms.zzp2c_map --></body></html>';
+			$check = $mcp->call('check_view', array('content' => $draft, 'view' => 'zzp2c_menu.html'));
+			same(array(
+				array('field' => 'zzp2c_sub', 'translate' => true),
+				array('field' => 'zzp2c_seats', 'translate' => false),
+				array('field' => 'zzp2c_map', 'translate' => false),
+			), $check['new_fields'], 'the heading is not new; a link is shared');
+			$written = $mcp->call('write_view', array('content' => $draft, 'view' => 'zzp2c_menu.html'));
+			same(true, $written['written']);
+			same($check['new_fields'], $written['new_fields']);
+			same(array(), $mcp->call('check_view', array('content' => $draft, 'view' => 'zzp2c_menu.html'))['new_fields'], 'written, nothing is new');
+			// a draft without a name is compared with every page
+			same(array(array('field' => 'zzp2c_other', 'translate' => true)), $mcp->call('check_view', array('content' => $draft.'<p><!-- print.cms.zzp2c_other -->x<!-- /print.cms.zzp2c_other --></p>'))['new_fields']);
+			// a view of a theme no route serves is no page: nothing of it is stored
+			same(array(), $mcp->call('check_view', array('content' => $draft, 'view' => 'zzp2c_menu.html', 'theme' => 'zzp2ctheme'))['new_fields']);
+		});
+		@rmdir($other);
+	});
+});
+
+test('P2.C: describe, site_overview and raster describe --json have the languages block', function () use ($root) {
+	p2c_site(function ($db) use ($root) {
+		p2c_session(array('RASTER_DB' => $db), function ($mcp) {
+			$overview = $mcp->call('site_overview');
+			same(false, $overview['languages']['enabled']);
+			check(array_key_exists('languages', $mcp->call('describe')), 'in describe by default');
+			$mcp->call('set_languages', array('languages' => array('en', 'ro')));
+			$languages = $mcp->call('describe', array('sections' => array('languages')))['languages'];
+			same(array('enabled', 'multilingual_setting', 'default', 'list', 'urls', 'missing'), array_keys($languages));
+			same(array(true, true, 'en', array('en', 'ro'), array('en' => '/', 'ro' => '/ro/')), array($languages['enabled'], $languages['multilingual_setting'], $languages['default'], $languages['list'], $languages['urls']));
+			check(is_int($languages['missing']['ro']) && $languages['missing']['ro'] >= 1, 'the dictionary word at least: '.json_encode($languages));
+			same($languages, $mcp->call('site_overview')['languages']);
+			same($languages['missing']['ro'], $mcp->call('translation_status', array('lang' => 'ro'))['total']);
+		});
+		$out = array();
+		exec('RASTER_DB='.escapeshellarg($db).' '.implode(' ', array_map('escapeshellarg', php_argv("$root/bin/raster", 'describe', '--json'))).' 2>/dev/null', $out);
+		$described = json_decode(implode("\n", $out), true);
+		same(true, $described['languages']['enabled']);
+		same(array('en' => '/', 'ro' => '/ro/'), $described['languages']['urls']);
+		check(isset($described['languages']['missing']['ro']), json_encode($described['languages']));
+	});
+});
+
+test('P2.C: read_asset and write_asset: a theme\'s CSS, JS and SVG, with write_view\'s path checks (#159)', function () use ($root, $base) {
+	$theme = "$root/application/views/default";
+	$outside = sys_get_temp_dir().'/raster-p2c-asset-'.getmypid();
+	@mkdir($outside);
+	file_put_contents("$outside/secret.css", 'body{} /* sk-live-789 */');
+	test_fixture("$theme/zzp2c_link.css");
+	symlink("$outside/secret.css", "$theme/zzp2c_link.css");
+	test_fixture("$theme/zzp2c_dir");
+	symlink($outside, "$theme/zzp2c_dir");
+	$css = "$theme/style.css";
+	$kept = file_get_contents($css);
+	$version = APPBASE.'data/cache/version';
+	try {
+		p2c_session(array(), function ($mcp) use ($theme, $kept, $version, $outside) {
+			$read = $mcp->call('read_asset', array('path' => 'style.css'));
+			same(array('path' => 'style.css', 'theme' => 'default', 'bytes' => strlen($kept), 'content' => $kept), $read);
+			$cache = @file_get_contents($version);
+			$written = $mcp->call('write_asset', array('path' => 'style.css', 'content' => $kept."\n.zz { color: red; }\n"));
+			same(array('written' => true, 'path' => 'style.css', 'created' => false, 'bytes' => strlen($kept) + 21), $written);
+			check(@file_get_contents($version) !== $cache, 'the page cache is cleared');
+			same($kept."\n.zz { color: red; }\n", file_get_contents("$theme/style.css"));
+			$made = $mcp->call('write_asset', array('path' => 'zzp2c.js', 'content' => 'console.log(1);'));
+			same(true, $made['created']);
+			$svg = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 2 2"><a xlink:href="about.html"><circle cx="1" cy="1" r="1"/></a></svg>';
+			same(true, $mcp->call('write_asset', array('path' => 'zzp2c.svg', 'content' => $svg))['written']);
+			same($svg, $mcp->call('read_asset', array('path' => 'zzp2c.svg'))['content']);
+			// an SVG that would run something, or isn't XML, is not written
+			foreach (array(
+				'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
+				'<svg xmlns="http://www.w3.org/2000/svg"><SCRIPT>alert(1)</SCRIPT></svg>',
+				'<svg xmlns="http://www.w3.org/2000/svg" xmlns:s="http://www.w3.org/2000/svg"><s:script>alert(1)</s:script></svg>',
+				'<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>',
+				'<svg xmlns="http://www.w3.org/2000/svg"><rect ONCLICK="alert(1)"/></svg>',
+				'<svg xmlns="http://www.w3.org/2000/svg"><a href=" java&#x09;script:alert(1)"><rect/></a></svg>',
+				'<svg xmlns="http://www.w3.org/2000/svg"><rect></svg>',
+				'<svg>&lt;',
+				'not xml at all',
+				'<!DOCTYPE svg [<!ENTITY x "y">]><svg xmlns="http://www.w3.org/2000/svg">&x;</svg>',
+				'<!DOCTYPE svg><svg xmlns="http://www.w3.org/2000/svg"/>',
+				'<?xml-stylesheet href="x.css"?><svg xmlns="http://www.w3.org/2000/svg"/>',
+				'<svg xmlns="http://www.w3.org/2000/svg"><foreignObject><p xmlns="http://www.w3.org/1999/xhtml">x</p></foreignObject></svg>',
+				'<svg xmlns="http://www.w3.org/2000/svg"><a><set attributeName="href" to="javascript:alert(1)"/></a></svg>',
+				'<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><a><animate attributeName="xlink:href" values="x"/></a></svg>',
+				'<svg xmlns="http://www.w3.org/2000/svg"><iframe srcdoc="x"/></svg>',
+				'<svg xmlns="http://www.w3.org/2000/svg"><a href="data:text/html,x"><rect/></a></svg>',
+				'<svg xmlns="http://www.w3.org/2000/svg"><a title="see javascript:x"><rect/></a></svg>',
+			) as $bad) {
+				$refused = $mcp->call('write_asset', array('path' => 'zzp2c.svg', 'content' => $bad));
+				check(isset($refused['error']), 'written: '.$bad);
+			}
+			same($svg, file_get_contents("$theme/zzp2c.svg"), 'the file is left as it was');
+			$declared = '<?xml version="1.0" encoding="UTF-8"?>'."\n".$svg;
+			same(true, $mcp->call('write_asset', array('path' => 'zzp2c.svg', 'content' => $declared))['written'], 'the XML declaration is fine');
+			check(isset($mcp->call('write_asset', array('path' => 'zzp2c.js', 'content' => str_repeat('x', 2097153)))['error']), 'at most 2 MB');
+			// only theme files that aren't views, inside the theme
+			foreach (array("zzp2c.css\n", 'zzp2c.php.css', 'zzp2c.PHP.js', 'zzp2c.phtml.svg', '../../config/the_app.php', '../zz.css', '../../../zz.css', '/etc/passwd.css', "style.css\0.css", 'about.html', 'zzp2c.php', 'zzp2c.CSS', 'zzp2c_link.css', 'zzp2c_dir/secret.css', 'nope/zz.css', '', '.') as $path) {
+				check(isset($mcp->call('read_asset', array('path' => $path))['error']), 'read: '.json_encode($path));
+				check(isset($mcp->call('write_asset', array('path' => $path, 'content' => 'x'))['error']), 'written: '.json_encode($path));
+			}
+			check(strpos(file_get_contents("$outside/secret.css"), 'sk-live-789') !== false, 'nothing written through a link');
+			foreach (array('..', '../..', 'nope', 'default/../default') as $other) {
+				check(isset($mcp->call('read_asset', array('path' => 'style.css', 'theme' => $other))['error']), "theme $other");
+			}
+		});
+		// over HTTP, reading is offered and writing waits for mcp_write_views
+		list(, $body) = http('POST', "$base/mcp", json_encode(array('jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/list')), array('Authorization: Bearer test-token'));
+		$names = array_column(json_decode($body, true)['result']['tools'], 'name');
+		check(in_array('read_asset', $names, true) && !in_array('write_asset', $names, true), json_encode($names));
+		// so do the tools that write the dictionaries and the config
+		check(in_array('read_strings', $names, true) && in_array('translation_status', $names, true), 'reading is offered');
+		check(!in_array('write_strings', $names, true) && !in_array('set_languages', $names, true), 'writing files waits for mcp_write_views');
+		foreach (array(array('set_languages', array('languages' => array('en', 'ro'))), array('write_strings', array('file' => 'zzp2c', 'lang' => 'en', 'strings' => array('a' => 'b')))) as $call) {
+			list(, $body) = http('POST', "$base/mcp", json_encode(array('jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => array('name' => $call[0], 'arguments' => $call[1]))), array('Authorization: Bearer test-token'));
+			same(-32602, json_decode($body, true)['error']['code'], $call[0]);
+		}
+		check(strpos(file_get_contents(APPBASE.'config/the_app.php'), "'multilingual'") === false, 'the config is untouched');
+		list(, $body) = http('POST', "$base/mcp", json_encode(array('jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => array('name' => 'write_asset', 'arguments' => array('path' => 'style.css', 'content' => 'x')))), array('Authorization: Bearer test-token'));
+		same(-32602, json_decode($body, true)['error']['code']);
+		same(strlen($kept) + 21, strlen(file_get_contents($css)));
+		check(strpos(json_encode(mcp_call('read_asset', array('path' => 'zzp2c_link.css'))), 'sk-live-789') === false, 'nothing read through a link over HTTP');
+	} finally {
+		file_put_contents($css, $kept);
+		foreach (array('zzp2c.js', 'zzp2c.svg', 'zzp2c_link.css', 'zzp2c_dir') as $name) @unlink("$theme/$name");
+		@unlink("$outside/secret.css");
+		@rmdir($outside);
+	}
+});
+
+test('P2.C: tools/list and describe grow by less than 1,000 characters (#161)', function () {
+	// The baseline is tools/list over stdio at the P2 kickoff (c247d94):
+	// 10954 characters, these 21 tools. P2.C added the six below. A later
+	// release that adds tools measures its own growth: it moves the
+	// baseline to the size before its change and adds its tools to the
+	// list, so this test keeps saying what each step costs. describe's own
+	// growth is its languages block; the rest of describe is other
+	// packages' (the starter's views, lint).
+	$kickoff = array('site_overview', 'get_page', 'update_page', 'page_history', 'list_items', 'get_item', 'create_item', 'update_item', 'run_action', 'delete_item',
+		'lint_templates', 'schema_status', 'describe', 'vocabulary', 'annotations', 'list_views', 'read_view', 'check_view', 'write_view', 'render_url', 'clear_cache');
+	$added = array('set_languages', 'translation_status', 'read_strings', 'write_strings', 'read_asset', 'write_asset');
+	p2c_site(function ($db) use ($kickoff, $added) {
+		p2c_session(array('RASTER_DB' => $db), function ($mcp) use ($kickoff, $added) {
+			$list = $mcp->message('tools/list')['result'];
+			same(array(), array_values(array_diff(array_column($list['tools'], 'name'), $kickoff, $added)), 'a tool this baseline does not know: move the baseline (see above)');
+			$tools = strlen(json_encode($list, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+			$languages = strlen(json_encode(array('languages' => $mcp->call('describe', array('sections' => array('languages')))['languages']), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)) - 2;
+			$growth = $tools - 10954 + $languages;
+			check($growth < 1000, "tools/list is $tools characters and the languages block $languages: $growth more than at the kickoff");
+			$instructions = $mcp->message('initialize')['result']['instructions'];
+			check(strpos($instructions, 'Making a site multilingual') !== false && strpos($instructions, 'write_asset') !== false, 'the recipe and the asset tools');
+			preg_match('/Making a site multilingual.*$/s', $instructions, $m);
+			check(str_word_count($m[0]) <= 120, 'the recipe is at most 120 words: '.str_word_count($m[0]));
+		});
+	});
+});
+
 // ## P2.B: page reads and writes in a language, the editor
 
-// The checkout copied to a folder of its own for the P2.B tests that need
-// translated fields, made once. Until P2.A lands, cms_types::translates(),
-// translated() and ensure()'s $translated are stubs that say no field is
-// translated; the copy gets bodies that follow the contract (D7) in their
-// place, so these tests run the real path here, and once P2.A's bodies are
-// in, the copy runs them unchanged. Nothing in the checkout is touched.
+// The checkout copied to a folder of its own for the P2.B tests, made
+// once, so their fixture views and settings never touch the checkout.
 function p2b_copy() {
 	global $root;
 	static $dir = null;
@@ -9789,23 +10305,6 @@ function p2b_copy() {
 		exec('cp -R '.escapeshellarg("$root/$part").' '.escapeshellarg("$dir/$part"));
 	}
 	register_shutdown_function(function () use ($dir) { exec('rm -rf '.escapeshellarg($dir)); });
-	$file = "$dir/system/models/cms/types.php";
-	$types = file_get_contents($file);
-	$stubs = array(
-		"static function translates(\$type, \$attribute = null) {\n\t\treturn false;\n\t}" =>
-			"static function translates(\$type, \$attribute = null) {\n\t\treturn \$type === 'text' && in_array(\$attribute, array(null, 'alt', 'title', 'placeholder', 'aria-label', 'content'), true);\n\t}",
-		"static function translated(\$table) {\n\t\treturn array();\n\t}" =>
-			"static function translated(\$table) {\n\t\tif (!i18n::enabled()) return array();\n\t\t\$columns = self::of_table(\$table);\n\t\t\$found = array();\n\t\tforeach (i18n::available() as \$lang) {\n\t\t\t\$suffix = i18n::suffix(\$lang);\n\t\t\tif (\$suffix === '') continue;\n\t\t\tforeach (\$columns as \$column => \$type) {\n\t\t\t\t\$field = substr(\$column, 0, -strlen(\$suffix));\n\t\t\t\tif (substr(\$column, -strlen(\$suffix)) === \$suffix && isset(\$columns[\$field])) \$found[\$field] = true;\n\t\t\t}\n\t\t}\n\t\treturn array_keys(\$found);\n\t}",
-		"\t\t\$have = cms_store::columns(\$table);\n" =>
-			"\t\t\$have = cms_store::columns(\$table);\n\t\tif (i18n::enabled()) foreach ((array)\$translated as \$f) foreach (i18n::available() as \$l) if (i18n::suffix(\$l) !== '') \$types[\$f.i18n::suffix(\$l)] = isset(\$types[\$f]) ? \$types[\$f] : (isset(\$have[\$f]) ? self::of_column(\$have[\$f]) : 'text');\n",
-	);
-	if (strpos($types, "static function translated(\$table) {\n\t\treturn array();\n\t}") !== false) {
-		foreach ($stubs as $stub => $body) {
-			check(substr_count($types, $stub) === 1, "types.php changed: $stub");
-			$types = str_replace($stub, $body, $types);
-		}
-		file_put_contents($file, $types);
-	}
 	return $dir;
 }
 // the copy multilingual (en, ro), with the fixture page /zzp2babout
@@ -9816,6 +10315,7 @@ function p2b_site($fn, $settings = "config::set('languages')->to(array('en', 'ro
 		.'<h1><!-- print.cms.zzp2b_headline -->Our story<!-- /print.cms.zzp2b_headline --></h1>'
 		.'<p class="intro"><!-- print.cms.zzp2b_intro -->Coffee since 2001.<!-- /print.cms.zzp2b_intro --></p>'
 		.'<!-- print.@src.cms.zzp2b_photo --><img src="photo.jpg" alt="Cup"><!-- /print.@src.cms.zzp2b_photo -->'
+		.'<!-- print.@href.cms.zzp2b_link --><a href="https://cafe.example"><!-- print.cms.zzp2b_link -->https://cafe.example<!-- /print.cms.zzp2b_link --></a><!-- /print.@href.cms.zzp2b_link -->'
 		.'<footer><!-- print.cms.site_zzp2b_tagline -->Slow coffee<!-- /print.cms.site_zzp2b_tagline --></footer></body></html>');
 	$events = "$dir/application/config/the_events.php";
 	$kept = file_get_contents($events);
@@ -9827,10 +10327,11 @@ function p2b_site($fn, $settings = "config::set('languages')->to(array('en', 'ro
 	}
 }
 // a server for the copy
-function p2b_server($dir, $fn) {
+function p2b_server($dir, $fn, $env = array()) {
 	global $db;
 	$port = free_port();
-	$env = array('RASTER_DB' => $db, 'RASTER_SECRET' => 'test-secret', 'RASTER_ENV' => 'development', 'PATH' => getenv('PATH'));
+	$env = $env + array('RASTER_DB' => $db, 'RASTER_SECRET' => 'test-secret', 'RASTER_ENV' => 'development', 'PATH' => getenv('PATH'));
+	foreach ($env as $name => $value) $env[$name] = str_replace('{port}', $port, $value);
 	$server = proc_open(php_argv('-S', "127.0.0.1:$port", "$dir/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $dir, $env);
 	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
 	try {
@@ -9882,6 +10383,16 @@ function p2b_clean($site_last) {
 	$columns = cms_store::columns('sitepage');
 	foreach (array_keys($columns) as $column) {
 		if (strpos($column, 'zzp2b') !== false) R::exec("ALTER TABLE sitepage DROP COLUMN `$column`");
+	}
+	// a page shown in development in a language ensures the translation
+	// columns of what it prints, the layout's site_* fields too
+	cms_store::forget();
+	foreach (R::inspect() as $table) {
+		if (!preg_match('/page$/', $table)) continue;
+		foreach (array_keys(cms_store::columns($table)) as $column) {
+			if (preg_match('/__[a-z]{2,3}(_[a-z0-9]{2,8})?$/', $column)) R::exec("ALTER TABLE `$table` DROP COLUMN `$column`");
+		}
+		cms_store::forget();
 	}
 	cms_store::forget();
 }
@@ -9951,6 +10462,71 @@ test('P2.B: update_page() in a language writes its column, refuses a shared fiel
 	same(array(array('en', array('headline', 'photo')), array('ro', array('headline'))), $out['events']);
 });
 
+test('P2.B: two saves at once in two languages keep each other\'s change', function () {
+	global $db;
+	$dir = p2b_copy();
+	p2b_php($dir, 'R::exec("DROP TABLE IF EXISTS zzp2bunitpage");
+		cms_types::ensure("zzp2bunitpage", array("slug" => "text", "updated_at" => "datetime", "headline" => "text", "intro" => "text"), array("headline", "intro"));
+		cms_store::update_page("zzp2bunitpage", "/zzp2bunit", array("headline" => "Our story", "intro" => "Since 2001"), array("headline", "intro"));
+		echo "[]";');
+	try {
+		reconnect();
+		$start = sprintf('%.6F', microtime(true) + 0.8);
+		$saves = array('array("headline" => "Our whole story"), array("headline", "intro")', 'array("intro" => "Din 2001"), array("headline", "intro"), "ro"');
+		$processes = array();
+		foreach ($saves as $n => $save) {
+			$script = 'require "'.$dir.'/system/boot.php"; boot::$appname = "application"; boot::cli(); cms_store::connect();'
+				.' config::set("languages")->to(array("en", "ro")); config::set("multilingual")->to(true);'
+				.' while (microtime(true) < '.$start.') usleep(100); cms_store::update_page("zzp2bunitpage", "/zzp2bunit", '.$save.'); echo "ok";';
+			$process = proc_open(php_argv('-r', $script), array(1 => array('pipe', 'w'), 2 => array('redirect', 1)), $pipes, $dir, array('RASTER_DB' => $db, 'RASTER_ENV' => 'development', 'PATH' => getenv('PATH')));
+			$processes[$n] = array($process, $pipes[1]);
+		}
+		foreach ($processes as $n => $process) {
+			same('ok', stream_get_contents($process[1]), "save $n");
+			proc_close($process[0]);
+		}
+		$latest = R::getRow('SELECT headline, intro, intro__ro FROM zzp2bunitpage ORDER BY id DESC LIMIT 1');
+		same(array('headline' => 'Our whole story', 'intro' => 'Since 2001', 'intro__ro' => 'Din 2001'), $latest);
+	} finally {
+		R::exec('DROP TABLE IF EXISTS zzp2bunitpage');
+		cms_store::forget();
+	}
+});
+
+test('P2.B: production before schema --apply: a save in a language is refused, never written to the default\'s column', function () {
+	$dir = p2b_copy();
+	cms_store::connect();
+	R::exec('DROP TABLE IF EXISTS zzp2bfrozenpage');
+	cms_types::ensure('zzp2bfrozenpage', array('slug' => 'text', 'updated_at' => 'datetime', 'zzp2b_note' => 'text', 'zzp2b_seats' => 'int'));
+	R::exec("INSERT INTO zzp2bfrozenpage (slug, updated_at, zzp2b_note, zzp2b_seats) VALUES ('/zzp2bfrozen', '2026-10-01 10:00:00', 'Open daily', 12)");
+	file_put_contents("$dir/application/views/default/zzp2bfrozen.html", '<!doctype html><html><head><title>Frozen</title></head><body>'
+		.'<p><!-- print.cms.zzp2b_note -->Open daily<!-- /print.cms.zzp2b_note --></p><p><!-- print.cms.zzp2b_seats -->12<!-- /print.cms.zzp2b_seats --></p></body></html>');
+	try {
+		p2b_site(function ($dir) {
+			p2b_server($dir, function ($base) {
+				$editor = p2b_login($base, 'zzp2b-frozen@example.test');
+				list($config) = p2b_config("$base/ro/zzp2bfrozen", $editor);
+				$post = function ($fields) use ($base, $editor, $config) {
+					list($status, $body) = form_post("$base/ro/api/cms/editor_save_field", $fields + array('type' => 'zzp2bfrozenpage', 'slug' => '/zzp2bfrozen', 'lang' => 'ro', 'csrf' => $config['csrf']), array("Cookie: $editor"));
+					return array($status, json_decode($body, true));
+				};
+				list($status, $json) = $post(array('field' => 'zzp2b_note', 'value' => 'Deschis zilnic'));
+				same(array(422, array('translation_columns_missing')), array($status, $json['problems']));
+				same('Open daily', R::getCell('SELECT zzp2b_note FROM zzp2bfrozenpage ORDER BY id DESC LIMIT 1'), 'the English is untouched');
+				// a number is one value in every language
+				same(200, $post(array('field' => 'zzp2b_seats', 'value' => '14'))[0]);
+			}, array('RASTER_ENV' => 'production', 'RASTER_URL' => 'http://127.0.0.1:{port}/'));
+		});
+		$js = file_get_contents(BASE.'models/cms/editor/editor.js');
+		check(strpos($js, 'problem_translation_columns_missing:') !== false, 'worded in English');
+		check(isset((include BASE.'models/cms/editor/lang/ro.php')['problem_translation_columns_missing']), 'and in Romanian');
+	} finally {
+		@unlink("$dir/application/views/default/zzp2bfrozen.html");
+		R::exec('DROP TABLE IF EXISTS zzp2bfrozenpage');
+		cms_store::forget();
+	}
+});
+
 test('P2.B: an editor on /ro/ saves Romanian, /about keeps English, and an empty Romanian field shows English', function () {
 	$site_last = (int)R::getCell('SELECT MAX(id) FROM sitepage');
 	try {
@@ -9961,6 +10537,8 @@ test('P2.B: an editor on /ro/ saves Romanian, /about keeps English, and an empty
 				$columns = cms_store::columns('zzp2baboutpage');
 				foreach (array('zzp2b_headline__ro', 'zzp2b_intro__ro', 'zzp2b_title__ro') as $column) check(isset($columns[$column]), "$column: ".implode(', ', array_keys($columns)));
 				check(!isset($columns['zzp2b_photo__ro']), 'a photo (@src) is shared');
+				// printed as a link's text and in its href: one value, as the content model says
+				check(isset($columns['zzp2b_link']) && !isset($columns['zzp2b_link__ro']), 'a link printed in its href too is shared');
 				check(isset(cms_store::columns('sitepage')['site_zzp2b_tagline__ro']), 'site fields too');
 				$editor = p2b_login($base);
 				list($config) = p2b_config("$base/ro/zzp2babout", $editor);
@@ -9968,7 +10546,10 @@ test('P2.B: an editor on /ro/ saves Romanian, /about keeps English, and an empty
 				same($base.'/ro/api/cms/', $config['api'], 'saves go to the page\'s language');
 				same(array('en', 'ro'), $config['languages']);
 				$mark = p2b_mark($config, 'zzp2b_headline');
-				same(array('ro', false, true, 'Our story', 'Our story'), array($mark['lang'], $mark['shared'], $mark['untranslated'], $mark['fallback'], $mark['value']), json_encode($mark));
+				// the value is what Romanian holds (nothing): an undo puts that back,
+				// never the English the page shows meanwhile
+				same(array('ro', false, true, 'Our story', ''), array($mark['lang'], $mark['shared'], $mark['untranslated'], $mark['fallback'], $mark['value']), json_encode($mark));
+				check(strpos(http('GET', "$base/ro/zzp2babout", null, array("Cookie: $editor"))[1], 'Our story<!--raster:e') !== false, 'the editor sees the English');
 				same(array('ro', true), array(p2b_mark($config, 'zzp2b_photo')['lang'], p2b_mark($config, 'zzp2b_photo')['shared']));
 				check(!isset(p2b_mark($config, 'zzp2b_photo')['untranslated']), 'a shared field is never untranslated');
 				$post = function ($endpoint, $fields, $lang = 'ro') use ($base, $editor, $config) {
@@ -10115,6 +10696,12 @@ test('P2.B: off, the editor\'s config JSON is byte for byte what it was, and sav
 			same('Again', R::getCell('SELECT zzp2b_off FROM zzp2boffpage ORDER BY id DESC LIMIT 1'), 'a language is ignored off');
 			same(array('type', 'slug', 'changed', 'fields'), array_keys($GLOBALS['p2b_events'][0]));
 			same(array('revision', 'updated_at', 'fields'), array_keys(cms_store::page_history('zzp2boffpage')[0]));
+			// the account's editor_lang is a multilingual site's column only:
+			// off, schema --check asks nothing new of an existing database
+			check(!array_key_exists('editor_lang', authentication::schema()['user']), 'off: no editor_lang');
+			with_settings(array('languages' => array('en', 'ro'), 'multilingual' => true), function () {
+				check(array_key_exists('editor_lang', authentication::schema()['user']), 'on: editor_lang');
+			});
 		});
 	} finally {
 		@unlink("$theme/zzp2boff.html");
@@ -10134,6 +10721,19 @@ function p2a_on($languages = array('en', 'ro')) {
 function p2a_columns($table) {
 	cms_store::forget();
 	return array_keys(cms_store::columns($table));
+}
+// table => the translation columns (x__ro) each CMS table has now, which
+// off are all kept translations; empty on a site that never had languages
+function p2a_translation_columns() {
+	cms_store::connect();
+	cms_store::forget();
+	$found = array();
+	foreach (R::inspect() as $table) {
+		if (!preg_match('/(page|data)$/', $table)) continue;
+		$columns = array_values(array_filter(array_keys(cms_store::columns($table)), function ($c) { return raster_schema::translation_of($c) !== null; }));
+		if ($columns) $found[$table] = $columns;
+	}
+	return $found;
 }
 // the SQL $fn sends
 function p2a_sql($fn) {
@@ -10344,9 +10944,12 @@ test('P2.A: off is identical: schema output and the content model\'s public view
 	require_once BASE.'tools/describe.php';
 	$described = json_encode(raster_describe::site(array('pages', 'collections')));
 	check(strpos($described, 'translate') === false, 'describe: '.$described);
-	// a site without languages: schema's status has exactly 2.2.45's keys
+	// a site without languages: schema's status has exactly 2.2.45's keys;
+	// translations only when some table holds them (an earlier test's)
+	$left = p2a_translation_columns();
 	$status = (new raster_schema())->status();
-	same(array('environment', 'frozen', 'drift', 'tables', 'system_tables', 'unused_tables', 'site_url'), array_keys($status));
+	same(array_merge(array('environment', 'frozen', 'drift', 'tables', 'system_tables', 'unused_tables', 'site_url'), $left ? array('translations') : array()), array_keys($status));
+	if ($left) same(array_intersect_key($left, $status['translations']), $status['translations'], 'only columns that are there');
 	foreach ($status['tables'] as $table) {
 		check(!array_key_exists('missing_translations', $table) && !array_key_exists('translated', $table) && !array_key_exists('kept', $table), $table['table']);
 	}
@@ -10380,7 +10983,7 @@ test('P2.A: schema --apply adds exactly the translation columns; off they are ke
 	try {
 		// off: what 2.2.45 said, and the table made as it was
 		$status = $schema->status();
-		check(!array_key_exists('translations', $status), 'no translations key off, on a site that never had any');
+		check(p2a_translation_columns() ? !isset($status['translations'][$type]) : !array_key_exists('translations', $status), 'no translations key off, on a site that never had any');
 		same(array('view', 'url', 'slug', 'kind', 'table', 'exists', 'rows', 'fields', 'missing', 'retyped', 'narrow', 'orphans', 'rename_candidates'), array_keys($table($status)), 'the keys of 2.2.45');
 		$changes = $schema->apply();
 		same(array('id', 'slug', 'updated_at', 'headline', 'photo', 'photo_alt', 'seats'), p2a_columns($type), 'off: no translation columns');
@@ -10423,8 +11026,9 @@ test('P2.A: schema --apply adds exactly the translation columns; off they are ke
 		check(!preg_match('/-\s+headline__ro/', $out), 'not listed as an orphan');
 		list($code, $out) = $raster('schema --json');
 		same(array('headline__ro', 'headline__pt_br', 'photo_alt__ro', 'photo_alt__pt_br'), json_decode($out, true)['translations'][$type], $out);
-		same(false, $drift_before, "the starter matches its database");
-		same(0, $raster('schema --check')[0], '--check passes');
+		// --check says what it said before the translations were made (earlier
+		// tests may leave drift of their own; these columns add none)
+		same($drift_before ? 1 : 0, $raster('schema --check')[0], '--check passes as it did');
 		// a renamed field: its old column is the orphan and the rename, never its translations
 		$write('title');
 		$t = $table($schema->status());
@@ -10470,6 +11074,12 @@ test('P2.A: untranslatable_text warns on words no annotation prints, multilingua
 	check(strpos($lines[12], "'Opening hours'") !== false, $lines[12]);
 	check(strpos($lines[14], "alt=\"Our team\"") !== false, 'a fixed alt: '.$lines[14]);
 	check(strpos($lines[16], 'content="Coffee and cake"') !== false, 'a description: '.$lines[16]);
+	// an email or an address alone, code, and a button's words
+	$more = "<html><body>\n<input placeholder=\"you@example.com\"><input placeholder=\"https://example.com\">\n<a href=\"/x\">www.example.com</a> <span>hello@example.com</span>\n"
+		."<pre>echo hello world</pre><code>print.cms.headline</code>\n<input type=\"submit\" value=\"Send it\">\n<input type=\"text\" value=\"Typed words\">\n<button type=\"submit\">Go now</button>\n</body></html>";
+	$lines = with_settings(p2a_on(), function () use ($warned, $more) { return $warned($more); });
+	same(array(5, 7), array_keys($lines), json_encode($lines));
+	check(strpos($lines[5], 'value="Send it"') !== false, $lines[5]);
 	// it never floods: ten lines, then one that counts the rest
 	$many = '<html><body>'.str_repeat("\n<p>Fixed words</p>", 25).'</body></html>';
 	$problems = array_values(array_filter(with_settings(p2a_on(), function () use ($many) { return lint_html($many); }), function ($p) { return strpos($p['message'], 'is the same in every language') !== false || strpos($p['message'], 'more line(s) of this view') !== false; }));
@@ -10498,6 +11108,13 @@ test('P2.A: html_lang_fixed warns on an <html> whose lang no print.i18n.language
 		check(has_problem(lint_html($fixed), '<html lang="en"> '.$said.': wrap it in <!-- print.@lang.i18n.language --><html lang="en"><!-- /print.@lang.i18n.language -->'), json_encode(lint_html($fixed)));
 		check(has_problem(lint_html($none), '<html> '.$said), 'no lang at all');
 		same(false, has_problem(lint_html($printed), $said), 'the starter\'s form');
+		// a print closed before the <html> sets nothing on it
+		$closed = '<!doctype html><!-- print.@lang.i18n.language --><!-- /print.@lang.i18n.language --><html lang="en"><head></head><body></body></html>';
+		check(has_problem(lint_html($closed), $said), 'closed early');
+		$self = '<!doctype html><!-- print.@lang.i18n.language --><!-- print.cms.note /--><html lang="en"><head></head><body></body></html>';
+		check(has_problem(lint_html($self), $said), 'a self-closing print between');
+		$comment = '<!doctype html><!-- print.@lang.i18n.language --><!-- a note --><html lang="en"><head></head><body></body></html>';
+		same(false, has_problem(lint_html($comment), $said), 'a plain comment between is fine');
 	});
 });
 
@@ -10571,429 +11188,6 @@ test('P2.A: schema --rename moves a field\'s translation columns with it', funct
 	}
 });
 
-// ## P2.C: the coding MCP builds multilingual sites (#159)
-
-// The starter with a fixture page, its own database and the_app.php as it
-// was, put back afterwards: what an agent finds before it adds a language.
-// The page has a heading (translated), a price (an int: shared) and a
-// dictionary word.
-function p2c_site($fn) {
-	global $root;
-	$theme = "$root/application/views/default";
-	$views = array(
-		'zzp2c_menu' => '<!doctype html><!-- print.@lang.i18n.language --><html lang="en"><!-- /print.@lang.i18n.language --><head><title>Menu</title></head><body>'
-			.'<h1><!-- print.cms.zzp2c_heading -->Our menu<!-- /print.cms.zzp2c_heading --></h1>'
-			.'<p class="price"><!-- print.cms.zzp2c_price -->14<!-- /print.cms.zzp2c_price --></p>'
-			.'<button><!-- print.i18n.zzp2c(\'order\') -->Order now<!-- /print.i18n.zzp2c(\'order\') --></button>'
-			.'</body></html>',
-	);
-	foreach ($views as $name => $html) {
-		test_fixture("$theme/$name.html");
-		file_put_contents("$theme/$name.html", $html);
-	}
-	$config = APPBASE.'config/the_app.php';
-	$kept = file_get_contents($config);
-	// the dictionaries as they were: an agent may write any of them
-	$i18n = APPBASE.'i18n';
-	$made = !is_dir($i18n);
-	$dictionaries = array();
-	foreach (glob("$i18n/*/*.php") ?: array() as $file) $dictionaries[$file] = file_get_contents($file);
-	$db = sys_get_temp_dir().'/raster-p2c-'.getmypid().'.sqlite';
-	try {
-		return $fn($db);
-	} finally {
-		file_put_contents($config, $kept);
-		foreach (array_keys($views) as $name) @unlink("$theme/$name.html");
-		foreach (glob("$i18n/*/*.php") ?: array() as $file) {
-			if (!isset($dictionaries[$file])) unlink($file);
-		}
-		foreach ($dictionaries as $file => $source) file_put_contents($file, $source);
-		foreach (glob("$i18n/*", GLOB_ONLYDIR) ?: array() as $dir) @rmdir($dir);
-		if ($made) @rmdir($i18n);
-		array_map('unlink', glob("$db*") ?: array());
-	}
-}
-
-// MCP over stdio one call at a time, as an agent works: each answer can
-// decide the next call
-class p2c_mcp {
-	public $process, $pipes, $id = 100;
-	function __construct($env = array()) {
-		global $root, $db;
-		$env = $env + array('RASTER_DB' => $db, 'RASTER_SECRET' => 'test-secret', 'RASTER_ENV' => 'development', 'PATH' => getenv('PATH'));
-		$this->process = proc_open(php_argv("$root/bin/raster", 'mcp'), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('file', '/dev/null', 'w')), $this->pipes, $root, $env);
-	}
-	function message($method, $params = array()) {
-		fwrite($this->pipes[0], json_encode(array('jsonrpc' => '2.0', 'id' => ++$this->id, 'method' => $method, 'params' => $params ?: new stdClass()))."\n");
-		fflush($this->pipes[0]);
-		$line = fgets($this->pipes[1]);
-		if ($line === false) throw new Exception("mcp $method: no answer");
-		return json_decode($line, true);
-	}
-	// the answer, or array('error' => the message) when the tool refused
-	function call($name, $arguments = array()) {
-		$result = $this->message('tools/call', array('name' => $name, 'arguments' => $arguments ?: new stdClass()))['result'];
-		return !empty($result['isError']) ? array('error' => $result['content'][0]['text']) : $result['structuredContent'];
-	}
-	function close() {
-		@fclose($this->pipes[0]);
-		@fclose($this->pipes[1]);
-		proc_close($this->process);
-	}
-}
-function p2c_session($env, $fn) {
-	$mcp = new p2c_mcp($env);
-	try {
-		return $fn($mcp);
-	} finally {
-		$mcp->close();
-	}
-}
-// the statements a config file runs, without its comments and blank lines
-function p2c_statements($source) {
-	$out = '';
-	foreach (token_get_all($source) as $token) {
-		if (is_array($token) && in_array($token[0], array(T_COMMENT, T_DOC_COMMENT, T_WHITESPACE, T_OPEN_TAG), true)) continue;
-		$out .= is_array($token) ? $token[1] : $token;
-	}
-	return $out;
-}
-
-test('P2.C: set_languages writes the two settings in their canonical form and leaves the rest of the file', function () {
-	$source = "<?php\n// config::set('languages')->to(array('fr'));\nconfig::set('theme')->to('default');\nconfig::set( 'languages' )->to(array(\n\t'en',\n\t'de', // German\n));\nconfig::set('protected')->to(array('x' => 'member'));\n";
-	$lines = array('multilingual' => "config::set('multilingual')->to(true);", 'languages' => "config::set('languages')->to(array('en', 'ro'));");
-	same("<?php\n// config::set('languages')->to(array('fr'));\nconfig::set('theme')->to('default');\nconfig::set('languages')->to(array('en', 'ro'));\nconfig::set('protected')->to(array('x' => 'member'));\nconfig::set('multilingual')->to(true);\n", mcp::config_lines($source, $lines), 'replaced where it was, the commented example kept, the missing one added');
-	same(mcp::config_lines($source, $lines), mcp::config_lines(mcp::config_lines($source, $lines), $lines), 'a second run changes nothing');
-	// a setting set twice keeps the first place, once
-	same("<?php\nconfig::set('languages')->to(array('en', 'ro'));\n\$x = 1;\nconfig::set('multilingual')->to(true);\n", mcp::config_lines("<?php\nconfig::set('languages')->to(array('ro'));\n\$x = 1;\nconfig::set(\"languages\")->to(array('de'));\n", $lines));
-	// null removes both, whole lines, and nothing else
-	same("<?php\nconfig::set('theme')->to('default');\n// config::set('multilingual')->to(true);\n", mcp::config_lines("<?php\nconfig::set('multilingual')->to(true);\nconfig::set('theme')->to('default');\n  config::set('languages')->to(array('en', 'ro'));\n// config::set('multilingual')->to(true);\n", array('multilingual' => null, 'languages' => null)));
-	// a file that ends in a closing tag gets them before it
-	same("<?php\n\$a = 1;\nconfig::set('multilingual')->to(true);\nconfig::set('languages')->to(array('en', 'ro'));\n?>\n", mcp::config_lines("<?php\n\$a = 1;\n?>\n", $lines));
-});
-
-test('P2.C: set_languages over MCP: on, one language, off; bad codes refused, production refuses', function () {
-	p2c_site(function ($db) {
-		$config = APPBASE.'config/the_app.php';
-		$before = file_get_contents($config);
-		p2c_session(array('RASTER_DB' => $db), function ($mcp) use ($config, $before) {
-			$on = $mcp->call('set_languages', array('languages' => array('EN', 'ro')));
-			check(!isset($on['error']), json_encode($on));
-			same(true, $on['enabled']);
-			same('en', $on['default']);
-			same(array('en', 'ro'), $on['languages']);
-			same(array('en' => '/', 'ro' => '/ro/'), $on['urls']);
-			check(is_int($on['columns_added']), 'columns_added');
-			check(array_key_exists('ro', $on['missing']), 'missing per translation language: '.json_encode($on['missing']));
-			$written = file_get_contents($config);
-			check(strpos($written, "config::set('multilingual')->to(true);\n") !== false && strpos($written, "config::set('languages')->to(array('en', 'ro'));\n") !== false, $written);
-			same(p2c_statements($before), str_replace(array("config::set('multilingual')->to(true);", "config::set('languages')->to(array('en','ro'));"), '', p2c_statements($written)), 'the rest of the file is as it was');
-			// the next call reads the file again
-			same(true, $mcp->call('describe', array('sections' => array('languages')))['languages']['enabled']);
-			// one language: languages set, multilingual off
-			$one = $mcp->call('set_languages', array('languages' => array('ro')));
-			same(false, $one['enabled']);
-			same('ro', $one['default']);
-			same(array(), $one['urls']);
-			$written = file_get_contents($config);
-			check(strpos($written, "config::set('multilingual')->to(false);") !== false && strpos($written, "config::set('languages')->to(array('ro'));") !== false, $written);
-			// [] takes both out; nothing else changed
-			same(false, $mcp->call('set_languages', array('languages' => array()))['enabled']);
-			same(p2c_statements($before), p2c_statements(file_get_contents($config)));
-			foreach (array(array('en', 'en'), array('english'), array('en_US'), array('en', ''), array('ro' => 'ro'), 'en,ro', array(array('en'))) as $bad) {
-				check(isset($mcp->call('set_languages', array('languages' => $bad))['error']), 'refused: '.json_encode($bad));
-			}
-			same(p2c_statements($before), p2c_statements(file_get_contents($config)), 'a refusal writes nothing');
-		});
-		// production refuses, and writes nothing
-		p2c_session(array('RASTER_DB' => $db, 'RASTER_ENV' => 'production'), function ($mcp) use ($config, $before) {
-			$refused = $mcp->call('set_languages', array('languages' => array('en', 'ro')));
-			check(isset($refused['error']) && strpos($refused['error'], 'production') !== false, json_encode($refused));
-			$refused = $mcp->call('write_strings', array('file' => 'zzp2c', 'lang' => 'ro', 'strings' => array('order' => 'Comandă')));
-			check(isset($refused['error']) && strpos($refused['error'], 'production') !== false, json_encode($refused));
-			same($before, file_get_contents($config));
-			check(!is_file(APPBASE.'i18n/ro/zzp2c.php'), 'no dictionary written');
-		});
-	});
-});
-
-test('P2.C: read_strings and write_strings: the agent sends words, Raster writes the PHP', function () {
-	p2c_site(function ($db) {
-		p2c_session(array('RASTER_DB' => $db), function ($mcp) {
-			$mcp->call('set_languages', array('languages' => array('en', 'ro')));
-			$read = $mcp->call('read_strings', array('file' => 'zzp2c', 'lang' => 'ro'));
-			same(array(), $read['strings']);
-			same(array('order'), $read['used_keys'], 'the keys the views print');
-			same(array('order'), $read['missing_keys']);
-			// words that look like PHP stay words
-			$php = "<?php system('id'); ?>";
-			$written = $mcp->call('write_strings', array('file' => 'zzp2c', 'lang' => 'ro', 'strings' => array('order' => 'Comandă acum', 'extra.key-1' => $php)));
-			same(array('written' => 2, 'unused_keys' => array('extra.key-1')), $written, 'a key no view prints is a warning');
-			$file = APPBASE.'i18n/ro/zzp2c.php';
-			$source = file_get_contents($file);
-			same("<?php\nreturn ".var_export(array('order' => 'Comandă acum', 'extra.key-1' => $php), true).";\n", $source, 'var_export, nothing else');
-			same(array('order' => 'Comandă acum', 'extra.key-1' => $php), include $file);
-			// it merges
-			$mcp->call('write_strings', array('file' => 'zzp2c', 'lang' => 'ro', 'strings' => array('order' => 'Comandă')));
-			$read = $mcp->call('read_strings', array('file' => 'zzp2c', 'lang' => 'ro'));
-			same(array('order' => 'Comandă', 'extra.key-1' => $php), $read['strings']);
-			same(array(), $read['missing_keys']);
-			// what is refused
-			foreach (array(
-				array('file' => '../zzp2c', 'lang' => 'ro', 'strings' => array('a' => 'b')),
-				array('file' => 'Zzp2c', 'lang' => 'ro', 'strings' => array('a' => 'b')),
-				array('file' => 'zzp2c', 'lang' => 'de', 'strings' => array('a' => 'b')),
-				array('file' => 'zzp2c', 'lang' => '../ro', 'strings' => array('a' => 'b')),
-				array('file' => 'zzp2c', 'lang' => 'ro', 'strings' => array('a b' => 'c')),
-				array('file' => 'zzp2c', 'lang' => 'ro', 'strings' => array("a'b" => 'c')),
-				array('file' => 'zzp2c', 'lang' => 'ro', 'strings' => array('a' => array('b'))),
-				array('file' => 'zzp2c', 'lang' => 'ro', 'strings' => array('a' => 3)),
-				array('file' => 'zzp2c', 'lang' => 'ro', 'strings' => array('x')),
-				array('file' => 'zzp2c', 'lang' => 'ro', 'strings' => array()),
-			) as $arguments) {
-				check(isset($mcp->call('write_strings', $arguments)['error']), 'refused: '.json_encode($arguments));
-			}
-			same(array('order' => 'Comandă', 'extra.key-1' => $php), include $file, 'nothing written by a refusal');
-			check(!is_file(APPBASE.'i18n/de/zzp2c.php'));
-			// the editor's own words
-			$editor = $mcp->call('read_strings', array('file' => 'raster_editor', 'lang' => 'ro'));
-			check(in_array('save', $editor['used_keys'], true), 'the editor\'s keys');
-			same(array(), $editor['missing_keys'], 'the editor has words of its own');
-			same(array(), $mcp->call('write_strings', array('file' => 'raster_editor', 'lang' => 'ro', 'strings' => array('save' => 'Păstrează', 'action_confirm' => 'Confirmă')))['unused_keys']);
-			same('Păstrează', (include APPBASE.'i18n/ro/raster_editor.php')['save']);
-			unlink(APPBASE.'i18n/ro/raster_editor.php');
-			// translation_status counts the dictionary
-			$status = $mcp->call('translation_status', array('lang' => 'ro'));
-			check(!in_array('strings', array_column($status['missing'], 'kind'), true), 'translated words are done: '.json_encode($status));
-			check(isset($mcp->call('translation_status', array('lang' => 'en'))['error']), 'the default language is refused');
-			check(isset($mcp->call('translation_status', array('lang' => 'de'))['error']), 'a language the site lacks too');
-		});
-	});
-});
-
-test('P2.C: off, the content tools answer as before', function () {
-	p2c_site(function ($db) {
-		p2c_session(array('RASTER_DB' => $db), function ($mcp) {
-			$page = $mcp->call('update_page', array('page' => '/zzp2c_menu', 'fields' => array('zzp2c_heading' => 'Lunch')));
-			same(array('url', 'view', 'revision', 'updated_at', 'fields'), array_keys($page));
-			same('Lunch', $page['fields']['zzp2c_heading']);
-			same(14, $page['fields']['zzp2c_price']);
-			check(isset($mcp->call('get_page', array('page' => '/zzp2c_menu', 'lang' => 'ro'))['error']), 'no other language to ask for');
-			check(isset($mcp->call('update_page', array('page' => '/zzp2c_menu', 'fields' => array('zzp2c_heading__ro' => 'x')))['error']), 'a translation column is never a field');
-			$check = $mcp->call('check_view', array('content' => '<h1><!-- print.cms.zzp2c_new -->New<!-- /print.cms.zzp2c_new --></h1>', 'view' => 'zzp2c_menu.html'));
-			same(array('view', 'errors', 'warnings', 'problems'), array_keys($check), 'no translate report');
-			same(array('enabled' => false, 'multilingual_setting' => false, 'default' => '', 'list' => array(), 'urls' => array(), 'missing' => array()), $mcp->call('describe', array('sections' => array('languages')))['languages']);
-		});
-		// no column for another language is made
-		$pdo = new PDO('sqlite:'.$db);
-		$table = $pdo->query("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'zzp2cmenu%page'")->fetchColumn();
-		$names = $pdo->query("PRAGMA table_info($table)")->fetchAll(PDO::FETCH_COLUMN, 1);
-		check($names && !preg_grep('/__/', $names), json_encode($names));
-	});
-});
-
-test('P2.C: an agent turns a one-language site into a bilingual one over MCP (needs P2.A, P2.B)', function () {
-	p2c_site(function ($db) {
-		p2c_session(array('RASTER_DB' => $db), function ($mcp) {
-			// the page exists, in English, before languages are turned on
-			$mcp->call('update_page', array('page' => '/zzp2c_menu', 'fields' => array('zzp2c_heading' => 'Our lunch menu')));
-			$on = $mcp->call('set_languages', array('languages' => array('en', 'ro')));
-			same(array('en' => '/', 'ro' => '/ro/'), $on['urls']);
-			check($on['columns_added'] > 0, 'translation columns: '.json_encode($on));
-			check($on['missing']['ro'] > 0, json_encode($on));
-			// the page says which field is translated and which is shared
-			$page = $mcp->call('get_page', array('page' => '/zzp2c_menu', 'lang' => 'ro'));
-			same(array('value' => '', 'default_value' => 'Our lunch menu', 'translated' => false, 'shared' => false), $page['fields']['zzp2c_heading']);
-			same(array('value' => 14, 'default_value' => 14, 'translated' => false, 'shared' => true), $page['fields']['zzp2c_price']);
-			$refused = $mcp->call('update_page', array('page' => '/zzp2c_menu', 'fields' => array('zzp2c_price' => 12), 'lang' => 'ro'));
-			same("'zzp2c_price' is shared by every language; update it without lang", isset($refused['error']) ? $refused['error'] : json_encode($refused));
-			// translate everything translation_status lists, a page at a time
-			$status = $mcp->call('translation_status', array('lang' => 'ro'));
-			same($on['missing']['ro'], $status['total']);
-			$kinds = array_unique(array_column($status['missing'], 'kind'));
-			foreach (array('page', 'site', 'strings') as $kind) check(in_array($kind, $kinds, true), "$kind is listed: ".json_encode($kinds));
-			$pages = array();
-			$strings = array();
-			$offset = 0;
-			do {
-				$batch = $mcp->call('translation_status', array('lang' => 'ro', 'limit' => 5, 'offset' => $offset));
-				foreach ($batch['missing'] as $missing) {
-					same(false, $missing['shared']);
-					same(mb_strlen($missing['default_value']) <= 300, true);
-					if ($missing['kind'] === 'strings') $strings[$missing['where']][$missing['field']] = 'RO '.$missing['default_value'];
-					else $pages[$missing['where']][$missing['field']] = 'RO '.$missing['default_value'];
-				}
-				$offset += 5;
-			} while ($offset < $batch['total']);
-			$pages['/zzp2c_menu']['zzp2c_heading'] = 'Meniul nostru de prânz';
-			$strings['zzp2c']['order'] = 'Comandă acum';
-			foreach ($pages as $where => $fields) {
-				$saved = $mcp->call('update_page', array('page' => $where, 'fields' => $fields, 'lang' => 'ro'));
-				check(!isset($saved['error']), "$where: ".json_encode($saved));
-			}
-			foreach ($strings as $file => $words) {
-				same(count($words), $mcp->call('write_strings', array('file' => $file, 'lang' => 'ro', 'strings' => $words))['written']);
-				// no PHP from the agent: the file is var_export's of its words
-				$path = APPBASE."i18n/ro/$file.php";
-				same("<?php\nreturn ".var_export(include $path, true).";\n", file_get_contents($path), $file);
-			}
-			// nothing left, and the English page is as it was
-			$status = $mcp->call('translation_status', array('lang' => 'ro'));
-			same(0, $status['total'], json_encode($status['missing']));
-			check($status['done'] > 0, 'done counts the translations');
-			same(array('ro' => 0), $mcp->call('describe', array('sections' => array('languages')))['languages']['missing']);
-			same('Our lunch menu', $mcp->call('get_page', array('page' => '/zzp2c_menu'))['fields']['zzp2c_heading']);
-			same(array('value' => 'Meniul nostru de prânz', 'default_value' => 'Our lunch menu', 'translated' => true, 'shared' => false), $mcp->call('get_page', array('page' => '/zzp2c_menu', 'lang' => 'ro'))['fields']['zzp2c_heading']);
-			// the Romanian revision, apart from the English ones
-			$history = $mcp->call('page_history', array('page' => '/zzp2c_menu', 'lang' => 'ro'));
-			same(array('ro'), array_values(array_unique(array_column($history['revisions'], 'saved_lang'))));
-			// /ro/ is Romanian, / still English
-			$ro = $mcp->call('render_url', array('url' => '/ro/zzp2c_menu'));
-			same(200, $ro['status']);
-			check(strpos($ro['html'], '<h1>Meniul nostru de prânz</h1>') !== false, 'the Romanian heading');
-			check(strpos($ro['html'], '<button>Comandă acum</button>') !== false, 'the Romanian word');
-			check(strpos($ro['html'], 'lang="ro"') !== false, 'html lang');
-			check(strpos($ro['html'], '>14<') !== false, 'the shared price');
-			$en = $mcp->call('render_url', array('url' => '/zzp2c_menu'));
-			check(strpos($en['html'], '<h1>Our lunch menu</h1>') !== false && strpos($en['html'], '<button>Order now</button>') !== false, 'English stays');
-			// as the editor sees it: the language its saves go to
-			same('ro', $mcp->call('render_url', array('url' => '/ro/zzp2c_menu', 'as' => 'editor'))['editing_lang']);
-			same('en', $mcp->call('render_url', array('url' => '/zzp2c_menu', 'as' => 'editor'))['editing_lang']);
-		});
-	});
-});
-
-test('P2.C: check_view and write_view say which new fields are translated (needs P2.A)', function () {
-	p2c_site(function ($db) {
-		p2c_session(array('RASTER_DB' => $db), function ($mcp) {
-			$mcp->call('set_languages', array('languages' => array('en', 'ro')));
-			$draft = '<!doctype html><html><head><title>Menu</title></head><body><h1><!-- print.cms.zzp2c_heading -->Our menu<!-- /print.cms.zzp2c_heading --></h1>'
-				.'<h2><!-- print.cms.zzp2c_sub -->Lunch<!-- /print.cms.zzp2c_sub --></h2><p><!-- print.cms.zzp2c_seats -->40<!-- /print.cms.zzp2c_seats --></p>'
-				.'<!-- print.@href.cms.zzp2c_map --><a href="https://maps.example/x">Map</a><!-- /print.@href.cms.zzp2c_map --></body></html>';
-			$check = $mcp->call('check_view', array('content' => $draft, 'view' => 'zzp2c_menu.html'));
-			same(array(
-				array('field' => 'zzp2c_sub', 'translate' => true),
-				array('field' => 'zzp2c_seats', 'translate' => false),
-				array('field' => 'zzp2c_map', 'translate' => false),
-			), $check['new_fields'], 'the heading is not new; a link is shared');
-			$written = $mcp->call('write_view', array('content' => $draft, 'view' => 'zzp2c_menu.html'));
-			same(true, $written['written']);
-			same($check['new_fields'], $written['new_fields']);
-			same(array(), $mcp->call('check_view', array('content' => $draft, 'view' => 'zzp2c_menu.html'))['new_fields'], 'written, nothing is new');
-		});
-	});
-});
-
-test('P2.C: describe, site_overview and raster describe --json have the languages block', function () use ($root) {
-	p2c_site(function ($db) use ($root) {
-		p2c_session(array('RASTER_DB' => $db), function ($mcp) {
-			$overview = $mcp->call('site_overview');
-			same(false, $overview['languages']['enabled']);
-			check(array_key_exists('languages', $mcp->call('describe')), 'in describe by default');
-			$mcp->call('set_languages', array('languages' => array('en', 'ro')));
-			$languages = $mcp->call('describe', array('sections' => array('languages')))['languages'];
-			same(array('enabled', 'multilingual_setting', 'default', 'list', 'urls', 'missing'), array_keys($languages));
-			same(array(true, true, 'en', array('en', 'ro'), array('en' => '/', 'ro' => '/ro/')), array($languages['enabled'], $languages['multilingual_setting'], $languages['default'], $languages['list'], $languages['urls']));
-			check(is_int($languages['missing']['ro']) && $languages['missing']['ro'] >= 1, 'the dictionary word at least: '.json_encode($languages));
-			same($languages, $mcp->call('site_overview')['languages']);
-			same($languages['missing']['ro'], $mcp->call('translation_status', array('lang' => 'ro'))['total']);
-		});
-		$out = array();
-		exec('RASTER_DB='.escapeshellarg($db).' '.implode(' ', array_map('escapeshellarg', php_argv("$root/bin/raster", 'describe', '--json'))).' 2>/dev/null', $out);
-		$described = json_decode(implode("\n", $out), true);
-		same(true, $described['languages']['enabled']);
-		same(array('en' => '/', 'ro' => '/ro/'), $described['languages']['urls']);
-		check(isset($described['languages']['missing']['ro']), json_encode($described['languages']));
-	});
-});
-
-test('P2.C: read_asset and write_asset: a theme\'s CSS, JS and SVG, with write_view\'s path checks (#159)', function () use ($root, $base) {
-	$theme = "$root/application/views/default";
-	$outside = sys_get_temp_dir().'/raster-p2c-asset-'.getmypid();
-	@mkdir($outside);
-	file_put_contents("$outside/secret.css", 'body{} /* sk-live-789 */');
-	test_fixture("$theme/zzp2c_link.css");
-	symlink("$outside/secret.css", "$theme/zzp2c_link.css");
-	test_fixture("$theme/zzp2c_dir");
-	symlink($outside, "$theme/zzp2c_dir");
-	$css = "$theme/style.css";
-	$kept = file_get_contents($css);
-	$version = APPBASE.'data/cache/version';
-	try {
-		p2c_session(array(), function ($mcp) use ($theme, $kept, $version, $outside) {
-			$read = $mcp->call('read_asset', array('path' => 'style.css'));
-			same(array('path' => 'style.css', 'theme' => 'default', 'bytes' => strlen($kept), 'content' => $kept), $read);
-			$cache = @file_get_contents($version);
-			$written = $mcp->call('write_asset', array('path' => 'style.css', 'content' => $kept."\n.zz { color: red; }\n"));
-			same(array('written' => true, 'path' => 'style.css', 'created' => false, 'bytes' => strlen($kept) + 21), $written);
-			check(@file_get_contents($version) !== $cache, 'the page cache is cleared');
-			same($kept."\n.zz { color: red; }\n", file_get_contents("$theme/style.css"));
-			$made = $mcp->call('write_asset', array('path' => 'zzp2c.js', 'content' => 'console.log(1);'));
-			same(true, $made['created']);
-			$svg = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 2 2"><a xlink:href="about.html"><circle cx="1" cy="1" r="1"/></a></svg>';
-			same(true, $mcp->call('write_asset', array('path' => 'zzp2c.svg', 'content' => $svg))['written']);
-			same($svg, $mcp->call('read_asset', array('path' => 'zzp2c.svg'))['content']);
-			// an SVG that would run something, or isn't XML, is not written
-			foreach (array(
-				'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
-				'<svg xmlns="http://www.w3.org/2000/svg"><SCRIPT>alert(1)</SCRIPT></svg>',
-				'<svg xmlns="http://www.w3.org/2000/svg" xmlns:s="http://www.w3.org/2000/svg"><s:script>alert(1)</s:script></svg>',
-				'<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>',
-				'<svg xmlns="http://www.w3.org/2000/svg"><rect ONCLICK="alert(1)"/></svg>',
-				'<svg xmlns="http://www.w3.org/2000/svg"><a href=" java&#x09;script:alert(1)"><rect/></a></svg>',
-				'<svg xmlns="http://www.w3.org/2000/svg"><rect></svg>',
-				'<svg>&lt;',
-				'not xml at all',
-				'<!DOCTYPE svg [<!ENTITY x "y">]><svg xmlns="http://www.w3.org/2000/svg">&x;</svg>',
-			) as $bad) {
-				$refused = $mcp->call('write_asset', array('path' => 'zzp2c.svg', 'content' => $bad));
-				check(isset($refused['error']), 'written: '.$bad);
-			}
-			same($svg, file_get_contents("$theme/zzp2c.svg"), 'the file is left as it was');
-			// only theme files that aren't views, inside the theme
-			foreach (array('../../config/the_app.php', '../zz.css', '../../../zz.css', '/etc/passwd.css', "style.css\0.css", 'about.html', 'zzp2c.php', 'zzp2c.CSS', 'zzp2c_link.css', 'zzp2c_dir/secret.css', 'nope/zz.css', '', '.') as $path) {
-				check(isset($mcp->call('read_asset', array('path' => $path))['error']), 'read: '.json_encode($path));
-				check(isset($mcp->call('write_asset', array('path' => $path, 'content' => 'x'))['error']), 'written: '.json_encode($path));
-			}
-			check(strpos(file_get_contents("$outside/secret.css"), 'sk-live-789') !== false, 'nothing written through a link');
-			foreach (array('..', '../..', 'nope', 'default/../default') as $other) {
-				check(isset($mcp->call('read_asset', array('path' => 'style.css', 'theme' => $other))['error']), "theme $other");
-			}
-		});
-		// over HTTP, reading is offered and writing waits for mcp_write_views
-		list(, $body) = http('POST', "$base/mcp", json_encode(array('jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/list')), array('Authorization: Bearer test-token'));
-		$names = array_column(json_decode($body, true)['result']['tools'], 'name');
-		check(in_array('read_asset', $names, true) && !in_array('write_asset', $names, true), json_encode($names));
-		list(, $body) = http('POST', "$base/mcp", json_encode(array('jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => array('name' => 'write_asset', 'arguments' => array('path' => 'style.css', 'content' => 'x')))), array('Authorization: Bearer test-token'));
-		same(-32602, json_decode($body, true)['error']['code']);
-		same(strlen($kept) + 21, strlen(file_get_contents($css)));
-		check(strpos(json_encode(mcp_call('read_asset', array('path' => 'zzp2c_link.css'))), 'sk-live-789') === false, 'nothing read through a link over HTTP');
-	} finally {
-		file_put_contents($css, $kept);
-		foreach (array('zzp2c.js', 'zzp2c.svg', 'zzp2c_link.css', 'zzp2c_dir') as $name) @unlink("$theme/$name");
-		@unlink("$outside/secret.css");
-		@rmdir($outside);
-	}
-});
-
-test('P2.C: tools/list and describe grow by less than 1,000 characters (#161)', function () {
-	// tools/list over stdio at the P2 kickoff (c247d94): 10954 characters.
-	// describe's own growth is its languages block; the rest of describe
-	// is other packages' (the starter's views, lint)
-	p2c_site(function ($db) {
-		p2c_session(array('RASTER_DB' => $db), function ($mcp) {
-			$tools = strlen(json_encode($mcp->message('tools/list')['result'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
-			$languages = strlen(json_encode(array('languages' => $mcp->call('describe', array('sections' => array('languages')))['languages']), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)) - 2;
-			$growth = $tools - 10954 + $languages;
-			check($growth < 1000, "tools/list is $tools characters and the languages block $languages: $growth more than at the kickoff");
-			$instructions = $mcp->message('initialize')['result']['instructions'];
-			check(strpos($instructions, 'Making a site multilingual') !== false && strpos($instructions, 'write_asset') !== false, 'the recipe and the asset tools');
-			preg_match('/Making a site multilingual.*$/s', $instructions, $m);
-			check(str_word_count($m[0]) <= 120, 'the recipe is at most 120 words: '.str_word_count($m[0]));
-		});
-	});
-});
-
 // ## P2.D: models carry no page words (#127)
 
 test('P2.D: the starter\'s nav: site::nav() gives each link its address and state, the layout its words (#127)', function () use ($base, $root, $p1b_on) {
@@ -11015,6 +11209,15 @@ test('P2.D: the starter\'s nav: site::nav() gives each link its address and stat
 	p1b_site($p1b_on, function () use ($base, $nav) {
 		same('<a class="nav-link" href="'.$base.'/ro/">Home</a>'."\n".'<a class="nav-link" href="'.$base.'/ro/news">News</a>'."\n".'<a class="nav-link active" href="'.$base.'/ro/about">About</a>', $nav(http('GET', "$base/ro/about")[1]));
 	});
+});
+
+test('P2.D: newsletter\'s fixed queries are sql/ files and show in vocabulary (#127)', function () use ($root) {
+	$vocabulary = (new raster_inspector())->vocabulary();
+	foreach (array('confirmed_count', 'confirmed_subscribers', 'unreached_subscribers') as $query) {
+		check(database::query_file('newsletter', $query) !== null, "no $query.sql");
+		check(in_array($query, $vocabulary['models']['newsletter']['queries'], true), 'vocabulary: '.json_encode($vocabulary['models']['newsletter']['queries']));
+	}
+	check(strpos(file_get_contents("$root/system/models/newsletter/newsletter.php"), "R::find('subscriber'") === false, 'no confirmed-subscriber SQL left in newsletter.php');
 });
 
 // ## P3 kickoff: the contracts the P3 packages code against

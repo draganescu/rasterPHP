@@ -1650,7 +1650,7 @@ test('N13', 'describe on the command line', function () {
 	same(0, $code, $out);
 	$described = json_decode($out, true);
 	same('demo', $described['site']['app']);
-	same(10, count($described));
+	same(11, count($described));
 	list($code, $out) = raster(array('describe', '--sections=site,vocabulary'));
 	same(0, $code, $out);
 	has($out, '## site');
@@ -5157,9 +5157,9 @@ test('N9', 'P1.D export: the site\'s address comes from site_url when --url and 
 
 test(array('A2', 'E3'), 'P2.D: the opening hours are the about page\'s hours list; the café model only reads them (#127)', function () use ($base, $root) {
 	$about = http('GET', "$base/about")[1];
-	has($about, '<tr class="closed"><td>Monday</td><td>closed</td></tr>');
-	has($about, '<tr class="open"><td>Tuesday to Friday</td><td>8:00 to 18:00</td></tr>');
-	has($about, '<tr class="open"><td>Weekend</td><td>9:00 to 16:00</td></tr>');
+	has($about, '<tr class="day closed"><td>Monday</td><td>closed</td></tr>');
+	has($about, '<tr class="day open"><td>Tuesday to Friday</td><td>8:00 to 18:00</td></tr>');
+	has($about, '<tr class="day open"><td>Weekend</td><td>9:00 to 16:00</td></tr>');
 	$model = file_get_contents("$root/demo/models/cafe/cafe.php");
 	foreach (array('Monday', 'Tuesday', 'Weekend', "'closed'", '8:00') as $word) lacks($model, $word, 'the words are the content\'s');
 	// an editor's change shows on the page, in hours.txt and at /api/cafe/hours
@@ -5168,11 +5168,16 @@ test(array('A2', 'E3'), 'P2.D: the opening hours are the about page\'s hours lis
 	check($monday !== null, 'Monday is an item of the hours list');
 	try {
 		mcp($base, 'update_item', array('collection' => 'hours', 'id' => $monday['id'], 'fields' => array('time' => '10:00 to 14:00', 'state' => 'open')));
-		has(http('GET', "$base/about")[1], '<tr class="open"><td>Monday</td><td>10:00 to 14:00</td></tr>');
+		has(http('GET', "$base/about")[1], '<tr class="day open"><td>Monday</td><td>10:00 to 14:00</td></tr>');
 		has(http('GET', "$base/hours.txt")[1], "Monday: 10:00 to 14:00\nTuesday to Friday: 8:00 to 18:00");
 		same(array('day' => 'Monday', 'time' => '10:00 to 14:00', 'state' => 'open'), json_decode(http('GET', "$base/api/cafe/hours")[1], true)[0]);
+		// a scheduled day is hidden from the text and the API too, as from the page
+		mcp($base, 'update_item', array('collection' => 'hours', 'id' => $monday['id'], 'fields' => array('published_at' => date('Y-m-d H:i:s', strtotime('+1 day')))));
+		lacks(http('GET', "$base/about")[1], '<td>Monday</td>');
+		lacks(http('GET', "$base/hours.txt")[1], 'Monday');
+		same('Tuesday to Friday', json_decode(http('GET', "$base/api/cafe/hours")[1], true)[0]['day']);
 	} finally {
-		mcp($base, 'update_item', array('collection' => 'hours', 'id' => $monday['id'], 'fields' => array('time' => 'closed', 'state' => 'closed')));
+		mcp($base, 'update_item', array('collection' => 'hours', 'id' => $monday['id'], 'fields' => array('time' => 'closed', 'state' => 'closed', 'published_at' => '')));
 	}
 	has(http('GET', "$base/hours.txt")[1], "Monday: closed\n");
 });
