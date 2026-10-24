@@ -11082,6 +11082,214 @@ test('P3 kickoff: off, list_where and index_slug send the SQL they always did', 
 	}
 });
 
+// ## P3.C: the sitemap (#126) and items in every language
+
+// the P3.C fixture views in the starter's theme for the length of $fn, then
+// taken away with the tables they made
+function p3c_views($views, $fn) {
+	global $root;
+	$theme = "$root/application/views/default";
+	foreach ($views as $name => $html) {
+		test_fixture("$theme/$name");
+		file_put_contents("$theme/$name", $html);
+	}
+	try {
+		return $fn($theme);
+	} finally {
+		foreach (array_keys($views) as $name) @unlink("$theme/$name");
+		cms_store::connect();
+		foreach (array('zzp3cfaqdata', 'zzp3cmenudata', 'zzp3cpagepage') as $table) R::getDatabaseAdapter()->exec("DROP TABLE IF EXISTS `$table`");
+		cms_store::forget();
+	}
+}
+// a FAQ that only zzp3cfaq.html shows (no item view), a menu with an item
+// view, and a page with a field
+function p3c_fixtures() {
+	return array(
+		'zzp3cfaq.html' => '<!doctype html><html><head><title>FAQ</title></head><body><!-- render.cms.zzp3cfaq --><h2><!-- print.title -->Is there wifi?<!-- /print.title --></h2><!-- /render.cms.zzp3cfaq --></body></html>',
+		'zzp3cmenu_item.html' => '<!doctype html><html><head><title>Menu</title></head><body><!-- render.cms.zzp3cmenu --><h1><!-- print.title -->Flat white<!-- /print.title --></h1><!-- /render.cms.zzp3cmenu --></body></html>',
+		'zzp3cpage.html' => '<!doctype html><html><head><title>Page</title></head><body><h1><!-- print.cms.zzp3c_headline -->Hello<!-- /print.cms.zzp3c_headline --></h1></body></html>',
+	);
+}
+// the FAQ's table with $rows (slug => columns), all in one transaction
+function p3c_faq($rows, $columns = array()) {
+	cms_store::connect();
+	cms_types::ensure('zzp3cfaqdata', array('title' => 'text', 'slug' => 'text', 'enabled' => 'bool', 'published_at' => 'datetime', 'updated_at' => 'datetime') + $columns);
+	R::begin();
+	try {
+		foreach ($rows as $slug => $values) {
+			$values += array('title' => $slug, 'slug' => $slug, 'enabled' => 1, 'published_at' => null, 'updated_at' => '2026-01-02 10:00:00');
+			R::exec('INSERT INTO zzp3cfaqdata (`'.implode('`, `', array_keys($values)).'`) VALUES ('.implode(', ', array_fill(0, count($values), '?')).')', array_values($values));
+		}
+		R::commit();
+	} catch (Exception $e) {
+		R::rollback();
+		throw $e;
+	}
+	cms_store::forget();
+}
+// the sitemap's rows, and the SQL it sent
+function p3c_pages() {
+	$rows = null;
+	$sql = p2a_sql(function () use (&$rows) { $rows = (new feed())->pages(); });
+	return array($rows, $sql);
+}
+function p3c_row($rows, $url) {
+	foreach ($rows as $row) if ($row['url'] === $url) return $row;
+	return null;
+}
+// a multilingual site at http://cafe.test/, in its default language (P1.C's)
+function p3c_on($settings = array()) {
+	return p1c_on($settings + array('url_language' => '', 'link_uri' => 'http://cafe.test/', 'uri_string' => '/sitemap.xml'));
+}
+
+test('P3.C: the sitemap lists every published item of a collection with no item view, all of them, in one query (#126)', function () {
+	p3c_views(p3c_fixtures(), function () {
+		$rows = array();
+		for ($i = 1; $i <= 1201; $i++) $rows["question-$i"] = array();
+		$rows['a-draft'] = array('enabled' => 0);
+		$rows['coming-later'] = array('published_at' => date('Y-m-d H:i:s', time() + 86400));
+		$rows['published-after-its-save'] = array('published_at' => '2026-03-04 09:00:00');
+		$rows['saved-after-publishing'] = array('published_at' => '2025-12-01 09:00:00', 'updated_at' => '2026-02-03 11:00:00');
+		p3c_faq($rows);
+		list($pages, $sql) = p3c_pages();
+		$urls = array_column($pages, 'url');
+		$link = rtrim(config::get('link_uri'), '/');
+		same(1203, count(preg_grep('#/zzp3cfaq/zzp3cfaq_item/#', $urls)), 'every published item, past 1,000');
+		check(in_array("$link/zzp3cfaq/zzp3cfaq_item/question-1", $urls) && in_array("$link/zzp3cfaq/zzp3cfaq_item/question-1201", $urls), 'the oldest and the newest');
+		same(array(), array_values(preg_grep('#a-draft|coming-later#', $urls)), 'no draft, nothing scheduled');
+		check(in_array("$link/zzp3cfaq", $urls), 'the FAQ page itself');
+		same(array(), array_values(preg_grep('#zzp3cmenu_item$#', $urls)), 'an item view is no page');
+		// the date: the later of its last save and its publishing
+		same('2026-01-02', p3c_row($pages, "$link/zzp3cfaq/zzp3cfaq_item/question-7")['updated']);
+		same('2026-03-04', p3c_row($pages, "$link/zzp3cfaq/zzp3cfaq_item/published-after-its-save")['updated']);
+		same('2026-02-03', p3c_row($pages, "$link/zzp3cfaq/zzp3cfaq_item/saved-after-publishing")['updated']);
+		// one query reads the items: id, slug and the dates, no item loaded whole
+		$reads = array_values(preg_grep('/^SELECT\b.*`zzp3cfaqdata`/i', $sql));
+		same(1, count($reads), json_encode($reads));
+		check(strpos($reads[0], 'SELECT `id`, `slug`, `published_at`, `updated_at` FROM `zzp3cfaqdata` WHERE') === 0, $reads[0]);
+	});
+});
+
+test('P3.C: a page\'s lastmod is its last save in the CMS, else its view\'s date (#126)', function () {
+	p3c_views(p3c_fixtures(), function ($theme) {
+		$link = rtrim(config::get('link_uri'), '/');
+		touch("$theme/zzp3cpage.html", strtotime('2025-01-02 12:00:00'));
+		clearstatcache();
+		same('2025-01-02', p3c_row((new feed())->pages(), "$link/zzp3cpage")['updated'], 'never saved: the file\'s date');
+		cms_store::connect();
+		cms_store::update_page(cms::page_type('/zzp3cpage'), '/zzp3cpage', array('zzp3c_headline' => 'Moved'), array('zzp3c_headline'));
+		same(date('Y-m-d'), p3c_row((new feed())->pages(), "$link/zzp3cpage")['updated'], 'saved: its revision\'s date');
+		// a deploy that touches the file doesn't move it
+		touch("$theme/zzp3cpage.html", strtotime('2030-01-02 12:00:00'));
+		clearstatcache();
+		same(date('Y-m-d'), p3c_row((new feed())->pages(), "$link/zzp3cpage")['updated'], 'the file\'s date no longer counts');
+	});
+});
+
+test('P3.C: off, the rows are url and updated, no slug column is read and the sitemap prints what 2.2.45\'s did', function () use ($base) {
+	$old = '<?xml version="1.0" encoding="UTF-8"?>'."\n".'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'."\n"
+		."  <!-- render.feed.pages -->\n  <url><loc><!-- print.url /--></loc><lastmod><!-- print.updated /--></lastmod></url>\n  <!-- /render.feed.pages -->\n</urlset>\n";
+	p3c_views(p3c_fixtures() + array('zzp3cold.xml' => $old), function () use ($base) {
+		p3c_faq(array('flat-white' => array('slug__ro' => 'cafea-cu-lapte')), array('slug__ro' => 'text'));
+		foreach (array(array('multilingual' => false, 'languages' => array()), array('multilingual' => false, 'languages' => array('en', 'ro')), array('multilingual' => true, 'languages' => array('en'))) as $settings) {
+			with_settings($settings, function () use ($settings) {
+				list($rows, $sql) = p3c_pages();
+				$keys = array_unique(array_map(function ($row) { ksort($row); return implode(',', array_keys($row)); }, $rows));
+				same(array('updated,url'), array_values($keys), json_encode($settings));
+				same(array(), array_values(preg_grep('/slug__ro/', $sql)), 'no slug column read: '.json_encode($settings));
+				check(in_array(rtrim(config::get('link_uri'), '/').'/zzp3cfaq/zzp3cfaq_item/flat-white', array_column($rows, 'url')), 'at its own slug');
+			});
+		}
+		// the bundled view prints, byte for byte, what the 2.2.45 view prints
+		list($status, $now) = http('GET', "$base/sitemap.xml");
+		same(200, $status);
+		list(, $then) = http('GET', "$base/zzp3cold.xml");
+		same($then, $now);
+		check(strpos($now, 'zzp3cfaq/zzp3cfaq_item/flat-white') !== false, $now);
+		check(strpos($now, 'xhtml') === false, 'no alternates off');
+	});
+});
+
+test('P3.C: multilingual, every language\'s address is a row with alternates and x-default, and the sitemap prints them as hreflang', function () use ($base) {
+	p3c_views(p3c_fixtures(), function () use ($base) {
+		p3c_faq(array('is-there-wifi' => array()));
+		with_settings(p3c_on(), function () {
+			list($rows, $sql) = p3c_pages();
+			$alternates = array(
+				array('lang' => 'en', 'url' => 'http://cafe.test/zzp3cpage'),
+				array('lang' => 'ro', 'url' => 'http://cafe.test/ro/zzp3cpage'),
+				array('lang' => 'x-default', 'url' => 'http://cafe.test/zzp3cpage'),
+			);
+			foreach (array('http://cafe.test/zzp3cpage', 'http://cafe.test/ro/zzp3cpage') as $url) {
+				$row = p3c_row($rows, $url);
+				check($row !== null, "$url is listed");
+				same($alternates, $row['alternates'], $url);
+			}
+			// the home page is /ro/ in Romanian
+			check(p3c_row($rows, 'http://cafe.test/ro/') !== null, 'the Romanian home page');
+			// an item with no Romanian slug is there at its own
+			$row = p3c_row($rows, 'http://cafe.test/ro/zzp3cfaq/zzp3cfaq_item/is-there-wifi');
+			check($row !== null, json_encode(array_column($rows, 'url')));
+			same(array('en', 'ro', 'x-default'), array_column($row['alternates'], 'lang'));
+			same(null, p3c_row($rows, 'x-default'), 'x-default is no row of its own');
+			same(count(array_unique(array_column($rows, 'url'))), count($rows), 'each address once');
+		});
+		p1b_site("config::set('languages')->to(array('en', 'ro'));\nconfig::set('multilingual')->to(true);", function () use ($base) {
+			list($status, $body) = http('GET', "$base/sitemap.xml");
+			same(200, $status);
+			$doc = new DOMDocument();
+			check(@$doc->loadXML($body), 'well-formed: '.$body);
+			check(strpos($body, "<loc>$base/ro/zzp3cpage</loc>") !== false, $body);
+			check(strpos($body, '<xhtml:link xmlns:xhtml="http://www.w3.org/1999/xhtml" rel="alternate" hreflang="ro" href="'.$base.'/ro/zzp3cfaq/zzp3cfaq_item/is-there-wifi"/>') !== false, $body);
+			check(strpos($body, 'hreflang="x-default" href="'.$base.'/zzp3cpage"') !== false, $body);
+			// read as a sitemap reader would: one url per language, three links each
+			$xpath = new DOMXPath($doc);
+			$xpath->registerNamespace('s', 'http://www.sitemaps.org/schemas/sitemap/0.9');
+			$xpath->registerNamespace('x', 'http://www.w3.org/1999/xhtml');
+			same(3, $xpath->query("//s:url[s:loc='$base/ro/zzp3cpage']/x:link")->length);
+		});
+	});
+});
+
+test('P3.C: multilingual, an item is listed at its slug in every language (needs P3.B\'s item_alternates)', function () {
+	p3c_views(p3c_fixtures(), function () {
+		p3c_faq(array('flat-white' => array('slug__ro' => 'cafea-cu-lapte'), 'is-there-wifi' => array()), array('slug__ro' => 'text'));
+		with_settings(p3c_on(), function () {
+			list($rows, $sql) = p3c_pages();
+			check((bool)preg_grep('/^SELECT `id`, `slug`, `published_at`, `updated_at`, `slug__ro` FROM `zzp3cfaqdata`/', $sql), 'the Romanian slug is read in the same query: '.json_encode($sql));
+			$row = p3c_row($rows, 'http://cafe.test/ro/zzp3cfaq/zzp3cfaq_item/cafea-cu-lapte');
+			check($row !== null, json_encode(array_column($rows, 'url')));
+			same(array(
+				array('lang' => 'en', 'url' => 'http://cafe.test/zzp3cfaq/zzp3cfaq_item/flat-white'),
+				array('lang' => 'ro', 'url' => 'http://cafe.test/ro/zzp3cfaq/zzp3cfaq_item/cafea-cu-lapte'),
+				array('lang' => 'x-default', 'url' => 'http://cafe.test/zzp3cfaq/zzp3cfaq_item/flat-white'),
+			), $row['alternates']);
+			same(null, p3c_row($rows, 'http://cafe.test/ro/zzp3cfaq/zzp3cfaq_item/flat-white'), 'not at the English slug in Romanian');
+			check(p3c_row($rows, 'http://cafe.test/ro/zzp3cfaq/zzp3cfaq_item/is-there-wifi') !== null, 'an item with no Romanian slug at its own');
+		});
+	});
+});
+
+test('P3.C: on an item page the switcher and hreflang give the item\'s slug in each language (needs P3.B\'s path_in)', function () {
+	p3c_views(p3c_fixtures(), function () {
+		p3c_faq(array('flat-white' => array('slug__ro' => 'cafea-cu-lapte')), array('slug__ro' => 'text'));
+		$english = p3c_on(array('uri_string' => '/zzp3cfaq/zzp3cfaq_item/flat-white'));
+		$romanian = p1c_on(array('uri_string' => '/zzp3cfaq/zzp3cfaq_item/cafea-cu-lapte'));
+		$want = array('en' => 'http://cafe.test/zzp3cfaq/zzp3cfaq_item/flat-white', 'ro' => 'http://cafe.test/ro/zzp3cfaq/zzp3cfaq_item/cafea-cu-lapte');
+		foreach (array('en' => $english, 'ro' => $romanian) as $page => $settings) {
+			with_settings($settings, function () use ($page, $want) {
+				same($want, array_column(i18n::alternates(), 'url', 'lang'), "alternates on the $page page");
+				same($want, array_column((new i18n())->languages(), 'url', 'code'), "the switcher on the $page page");
+				$links = template::language_links('', 200);
+				foreach ($want as $lang => $url) check(strpos($links, "hreflang=\"$lang\" href=\"$url\"") !== false, "hreflang $lang on the $page page: $links");
+				check(strpos($links, "hreflang=\"x-default\" href=\"{$want['en']}\"") !== false, $links);
+				check(strpos($links, "<link rel=\"canonical\" href=\"{$want[$page]}\">") !== false, $links);
+			});
+		}
+	});
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";
 foreach ($skipped as $skip) echo "  - $skip\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";

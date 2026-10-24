@@ -2071,8 +2071,27 @@ field every page shares, `print.cms.site_name`), else its host.
 **feed**:
 - `render.feed.items('news')`: the newest published items, with every field
   plus `url`, `date_rfc822` and `date_iso`.
-- `render.feed.pages`: every page and item, with `url` and `updated`, for
-  `sitemap.xml`.
+- `render.feed.pages`: every page and item, with `url` and `updated`
+  (`YYYY-MM-DD`), for `sitemap.xml`:
+  - pages: every view that is a page, but those that need an account, the
+    pages the models in use name in `requires()` and `sitemap_skip`;
+    `updated` is the page's last save in the CMS (its newest revision),
+    else the view file's date.
+  - items: every published item (no drafts, nothing scheduled) of every
+    collection whose items have pages, as `cms` routes them: `news_item.html`,
+    or else `news.html`, renders `render.cms.news` (so a FAQ shown only by
+    `faq.html` is listed too). All of them, each collection in one query
+    of `id`, the slugs and the dates; `updated` is the later of the item's
+    last save and its `published_at`. Not listed: a private record type's,
+    those of a collection whose item page needs an account, and those
+    whose page is in `sitemap_skip`.
+  - Multilingual, every language's address is a row of its own (`/about`
+    and `/ro/about`; an item at its slug in that language), and each row
+    has `alternates`: rows of `lang` and `url`, every language's address
+    and `x-default` (the default language's). The starter's and the
+    demo's `sitemap.xml` print them as `<xhtml:link rel="alternate"
+    hreflang>` inside `print.if.multilingual`; off, the sitemap is as it
+    always was.
 - `print.feed.site_url`.
 
 **pagination**: `render.pagination.links('cms.news')` (add the list's filters
@@ -2116,7 +2135,8 @@ every language is **Multilingual sites**, below).
   (`/ro/menu`, from `i18n::alternates()`); otherwise it is the page with
   `?lang=xx`. The flag `if.languages` is true when the site has more than
   one language: the starter's `_layout.html` shows its switcher inside
-  `print.if.languages`.
+  `print.if.languages`. The flag `if.multilingual` is true when
+  `i18n::enabled()` is.
 - Multilingual, Raster also puts into `<head>`, after the `<base>`:
   `<link rel="canonical">` (the page in its own language), one
   `<link rel="alternate" hreflang="xx">` per language, and
@@ -2407,7 +2427,8 @@ of lists and filter pages come along; drafts and the editor don't.
   `ro/index.html` and `/ro/menu` `ro/menu/index.html`. A multilingual site
   (`multilingual` on) is crawled at each language's own addresses: every
   view is started in every language (`/menu` and `/ro/menu`), and the links
-  its pages carry are followed from there. Each language gets its own
+  its pages carry are followed from there, so an item is written at its
+  slug in each language (`ro/menu/menu_item/cafea-cu-lapte/index.html`). Each language gets its own
   `404.html` (`ro/404.html`). It warns when the links are root-relative (no
   `--url` or site address: search engines want absolute `hreflang` and
   canonical links). A language with its own `domain_language` host is
