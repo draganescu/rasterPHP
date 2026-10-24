@@ -395,7 +395,7 @@ alike:
 
 | Event | Payload |
 |---|---|
-| `authentication.registered`, `logged_in`, `logged_out`, `password_changed`, `account_saved` | `id`, `email`, `name`, `role` |
+| `authentication.registered`, `logged_in`, `logged_out`, `password_changed`, `account_saved` | `id`, `email`, `name`, `role` (and `lang`, the account's language, on a multilingual site) |
 | `authentication.login_failed` | `login` |
 | `newsletter.subscribed` | `email`, `name`, `status` (`pending` or `confirmed`), `source` (after the commit; the framework's listener `newsletter.confirmation_mail` emails a pending address) |
 | `newsletter.confirmed`, `newsletter.unsubscribed` | `email`, `name` (after the commit) |
@@ -2128,6 +2128,28 @@ field every page shares, `print.cms.site_name`), else its host.
   the mail was handed over.
 - Links in emails: `util::url('letters/confirm', array('token' => $t))` is
   the absolute address of a page of the site, with its query.
+- **The language an email goes out in** (multilingual on, #200 D13):
+  `send_view($view, $to, $vars, $headers, $lang)` renders the view in
+  `$lang` (`i18n::with`): its dictionary words, CMS fields, `<title>` (so
+  the subject), the `site_name` fallback and its links (`/ro/…`). A root
+  link (`href="/menu"`) is the page in that language, and a root file
+  (`/media/x.jpg`) the site's. Build the vars in the same language, so
+  `util::url()` links are `/ro/` too:
+  `mail::in_language($lang, function () use (…) { …util::url(…)…; mail::send_view(…, $lang); })`.
+  `$lang` null, or multilingual off, is the request's language, as before:
+  off, every email is byte-identical. Rows that email later store the
+  language they were made in, `lang` (`user`, `subscriber`, `booking`,
+  `rsvp`, `contactmessage`, the shop's `order`; declared only when on, set
+  once from `i18n::current()`, readonly), read with `i18n::of($row)` (the
+  default language for a row from before the column). So the bundled
+  senders mail each guest in theirs whoever acts (staff confirming on an
+  English `/staff`, the `promote` action, MCP `run_action`, a webhook), and
+  staff (`booking_staff_email`, `rsvp_staff_email`, `contact_staff_email`,
+  `shop_staff_email`) in the default language, with the guest's as
+  `print.self.lang` in `booking_new`, `rsvp_new` and `contact_received`.
+  A frozen database without the column skips it until `schema --apply`
+  (accounts and subscribers; a record type's column is needed, as for any
+  new field). Off again, a record table's `lang` is kept, not an orphan.
 - Many mails at once: `mail::keep_open()` keeps the SMTP connection for the
   mails that follow (`RSET` between them, a new connection if the server
   dropped it) until `mail::close()`. `mail::destination()` is the transport
@@ -2303,6 +2325,7 @@ as a one-language site. Each part is described where it lives:
 | item slugs per language (`slug__ro`), `slughistory`, 301s from old and other languages' slugs | **The CMS**: Item addresses |
 | translation columns in `schema`, kept translations | **The CMS**: Changing fields |
 | `untranslatable_text`, `missing_translation_key`, `html_lang_fixed` | **i18n**: Lint, multilingual on |
+| the language emails go out in, the stored `lang` of rows that email | **mail** |
 | the editor on `/ro/…` and the editor's own language | **Editors and agents**: the in-page editor |
 | `set_languages`, `translation_status`, `read_strings`, `write_strings`, `lang` on the page tools | **Editors and agents**: Tools for languages |
 

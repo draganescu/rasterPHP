@@ -200,6 +200,9 @@ class rsvp
 			unset(self::$changed[$id]);
 			if (self::is_staff() && !self::$writing) self::$changed[$id] = array('was' => $was, 'was_people' => (int)$before['people'], 'answered' => $answered);
 		}
+		// the language the guest replied in, which their emails go out in:
+		// set once, when the reply is made (#200 D13)
+		if (!$before && i18n::enabled()) $values['lang'] = i18n::current();
 		return $values;
 	}
 
@@ -666,23 +669,48 @@ class rsvp
 	// the guest made the change and the site set it. The views get the
 	// reply's fields, who, manage_url, position, event_title, event_date,
 	// event_starts, event_url, deadline and site_url.
+	// Multilingual (#200 D13): the guest's goes in the language they replied
+	// in (i18n::of), whoever made the change, and staff's in the default
+	// language, with the guest's as lang; the links and the event's title,
+	// date and start are made in each one's.
 	protected static function mail($reply, $guest, $staff) {
 		if (!is_array($reply) || !isset($reply['id'], $reply['event'], $reply['email']) || !self::ready()) return null;
 		$id = (int)$reply['id'];
 		$event = self::item($reply['event']);
-		$vars = $reply;
-		$vars['manage_url'] = isset(self::$links[$id]) ? util::url(config::get('rsvp_manage_page', 'rsvp'), array('token' => self::$links[$id])) : '';
+		$token = isset(self::$links[$id]) ? self::$links[$id] : null;
 		unset(self::$links[$id]);
-		$vars['position'] = (string)self::position($reply);
-		$vars['event_url'] = $event ? $event['url'] : '';
-		$vars['deadline'] = $event ? date('Y-m-d H:i', $event['deadline']) : '';
-		$vars['site_url'] = util::url('');
-		if ($guest !== null && trim((string)$reply['email']) !== '') self::send('_email/'.$guest, $reply['email'], $vars);
+		$position = (string)self::position($reply);
+		$vars = function ($token) use ($reply, $event, $position) {
+			$vars = $reply;
+			// the payload's are the request's language's: read again in this one
+			if (i18n::enabled()) {
+				$event = self::item($reply['event']);
+				$vars['event_title'] = $event ? $event['title'] : '';
+				$vars['event_date'] = $event ? $event['date'] : '';
+				$vars['event_starts'] = $event ? $event['starts'] : '';
+			}
+			$vars['manage_url'] = $token !== null ? util::url(config::get('rsvp_manage_page', 'rsvp'), array('token' => $token)) : '';
+			$vars['position'] = $position;
+			$vars['event_url'] = $event ? $event['url'] : '';
+			$vars['deadline'] = $event ? date('Y-m-d H:i', $event['deadline']) : '';
+			$vars['site_url'] = util::url('');
+			return $vars;
+		};
+		$lang = i18n::of($reply);
+		if ($guest !== null && trim((string)$reply['email']) !== '') {
+			mail::in_language($lang, function () use ($guest, $reply, $vars, $token, $lang) {
+				self::send('_email/'.$guest, $reply['email'], $vars($token), $lang);
+			});
+		}
 		// staff asked for these, or a jazz night would send forty
 		$to = trim((string)config::get('rsvp_staff_email', ''));
 		if (!$staff || $to === '' || !isset($reply['who']) || $reply['who'] !== 'guest') return null;
-		$vars['manage_url'] = '';
-		self::send('_email/rsvp_new', $to, $vars);
+		$default = i18n::default_language();
+		mail::in_language($default, function () use ($to, $vars, $lang, $default) {
+			$staff_vars = $vars(null);
+			if (i18n::enabled()) $staff_vars['lang'] = $lang;
+			self::send('_email/rsvp_new', $to, $staff_vars, $default);
+		});
 		return null;
 	}
 
@@ -700,10 +728,10 @@ class rsvp
 	// a reply stays made when its email can't go: the failure is logged,
 	// without the address or the link, so not the error's text either (an
 	// SMTP server's reply can name the recipient)
-	protected static function send($view, $to, $vars) {
+	protected static function send($view, $to, $vars, $lang = null) {
 		$mail = controller::model_class('mail');
 		try {
-			if ($mail::send_view($view, $to, $vars)) return true;
+			if ($mail::send_view($view, $to, $vars, array(), $lang)) return true;
 		} catch (Exception $e) {
 			log::error("rsvp: $view: not sent (".get_class($e).")");
 			return false;

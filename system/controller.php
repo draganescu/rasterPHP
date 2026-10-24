@@ -454,6 +454,9 @@ class controller {
 	// multilingual site it renders in that language (i18n::with); null, or
 	// off, in the request's own (#200 D13; P4.A).
 	static function render_view($view, $vars = array(), $format = 'html', $lang = null) {
+		if ($lang !== null && i18n::enabled()) {
+			return i18n::with($lang, function () use ($view, $vars, $format) { return controller::render_view($view, $vars, $format); });
+		}
 		$path = file_exists($view) ? $view : controller::build_view_path($view);
 		if (!file_exists($path)) throw new RuntimeException("View not found: $view");
 		$previous = template::swap(null);
@@ -470,9 +473,13 @@ class controller {
 			foreach ($vars as $name => $value) $template->vars[$name] = $value;
 			controller::instance()->render($template, file_get_contents($path));
 			$output = template::instance()->output;
-			// relative images and links become absolute, relative to the theme
+			// relative images and links become absolute, relative to the theme.
+			// Multilingual: a root link is the site's (fix_links gave a page
+			// its language's address), so a file's keeps its path on the site
 			$base = config::get('base_uri').trim(boot::$appname.'/'.config::get('views_path'), '/').'/'.config::get('theme').'/';
-			return preg_replace_callback('/\b(src|href)=(["\'])(?!https?:|mailto:|tel:|#|\/\/|data:)([^"\']*)\2/i', function ($m) use ($base) {
+			$site = i18n::enabled() ? preg_replace('#^([a-z][a-z0-9+.-]*://[^/]+).*$#is', '$1', (string)config::get('base_uri')) : null;
+			return preg_replace_callback('/\b(src|href)=(["\'])(?!https?:|mailto:|tel:|#|\/\/|data:)([^"\']*)\2/i', function ($m) use ($base, $site) {
+				if ($site !== null && substr($m[3], 0, 1) === '/') return $m[1].'='.$m[2].$site.$m[3].$m[2];
 				return $m[1].'='.$m[2].$base.ltrim($m[3], './').$m[2];
 			}, $output);
 		} finally {
@@ -741,7 +748,9 @@ class controller {
 		// about.html does; /index.php/about is /about.
 		// Links to files keep theirs: an extension, the app's folder (the
 		// theme), media/, system/, or a file that exists (#200 D10)
-		if (config::get('multilingual') && i18n::prefix() !== '') {
+		// An email (render_view) gets it in every language: there a root
+		// link would otherwise read as the theme's.
+		if (config::get('multilingual') && (i18n::prefix() !== '' || ($template->is_email && i18n::enabled()))) {
 			$folder = (string)config::get('folder_path', '/');
 			$codes = array_map('strtolower', i18n::available());
 			$files = array(strtolower(boot::$appname), strtolower((string)config::get('raster_media_folder', 'media')), 'system');
