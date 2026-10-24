@@ -388,6 +388,9 @@ class cms_editor {
 		$id = (int)util::post('id');
 		$write = $lang !== null && !i18n::is_default($lang) && $id ? $lang : null;
 		$every = $record ? cms_records::translated_fields($record) : cms_types::translated($type);
+		// the address is per language too, before the table has slug__ro:
+		// the save makes it, so /ro/ never changes the default slug
+		if (i18n::enabled() && array_key_exists('slug', $columns) && !in_array('slug', $every, true)) $every[] = 'slug';
 		$translated = $write === null ? array() : $every;
 		// a new item: a copy of a stored one (Duplicate), or one brought back
 		// (undo after Delete), comes with every language's text as stored,
@@ -415,10 +418,16 @@ class cms_editor {
 		}
 		// production before schema --apply made the language's columns: a
 		// text field would land in the default language's column
-		if ($write !== null && database::$frozen && !self::has_language($type, $write)) {
+		// text field would land in the default language's column, and a
+		// translated one (a record's, the slug) has no column to go to
+		if ($write !== null && database::$frozen) {
 			$types = cms_types::of_table($type);
+			$none = !self::has_language($type, $write);
 			foreach (array_keys($fields) as $field) {
-				if (!in_array($field, $every, true) && (!isset($types[$field]) || $types[$field] === 'text') && !in_array($field, array('enabled', 'published_at'), true)) return self::refused(new cms_refused(array('translation_columns_missing')));
+				$missing = in_array($field, $every, true)
+					? !array_key_exists(cms_types::column($field, $write), $columns)
+					: $none && (!isset($types[$field]) || $types[$field] === 'text') && !in_array($field, array('enabled', 'published_at'), true);
+				if ($missing) return self::refused(new cms_refused(array('translation_columns_missing')));
 			}
 		}
 		$own = array_intersect_key($fields, array_flip($translated));

@@ -22,6 +22,9 @@ class cms_store {
 	// language code the slug is in. Multilingual only: record_slug() writes
 	// it, resolve_slug() reads it, schema --apply makes it.
 	static $slughistory = array('type' => '', 'item' => 0, 'lang' => '', 'slug' => '', 'created_at' => '');
+	// slug_item's answers this request (and cms::item_visible's), forgotten
+	// when an item is saved or deleted
+	static $slug_items = array();
 
 	// ##Slugs, drafts and order
 
@@ -118,8 +121,11 @@ class cms_store {
 	// of its own is found by it before one that is at its default slug in
 	// Romanian. Multilingual only (null off, with no query).
 	static function slug_item($type, $slug, $lang = null) {
-		if (!i18n::enabled() || !preg_match('/^[a-z0-9_]+$/', $type) || (string)$slug === '' || !self::table_exists($type)) return null;
+		if (!i18n::enabled() || !preg_match('/^[a-z0-9_]+$/', $type) || (string)$slug === '') return null;
 		$lang = $lang === null ? i18n::current() : (string)$lang;
+		$key = $type."\n".$lang."\n".$slug;
+		if (array_key_exists($key, self::$slug_items)) return self::$slug_items[$key];
+		if (!self::table_exists($type)) return null;
 		$columns = self::columns($type);
 		if (!array_key_exists('slug', $columns)) return null;
 		$select = 'id, `'.implode('`, `', self::slug_columns($columns)).'`';
@@ -129,14 +135,15 @@ class cms_store {
 		} else {
 			$row = R::getRow("SELECT $select FROM `$type` WHERE `$column` = ? OR ((`$column` IS NULL OR `$column` = '') AND slug = ?) ORDER BY CASE WHEN `$column` = ? THEN 0 ELSE 1 END, id LIMIT 1", array((string)$slug, (string)$slug, (string)$slug));
 		}
-		return $row ?: null;
+		return self::$slug_items[$key] = $row ?: null;
 	}
 
 	// Gives the item $bean the slug it lacks in each translation language,
 	// made from its translated title, headline or name (slug__ro from
 	// title__ro), once it has one: an item with no translated text keeps its
-	// default slug in that language too, and a slug once made stays (a new
-	// one is written as slug, with lang). Multilingual only. In development
+	// default slug in that language too, unless another item's address there
+	// already is that slug, and a slug once made stays (a new one is written
+	// as slug, with lang). Multilingual only. In development
 	// the column is made when it is first needed.
 	static function translate_slugs($type, $bean, $skip = array()) {
 		if (!i18n::enabled() || !array_key_exists('slug', self::columns($type))) return;
@@ -146,7 +153,17 @@ class cms_store {
 			$column = self::slug_column($lang);
 			if ($column === 'slug' || !empty($values[$column])) continue;
 			$source = self::slug_source($values, $skip, $lang);
-			if ($source === $default) continue;
+			if ($source === $default) {
+				// no words of its own there, so its address there is its
+				// default slug, unless that is already another item's
+				// address in the language (a slug__ro made from its
+				// translation): then a free one in that language, so one
+				// address is one item
+				if (!array_key_exists($column, self::columns($type)) || (string)$values['slug'] === '') continue;
+				if (!R::getCell("SELECT COUNT(*) FROM `$type` WHERE `$column` = ? AND id != ?", array((string)$values['slug'], (int)$bean->id))) continue;
+				$bean->$column = self::unique_slug($type, $values['slug'], (int)$bean->id, $lang);
+				continue;
+			}
 			if (!array_key_exists($column, self::columns($type))) {
 				if (database::$frozen) continue;
 				cms_types::ensure($type, array(), array('slug'));
@@ -166,6 +183,7 @@ class cms_store {
 		if (!self::table_exists('slughistory')) {
 			if (database::$frozen) return false;
 			cms_types::ensure('slughistory', array_map(array('cms_types', 'of_default'), self::$slughistory));
+			self::index_history();
 		}
 		$seen = R::getCell('SELECT COUNT(*) FROM slughistory WHERE `type` = ? AND item = ? AND lang = ? AND slug = ?', array($type, (int)$id, $lang, (string)$slug));
 		if ($seen) return false;
@@ -176,6 +194,20 @@ class cms_store {
 		$row->slug = (string)$slug;
 		$row->created_at = R::isoDateTime();
 		R::store($row);
+		return true;
+	}
+
+	// slughistory's index on (type, slug), what resolve_slug looks it up by;
+	// true when it made it. MySQL indexes TEXT columns by their start.
+	static function index_history() {
+		$adapter = R::getDatabaseAdapter();
+		if ($adapter->getDatabase()->getDatabaseType() !== 'mysql') {
+			if ($adapter->getCell("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'slughistory_type_slug'")) return false;
+			$adapter->exec('CREATE INDEX IF NOT EXISTS `slughistory_type_slug` ON `slughistory` (`type`, `slug`)');
+			return true;
+		}
+		if ($adapter->getCell("SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'slughistory' AND index_name = 'slughistory_type_slug'")) return false;
+		$adapter->exec('CREATE INDEX `slughistory_type_slug` ON `slughistory` (`type`(64), `slug`(191))');
 		return true;
 	}
 
@@ -218,7 +250,10 @@ class cms_store {
 			if (self::slug_in($row, $lang) === $slug) return null;
 		}
 		if (!$rows && self::table_exists('slughistory')) {
-			$id = R::getCell('SELECT item FROM slughistory WHERE `type` = ? AND slug = ? ORDER BY id DESC LIMIT 1', array($type, $slug));
+			// the newest of the items still there that had it, a published
+			// one before a draft
+			$live = array_key_exists('enabled', $columns) ? "CASE WHEN t.enabled = '0' THEN 1 ELSE 0 END, " : '';
+			$id = R::getCell("SELECT h.item FROM slughistory h JOIN `$type` t ON t.id = h.item WHERE h.`type` = ? AND h.slug = ? ORDER BY {$live}h.id DESC LIMIT 1", array($type, $slug));
 			if ($id) $rows = R::getAll("SELECT $select FROM `$type` WHERE id = ?", array((int)$id));
 		}
 		if (!$rows || self::slug_in($rows[0], $lang) === $slug) return null;
@@ -475,6 +510,7 @@ class cms_store {
 	static function forget() {
 		self::$tables = null;
 		self::$columns = array();
+		self::$slug_items = array();
 		cms_types::forget();
 	}
 
@@ -799,7 +835,11 @@ class cms_store {
 				$bean->owner = $user ? (int)$user['id'] : 0;
 			}
 			if ($info['owner'] && $bean->owner === null) $bean->owner = 0;
+			// frozen, a declared field without its column yet (one a newer
+			// release declares, before schema --apply) is left to the model
+			$have = database::$frozen ? self::columns($type) : null;
 			foreach ($info['fields'] as $field => $default) {
+				if ($have !== null && !array_key_exists($field, $have)) continue;
 				if ($bean->$field === null) $bean->$field = is_array($default) ? '[]' : cms_types::clean($info['types'][$field], $default, $field);
 			}
 		}
@@ -833,6 +873,7 @@ class cms_store {
 		if (i18n::enabled() && isset($types['saved_lang'])) $bean->saved_lang = $saved_lang;
 		$bean->updated_at = R::isoDateTime();
 		R::store($bean);
+		self::$slug_items = array();
 		// every slug it has had, for the redirects from the old ones (#138)
 		self::record_slugs($type, $bean, $before);
 		util::content_changed();
@@ -858,6 +899,7 @@ class cms_store {
 			cms_records::check($info, null, $item);
 		}
 		R::trash($bean);
+		self::$slug_items = array();
 		util::content_changed();
 		cms_records::dispatch('cms.item_deleted', array('collection' => self::collection_of($type, $name), 'item' => $item));
 		return true;
