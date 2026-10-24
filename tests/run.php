@@ -11595,6 +11595,256 @@ test('P3.A: schema knows item and record translations: missing ones are drift, -
 	}
 });
 
+// ## P3.D: the coding MCP translates items
+
+// The starter with a fixture collection (render.cms.zzp3d: a name and a
+// description, translated, and a price, shared), its own database and
+// the_app.php as it was, put back afterwards. /zzp3d/zzp3d_item/<slug> is
+// an item's page, rendered by the same view.
+function p3d_site($fn) {
+	global $root;
+	$view = "$root/application/views/default/zzp3d.html";
+	test_fixture($view);
+	file_put_contents($view, '<!doctype html><!-- print.@lang.i18n.language --><html lang="en"><!-- /print.@lang.i18n.language --><head><title>Dishes</title></head><body>'
+		."\n<!-- render.cms.zzp3d --><article><h2><!-- print.name -->Flat white<!-- /print.name --></h2>"
+		.'<p class="d"><!-- print.description -->Milk and espresso<!-- /print.description --></p><p class="price"><!-- print.price -->14<!-- /print.price --></p></article><!-- /render.cms.zzp3d -->'
+		."\n</body></html>");
+	$config = APPBASE.'config/the_app.php';
+	$kept = file_get_contents($config);
+	$db = sys_get_temp_dir().'/raster-p3d-'.getmypid().'.sqlite';
+	try {
+		return $fn($db);
+	} finally {
+		file_put_contents($config, $kept);
+		@unlink($view);
+		array_map('unlink', glob("$db*") ?: array());
+	}
+}
+// writes columns of an item straight into the fixture's database, as a
+// translation saved some other way would
+function p3d_write($db, $table, $id, $values) {
+	$pdo = new PDO('sqlite:'.$db);
+	foreach ($values as $column => $value) {
+		$statement = $pdo->prepare("UPDATE `$table` SET `$column` = ? WHERE id = ?");
+		$statement->execute(array($value, $id));
+	}
+}
+function p3d_columns($db, $table) {
+	$pdo = new PDO('sqlite:'.$db);
+	return $pdo->query("PRAGMA table_info($table)")->fetchAll(PDO::FETCH_COLUMN, 1);
+}
+// the rows translation_status lists of one kind
+function p3d_status($mcp, $kind) {
+	$status = $mcp->call('translation_status', array('lang' => 'ro'));
+	return array_values(array_filter($status['missing'], function ($row) use ($kind) { return $row['kind'] === $kind; }));
+}
+
+test('P3.D: off, the item tools answer as before and make no translation column', function () {
+	p3d_site(function ($db) {
+		p2c_session(array('RASTER_DB' => $db), function ($mcp) use ($db) {
+			$made = $mcp->call('create_item', array('collection' => 'zzp3d', 'fields' => array('name' => 'Flat white', 'price' => 14)));
+			check(!isset($made['error']), json_encode($made));
+			$id = $made['id'];
+			$listed = $mcp->call('list_items', array('collection' => 'zzp3d'));
+			same(array('collection', 'fields', 'total', 'items'), array_keys($listed));
+			same('Flat white', $listed['items'][0]['name']);
+			$item = $mcp->call('get_item', array('collection' => 'zzp3d', 'id' => $id));
+			same(array('Flat white', 14, 'flat-white'), array($item['name'], $item['price'], $item['slug']));
+			same('Cortado', $mcp->call('update_item', array('collection' => 'zzp3d', 'id' => $id, 'fields' => array('name' => 'Cortado')))['name']);
+			foreach (array('list_items' => array(), 'get_item' => array('id' => $id), 'create_item' => array('fields' => array('name' => 'x')), 'update_item' => array('id' => $id, 'fields' => array('name' => 'x'))) as $tool => $arguments) {
+				$refused = $mcp->call($tool, array('collection' => 'zzp3d', 'lang' => 'ro') + $arguments);
+				check(isset($refused['error']) && strpos($refused['error'], 'one language') !== false, "$tool: ".json_encode($refused));
+			}
+			check(isset($mcp->call('update_item', array('collection' => 'zzp3d', 'id' => $id, 'fields' => array('name__ro' => 'x')))['error']), 'a translation column is never a field');
+			same('Cortado', $mcp->call('get_item', array('collection' => 'zzp3d', 'id' => $id))['name'], 'nothing written by a refusal');
+		});
+		check(!preg_grep('/__/', p3d_columns($db, 'zzp3ddata')), json_encode(p3d_columns($db, 'zzp3ddata')));
+	});
+});
+
+test('P3.D: without lang, or with the default one, list_items and get_item send the SQL they always did', function () {
+	p3d_site(function ($db) {
+		cms_store::connect();
+		try {
+			cms_types::ensure('zzp3ddata', array('slug' => 'text', 'name' => 'text', 'description' => 'text', 'price' => 'int', 'enabled' => 'bool', 'published_at' => 'datetime', 'updated_at' => 'datetime'));
+			$item = cms_store::save_item('zzp3ddata', 0, array('name' => 'Flat white', 'price' => 14), array('name', 'description', 'price'));
+			$settings = array(
+				'off' => array('multilingual' => false, 'languages' => array()),
+				'languages, switch off' => array('multilingual' => false, 'languages' => array('en', 'ro')),
+				'on' => array('multilingual' => true, 'languages' => array('en', 'ro')),
+			);
+			foreach ($settings as $what => $setting) {
+				with_settings($setting, function () use ($what, $item) {
+					$mcp = new mcp();
+					foreach (array('list_items' => array(), 'get_item' => array('id' => $item['id'])) as $tool => $arguments) {
+						$arguments += array('collection' => 'zzp3d');
+						$plain = $default = null;
+						$sql = p2a_sql(function () use ($mcp, $tool, $arguments, &$plain) { $plain = $mcp->call_tool($tool, $arguments); });
+						check(empty($plain['isError']), "$what, $tool: ".json_encode($plain));
+						if ($what === 'off') continue;
+						same($sql, p2a_sql(function () use ($mcp, $tool, $arguments, &$default) { $default = $mcp->call_tool($tool, $arguments + array('lang' => 'en')); }), "$what, $tool: the SQL");
+						same($plain['content'], $default['content'], "$what, $tool: the answer");
+					}
+				});
+			}
+		} finally {
+			R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS zzp3ddata');
+			cms_store::forget();
+		}
+	});
+});
+
+test('P3.D: translation_status lists items, done once their column holds a translation', function () {
+	p3d_site(function ($db) {
+		p2c_session(array('RASTER_DB' => $db), function ($mcp) use ($db) {
+			$flat = $mcp->call('create_item', array('collection' => 'zzp3d', 'fields' => array('name' => 'Flat white', 'description' => 'Milk and espresso', 'price' => 14)));
+			$mcp->call('set_languages', array('languages' => array('en', 'ro')));
+			$tea = $mcp->call('create_item', array('collection' => 'zzp3d', 'fields' => array('name' => 'Tea', 'price' => 9)));
+			// set_languages made the first item's columns, create_item the second's
+			$columns = p3d_columns($db, 'zzp3ddata');
+			foreach (array('name__ro', 'description__ro', 'slug__ro') as $column) check(in_array($column, $columns, true), "$column: ".json_encode($columns));
+			check(!in_array('price__ro', $columns, true), 'a price is shared');
+			$rows = p3d_status($mcp, 'item');
+			same(array(
+				array('kind' => 'item', 'where' => "zzp3d/{$flat['id']}", 'field' => 'name', 'default_value' => 'Flat white', 'length' => 10, 'shared' => false),
+				array('kind' => 'item', 'where' => "zzp3d/{$flat['id']}", 'field' => 'description', 'default_value' => 'Milk and espresso', 'length' => 17, 'shared' => false),
+				array('kind' => 'item', 'where' => "zzp3d/{$tea['id']}", 'field' => 'name', 'default_value' => 'Tea', 'length' => 3, 'shared' => false),
+			), $rows, 'each translated field with words, never the price or the slug; an empty description is nothing to translate');
+			$before = $mcp->call('translation_status', array('lang' => 'ro'));
+			same($before['total'], $mcp->call('describe', array('sections' => array('languages')))['languages']['missing']['ro'], 'describe counts them too');
+			p3d_write($db, 'zzp3ddata', $flat['id'], array('name__ro' => 'Cafea cu lapte'));
+			$after = $mcp->call('translation_status', array('lang' => 'ro'));
+			same($before['total'] - 1, $after['total']);
+			same($before['done'] + 1, $after['done']);
+			same(array('description', 'name'), array_column(p3d_status($mcp, 'item'), 'field'));
+		});
+	});
+});
+
+test('P3.D: get_item and list_items with lang show the item in that language', function () {
+	p3d_site(function ($db) {
+		p2c_session(array('RASTER_DB' => $db), function ($mcp) use ($db) {
+			$mcp->call('set_languages', array('languages' => array('en', 'ro')));
+			$flat = $mcp->call('create_item', array('collection' => 'zzp3d', 'fields' => array('name' => 'Flat white', 'description' => 'Milk and espresso', 'price' => 14)));
+			$item = $mcp->call('get_item', array('collection' => 'zzp3d', 'id' => $flat['id'], 'lang' => 'ro'));
+			same(array('value' => '', 'default_value' => 'Flat white', 'translated' => false, 'shared' => false), $item['name']);
+			same(array('value' => 14, 'default_value' => 14, 'translated' => false, 'shared' => true), $item['price']);
+			same(array($flat['id'], 'ro', 'flat-white', true), array($item['id'], $item['lang'], $item['slug'], $item['enabled']), 'id, slug, enabled stay plain');
+			check(!preg_grep('/__/', array_keys($item)), 'no translation columns: '.json_encode(array_keys($item)));
+			p3d_write($db, 'zzp3ddata', $flat['id'], array('name__ro' => 'Cafea cu lapte', 'slug__ro' => 'cafea-cu-lapte'));
+			$item = $mcp->call('get_item', array('collection' => 'zzp3d', 'id' => $flat['id'], 'lang' => 'ro'));
+			same(array('value' => 'Cafea cu lapte', 'default_value' => 'Flat white', 'translated' => true, 'shared' => false), $item['name']);
+			same('cafea-cu-lapte', $item['slug'], 'the slug in that language');
+			same('flat-white', $mcp->call('get_item', array('collection' => 'zzp3d', 'id' => $flat['id'], 'lang' => 'en'))['slug'], 'the default language is as without lang');
+			$listed = $mcp->call('list_items', array('collection' => 'zzp3d', 'lang' => 'ro'));
+			same(array('collection', 'lang', 'fields', 'total', 'items'), array_keys($listed));
+			$row = $listed['items'][0];
+			same(array('Cafea cu lapte', 'Milk and espresso', 14, 'cafea-cu-lapte', array('description')), array($row['name'], $row['description'], $row['price'], $row['slug'], $row['untranslated']), 'translated, else the default; with what it lacks');
+			check(!preg_grep('/__/', array_keys($row)), json_encode(array_keys($row)));
+			same('Flat white', $mcp->call('list_items', array('collection' => 'zzp3d'))['items'][0]['name'], 'without lang, as before');
+			check(isset($mcp->call('get_item', array('collection' => 'zzp3d', 'id' => $flat['id'], 'lang' => 'de'))['error']), 'a language the site lacks');
+		});
+	});
+});
+
+test('P3.D: create_item takes no translation; update_item with lang refuses shared fields', function () {
+	p3d_site(function ($db) {
+		p2c_session(array('RASTER_DB' => $db), function ($mcp) {
+			$mcp->call('set_languages', array('languages' => array('en', 'ro')));
+			$refused = $mcp->call('create_item', array('collection' => 'zzp3d', 'fields' => array('name' => 'Cafea'), 'lang' => 'ro'));
+			same('Create the item without lang, in the default language (en), then translate it with update_item and lang', isset($refused['error']) ? $refused['error'] : json_encode($refused));
+			same(0, $mcp->call('list_items', array('collection' => 'zzp3d'))['total'], 'nothing made');
+			$flat = $mcp->call('create_item', array('collection' => 'zzp3d', 'fields' => array('name' => 'Flat white', 'price' => 14), 'lang' => 'en'));
+			check(!isset($flat['error']), 'the default language is as none: '.json_encode($flat));
+			foreach (array('price' => 12, 'enabled' => false) as $field => $value) {
+				$refused = $mcp->call('update_item', array('collection' => 'zzp3d', 'id' => $flat['id'], 'fields' => array('name' => 'Cafea', $field => $value), 'lang' => 'ro'));
+				same("'$field' is shared by every language; update it without lang", isset($refused['error']) ? $refused['error'] : json_encode($refused));
+			}
+			check(isset($mcp->call('update_item', array('collection' => 'zzp3d', 'id' => $flat['id'], 'fields' => array('name__ro' => 'Cafea'), 'lang' => 'ro'))['error']), 'a column is never a field');
+			$item = $mcp->call('get_item', array('collection' => 'zzp3d', 'id' => $flat['id']));
+			same(array('Flat white', 14), array($item['name'], $item['price']), 'nothing written');
+			same('', $item['name__ro'], 'no translation either');
+		});
+	});
+});
+
+test('P3.D: tools/list grows by less than 100 characters with lang on the item tools (#161)', function () {
+	// tools/list over stdio at the P3 kickoff (43aa961): 11739 characters
+	p3d_site(function ($db) {
+		p2c_session(array('RASTER_DB' => $db), function ($mcp) {
+			$tools = $mcp->message('tools/list')['result']['tools'];
+			foreach ($tools as $tool) {
+				if (in_array($tool['name'], array('list_items', 'get_item', 'create_item', 'update_item'), true)) check(isset($tool['inputSchema']['properties']['lang']), $tool['name']);
+			}
+			$size = strlen(json_encode(array('tools' => $tools), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+			check($size - 11739 < 100, "tools/list is $size characters, ".($size - 11739).' more than at the P3 kickoff');
+		});
+	});
+});
+
+test('P3.D: an agent translates a collection over MCP and /ro/ shows its items (needs P3.A, P3.B)', function () {
+	p3d_site(function ($db) {
+		p2c_session(array('RASTER_DB' => $db), function ($mcp) {
+			$mcp->call('set_languages', array('languages' => array('en', 'ro')));
+			$flat = $mcp->call('create_item', array('collection' => 'zzp3d', 'fields' => array('name' => 'Flat white', 'description' => 'Milk and espresso', 'price' => 14)));
+			$mcp->call('create_item', array('collection' => 'zzp3d', 'fields' => array('name' => 'Tea', 'description' => 'Black', 'price' => 9)));
+			// what translation_status lists, translated one item at a time
+			$words = array('Flat white' => 'Cafea cu lapte', 'Milk and espresso' => 'Lapte și espresso', 'Tea' => 'Ceai', 'Black' => 'Negru');
+			$items = array();
+			foreach (p3d_status($mcp, 'item') as $row) {
+				list(, $id) = explode('/', $row['where']);
+				$items[$id][$row['field']] = $words[$row['default_value']];
+			}
+			same(2, count($items), json_encode($items));
+			foreach ($items as $id => $fields) {
+				$saved = $mcp->call('update_item', array('collection' => 'zzp3d', 'id' => (int)$id, 'fields' => $fields, 'lang' => 'ro'));
+				check(!isset($saved['error']), json_encode($saved));
+			}
+			// nothing left for items, and the English is as it was
+			same(array(), p3d_status($mcp, 'item'), 'translation_status: 0 missing for items');
+			$item = $mcp->call('get_item', array('collection' => 'zzp3d', 'id' => $flat['id'], 'lang' => 'ro'));
+			same(array('value' => 'Cafea cu lapte', 'default_value' => 'Flat white', 'translated' => true, 'shared' => false), $item['name']);
+			same('cafea-cu-lapte', $item['slug'], 'a Romanian slug, made from the Romanian name');
+			$english = $mcp->call('get_item', array('collection' => 'zzp3d', 'id' => $flat['id']));
+			same(array('Flat white', 'flat-white'), array($english['name'], $english['slug']));
+			same(array(), $mcp->call('list_items', array('collection' => 'zzp3d', 'lang' => 'ro'))['items'][0]['untranslated']);
+			// the slug can be set too, in that language only
+			same('cafea-cu-lapte', $mcp->call('update_item', array('collection' => 'zzp3d', 'id' => $flat['id'], 'fields' => array('slug' => 'cafea-cu-lapte'), 'lang' => 'ro'))['slug']);
+			// /ro/ lists and shows the items in Romanian, at their Romanian address
+			$list = $mcp->call('render_url', array('url' => '/ro/zzp3d'));
+			same(200, $list['status']);
+			check(strpos($list['html'], '<h2>Cafea cu lapte</h2>') !== false && strpos($list['html'], '<h2>Ceai</h2>') !== false, 'the Romanian names');
+			check(strpos($list['html'], '>14<') !== false, 'the shared price');
+			$page = $mcp->call('render_url', array('url' => '/ro/zzp3d/zzp3d_item/cafea-cu-lapte'));
+			same(200, $page['status'], json_encode($page));
+			check(strpos($page['html'], '<h2>Cafea cu lapte</h2>') !== false && strpos($page['html'], 'Lapte și espresso') !== false, 'the item in Romanian');
+			check(strpos($page['html'], '<h2>Ceai</h2>') === false, 'that item only');
+			$en = $mcp->call('render_url', array('url' => '/zzp3d/zzp3d_item/flat-white'));
+			check(strpos($en['html'], '<h2>Flat white</h2>') !== false, 'English stays at its own address');
+		});
+	});
+});
+
+test('P3.D: translation_status lists records whose type declares translate (needs P3.A)', function () {
+	temp_model(APPBASE.'models/zzp3drec', array('zzp3drec.php' => "<?php\nclass zzp3drec\n{\n\tstatic function types() {\n\t\treturn array('zzp3drec' => array('fields' => array('title' => '', 'email' => ''), 'translate' => array('title')));\n\t}\n}\n"));
+	try {
+		p3d_site(function ($db) {
+			p2c_session(array('RASTER_DB' => $db), function ($mcp) {
+				$mcp->call('set_languages', array('languages' => array('en', 'ro')));
+				$made = $mcp->call('create_item', array('collection' => 'zzp3drec', 'fields' => array('title' => 'Opening hours', 'email' => 'ana@example.com')));
+				check(!isset($made['error']), json_encode($made));
+				same(array(array('kind' => 'record', 'where' => "zzp3drec/{$made['id']}", 'field' => 'title', 'default_value' => 'Opening hours', 'length' => 13, 'shared' => false)), p3d_status($mcp, 'record'), 'the title, never the email');
+				same(array('value' => 'ana@example.com', 'default_value' => 'ana@example.com', 'translated' => false, 'shared' => true), $mcp->call('get_item', array('collection' => 'zzp3drec', 'id' => $made['id'], 'lang' => 'ro'))['email']);
+				$saved = $mcp->call('update_item', array('collection' => 'zzp3drec', 'id' => $made['id'], 'fields' => array('title' => 'Program'), 'lang' => 'ro'));
+				check(!isset($saved['error']), json_encode($saved));
+				same(array(), p3d_status($mcp, 'record'));
+			});
+		});
+	} finally {
+		remove_dir(APPBASE.'models/zzp3drec');
+	}
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";
 foreach ($skipped as $skip) echo "  - $skip\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";

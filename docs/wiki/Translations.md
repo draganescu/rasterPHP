@@ -92,7 +92,7 @@ The mock-up still says `lang="en"`, and the page says the language it is shown i
 
 ## With an AI agent
 
-Over [MCP](Working-with-AI-Agents), an agent can do the whole job: `set_languages` turns languages on (and adds the columns), `translation_status` lists what a language still lacks, `update_page` with a `lang` writes a page's translation, `read_strings` and `write_strings` handle the dictionaries, and `render_url` with `/ro/…` shows the result. `set_languages` and `write_strings` change the site's files, so they refuse on a production server, and over HTTP they are offered only when the site sets `config::set('mcp_write_views')->to(true)` (over stdio they always are).
+Over [MCP](Working-with-AI-Agents), an agent can do the whole job: `set_languages` turns languages on (and adds the columns), `translation_status` lists what a language still lacks (page fields, items, dictionary words), `update_page` with a `lang` writes a page's translation and `update_item` with a `lang` an item's, `read_strings` and `write_strings` handle the dictionaries, and `render_url` with `/ro/…` shows the result. `set_languages` and `write_strings` change the site's files, so they refuse on a production server, and over HTTP they are offered only when the site sets `config::set('mcp_write_views')->to(true)` (over stdio they always are).
 
 ## From a model
 
