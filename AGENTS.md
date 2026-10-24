@@ -2016,13 +2016,92 @@ use `'model.method'`: `method(true)` returns
 
 **i18n**: the template's text is the default language.
 - Translations: `print.i18n.home('welcome')` looks up `application/i18n/<lang>/home.php`,
-  which returns an array of key => text.
-- Settings: `config::set('languages')->to(array('en', 'ro'))` and
-  `domain_language`.
-- The language comes from `?lang=` (remembered in a cookie), the domain, the
-  cookie, then the browser.
-- `print.i18n.language` gives the current language; `render.i18n.languages`
-  gives a switcher with `code`, `url` and `state`.
+  which returns an array of key => text. A dictionary that sets `$lang`
+  instead of returning it still works until 3.0.0 (`doctor` warns, and
+  `raster upgrade` adds `return $lang;`).
+- Settings: `config::set('languages')->to(array('en', 'ro'))` (codes such
+  as `en`, `ro`, `pt-br`; the first is the default; `doctor` fails on one
+  it can't read, which is skipped), `domain_language`, and the switch
+  `config::set('multilingual')->to(true)`, off by default. Multilingual
+  needs two or more languages: with fewer, `doctor` fails and the site
+  behaves as off.
+- Multilingual, each language has its own addresses (`/ro/menu`) and the
+  address alone picks it: an exact `domain_language` host, else the
+  `/<lang>/` prefix, else the default.
+- Without `multilingual` (template-only translation, deprecated since
+  2.2.49, removed in 3.0.0; `doctor` warns on two or more languages and
+  suggests the switch; one language, `array('ro')`, is fine) only the
+  template's words are translated, and the language comes from `?lang=`
+  (remembered in a cookie), the domain, the cookie, then the browser.
+- `print.i18n.language` gives the current language (without `languages`,
+  nothing: the mock-up's `lang="en"` stays, so write it with a default);
+  `render.i18n.languages` gives a switcher with `code`, `url` and `state`.
+- **The language API.** Every model, a site's own too, reads language
+  state through these static calls, never `config::get('languages')`.
+  With multilingual off they give the one-language answer, so callers
+  need no special case:
+
+  | Call | Gives |
+  |---|---|
+  | `i18n::enabled()` | `multilingual` is on and there are two or more languages |
+  | `i18n::available()` | the languages, the ones Raster can read |
+  | `i18n::default_language()` | the first, or `''` when `languages` is unset |
+  | `i18n::current()` | this request's language: multilingual, the address's; otherwise what `?lang=`, the cookie and the browser pick (`i18n::detect()`, kept) |
+  | `i18n::is_default($lang = null)` | whether it is the default language |
+  | `i18n::suffix($lang = null)` | a translation column's suffix: `''` when off and for the default, else `__ro`, `__pt_br` |
+  | `i18n::prefix($lang = null)` | the address prefix on this host: `''` when off, for the default and on the language's own domain, else `ro/` |
+  | `i18n::with($lang, $fn)` | runs `$fn` with `current()` set to `$lang` (one the site doesn't list runs in the default) and, multilingual, `link_uri` set to that language's address; puts both back, even when `$fn` throws, nests, and returns what `$fn` returned |
+  | `i18n::dir($lang = null)` | `rtl` for Arabic, Hebrew, Persian, Urdu and the other right-to-left languages, else `ltr` |
+  | `i18n::date_order($lang = null)` | how dates are typed: `''` without languages, `mdy` for `en-us`, `dmy` for the rest (`Y-m-d` is always read) |
+  | `i18n::address($lang)` | where that language's pages start (`link_base` and its prefix; its own `domain_language` host, seen from the site's address or a language's domain; or the site's address seen from another language's domain), the base `alternates()`, `with()` and the `/ro/` and `?lang=` redirects use; `null` when it has none |
+  | `i18n::alternates($path = null)` | the page (or `$path`, as it reads) in every language: rows of `lang` and `url`, each path segment encoded; a language with its own `domain_language` host is at that host, and from such a host the others are on the site's address (`RASTER_URL`, `site_url`), or left out without one (`doctor` fails on that) |
+
+  `$lang` left out is `current()`. Raster calls these on the bundled
+  class, from the page cache before any model loads too, so a site's
+  `the_i18n` can't change them; it changes only what templates print
+  through `print.i18n` and `render.i18n`.
+
+**Multilingual URLs** (`multilingual` on, with two or more `languages`): the
+URL alone says the content's language, so one URL is always one language.
+- **Addresses.** The default language has no prefix (`/menu`); every other
+  language is under its code (`/ro/menu`). A language's home page is `/ro/`,
+  and `/ro` answers 301 to it. `/ro/menu/` answers 301 to `/ro/menu` (the
+  one-address rule), `/en/menu` (the default's code) 301 to `/menu`, and
+  `?lang=ro` 301 to the same page in that language (`/ro/menu`, the rest of
+  the query kept; `ro-RO` names `ro`). A host listed in `domain_language`
+  (exactly, port aside) is that language and takes no prefix. One language
+  has one address: on the site's address (`site_url`, else `RASTER_URL`)
+  `/ro/menu` answers 301 to `example.ro/menu` when `ro` has its own
+  domain, and `?lang=` goes to a language's domain, or from one to the
+  site's address. On any other host (a preview or staging copy whose
+  `RASTER_URL` isn't the `site_url`, `localhost`) every language is served
+  under its prefix there, and links stay on that host.
+  The cookie and `Accept-Language` don't choose the content, and no `lang`
+  cookie is set.
+- **One place.** `config::initialize()` takes the prefix off, after the
+  site's own folder (`RASTER_URL=https://host/preview/abc/` serves
+  `/preview/abc/ro/menu`) and before anything reads the path. Routes,
+  `protected` pages (`/ro/staff` sends a visitor to `/ro/login`, and back),
+  the cross-site check, `/ro/api/…` and `/ro/mcp` see `/menu`, as without a
+  prefix. `config::get('url_language')` is the language the URL names (`''`
+  for the default, and when multilingual is off), `link_base` the site's
+  link address without a prefix, and `link_uri` adds the prefix (`…/ro/`),
+  so every link Raster builds, in pages and in emails rendered there, keeps
+  the language.
+- **Links.** On a `/ro/` page, links by file name (`href="menu.html"`) and
+  hand-written root links to pages (`href="/menu"`, `action="/contact"`,
+  `formaction`) become `…/ro/menu`, and `/index.php/menu` the same. Links to files are left alone: anything with an
+  extension (`/menu.pdf`, `/news.rss`), under the app's folder (the theme),
+  `media/` or `system/`, and any path that is a file. A root link outside
+  the site's folder, or that already names a language (`/ro/menu`), keeps
+  that.
+- **Headers and cache.** Every HTML and feed page answers
+  `Content-Language: ro` (its language), and a cached copy goes out with it
+  too. The page cache keeps one copy per URL, so `/menu` and `/ro/menu` are
+  two copies and need no `Vary`.
+- With multilingual off none of this happens: `/ro/menu` is a 404, `?lang=`
+  picks the template's language and sets the cookie, links are as before and
+  there is no `Content-Language`.
 
 ## Environments and cache
 
@@ -2177,7 +2256,7 @@ of lists and filter pages come along; drafts and the editor don't.
 
 - Editors (roles editor and admin) log in at `/login`. They also see drafts.
   Visitors get no cookies until they log in (except `lang`, when they pick a
-  language).
+  language on a site that isn't multilingual).
 - **The in-page editor.** For editors, the page itself is the editor: every
   `print.cms` field, collection, item and item field is editable where it
   shows, in the site's own type (`E` or the Edit button starts, changes save
@@ -2318,7 +2397,8 @@ of lists and filter pages come along; drafts and the editor don't.
   models send: newsletter and authentication send through
   `controller::model_class('mail')`, so a `the_mail` changes every email
   Raster sends. Other static calls between models (`newsletter::subscribe`,
-  `i18n::detect`, `authentication::` helpers) go to the bundled class.
+  `authentication::` helpers) go to the bundled class, and so does the
+  language API (`i18n::current()` and the rest), which can't be overridden.
   A helper file in the override's folder (`the_cms/store.php`) is found
   before the bundled one, and so is a query in its `sql/` folder
   (`the_newsletter/sql/confirmed_count.sql`).
@@ -2421,7 +2501,8 @@ Set in `config/the_app.php` with `config::set('name')->to(value)`.
 | `newsletter_double_opt_in` | true | false subscribes without a confirmation |
 | `newsletter_confirm_page`, `newsletter_unsubscribe_page` | `newsletter-confirm`, `newsletter-unsubscribe` | |
 | `mail`, `mail_from` | see `RASTER_MAIL` | transport and sender |
-| `languages`, `domain_language`, `language_cookie` | none, none, `lang` | |
+| `multilingual` | false | one address per language (`/ro/menu`) for the `languages`, which need to be two or more (see **i18n**) |
+| `languages`, `domain_language`, `language_cookie` | none, none, `lang` | the languages, the first the default; a host that is one language's; the cookie template-only translation remembers the choice in |
 | `page_cache`, `page_cache_ttl`, `page_cache_skip` | on in production, 3600, none | |
 | `asset_versions` | true | false leaves theme asset URLs as they are written |
 | `mcp_token` | none | same as `RASTER_MCP_TOKEN` |
@@ -2508,7 +2589,9 @@ stamp check, so people with a page open send it again.
   `system/private_paths.php`, uses of deprecated features
   (`system/tools/deprecations.php`, minus the ones config `allow_deprecated`
   says are on purpose), a `data/secret` the user running it can't read or
-  that isn't a key,
+  that isn't a key, a language code it can't read, `multilingual` with
+  fewer than two languages and, multilingual, a `domain_language` without
+  a site address (`RASTER_URL`, `site_url`) on a host of no language,
   and, in production, one address that sent one form many different
   emails today (many people share it), the site address, mail, tokens,
   whether PHP shows errors (`display_errors`) and whether PHP takes the

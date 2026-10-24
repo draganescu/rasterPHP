@@ -23,3 +23,6 @@ config::set('cms_enabled')->to(true);
 // the default page size for all CMS data types
 config::set("raster_page_size")->to(10);
 config::set('raster_media_folder')->to('media');
+// one address per language (/ro/menu) and translatable content, for the
+// languages listed in `languages` (two or more; the first is the default)
+config::set('multilingual')->to(false);

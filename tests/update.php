@@ -582,6 +582,119 @@ test('P0.C: an older login view gets the no_database and no_users alerts login_m
 	lacks($out, 'login-message-alerts');
 });
 
+// ## P1.A: the language API, the switch, doctor
+
+test('P1.A: doctor on languages: multilingual needs two, codes it can\'t read, template-only is deprecated', function () use ($repo, $tmp) {
+	$site = "$tmp/site-p1a";
+	same(0, raster($repo, array('new', $site))[0]);
+	$config = "$site/application/config/the_app.php";
+	$starter = file_get_contents($config);
+	$doctor = function ($settings) use ($site, $config, $starter) {
+		file_put_contents($config, $starter."\n".$settings."\n");
+		return raster($site, array('doctor'));
+	};
+	list($code, $out) = $doctor('');
+	same(0, $code, $out);
+	lacks($out, 'multilingual');
+	lacks($out, 'deprecated');
+	list($code, $out) = $doctor("config::set('multilingual')->to(true);\nconfig::set('languages')->to(array('ro'));");
+	same(1, $code, $out);
+	has($out, '✗ multilingual is on with fewer than two languages');
+	has($out, 'The site behaves as if it were off');
+	list($code, $out) = $doctor("config::set('multilingual')->to(true);");
+	same(1, $code, $out);
+	has($out, '✗ multilingual is on with fewer than two languages');
+	list($code, $out) = $doctor("config::set('languages')->to(array('en', 'ro_RO'));\nconfig::set('domain_language')->to(array('example.ro' => 'Romanian'));");
+	same(1, $code, $out);
+	has($out, "✗ Language code(s) Raster can't read: 'ro_RO', 'Romanian'");
+	has($out, 'In languages and domain_language, a code is two or three letters, then an optional region: en, ro, pt-br');
+	// two languages without the switch: the template's words only (D2)
+	list($code, $out) = $doctor("config::set('languages')->to(array('en', 'ro'));");
+	same(0, $code, $out);
+	has($out, "languages without multilingual translates only the template's words");
+	has($out, "add config::set('multilingual')->to(true)");
+	has($out, '(deprecated in 2.2.49, removed in 3.0.0)');
+	has($out, 'application/config/the_app.php:'.(substr_count($starter, "\n") + 2));
+	// on, it says so, and nothing is deprecated
+	list($code, $out) = $doctor("config::set('languages')->to(array('en', 'ro'));\nconfig::set('multilingual')->to(true);");
+	same(0, $code, $out);
+	has($out, '✓ Multilingual: en, ro');
+	lacks($out, 'deprecated');
+	// one language is a one-language site, not template-only translation
+	list($code, $out) = $doctor("config::set('languages')->to(array('ro'));");
+	same(0, $code, $out);
+	lacks($out, 'deprecated');
+	lacks($out, 'multilingual');
+	// the running config decides, not one file's text
+	$routes = "$site/application/config/the_routes.php";
+	$kept = file_get_contents($routes);
+	file_put_contents($routes, $kept."\nconfig::set('multilingual')->to(TRUE);\n");
+	list($code, $out) = $doctor("config::set('languages')->to(array('en', 'ro'));");
+	file_put_contents($routes, $kept);
+	lacks($out, 'deprecated', 'multilingual set in another file');
+	has($out, '✓ Multilingual: en, ro');
+	list($code, $out) = $doctor("// config::set('languages')->to(array('en', 'ro'));");
+	lacks($out, 'deprecated', 'a line in a comment');
+	list($code, $out) = $doctor("config::set('languages')->to(['en', 'ro']);\nconfig::set('multilingual')->to(TRUE);");
+	lacks($out, 'deprecated', 'TRUE');
+	list($code, $out) = $doctor("config::set('languages')->to(['en', 'ro']);");
+	has($out, '(deprecated in 2.2.49, removed in 3.0.0)', 'a [] list');
+	list($code, $out) = $doctor("\$codes = array('en', 'ro');\nconfig::set(\"languages\")->to(\$codes);");
+	has($out, '(deprecated in 2.2.49, removed in 3.0.0)', 'set from a variable');
+	list($code, $out) = $doctor("\$set = 'config::set';\nconfig::instance()->languages = array('en', 'ro');");
+	has($out, "translates only the template's words", 'set without config::set: the app\'s config is named');
+	has($out, "\n      application/config\n");
+	// a site that keeps it on purpose
+	list($code, $out) = $doctor("config::set('languages')->to(array('en', 'ro'));\nconfig::set('allow_deprecated')->to(array('template-only-languages' => true));");
+	same(0, $code, $out);
+	has($out, '1 use(s) of deprecated features kept on purpose');
+});
+
+test('P1.A: a dictionary that sets $lang gets a doctor warning and returns it after upgrade (#44)', function () use ($repo, $tmp) {
+	$site = "$tmp/site-p1a-lang";
+	same(0, raster($repo, array('new', $site))[0]);
+	$version = '2.2.49';
+	check(is_file("$repo/system/upgrades/$version.php"), 'the upgrade step');
+	if (version_compare(trim(file_get_contents("$site/system/VERSION")), $version, '<')) file_put_contents("$site/system/VERSION", "$version\n");
+	file_put_contents("$site/application/config/raster-version", "2.2.48\n");
+	mkdir("$site/application/i18n/ro", 0775, true);
+	$old = "$site/application/i18n/ro/home.php";
+	file_put_contents($old, "<?php\n\$lang = array(\n\t'welcome' => 'Bine ați venit',\n\t'return' => 'Înapoi',\n);\n?>\n");
+	$parts = "$site/application/i18n/ro/menu.php";
+	file_put_contents($parts, "<?php\n\$lang['soup'] = 'Supă';\n\$lang['tea'] = 'Ceai';\n");
+	$current = "$site/application/i18n/ro/footer.php";
+	file_put_contents($current, "<?php\n// \$lang = array() was the old way\nreturn array('rights' => 'Toate drepturile rezervate');\n");
+	$footer = file_get_contents($current);
+	$text = "$site/application/i18n/ro/legal.php";
+	file_put_contents($text, "<?php\n\$lang = array('terms' => 'Termeni');\n?>\n<!-- kept as written -->\n");
+	list($code, $out) = raster($site, array('doctor'));
+	has($out, 'a dictionary that sets $lang instead of returning it');
+	has($out, 'application/i18n/ro/home.php:2');
+	has($out, 'application/i18n/ro/menu.php:2');
+	lacks($out, 'footer.php');
+	list($code, $out) = raster($site, array('upgrade', '--dry-run'));
+	has($out, "$version i18n-return-array");
+	list($code, $out) = raster($site, array('upgrade'));
+	same(0, $code, $out);
+	has($out, 'application/i18n/ro/home.php');
+	has($out, 'application/i18n/ro/menu.php');
+	lacks($out, 'footer.php');
+	same($footer, file_get_contents($current), 'a dictionary that returns is left alone');
+	same(array('welcome' => 'Bine ați venit', 'return' => 'Înapoi'), (function ($file) { return include $file; })($old));
+	same(array('soup' => 'Supă', 'tea' => 'Ceai'), (function ($file) { return include $file; })($parts));
+	// text after the closing tag is still printed, and the array returned
+	same("<?php\n\$lang = array('terms' => 'Termeni');\n?>\n<!-- kept as written -->\n<?php return \$lang;\n", file_get_contents($text));
+	ob_start();
+	$terms = (function ($file) { return include $file; })($text);
+	same("<!-- kept as written -->\n", ob_get_clean());
+	same(array('terms' => 'Termeni'), $terms);
+	list($code, $out) = raster($site, array('doctor'));
+	lacks($out, 'sets $lang');
+	file_put_contents("$site/application/config/raster-version", "2.2.48\n");
+	list($code, $out) = raster($site, array('upgrade', '--dry-run'));
+	lacks($out, 'i18n-return-array', 'once is enough');
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";
 exit($failed ? 1 : 0);

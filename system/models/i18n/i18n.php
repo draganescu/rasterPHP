@@ -14,11 +14,15 @@
 * A missing translation keeps the template's text.
 *
 * Settings (application/config/the_app.php):
+*   config::set('multilingual')->to(true);              // one address per language: /ro/menu
 *   config::set('languages')->to(array('en', 'ro'));   // first one is the default
 *   config::set('domain_language')->to(array('example.ro' => 'ro'));
 *
-* The language is picked from ?lang=xx (remembered in a cookie), then the
-* domain, the cookie, the browser's Accept-Language, then the default.
+* Multilingual, the address alone picks the language: a domain_language
+* host, then the /ro/ prefix, then the default. Without multilingual
+* (template-only translation, deprecated, removed in 3.0.0) it is picked
+* from ?lang=xx (remembered in a cookie), then the domain, the cookie, the
+* browser's Accept-Language, then the default.
 *
 *   <html lang="<!-- print.i18n.language /-->">
 *   <!-- render.i18n.languages --><!-- print.+class.state --><!-- print.@href.url --><a href="#"><!-- print.code -->en<!-- /print.code --></a><!-- /print.@href.url --><!-- /print.+class.state --><!-- /render.i18n.languages -->
@@ -37,22 +41,176 @@ class i18n
 		return (string)config::get('language_cookie', 'lang');
 	}
 
-	// the language of this request
-	static function detect() {
-		if (self::$detected !== null) return self::$detected;
+	// ##The language API (#200)
+	// Every model reads language state through these, never through
+	// config::get('languages'). With multilingual off they give the
+	// one-language answer: enabled() false, the suffix and prefix empty.
+	// config::initialize() sets `url_language` (the language the URL names,
+	// '' when off) and `link_base` (link_uri without the language prefix).
+	// Raster calls them on this class, so a site's the_i18n can't change
+	// them (it can change what templates print through print.i18n).
+
+	protected static $current = null;
+
+	// multilingual is on and there are two or more languages (D1)
+	static function enabled() {
+		return (bool)config::get('multilingual', false) && count(self::available()) >= 2;
+	}
+
+	// the first language, or '' when languages is unset
+	static function default_language() {
 		$languages = self::available();
-		if (!$languages) return self::$detected = '';
-		$pick = function ($candidate) use ($languages) {
-			$candidate = strtolower((string)$candidate);
-			foreach ($languages as $language) {
-				if (strtolower($language) === $candidate) return $language;
-			}
-			foreach ($languages as $language) {
-				if (strtolower($language) === substr($candidate, 0, 2)) return $language;
-			}
-			return null;
-		};
-		if (isset($_GET['lang']) && ($language = $pick($_GET['lang']))) {
+		return $languages ? $languages[0] : '';
+	}
+
+	// this request's content language: the one i18n::with() runs in, then
+	// the URL's when multilingual (D4), otherwise what detect() picks
+	static function current() {
+		if (self::$current !== null) return self::$current;
+		if (!self::enabled()) return self::detect();
+		$language = self::known(config::get('url_language'));
+		return $language !== null ? $language : self::default_language();
+	}
+
+	static function is_default($lang = null) {
+		$lang = $lang === null ? self::current() : (string)$lang;
+		return strtolower($lang) === strtolower(self::default_language());
+	}
+
+	// the column suffix of a translation (D3): '' when off and for the
+	// default language, else '__ro', '__pt_br', '__id'
+	static function suffix($lang = null) {
+		if (!self::enabled()) return '';
+		$lang = $lang === null ? self::current() : (string)$lang;
+		if ($lang === '' || self::is_default($lang)) return '';
+		return '__'.strtolower(str_replace('-', '_', $lang));
+	}
+
+	// the URL prefix of a language on this host: '' when off, for the
+	// default language and on the language's own domain (domain_language),
+	// else 'ro/'
+	static function prefix($lang = null) {
+		if (!self::enabled()) return '';
+		$lang = $lang === null ? self::current() : (string)$lang;
+		if ($lang === '' || self::is_default($lang)) return '';
+		$domains = array_change_key_case((array)config::get('domain_language', array()));
+		$host = self::host();
+		if (isset($domains[$host]) && strtolower($domains[$host]) === strtolower($lang)) return '';
+		return strtolower($lang).'/';
+	}
+
+	// runs $fn with current() set to $lang (a language the site doesn't
+	// list runs in the default one) and link_uri set to that language's
+	// address (kept as it is when it has none, see address()), puts both
+	// back, even when $fn throws, and returns what $fn returned. Calls
+	// inside it nest.
+	static function with($lang, $fn) {
+		$current = self::$current;
+		$link = config::get('link_uri');
+		$known = self::known($lang);
+		self::$current = $known !== null ? $known : self::default_language();
+		$address = self::enabled() && config::get('link_base') ? self::address(self::$current) : null;
+		$moved = $address !== null;
+		if ($moved) config::set('link_uri')->to($address);
+		try {
+			return $fn();
+		} finally {
+			self::$current = $current;
+			if ($moved) config::set('link_uri')->to($link);
+		}
+	}
+
+	// 'rtl' for languages written right to left, else 'ltr'
+	static function dir($lang = null) {
+		$lang = $lang === null ? self::current() : (string)$lang;
+		$base = strtolower(strtok($lang, '-'));
+		return in_array($base, array('ar', 'arc', 'ckb', 'dv', 'fa', 'he', 'ps', 'sd', 'ug', 'ur', 'yi'), true) ? 'rtl' : 'ltr';
+	}
+
+	// the order dates are typed in (D14): '' without languages, 'mdy' for
+	// en-us, 'dmy' for every other language; Y-m-d is always read
+	static function date_order($lang = null) {
+		if (!self::available()) return '';
+		$lang = $lang === null ? self::current() : (string)$lang;
+		return strtolower($lang) === 'en-us' ? 'mdy' : 'dmy';
+	}
+
+	// the current page (or $path, as it reads, not encoded) in every
+	// language that has an address: rows of lang and url, each segment
+	// encoded as the one-address redirect writes it, for the switcher,
+	// hreflang and the sitemap
+	static function alternates($path = null) {
+		$path = $path === null ? ltrim(strtok((string)config::get('uri_string'), '?'), '/') : ltrim((string)$path, '/');
+		$path = implode('/', array_map('rawurlencode', explode('/', $path)));
+		$rows = array();
+		foreach (self::available() as $code) {
+			$address = self::address($code);
+			if ($address !== null) $rows[] = array('lang' => $code, 'url' => $address.$path);
+		}
+		return $rows;
+	}
+
+	// where a language's pages start: link_base and its prefix on this
+	// host. A language with its own domain_language host is there, but only
+	// seen from the site's own address (config site_url, else RASTER_URL) or
+	// from a language's domain: any other host (a preview or staging copy
+	// whose RASTER_URL isn't the site_url, localhost) serves every language
+	// under its prefix. On a language's
+	// domain the others are on the site's address (RASTER_URL, site_url),
+	// the host that takes prefixes. Both keep the folder and the index file;
+	// config::language_of_url redirects there too. On a language's domain
+	// without a site address to send the others to, they have none: null
+	// (`doctor` fails on that).
+	static function address($lang) {
+		$base = (string)(config::get('link_base') ?: config::get('link_uri'));
+		if (!self::enabled()) return $base;
+		$domains = array_change_key_case((array)config::get('domain_language', array()));
+		$host = self::host();
+		$protocol = (string)config::get('protocol');
+		$after_host = substr($base, strlen($protocol.'://'.config::get('host')));
+		$on_domain = isset($domains[$host]) && self::known($domains[$host]) !== null;
+		$home = strtolower((string)parse_url((string)(config::get('site_url') ?: getenv('RASTER_URL')), PHP_URL_HOST));
+		if (!$on_domain && $home !== $host) return $base.self::prefix($lang);
+		foreach ($domains as $domain => $language) {
+			if (strtolower($language) !== strtolower($lang) || self::known($language) === null) continue;
+			return $domain === $host ? $base : $protocol.'://'.$domain.$after_host;
+		}
+		if ($on_domain) {
+			$site = parse_url((string)(getenv('RASTER_URL') ?: config::get('site_url')));
+			if (empty($site['host']) || isset($domains[strtolower($site['host'])])) return null;
+			return $protocol.'://'.strtolower($site['host']).(isset($site['port']) ? ':'.$site['port'] : '').$after_host.(self::is_default($lang) ? '' : strtolower($lang).'/');
+		}
+		return $base.self::prefix($lang);
+	}
+
+	// this request's host, without the port
+	protected static function host() {
+		return strtolower(preg_replace('/:\d+$/', '', (string)config::get('host')));
+	}
+
+	// the listed language $candidate names (ro, RO, ro-RO all give ro), or null
+	protected static function known($candidate) {
+		$candidate = strtolower((string)$candidate);
+		if ($candidate === '') return null;
+		$languages = self::available();
+		foreach ($languages as $language) {
+			if (strtolower($language) === $candidate) return $language;
+		}
+		foreach ($languages as $language) {
+			if (strtolower($language) === substr($candidate, 0, 2)) return $language;
+		}
+		return null;
+	}
+
+	// the language of this request: inside i18n::with() its language;
+	// multilingual, current(); otherwise ?lang=xx (remembered in a cookie),
+	// the domain, the cookie, Accept-Language, then the default
+	static function detect() {
+		if (self::$current !== null) return self::$current;
+		if (self::enabled()) return self::current();
+		if (self::$detected !== null) return self::$detected;
+		if (!self::available()) return self::$detected = '';
+		if (isset($_GET['lang']) && ($language = self::known($_GET['lang']))) {
 			if (PHP_SAPI !== 'cli' && !headers_sent()) {
 				setcookie(self::cookie_name(), $language, array('expires' => time() + 31536000, 'path' => '/', 'samesite' => 'Lax'));
 			}
@@ -62,15 +220,15 @@ class i18n
 		foreach ((array)config::get('domain_language', array()) as $domain => $language) {
 			if ($host === $domain || substr($host, -strlen('.'.$domain)) === '.'.$domain) return self::$detected = $language;
 		}
-		if (isset($_COOKIE[self::cookie_name()]) && ($language = $pick($_COOKIE[self::cookie_name()]))) {
+		if (isset($_COOKIE[self::cookie_name()]) && ($language = self::known($_COOKIE[self::cookie_name()]))) {
 			return self::$detected = $language;
 		}
 		if (!empty($_SERVER['HTTP_ACCEPT_LANGUAGE'])) {
 			foreach (self::parse_header($_SERVER['HTTP_ACCEPT_LANGUAGE']) as $candidate) {
-				if ($language = $pick($candidate)) return self::$detected = $language;
+				if ($language = self::known($candidate)) return self::$detected = $language;
 			}
 		}
-		return self::$detected = $languages[0];
+		return self::$detected = self::default_language();
 	}
 
 	// languages from an Accept-Language header, best first
@@ -103,9 +261,8 @@ class i18n
 	// print.i18n.<file>('key'): the translation, or false to keep the template text
 	function __call($file, $args) {
 		if (!preg_match('/^[a-z0-9_]+$/', $file) || !isset($args[0])) return false;
-		$language = self::detect();
-		$languages = self::available();
-		if ($language === '' || ($languages && $language === $languages[0])) return false;
+		$language = self::current();
+		if ($language === '' || self::is_default($language)) return false;
 		$key = $language.'/'.$file;
 		if (!isset($this->loaded[$key])) {
 			$path = APPBASE.'i18n/'.$language.'/'.$file.'.php';

@@ -633,6 +633,8 @@ class controller {
 			// publish shows at once, with the new asset URLs; a model or the
 			// session may send its own
 			header('Cache-Control: no-cache');
+			// multilingual: the language the URL names, sent again with a cached copy (#200)
+			if (in_array($template->format, array('html', 'xml'), true) && config::get('multilingual') && i18n::enabled()) header('Content-Language: '.i18n::current());
 		}
 		
 		$template::set('views_path')->to(boot::$appname.DIRECTORY_SEPARATOR.config::get('views_path'));
@@ -731,6 +733,30 @@ class controller {
 		$template->output = preg_replace_callback('/(href)=(["\'])([a-zA-Z0-9\-_\/]+\.(rss|atom|xml|json|txt))\2/', function ($m) {
 			return file_exists(controller::build_view_path(substr($m[3], 0, -strlen($m[4]) - 1), '.'.$m[4])) ? $m[1].'='.$m[2].template::get('link_uri').$m[3].$m[2] : $m[0];
 		}, $template->output);
+		// multilingual: a hand-written root link to a page (href="/about",
+		// action="/contact", formaction) gets the language's address, as
+		// about.html does; /index.php/about is /about.
+		// Links to files keep theirs: an extension, the app's folder (the
+		// theme), media/, system/, or a file that exists (#200 D10)
+		if (config::get('multilingual') && i18n::prefix() !== '') {
+			$folder = (string)config::get('folder_path', '/');
+			$codes = array_map('strtolower', i18n::available());
+			$files = array(strtolower(boot::$appname), strtolower((string)config::get('raster_media_folder', 'media')), 'system');
+			$index = (string)config::get('index_file', 'index.php');
+			$template->output = preg_replace_callback('/(?<![\w-])(href|action|formaction)=(["\'])(\/(?!\/)[^"\']*)\2/i', function ($m) use ($folder, $codes, $files, $index) {
+				if (strpos($m[3], $folder) !== 0 && $m[3].'/' !== $folder) return $m[0];
+				$rest = (string)substr($m[3], strlen($folder));
+				// /index.php/about is /about: link_uri has the index file when it's needed
+				if ($rest === $index || strpos($rest, $index.'/') === 0 || strpos($rest, $index.'?') === 0 || strpos($rest, $index.'#') === 0) $rest = ltrim(substr($rest, strlen($index)), '/');
+				$path = rawurldecode(preg_replace('/[?#].*$/s', '', $rest));
+				$first = strtolower((string)current(explode('/', $path)));
+				if (preg_match('/\.[a-z0-9]+$/i', $path) || in_array($first, $files, true) || strpos($path, '..') !== false
+					|| ($path !== '' && is_file(dirname(BASE).'/'.$path))) return $m[0];
+				// a link that names a language already keeps it
+				$base = in_array($first, $codes, true) ? config::get('link_base') : template::get('link_uri');
+				return $m[1].'='.$m[2].$base.$rest.$m[2];
+			}, $template->output);
+		}
 		$template->output = str_replace(template::get('link_uri')."__", template::get('link_uri').template::get('pad_uri'), $template->output);
 		if ($template->format === 'html' && !$template->is_email && config::get('asset_versions', true)) {
 			$template->output = self::version_assets($template->output);

@@ -25,7 +25,7 @@ class raster_describe
 		'theme', 'default_view', 'views_ext', 'rewrite', 'strict_templates',
 		'error_document_403', 'error_document_404', 'error_document_500', 'error_document_503', 'site_url', 'cms_enabled', 'raster_page_size',
 		'raster_media_folder', 'feed_limit', 'sitemap_skip', 'protected', 'mail_from',
-		'languages', 'domain_language', 'language_cookie', 'page_cache',
+		'multilingual', 'languages', 'domain_language', 'language_cookie', 'page_cache',
 		'page_cache_ttl', 'page_cache_skip', 'api_system_models',
 		'allow_deprecated',
 		'spam_min_seconds', 'spam_max_age', 'spam_per_ip', 'spam_per_email', 'spam_ip_blocks',
