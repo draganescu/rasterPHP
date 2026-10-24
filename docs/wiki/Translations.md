@@ -60,9 +60,11 @@ Nothing to set up per field: Raster reads from the markup which fields hold word
 
 On `/ro/about`, the in-page editor edits the Romanian. A field nobody has translated yet shows the default language's words, so a new language starts complete and fills in as it is translated. A shared field, a photo say, can be changed from any language's page, and the change shows in every language. The editor's own buttons follow the person, not the page: pick their language in the editor's dock.
 
-This covers page fields and the `site_` fields every page shares. Collection items (news posts, menu dishes) keep one value for every language for now.
+This covers page fields, the `site_` fields every page shares, and collection items (news posts, menu dishes): on `/ro/menu` each dish shows its Romanian name, or its English one until it has a Romanian one, and a list sorted or filtered by name (`order=name`) goes by the names it shows. A type a model declares (a booking, an inquiry) keeps one value for every language unless its `types()` says `'translate' => array('name', 'description')`, or `'shared' => array('email')` for every other text field.
 
 Behind the scenes a translated field `headline` keeps its Romanian in a column `headline__ro` (`pt-br` gives `headline__pt_br`). That's why field and collection names may not contain two underscores in a row. In development the columns appear on their own; on a production server, run `php bin/raster schema --apply` after adding a language. Turning multilingual off keeps every translation, ready for when it's turned on again.
+
+An item has an address in every language. Once a dish has a Romanian name, it gets a Romanian slug made from it, so the flat white is at `/menu/menu_item/flat-white` and `/ro/menu/menu_item/cafea-cu-lapte`. Until it has one, its Romanian page is at its English slug (`/ro/menu/menu_item/flat-white`). The language switcher and the `hreflang` links follow. An item's address in the wrong language, or one it had before you renamed it, sends the visitor to the right one with a permanent redirect (301), so old links and search results keep working. Raster remembers every slug an item has had (table `slughistory`); this needs multilingual on, and without it a renamed item's old address is a 404 as before.
 
 ## Keep words out of models
 
@@ -92,7 +94,7 @@ The mock-up still says `lang="en"`, and the page says the language it is shown i
 
 ## With an AI agent
 
-Over [MCP](Working-with-AI-Agents), an agent can do the whole job: `set_languages` turns languages on (and adds the columns), `translation_status` lists what a language still lacks, `update_page` with a `lang` writes a page's translation, `read_strings` and `write_strings` handle the dictionaries, and `render_url` with `/ro/…` shows the result. `set_languages` and `write_strings` change the site's files, so they refuse on a production server, and over HTTP they are offered only when the site sets `config::set('mcp_write_views')->to(true)` (over stdio they always are).
+Over [MCP](Working-with-AI-Agents), an agent can do the whole job: `set_languages` turns languages on (and adds the columns), `translation_status` lists what a language still lacks (page fields, items, dictionary words), `update_page` with a `lang` writes a page's translation and `update_item` with a `lang` an item's, `read_strings` and `write_strings` handle the dictionaries, and `render_url` with `/ro/…` shows the result. `set_languages` and `write_strings` change the site's files, so they refuse on a production server, and over HTTP they are offered only when the site sets `config::set('mcp_write_views')->to(true)` (over stdio they always are).
 
 ## From a model
 

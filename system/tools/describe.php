@@ -198,8 +198,9 @@ class raster_describe
 	// Everything that has words in the default language and could have
 	// them in $lang: each translated page and site_* field whose shown value
 	// isn't empty, and each dictionary key the views print with a mock-up
-	// text, with done telling whether $lang has it. For translation_status
-	// and the missing counts above; P3 and P4 add items, records and emails.
+	// text, and each translated field of every item and record (where is
+	// <collection>/<id>), with done telling whether $lang has it. For
+	// translation_status and the missing counts above; P4 adds emails.
 	static function translations($lang, $inspector = null) {
 		return self::translations_in(array($lang), $inspector)[$lang];
 	}
@@ -224,6 +225,31 @@ class raster_describe
 				}
 			}
 		}
+		// items and records: one query a collection, only the columns counted
+		foreach ($inspector->content_model()['collections'] as $collection) {
+			if (!cms_store::table_exists($collection['type'])) continue;
+			$columns = cms_store::columns($collection['type']);
+			$fields = array_values(array_intersect(self::item_translated($collection), array_keys($columns)));
+			if (!$fields) continue;
+			$select = array('id');
+			foreach ($fields as $field) {
+				$select[] = $field;
+				foreach ($langs as $lang) {
+					if (array_key_exists(cms_types::column($field, $lang), $columns)) $select[] = cms_types::column($field, $lang);
+				}
+			}
+			foreach (R::getAll('SELECT `'.implode('`, `', array_unique($select)).'` FROM `'.$collection['type'].'` ORDER BY id') as $item) {
+				foreach ($fields as $field) {
+					$value = (string)$item[$field];
+					if (trim($value) === '') continue;
+					foreach ($langs as $lang) {
+						$column = cms_types::column($field, $lang);
+						$done = $column !== $field && isset($item[$column]) && trim((string)$item[$column]) !== '';
+						$rows[$lang][] = array('kind' => isset($collection['model']) ? 'record' : 'item', 'where' => $collection['name'].'/'.$item['id'], 'field' => $field, 'default_value' => $value, 'done' => $done);
+					}
+				}
+			}
+		}
 		foreach (self::strings_used($inspector) as $file => $keys) {
 			foreach ($langs as $lang) {
 				$strings = self::dictionary($file, $lang);
@@ -235,6 +261,22 @@ class raster_describe
 			}
 		}
 		return $rows;
+	}
+
+	// the fields of a collection (as the content model has it) that have a
+	// translation per language: a record type's as its model declares them
+	// (translate, shared), a markup collection's as the templates print them
+	// or the database has them. Never slug: it is made from the title.
+	static function item_translated($collection) {
+		if (isset($collection['model'])) {
+			$info = cms_records::info($collection['name']);
+			return $info ? array_values(cms_records::translated_fields($info)) : array();
+		}
+		$fields = array();
+		foreach ($collection['fields'] as $name => $field) {
+			if (!empty($field['translate'])) $fields[] = $name;
+		}
+		return array_values(array_unique(array_merge($fields, array_intersect(cms_types::translated($collection['type']), array_keys($collection['fields'])))));
 	}
 
 	// file => key => the mock-up text, for every print.i18n.<file>('key')

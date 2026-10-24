@@ -16,6 +16,13 @@ class cms_store {
 	// columns RedBean or Raster manage, never edited as content
 	static $system_fields = array('id', 'slug', 'updated_at', 'enabled', 'published_at', 'saved_lang');
 
+	// every slug an item has had, in every language, so an old or another
+	// language's slug answers 301 to the right one (#138, #200). One row per
+	// slug: type is the item's table (menudata), item its id, lang the
+	// language code the slug is in. Multilingual only: record_slug() writes
+	// it, resolve_slug() reads it, schema --apply makes it.
+	static $slughistory = array('type' => '', 'item' => 0, 'lang' => '', 'slug' => '', 'created_at' => '');
+
 	// ##Slugs, drafts and order
 
 	static function slugify($text) {
@@ -31,19 +38,34 @@ class cms_store {
 
 	// the text a slug is made from: title, headline or name, else the first
 	// field. $skip lists fields a public URL must never carry (a record's
-	// hidden fields, its owner).
-	static function slug_source($values, $skip = array()) {
+	// hidden fields, its owner). $lang: the language the slug is for (null:
+	// the default); in a translation language the translated title,
+	// headline or name comes first (title__ro), then as for the default.
+	static function slug_source($values, $skip = array(), $lang = null) {
+		if ($lang !== null && i18n::enabled() && !i18n::is_default($lang)) {
+			foreach (array('title', 'headline', 'name') as $field) {
+				$column = cms_types::column($field, $lang);
+				if (!empty($values[$column]) && is_string($values[$column]) && !in_array($field, $skip, true)) return $values[$column];
+			}
+		}
 		foreach (array('title', 'headline', 'name') as $field) {
 			if (!empty($values[$field]) && !in_array($field, $skip, true)) return $values[$field];
 		}
 		foreach ($values as $field => $value) {
 			if (in_array($field, $skip, true) || in_array($field, self::$system_fields)) continue;
+			// nor a skipped field's translation (token__ro)
+			if (strpos($field, '__') !== false && in_array(strstr($field, '__', true), $skip, true)) continue;
 			if (is_string($value) && trim(strip_tags($value)) !== '') return $value;
 		}
 		return 'item';
 	}
 
-	static function unique_slug($type, $text, $id) {
+	// A free slug made from $text, in the language $lang (null: the
+	// default). In the default language it is unique among the other rows'
+	// slug. In a translation language it is unique among their slugs in
+	// that language, which for a row with no slug__ro is its slug (the
+	// address it has in that language): so one /ro/ address is one item.
+	static function unique_slug($type, $text, $id, $lang = null) {
 		$base = self::slugify($text);
 		if (!preg_match('/^[a-z0-9_]+$/', $type) || !self::table_exists($type) || !array_key_exists('slug', self::columns($type))) return $base;
 		// every slug taken by another row, in one query that the slug index
@@ -51,11 +73,156 @@ class cms_store {
 		// for its LIKE, which ignores case. A slug holds only a-z, 0-9 and -,
 		// so nothing in it is a wildcard. MySQL compares without case.
 		$sqlite = R::getDatabaseAdapter()->getDatabase()->getDatabaseType() !== 'mysql';
-		$rows = R::getCol("SELECT slug FROM `$type` WHERE (slug = ? OR slug ".($sqlite ? 'GLOB' : 'LIKE').' ?) AND id != ?', array($base, $sqlite ? "$base-*" : "$base-%", (int)$id));
+		$column = $lang === null ? 'slug' : self::slug_column(self::write_language($lang) ?: i18n::default_language());
+		if ($column === 'slug' || !array_key_exists($column, self::columns($type))) {
+			$rows = R::getCol("SELECT slug FROM `$type` WHERE (slug = ? OR slug ".($sqlite ? 'GLOB' : 'LIKE').' ?) AND id != ?', array($base, $sqlite ? "$base-*" : "$base-%", (int)$id));
+		} else {
+			$like = $sqlite ? 'GLOB' : 'LIKE';
+			$pattern = $sqlite ? "$base-*" : "$base-%";
+			$found = R::getAll("SELECT slug, `$column` AS translated FROM `$type` WHERE (slug = ? OR slug $like ? OR `$column` = ? OR `$column` $like ?) AND id != ?", array($base, $pattern, $base, $pattern, (int)$id));
+			$rows = array();
+			foreach ($found as $row) $rows[] = (string)$row['translated'] !== '' ? $row['translated'] : (string)$row['slug'];
+		}
 		$taken = array_flip(array_map('strtolower', $rows));
 		$slug = $base;
 		for ($i = 2; isset($taken[$slug]); $i++) $slug = $base.'-'.$i;
 		return $slug;
+	}
+
+	// the column an item's slug in $lang is in: slug, or slug__ro when
+	// multilingual is on and $lang is a translation language
+	static function slug_column($lang = null) {
+		return cms_types::column('slug', $lang);
+	}
+
+	// an item's slug in $lang, from a row with its slug columns: slug__ro,
+	// or its slug while it has none ('' when it has neither, and is at its id)
+	static function slug_in($row, $lang) {
+		$column = self::slug_column($lang);
+		if (isset($row[$column]) && (string)$row[$column] !== '') return (string)$row[$column];
+		return isset($row['slug']) ? (string)$row['slug'] : '';
+	}
+
+	// language => slug column, of the site's languages whose column $columns has
+	static function slug_columns($columns) {
+		$slugs = array();
+		foreach (i18n::available() as $lang) {
+			$column = self::slug_column($lang);
+			if (array_key_exists($column, $columns) && !in_array($column, $slugs, true)) $slugs[$lang] = $column;
+		}
+		return $slugs ?: array(i18n::default_language() => 'slug');
+	}
+
+	// The item of $type whose slug in $lang (null: i18n::current()) is $slug,
+	// as a row of its id and slug columns, or null. An item with a slug__ro
+	// of its own is found by it before one that is at its default slug in
+	// Romanian. Multilingual only (null off, with no query).
+	static function slug_item($type, $slug, $lang = null) {
+		if (!i18n::enabled() || !preg_match('/^[a-z0-9_]+$/', $type) || (string)$slug === '' || !self::table_exists($type)) return null;
+		$lang = $lang === null ? i18n::current() : (string)$lang;
+		$columns = self::columns($type);
+		if (!array_key_exists('slug', $columns)) return null;
+		$select = 'id, `'.implode('`, `', self::slug_columns($columns)).'`';
+		$column = self::slug_column($lang);
+		if ($column === 'slug' || !array_key_exists($column, $columns)) {
+			$row = R::getRow("SELECT $select FROM `$type` WHERE slug = ? ORDER BY id LIMIT 1", array((string)$slug));
+		} else {
+			$row = R::getRow("SELECT $select FROM `$type` WHERE `$column` = ? OR ((`$column` IS NULL OR `$column` = '') AND slug = ?) ORDER BY CASE WHEN `$column` = ? THEN 0 ELSE 1 END, id LIMIT 1", array((string)$slug, (string)$slug, (string)$slug));
+		}
+		return $row ?: null;
+	}
+
+	// Gives the item $bean the slug it lacks in each translation language,
+	// made from its translated title, headline or name (slug__ro from
+	// title__ro), once it has one: an item with no translated text keeps its
+	// default slug in that language too, and a slug once made stays (a new
+	// one is written as slug, with lang). Multilingual only. In development
+	// the column is made when it is first needed.
+	static function translate_slugs($type, $bean, $skip = array()) {
+		if (!i18n::enabled() || !array_key_exists('slug', self::columns($type))) return;
+		$values = $bean->export();
+		$default = self::slug_source($values, $skip);
+		foreach (i18n::available() as $lang) {
+			$column = self::slug_column($lang);
+			if ($column === 'slug' || !empty($values[$column])) continue;
+			$source = self::slug_source($values, $skip, $lang);
+			if ($source === $default) continue;
+			if (!array_key_exists($column, self::columns($type))) {
+				if (database::$frozen) continue;
+				cms_types::ensure($type, array(), array('slug'));
+			}
+			$bean->$column = self::unique_slug($type, $source, (int)$bean->id, $lang);
+		}
+	}
+
+	// Remembers that item $id of $type had $slug in $lang (null: the default
+	// language) in slughistory, so its old address answers 301 to the one it
+	// has now. True when it wrote a row: one per slug, and saving the same
+	// slug again adds none. Multilingual only; in development the table is
+	// made on the first write, frozen it waits for schema --apply.
+	static function record_slug($type, $id, $slug, $lang = null) {
+		if (!i18n::enabled() || (string)$slug === '' || !(int)$id) return false;
+		$lang = self::write_language($lang) ?: i18n::default_language();
+		if (!self::table_exists('slughistory')) {
+			if (database::$frozen) return false;
+			cms_types::ensure('slughistory', array_map(array('cms_types', 'of_default'), self::$slughistory));
+		}
+		$seen = R::getCell('SELECT COUNT(*) FROM slughistory WHERE `type` = ? AND item = ? AND lang = ? AND slug = ?', array($type, (int)$id, $lang, (string)$slug));
+		if ($seen) return false;
+		$row = R::dispense('slughistory');
+		$row->type = $type;
+		$row->item = (int)$id;
+		$row->lang = $lang;
+		$row->slug = (string)$slug;
+		$row->created_at = R::isoDateTime();
+		R::store($row);
+		return true;
+	}
+
+	// after a save of item $bean: each language's slug it was given or
+	// changed to, and the one it had, if slughistory doesn't have it yet (a
+	// slug from before multilingual was on). $before is the item as it was
+	// (null for a new one).
+	static function record_slugs($type, $bean, $before) {
+		if (!i18n::enabled()) return;
+		$after = $bean->export();
+		foreach (i18n::available() as $lang) {
+			$column = self::slug_column($lang);
+			$now = isset($after[$column]) ? (string)$after[$column] : '';
+			$was = $before && isset($before[$column]) ? (string)$before[$column] : '';
+			if ($before && $now === $was) continue;
+			if ($was !== '') self::record_slug($type, $bean->id, $was, $lang);
+			if ($now !== '') self::record_slug($type, $bean->id, $now, $lang);
+		}
+	}
+
+	// What an item URL's $slug means in $lang (null: i18n::current()). Null:
+	// show the URL as it is, since it is the item's slug in $lang (or the
+	// default slug of an item with none in $lang), or no item's at all (the
+	// list then answers 404), or multilingual is off. array('id' => n,
+	// 'slug' => s): $slug is item n's slug in another language, or one it
+	// had (slughistory), and s its slug in $lang, for a 301. A slug an item
+	// has now wins over one another item had. A number no item has as its
+	// slug is an id, as always (#90).
+	static function resolve_slug($type, $slug, $lang = null) {
+		if (!i18n::enabled() || !preg_match('/^[a-z0-9_]+$/', $type) || (string)$slug === '' || !self::table_exists($type)) return null;
+		$lang = $lang === null ? i18n::current() : (string)$lang;
+		$slug = (string)$slug;
+		$columns = self::columns($type);
+		if (!array_key_exists('slug', $columns)) return null;
+		$slugs = self::slug_columns($columns);
+		$select = 'id, `'.implode('`, `', $slugs).'`';
+		$where = implode(' OR ', array_map(function ($column) { return "`$column` = ?"; }, $slugs));
+		$rows = R::getAll("SELECT $select FROM `$type` WHERE $where ORDER BY id", array_fill(0, count($slugs), $slug));
+		foreach ($rows as $row) {
+			if (self::slug_in($row, $lang) === $slug) return null;
+		}
+		if (!$rows && self::table_exists('slughistory')) {
+			$id = R::getCell('SELECT item FROM slughistory WHERE `type` = ? AND slug = ? ORDER BY id DESC LIMIT 1', array($type, $slug));
+			if ($id) $rows = R::getAll("SELECT $select FROM `$type` WHERE id = ?", array((int)$id));
+		}
+		if (!$rows || self::slug_in($rows[0], $lang) === $slug) return null;
+		return array('id' => (int)$rows[0]['id'], 'slug' => self::slug_in($rows[0], $lang));
 	}
 
 	// SQL that hides drafts (enabled = 0) and posts published in the future
@@ -107,7 +274,9 @@ class cms_store {
 	// (/news/news_items/tag/php) and the item asked for (id or slug), $uri
 	// the ones of those the URL asked for. Drafts and scheduled items for
 	// editors only; a private type's records for editors and their owners.
-	static function list_where($name, $conditions, $filters = array(), $uri = array()) {
+	// $lang: the language the list is shown in: its filters match the
+	// translations (conditions_sql; null: as it always was).
+	static function list_where($name, $conditions, $filters = array(), $uri = array(), $lang = null) {
 		$fields = self::columns(cms::collection_type($name));
 		$record = cms_records::info($name);
 		$compare = array();
@@ -154,7 +323,7 @@ class cms_store {
 			$compare[] = array($key, '=', $value);
 		}
 		// featured=1, date>=today, guests>4, each as its field's type
-		list($more, $more_bindings) = self::conditions_sql($compare, $fields);
+		list($more, $more_bindings) = self::conditions_sql($compare, $fields, 'c', $lang);
 		return array($sql.$more, $bindings + $more_bindings);
 	}
 
@@ -222,8 +391,23 @@ class cms_store {
 		return $equals;
 	}
 
-	// SQL for conditions on columns the table has; others are left out
-	static function conditions_sql($conditions, $columns, $prefix = 'c') {
+	// The SQL a list compares and sorts $field by in $lang (D8): `name`, or
+	// in a translation language whose column the table has (name__ro) the
+	// translation, and the default language's value where it is empty, so
+	// an untranslated item still matches and sorts by its own words. Null,
+	// off and the default language: `name`, as it always was.
+	static function field_sql($field, $columns, $lang = null) {
+		if ($lang !== null && $lang !== '' && i18n::suffix($lang) !== '') {
+			$column = cms_types::column($field, $lang);
+			if (array_key_exists($column, $columns)) return "COALESCE(NULLIF(`$column`, ''), `$field`)";
+		}
+		return "`$field`";
+	}
+
+	// SQL for conditions on columns the table has; others are left out.
+	// $lang: the language the values are in (null: the default); a field
+	// with a translation in it compares as field_sql says
+	static function conditions_sql($conditions, $columns, $prefix = 'c', $lang = null) {
 		$sql = '';
 		$bindings = array();
 		foreach (array_values($conditions) as $i => $condition) {
@@ -238,21 +422,24 @@ class cms_store {
 				$sql .= $operator === '!=' ? '' : ' AND 1 = 0 ';
 				continue;
 			}
+			$column = self::field_sql($field, $columns, $lang);
 			if ($value === null) {
-				$sql .= $operator === '=' ? " AND `$field` IS NULL " : ($operator === '!=' ? " AND `$field` IS NOT NULL " : ' AND 1 = 0 ');
+				$sql .= $operator === '=' ? " AND $column IS NULL " : ($operator === '!=' ? " AND $column IS NOT NULL " : ' AND 1 = 0 ');
 				continue;
 			}
 			$name = ':'.$prefix.$i.'_'.$field;
 			// a field nobody filled is not equal to anything
-			$sql .= $operator === '!=' ? " AND (`$field` IS NULL OR `$field` != $name) " : " AND `$field` $operator $name ";
+			$sql .= $operator === '!=' ? " AND ($column IS NULL OR $column != $name) " : " AND $column $operator $name ";
 			$bindings[$name] = $value;
 		}
 		return array($sql, $bindings);
 	}
 
 	// order=newest|oldest|<field>|-<field> (minus means descending), or
-	// several separated by commas: order=date,time or order=-date,-time
-	static function order_sql($order, $columns) {
+	// several separated by commas: order=date,time or order=-date,-time.
+	// $lang: the language to sort in (null: the default); a field with a
+	// translation in it sorts as field_sql says
+	static function order_sql($order, $columns, $lang = null) {
 		$parts = array();
 		foreach (explode(',', (string)$order) as $part) {
 			$part = trim($part);
@@ -265,7 +452,7 @@ class cms_store {
 			$desc = $part[0] === '-';
 			$field = ltrim($part, '-');
 			if (!preg_match('/^[a-z0-9_]+$/', $field) || !array_key_exists($field, $columns)) continue;
-			$parts[] = "`$field`".($desc ? ' DESC' : ' ASC');
+			$parts[] = self::field_sql($field, $columns, $lang).($desc ? ' DESC' : ' ASC');
 		}
 		if (!$parts) return 'id ASC';
 		$sql = implode(', ', $parts);
@@ -501,7 +688,12 @@ class cms_store {
 	// hidden fields and the owner). Records of a declared type go through the
 	// model's check() first. $name is the collection's own name, for the
 	// event (team_members, whose table is teammembersdata). $lang is the
-	// language the values are in (null: the default); ignored for now.
+	// language the values are in (null: the default): in a translation
+	// language each translated field is stored in its column (name__ro) and
+	// a shared one is refused (field_shared). $values and $allowed always
+	// name the fields themselves (name). A markup collection's translated
+	// fields are the ones with translation columns; a declared type's are
+	// what it declares (cms_records::translated_fields).
 	static function save_item($type, $id, $values, $allowed, $who = 'editor', $name = null, $lang = null) {
 		$info = cms_records::for_table($type);
 		if ($info) cms_records::ensure($info);
@@ -514,13 +706,14 @@ class cms_store {
 	}
 
 	static function store_item($type, $id, $values, $allowed, $who, $info, $name = null, $lang = null) {
+		$lang = self::write_language($lang);
 		if ($info) {
 			$allowed = $who === 'model' ? array_merge(array_keys($info['fields']), array('owner')) : array_values(array_intersect($allowed, cms_records::writable($info)));
 		}
 		// slug, enabled (0 = draft) and published_at can always be set, except by visitors
 		if ($who !== 'visitor') $allowed = array_merge($allowed, array('slug', 'enabled', 'published_at'));
 		// one value, like every other field: slug[]=x is refused, not 'array'
-		if (isset($values['slug'])) $values['slug'] = self::unique_slug($type, cms_types::clean('text', $values['slug'], 'slug') ?: 'item', (int)$id);
+		if (isset($values['slug'])) $values['slug'] = self::unique_slug($type, cms_types::clean('text', $values['slug'], 'slug') ?: 'item', (int)$id, $lang);
 		$types = cms_types::of_table($type);
 		foreach ($values as $field => $value) {
 			if (!in_array($field, $allowed, true)) {
@@ -539,6 +732,43 @@ class cms_store {
 			// the field's type: 'guests' => '4' is stored as 4, 'many' is refused
 			$values[$field] = cms_types::clean(isset($types[$field]) ? $types[$field] : 'text', $value, $field);
 		}
+		// the column each value goes to: the field's own, or in a
+		// translation its column there (name__ro, slug__ro), all or nothing
+		$columns = $values;
+		if ($lang !== '') {
+			$translated = $info ? cms_records::translated_fields($info) : cms_types::translated($type);
+			$columns = array();
+			foreach ($values as $field => $value) {
+				// a slug has one per language (slug__ro)
+				if ($field === 'slug') { $columns[self::slug_column($lang)] = $value; continue; }
+				if (!in_array($field, $translated, true)) throw new cms_refused(array('field_shared'));
+				$columns[cms_types::column($field, $lang)] = $value;
+			}
+			$missing = array_diff_key($columns, self::columns($type));
+			// a slug's column comes with its index
+			$slug = self::slug_column($lang);
+			if (isset($missing[$slug]) && !database::$frozen) {
+				cms_types::ensure($type, array(), array('slug'));
+				unset($missing[$slug]);
+			}
+			if ($missing && database::$frozen) {
+				throw new InvalidArgumentException("No column for the $lang translation of '".implode("', '", array_keys($missing))."' yet: run php bin/raster schema --apply");
+			}
+			if ($missing) {
+				$add = array();
+				foreach ($missing as $column => $value) {
+					$field = substr($column, 0, -strlen(i18n::suffix($lang)));
+					$add[$column] = isset($types[$field]) ? $types[$field] : 'text';
+				}
+				cms_types::ensure($type, $add);
+			}
+		}
+		// development keeps the language of each save from the first
+		// multilingual one on
+		if (i18n::enabled() && !database::$frozen && self::table_exists($type) && !array_key_exists('saved_lang', $types)) {
+			cms_types::ensure($type, array('saved_lang' => 'text'));
+			$types = cms_types::of_table($type);
+		}
 		if ($id) {
 			$bean = R::findOne($type, ' id = ? ', array((int)$id));
 			if (!$bean) throw new InvalidArgumentException("No item $id");
@@ -547,7 +777,7 @@ class cms_store {
 			$bean->enabled = 1;
 		}
 		$before = $id ? self::export_item($bean) : null;
-		foreach ($values as $field => $value) {
+		foreach ($columns as $field => $value) {
 			$bean->$field = $value;
 		}
 		if (!empty($bean->published_at) && strtotime($bean->published_at) > time()) {
@@ -558,6 +788,8 @@ class cms_store {
 		if (empty($bean->slug)) {
 			$bean->slug = self::unique_slug($type, self::slug_source($bean->export(), $skip), (int)$bean->id);
 		}
+		// multilingual: slug__ro from the Romanian title, once there is one
+		self::translate_slugs($type, $bean, $skip);
 		if ($info && !$id) {
 			$bean->created_at = R::isoDateTime();
 			// a record remembers who made it, so they can read it later (a
@@ -594,12 +826,21 @@ class cms_store {
 				cms_records::$writer = $writer;
 			}
 		}
+		// the language the save changed: the default's code for a save
+		// without one. Only while multilingual and once the table has the
+		// column, so off a save stores what it always did
+		$saved_lang = $lang !== '' ? $lang : i18n::default_language();
+		if (i18n::enabled() && isset($types['saved_lang'])) $bean->saved_lang = $saved_lang;
 		$bean->updated_at = R::isoDateTime();
 		R::store($bean);
+		// every slug it has had, for the redirects from the old ones (#138)
+		self::record_slugs($type, $bean, $before);
 		util::content_changed();
 		$item = self::export_item($bean);
 		if ($info) $item = cms_records::decode($info, $item);
-		cms_records::dispatch('cms.item_saved', array('collection' => self::collection_of($type, $name), 'created' => !$id, 'item' => $item));
+		$event = array('collection' => self::collection_of($type, $name), 'created' => !$id, 'item' => $item);
+		if (i18n::enabled()) $event['lang'] = $saved_lang;
+		cms_records::dispatch('cms.item_saved', $event);
 		return $info && $who !== 'model' ? cms_records::shown($info, $item) : $item;
 	}
 
