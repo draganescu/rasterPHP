@@ -818,9 +818,11 @@ mock-up is stored only when the collection's table is made.
   Page tables and `sitepage` get them, and a `saved_lang` column (the
   language a revision was saved in, managed by Raster); collections' items
   come later. Raster makes a translation column before anything is stored
-  in it, which is what keeps `name__id` a plain text column: RedBean reads
-  `x_id` as a link and, on MySQL, would make a column it created itself an
-  int.
+  in it (every write path declares it first), which is what keeps
+  `name__id` a plain text column. A column RedBean creates itself takes its
+  type from the first value stored, and one ending in `_id` also gets an
+  index and an attempt at a foreign key to a table `name_`, and on MySQL
+  is made an integer column, which refuses text.
 - **Relationships are by value.** `print.@href.raster_filter@author` links to
   the items with the same `author`. For real references, write a model.
 - **Page edits are versioned:** every save is a new revision. Values can be

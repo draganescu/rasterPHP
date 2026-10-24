@@ -10554,6 +10554,12 @@ test('P2.A: untranslatable_text warns on words no annotation prints, multilingua
 	check(strpos($lines[12], "'Opening hours'") !== false, $lines[12]);
 	check(strpos($lines[14], "alt=\"Our team\"") !== false, 'a fixed alt: '.$lines[14]);
 	check(strpos($lines[16], 'content="Coffee and cake"') !== false, 'a description: '.$lines[16]);
+	// an email or an address alone, code, and a button's words
+	$more = "<html><body>\n<input placeholder=\"you@example.com\"><input placeholder=\"https://example.com\">\n<a href=\"/x\">www.example.com</a> <span>hello@example.com</span>\n"
+		."<pre>echo hello world</pre><code>print.cms.headline</code>\n<input type=\"submit\" value=\"Send it\">\n<input type=\"text\" value=\"Typed words\">\n<button type=\"submit\">Go now</button>\n</body></html>";
+	$lines = with_settings(p2a_on(), function () use ($warned, $more) { return $warned($more); });
+	same(array(5, 7), array_keys($lines), json_encode($lines));
+	check(strpos($lines[5], 'value="Send it"') !== false, $lines[5]);
 	// it never floods: ten lines, then one that counts the rest
 	$many = '<html><body>'.str_repeat("\n<p>Fixed words</p>", 25).'</body></html>';
 	$problems = array_values(array_filter(with_settings(p2a_on(), function () use ($many) { return lint_html($many); }), function ($p) { return strpos($p['message'], 'is the same in every language') !== false || strpos($p['message'], 'more line(s) of this view') !== false; }));
@@ -10582,6 +10588,13 @@ test('P2.A: html_lang_fixed warns on an <html> whose lang no print.i18n.language
 		check(has_problem(lint_html($fixed), '<html lang="en"> '.$said.': wrap it in <!-- print.@lang.i18n.language --><html lang="en"><!-- /print.@lang.i18n.language -->'), json_encode(lint_html($fixed)));
 		check(has_problem(lint_html($none), '<html> '.$said), 'no lang at all');
 		same(false, has_problem(lint_html($printed), $said), 'the starter\'s form');
+		// a print closed before the <html> sets nothing on it
+		$closed = '<!doctype html><!-- print.@lang.i18n.language --><!-- /print.@lang.i18n.language --><html lang="en"><head></head><body></body></html>';
+		check(has_problem(lint_html($closed), $said), 'closed early');
+		$self = '<!doctype html><!-- print.@lang.i18n.language --><!-- print.cms.note /--><html lang="en"><head></head><body></body></html>';
+		check(has_problem(lint_html($self), $said), 'a self-closing print between');
+		$comment = '<!doctype html><!-- print.@lang.i18n.language --><!-- a note --><html lang="en"><head></head><body></body></html>';
+		same(false, has_problem(lint_html($comment), $said), 'a plain comment between is fine');
 	});
 });
 
