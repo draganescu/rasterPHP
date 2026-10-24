@@ -12790,6 +12790,86 @@ test('P4.B: dates are typed day first in every language but en-us; ISO and words
 	});
 });
 
+test('P4.B: booking resource and service names in a language: the translation, else the default; off, as before (#200)', function () use ($p1b_on) {
+	booking_site(function () use ($p1b_on) {
+		same(array('name'), cms_records::info('bookingservice')['translate'], 'bookingservice translates its name');
+		same(array('name'), cms_records::info('bookingresource')['translate']);
+		same(array(), cms_records::info('bookingservice')['unknown']);
+		same(array(), cms_records::info('booking')['translate'], "a booking's fields are what the guest typed");
+		$on = array('multilingual' => true, 'languages' => array('en', 'ro'));
+		$date = with_settings($on, function () {
+			$date = booking_salon();
+			$cut = (int)R::getCell("SELECT id FROM bookingservicedata WHERE slug = 'cut'");
+			$ana = (int)R::getCell("SELECT id FROM bookingresourcedata WHERE slug = 'ana'");
+			cms_store::save_item('bookingservicedata', $cut, array('name' => 'Tuns'), array('name'), 'editor', null, 'ro');
+			cms_store::save_item('bookingresourcedata', $ana, array('name' => 'Ana (RO)'), array('name'), 'editor', null, 'ro');
+			return $date;
+		});
+		$names = function ($rows) { return array_map(function ($row) { return $row['name']; }, $rows); };
+		$name_of = new ReflectionMethod('booking', 'name_of');
+		$name_of->setAccessible(true);
+		with_settings($on, function () use ($names, $name_of) {
+			booking::forget();
+			same(array('Cut', 'Colour'), $names((new booking())->services()), 'en');
+			same(array('Ana', 'Mihai'), $names((new booking())->resources()));
+			$ro = i18n::with('ro', function () use ($names, $name_of) {
+				return array($names((new booking())->services()), $names((new booking())->resources()), $name_of->invoke(null, booking::setup(), 'services', 'cut'), $name_of->invoke(null, booking::setup(), 'resources', 'mihai'));
+			});
+			same(array(array('Tuns', 'Colour'), array('Ana (RO)', 'Mihai'), 'Tuns', 'Mihai'), $ro, 'ro: translated, and an untranslated name in English');
+			same('Cut', $name_of->invoke(null, booking::setup(), 'services', 'cut'), 'the setup is read once for every language');
+			same('', $name_of->invoke(null, booking::setup(), 'services', 'nothing'));
+		});
+		// off: the stored name, whatever the columns
+		foreach (p4_off_settings() as $what => $setting) {
+			with_settings($setting, function () use ($names, $name_of, $what) {
+				booking::forget();
+				same(array('Cut', 'Colour'), $names((new booking())->services()), $what);
+				same('Cut', i18n::with('ro', function () use ($name_of) { return $name_of->invoke(null, booking::setup(), 'services', 'cut'); }), $what);
+			});
+		}
+		// the pages: /ro/ shows the Romanian names
+		p1b_site($p1b_on, function () {
+			$ro = booking_render('/ro/zzbook');
+			check(strpos($ro, '<i class="service">Tuns</i>') !== false && strpos($ro, '<i class="service">Colour</i>') !== false && strpos($ro, '<b class="resource">Ana (RO)</b>') !== false, "/ro/zzbook: $ro");
+			$en = booking_render('/zzbook');
+			check(strpos($en, '<i class="service">Cut</i>') !== false && strpos($en, 'Tuns') === false, "/zzbook: $en");
+		});
+		booking::forget();
+	});
+});
+
+test('P4.B: an rsvp event reads in the current language, each language cached on its own (#200)', function () {
+	rsvp_site(function () {
+		$on = array('multilingual' => true, 'languages' => array('en', 'ro'));
+		with_settings($on, function () {
+			$id = (int)rsvp_event(array('title' => 'Jazz night'))['id'];
+			cms_types::ensure('eventsdata', array(), array('title'));
+			cms_store::save_item('eventsdata', $id, array('title' => 'Seară de jazz', 'slug' => 'seara-de-jazz'), array('title', 'slug'), 'editor', null, 'ro');
+			rsvp::forget();
+			$en = rsvp::item($id);
+			$ro = i18n::with('ro', function () use ($id) { return rsvp::item($id); });
+			same('Jazz night', $en['title']);
+			same('Seară de jazz', $ro['title'], 'ro: the title translated');
+			same('jazz-night', $ro['slug'], 'the slug the event is known by stays');
+			check(substr($ro['url'], -strlen('/seara-de-jazz')) === '/seara-de-jazz' && strpos($ro['url'], '/ro/') !== false, 'ro url: '.$ro['url']);
+			check(substr($en['url'], -strlen('/jazz-night')) === '/jazz-night' && strpos($en['url'], '/ro/') === false, 'en url: '.$en['url']);
+			same('Jazz night', rsvp::item($id)['title'], 'the English one is still English after');
+			// an event without a translation reads in English
+			$plain = (int)rsvp_event(array('title' => 'Quiz'))['id'];
+			same('Quiz', i18n::with('ro', function () use ($plain) { return rsvp::item($plain)['title']; }));
+		});
+		foreach (p4_off_settings() as $what => $setting) {
+			with_settings($setting, function () use ($what) {
+				rsvp::forget();
+				$id = (int)R::getCell("SELECT id FROM eventsdata WHERE slug = 'jazz-night'");
+				same('Jazz night', rsvp::item($id)['title'], $what);
+				same('Jazz night', i18n::with('ro', function () use ($id) { return rsvp::item($id)['title']; }), "$what, in ro");
+			});
+		}
+		rsvp::forget();
+	});
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";
 foreach ($skipped as $skip) echo "  - $skip\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";

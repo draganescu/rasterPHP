@@ -1044,7 +1044,15 @@ own: the bundled booking model has the type, its rules and its emails (see
   `'translate' => array('name', 'description')` gives those text fields a
   column per language, `'shared' => array('email', 'phone')` gives one to
   every text field but those (lists and hidden fields never get one).
-  `cms_records::translated_fields($info)` names them.
+  `cms_records::translated_fields($info)` names them. The bundled booking
+  translates `bookingresource` and `bookingservice` `name`: `/ro/` pages
+  (`render.booking.resources`, `render.booking.services`) and the
+  `resource_name`/`service_name` of the guest's page, the staff page and the
+  emails show the name in the current language, or the default's while it
+  has none. A booking's own fields, like every record a visitor sends, are
+  what was typed. An rsvp event is an item of the events collection, so its
+  title translates there: `event_title` and `event_url` are the current
+  language's (`rsvp::item()` reads each language once).
 - **Editors and agents** change records like items, except that readonly
   fields are shown and not editable, hidden fields never reach them, and the
   item's handle has the type's actions instead of Duplicate and Schedule.

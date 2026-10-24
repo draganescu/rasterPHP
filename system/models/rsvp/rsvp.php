@@ -99,7 +99,7 @@ class rsvp
 	// what staff's writes changed, id => was, was_people and whether the
 	// answer, people or event did, for saved()
 	static $changed = array();
-	// the events read in this request, id => event (item())
+	// the events read in this request, language => id => event (item())
 	static $events = array();
 	// the guest's new links, id => raw token: this request only, for the
 	// model's own email listener, never stored, logged or sent with an event
@@ -489,22 +489,28 @@ class rsvp
 	static function item($id) {
 		$id = (int)$id;
 		if ($id < 1) return null;
-		if (array_key_exists($id, self::$events)) return self::$events[$id];
+		// each language's own: a mail in another language reads it in that one
+		$lang = i18n::current();
+		if (isset(self::$events[$lang]) && array_key_exists($id, self::$events[$lang])) return self::$events[$lang][$id];
 		$table = self::table();
-		return self::$events[$id] = self::from_item($table === null ? null : cms_store::get_item($table, $id));
+		return self::$events[$lang][$id] = self::from_item($table === null ? null : cms_store::get_item($table, $id));
 	}
 
 	// an item of the events collection as the model reads it (item()), or
-	// null
+	// null. Its title and url are the current language's (the title's
+	// translation, or the default's while it has none); slug is the
+	// default language's, the one the item is known by.
 	protected static function from_item($item) {
 		$event = null;
 		if ($item && isset($item['date']) && (string)$item['date'] !== '') {
+			$table = self::table();
+			$shown = $table === null ? $item : cms_store::localized($item, $table);
 			$starts = isset($item['starts']) && (string)$item['starts'] !== '' ? $item['starts'] : (isset($item['time']) && (string)$item['time'] !== '' ? $item['time'] : '00:00');
 			$starts = substr((string)$starts, 0, 5);
 			$published = isset($item['published_at']) ? (string)$item['published_at'] : '';
 			$event = array(
 				'id' => (int)$item['id'],
-				'title' => (string)cms_store::slug_source($item),
+				'title' => (string)cms_store::slug_source($shown),
 				'slug' => (string)$item['slug'],
 				'date' => (string)$item['date'],
 				'starts' => $starts,
@@ -512,7 +518,7 @@ class rsvp
 				'rsvp_until' => isset($item['rsvp_until']) ? (string)$item['rsvp_until'] : '',
 				'visible' => (!isset($item['enabled']) || ($item['enabled'] !== false && (string)$item['enabled'] !== '0')) && ($published === '' || $published <= date('Y-m-d H:i:s')),
 				'starts_at' => strtotime($item['date'].' '.$starts),
-				'url' => cms::item_url(self::collection(), $item),
+				'url' => cms::item_url(self::collection(), $shown),
 			);
 			if ($event['starts_at'] === false) $event = null;
 			else $event['deadline'] = self::deadline($event);
@@ -1036,7 +1042,7 @@ class rsvp
 		foreach (database::instance('rsvp')->query("SELECT * FROM `$table` WHERE `date` >= ? ORDER BY `date`, id", array($from)) as $row) {
 			$row['id'] = (int)$row['id'];
 			$event = self::from_item(cms_types::read_row($table, $row));
-			if ($event) $events[$event['id']] = self::$events[$event['id']] = $event;
+			if ($event) $events[$event['id']] = self::$events[i18n::current()][$event['id']] = $event;
 		}
 		uasort($events, function ($a, $b) { return ($a['starts_at'] - $b['starts_at']) ?: ($a['id'] - $b['id']); });
 		return $events;

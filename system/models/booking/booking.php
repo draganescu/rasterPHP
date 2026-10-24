@@ -97,8 +97,11 @@ class booking
 
 	static function types() {
 		$types = array(
+			// a resource's and a service's name have a column per language
+			// on a multilingual site (#200 D7); nothing else here does
 			'bookingresource' => array(
 				'fields' => array('name' => '', 'people' => 0, 'bookings' => 0, 'active' => true),
+				'translate' => array('name'),
 			),
 			'bookinghours' => array(
 				'fields' => array('resource' => '', 'days' => 'daily', 'starts' => '', 'ends' => '', 'every' => 30, 'from' => '', 'until' => ''),
@@ -110,6 +113,7 @@ class booking
 			),
 			'bookingservice' => array(
 				'fields' => array('name' => '', 'minutes' => 30, 'resources' => '', 'active' => true),
+				'translate' => array('name'),
 			),
 			'booking' => array(
 				'fields' => array(
@@ -576,8 +580,8 @@ class booking
 		$vars = $booking;
 		$vars['manage_url'] = isset(self::$links[$id]) ? util::url(config::get('booking_manage_page', 'booking'), array('token' => self::$links[$id])) : '';
 		unset(self::$links[$id]);
-		$vars['resource_name'] = isset($setup['resources'][$booking['resource']]) ? $setup['resources'][$booking['resource']]['name'] : '';
-		$vars['service_name'] = isset($setup['services'][$booking['service']]) ? $setup['services'][$booking['service']]['name'] : '';
+		$vars['resource_name'] = self::name_of($setup, 'resources', $booking['resource']);
+		$vars['service_name'] = self::name_of($setup, 'services', $booking['service']);
 		$vars['site_url'] = util::url('');
 		$vars['book_url'] = util::url(config::get('booking_page', 'book'));
 		if (trim((string)$booking['email']) !== '') self::send('_email/'.$guest, $booking['email'], $vars);
@@ -652,6 +656,23 @@ class booking
 	static function forget() {
 		self::$setup = null;
 		self::$managed = array();
+	}
+
+	// a setup row ($group 'resources' or 'services') as it reads in the
+	// current language: its translated name, or the default language's
+	// while it has none. setup() keeps every column, so it is read once
+	// for every language.
+	protected static function localized_row($group, $row) {
+		$info = cms_records::info($group === 'resources' ? 'bookingresource' : 'bookingservice');
+		return $info ? cms_store::localized($row, $info['type']) : $row;
+	}
+
+	// the name of the resource or service $slug names, in the current
+	// language, or '' when it names none
+	protected static function name_of($setup, $group, $slug) {
+		if (!isset($setup[$group][$slug])) return '';
+		$row = self::localized_row($group, $setup[$group][$slug]);
+		return $row['name'];
 	}
 
 	// ##Time
@@ -915,7 +936,7 @@ class booking
 		$rows = array();
 		foreach (self::setup()['resources'] as $slug => $row) {
 			if (!$row['active'] || (isset($options['service']) && !self::offers($options['service'], $slug))) continue;
-			$rows[] = $row;
+			$rows[] = self::localized_row('resources', $row);
 		}
 		return cms_records::listed('bookingresource', $rows);
 	}
@@ -927,7 +948,7 @@ class booking
 		$rows = array();
 		foreach (self::setup()['services'] as $slug => $row) {
 			if (!$row['active'] || (isset($options['resource']) && !self::offers($slug, $options['resource']))) continue;
-			$rows[] = $row;
+			$rows[] = self::localized_row('services', $row);
 		}
 		return cms_records::listed('bookingservice', $rows);
 	}
@@ -1003,8 +1024,8 @@ class booking
 		}
 		$setup = self::setup();
 		$row = cms_records::shown(cms_records::info('booking'), $booking);
-		$row['resource_name'] = isset($setup['resources'][$booking['resource']]) ? $setup['resources'][$booking['resource']]['name'] : '';
-		$row['service_name'] = isset($setup['services'][$booking['service']]) ? $setup['services'][$booking['service']]['name'] : '';
+		$row['resource_name'] = self::name_of($setup, 'resources', $booking['resource']);
+		$row['service_name'] = self::name_of($setup, 'services', $booking['service']);
 		return array(cms_records::for_template(cms_records::info('booking'), $row));
 	}
 
@@ -1096,8 +1117,8 @@ class booking
 			$key = $b['date'].'|'.$b['resource'];
 			$row = cms_records::shown($info, $b);
 			$row['attention'] = self::reason($b, isset($taken[$key]) ? $taken[$key] : array());
-			$row['resource_name'] = isset($setup['resources'][$b['resource']]) ? $setup['resources'][$b['resource']]['name'] : '';
-			$row['service_name'] = isset($setup['services'][$b['service']]) ? $setup['services'][$b['service']]['name'] : '';
+			$row['resource_name'] = self::name_of($setup, 'resources', $b['resource']);
+			$row['service_name'] = self::name_of($setup, 'services', $b['service']);
 			$rows[] = $row;
 		}
 		return cms_records::listed('booking', $rows);
