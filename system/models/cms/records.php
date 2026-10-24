@@ -34,7 +34,9 @@ class cms_records {
 	// that took the name: booking => array('type' => 'booking', 'by' => 'salon')
 	static $left_out = array();
 	// names a type declaration understands
-	static $keys = array('fields', 'types', 'public', 'owner', 'create', 'staff_add', 'readonly', 'hidden', 'actions', 'html', 'spam');
+	// (translate and shared: which fields have a column per language on a
+	// multilingual site, see translated_fields)
+	static $keys = array('fields', 'types', 'public', 'owner', 'create', 'staff_add', 'readonly', 'hidden', 'actions', 'html', 'spam', 'translate', 'shared');
 	// the model methods with a meaning of their own, never actions
 	static $hooks = array('types', 'check', 'fill', 'schema', 'listens', 'api', 'requires');
 	// who is writing while fill() and check() run: visitor (a form), editor
@@ -177,6 +179,15 @@ class cms_records {
 	static function is_private($collection) {
 		$info = self::info($collection);
 		return $info && !$info['public'];
+	}
+
+	// The fields of a declared type that have a column per language when
+	// multilingual is on (D7): those 'translate' => array(...) names, or with
+	// 'shared' => array(...) every text field but those, and none when the
+	// type says neither (a booking's fields are what the visitor typed).
+	// None for now.
+	static function translated_fields($info) {
+		return array();
 	}
 
 	// the fields a person may write through the editor, MCP or a form:

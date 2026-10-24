@@ -189,6 +189,24 @@ class cms
 		return util::url(cms::item_path($name, !empty($item['slug']) ? rawurlencode($item['slug']) : $item['id']));
 	}
 
+	// $path (as it reads, no language prefix, not encoded) spelled the way
+	// the language $lang spells it: an item URL's slug becomes the item's
+	// slug in $lang (/menu/menu_item/flat-white is menu/menu_item/cafea-cu-lapte
+	// in ro); any other path is as it is. $from is the language $path is
+	// in (null: the current one). i18n::alternates() asks it for every
+	// language when multilingual is on. The path as it is, for now.
+	static function path_in($path, $lang, $from = null) {
+		return $path;
+	}
+
+	// an item's address in every language, as i18n::alternates() gives a
+	// page's: rows of lang and url. $item is a row as read, with its slug
+	// columns (slug, slug__ro), so a list of items needs no query per
+	// item. For now, every language with the item's own slug.
+	static function item_alternates($name, $item) {
+		return i18n::alternates(ltrim(cms::item_path($name, !empty($item['slug']) ? $item['slug'] : $item['id']), '/'));
+	}
+
 	// The address of a view that is a page (about.html is /about, the
 	// default view /), or null for one that is never a page: partials and
 	// folders starting with _ (_layout, _email/), and feeds (news.rss).

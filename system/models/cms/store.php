@@ -16,6 +16,13 @@ class cms_store {
 	// columns RedBean or Raster manage, never edited as content
 	static $system_fields = array('id', 'slug', 'updated_at', 'enabled', 'published_at', 'saved_lang');
 
+	// every slug an item has had, in every language, so an old or another
+	// language's slug answers 301 to the right one (#138, #200). One row per
+	// slug: type is the item's table (menudata), item its id, lang the
+	// language code the slug is in. Multilingual only; nothing reads or
+	// writes it yet (P3.B).
+	static $slughistory = array('type' => '', 'item' => 0, 'lang' => '', 'slug' => '', 'created_at' => '');
+
 	// ##Slugs, drafts and order
 
 	static function slugify($text) {
@@ -31,8 +38,9 @@ class cms_store {
 
 	// the text a slug is made from: title, headline or name, else the first
 	// field. $skip lists fields a public URL must never carry (a record's
-	// hidden fields, its owner).
-	static function slug_source($values, $skip = array()) {
+	// hidden fields, its owner). $lang: the language the slug is for (null:
+	// the default); ignored for now.
+	static function slug_source($values, $skip = array(), $lang = null) {
 		foreach (array('title', 'headline', 'name') as $field) {
 			if (!empty($values[$field]) && !in_array($field, $skip, true)) return $values[$field];
 		}
@@ -43,7 +51,9 @@ class cms_store {
 		return 'item';
 	}
 
-	static function unique_slug($type, $text, $id) {
+	// a free slug made from $text; $lang is the language whose slugs it must
+	// not take (null: the default); ignored for now
+	static function unique_slug($type, $text, $id, $lang = null) {
 		$base = self::slugify($text);
 		if (!preg_match('/^[a-z0-9_]+$/', $type) || !self::table_exists($type) || !array_key_exists('slug', self::columns($type))) return $base;
 		// every slug taken by another row, in one query that the slug index
@@ -56,6 +66,26 @@ class cms_store {
 		$slug = $base;
 		for ($i = 2; isset($taken[$slug]); $i++) $slug = $base.'-'.$i;
 		return $slug;
+	}
+
+	// the column an item's slug in $lang is in: slug, or slug__ro when
+	// multilingual is on and $lang is a translation language
+	static function slug_column($lang = null) {
+		return cms_types::column('slug', $lang);
+	}
+
+	// remembers that item $id of $type had $slug in $lang (slughistory);
+	// does nothing for now
+	static function record_slug($type, $id, $slug, $lang = null) {
+		return false;
+	}
+
+	// what an item URL's $slug means in $lang: null when it is no other
+	// slug (show it as it is); array('id' => n, 'slug' => s) when it is an
+	// old slug or another language's, s being the item's slug in $lang to
+	// answer 301 to. Null for now.
+	static function resolve_slug($type, $slug, $lang = null) {
+		return null;
 	}
 
 	// SQL that hides drafts (enabled = 0) and posts published in the future
@@ -107,7 +137,9 @@ class cms_store {
 	// (/news/news_items/tag/php) and the item asked for (id or slug), $uri
 	// the ones of those the URL asked for. Drafts and scheduled items for
 	// editors only; a private type's records for editors and their owners.
-	static function list_where($name, $conditions, $filters = array(), $uri = array()) {
+	// $lang: the language the list is shown in, for conditions_sql (null:
+	// as it always was).
+	static function list_where($name, $conditions, $filters = array(), $uri = array(), $lang = null) {
 		$fields = self::columns(cms::collection_type($name));
 		$record = cms_records::info($name);
 		$compare = array();
@@ -222,8 +254,10 @@ class cms_store {
 		return $equals;
 	}
 
-	// SQL for conditions on columns the table has; others are left out
-	static function conditions_sql($conditions, $columns, $prefix = 'c') {
+	// SQL for conditions on columns the table has; others are left out.
+	// $lang: the language the values are in (null: the default); ignored
+	// for now
+	static function conditions_sql($conditions, $columns, $prefix = 'c', $lang = null) {
 		$sql = '';
 		$bindings = array();
 		foreach (array_values($conditions) as $i => $condition) {
@@ -251,8 +285,9 @@ class cms_store {
 	}
 
 	// order=newest|oldest|<field>|-<field> (minus means descending), or
-	// several separated by commas: order=date,time or order=-date,-time
-	static function order_sql($order, $columns) {
+	// several separated by commas: order=date,time or order=-date,-time.
+	// $lang: the language to sort in (null: the default); ignored for now
+	static function order_sql($order, $columns, $lang = null) {
 		$parts = array();
 		foreach (explode(',', (string)$order) as $part) {
 			$part = trim($part);

@@ -11017,6 +11017,71 @@ test('P2.D: the starter\'s nav: site::nav() gives each link its address and stat
 	});
 });
 
+// ## P3 kickoff: the contracts the P3 packages code against
+
+test('P3 kickoff: off, and in the default language, the $lang arguments change no SQL string', function () {
+	$columns = array('id' => 'INTEGER', 'slug' => 'TEXT', 'slug__ro' => 'TEXT', 'name' => 'TEXT', 'name__ro' => 'TEXT', 'price' => 'INT', 'published_at' => 'DATETIME', 'updated_at' => 'DATETIME');
+	$conditions = array(array('name', '=', 'Flat white'), array('price', '>', '4'), array('name', '!=', 'x'), array('slug', '=', 'flat-white'));
+	// today's SQL, written out once so a change to it can't hide
+	same(array(" AND `name` = :c0_name  AND `price` > :c1_price  AND (`name` IS NULL OR `name` != :c2_name)  AND `slug` = :c3_slug ", array(':c0_name' => 'Flat white', ':c1_price' => 4, ':c2_name' => 'x', ':c3_slug' => 'flat-white')), cms_store::conditions_sql($conditions, $columns));
+	same('`name` ASC, `price` DESC, id ASC', cms_store::order_sql('name,-price', $columns));
+	$settings = array(
+		'off' => array('multilingual' => false, 'languages' => array()),
+		'languages, switch off' => array('multilingual' => false, 'languages' => array('en', 'ro')),
+		'one language' => array('multilingual' => true, 'languages' => array('en')),
+		'on' => array('multilingual' => true, 'languages' => array('en', 'ro')),
+	);
+	foreach ($settings as $what => $setting) {
+		with_settings($setting, function () use ($what, $columns, $conditions) {
+			$conditions_sql = cms_store::conditions_sql($conditions, $columns);
+			$order_sql = cms_store::order_sql('name,-price,newest', $columns);
+			// on, only the default language (and null) is promised to be today's
+			$langs = $what === 'on' ? array(null, 'en') : array(null, 'en', 'ro', 'pt-br');
+			foreach ($langs as $lang) {
+				same($conditions_sql, cms_store::conditions_sql($conditions, $columns, 'c', $lang), "$what, conditions in ".var_export($lang, true));
+				same($order_sql, cms_store::order_sql('name,-price,newest', $columns, $lang), "$what, order in ".var_export($lang, true));
+				if ($what !== 'on') {
+					same('slug', cms_store::slug_column($lang), "$what, slug column");
+					same(null, cms_store::resolve_slug('zzp3kickdata', 'flat-white', $lang), "$what, resolve_slug");
+					same('menu/menu_item/flat-white', cms::path_in('menu/menu_item/flat-white', $lang), "$what, path_in");
+				}
+			}
+		});
+	}
+	with_settings($settings['on'], function () {
+		same('slug', cms_store::slug_column('en'));
+		same('slug__ro', cms_store::slug_column('ro'));
+	});
+});
+
+test('P3 kickoff: off, list_where and index_slug send the SQL they always did', function () {
+	cms_store::connect();
+	$adapter = R::getDatabaseAdapter();
+	try {
+		cms_types::ensure('zzp3kickdata', array('slug' => 'text', 'name' => 'text', 'price' => 'int', 'enabled' => 'bool', 'published_at' => 'datetime', 'updated_at' => 'datetime'));
+		with_settings(array('multilingual' => false, 'languages' => array('en', 'ro')), function () {
+			$conditions = cms_store::list_options('price>4&order=name')['conditions'];
+			$plain = cms_store::list_where('zzp3kick', $conditions, array('slug' => 'flat-white'), array());
+			foreach (array('en', 'ro') as $lang) same($plain, cms_store::list_where('zzp3kick', $conditions, array('slug' => 'flat-white'), array(), $lang), "list_where in $lang");
+		});
+		// the slug index: the same statements with and without the column named
+		$adapter->exec('DROP INDEX IF EXISTS `zzp3kickdata_slug`');
+		$plain = p2a_sql(function () { same(true, cms_types::index_slug('zzp3kickdata')); });
+		$adapter->exec('DROP INDEX IF EXISTS `zzp3kickdata_slug`');
+		same($plain, p2a_sql(function () { same(true, cms_types::index_slug('zzp3kickdata', 'slug')); }));
+		same(false, cms_types::index_slug('zzp3kickdata', 'slug'), 'made once');
+		try {
+			cms_types::index_slug('zzp3kickdata', 'name');
+			check(false, 'only a slug column is indexed as one');
+		} catch (InvalidArgumentException $e) {
+			check(true);
+		}
+	} finally {
+		$adapter->exec('DROP TABLE IF EXISTS zzp3kickdata');
+		cms_store::forget();
+	}
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";
 foreach ($skipped as $skip) echo "  - $skip\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";
