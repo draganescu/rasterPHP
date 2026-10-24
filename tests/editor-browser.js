@@ -162,7 +162,7 @@ async function multilingual(browser) {
 		// not a paragraph inside the paragraph (#114)
 		const about = path.join(root, 'demo/views/cafe/about.html');
 		const aboutView = fs.readFileSync(about, 'utf8');
-		fs.writeFileSync(about, aboutView.replace('<h2>Opening hours</h2>', '<p class="lead"><!-- print.cms.lead -->We roast <em>our own</em> beans.<!-- /print.cms.lead --></p><ul class="features"><!-- print.cms.features --><li>Fast</li><li>Cheap</li><!-- /print.cms.features --></ul><article class="note"><!-- print.cms.note -->Fresh <em>bread</em> daily.<!-- /print.cms.note --></article><h2>Opening hours</h2>'));
+		fs.writeFileSync(about, aboutView.replace("<h2><!-- print.i18n.about('opening_hours') -->", '<p class="lead"><!-- print.cms.lead -->We roast <em>our own</em> beans.<!-- /print.cms.lead --></p><ul class="features"><!-- print.cms.features --><li>Fast</li><li>Cheap</li><!-- /print.cms.features --></ul><article class="note"><!-- print.cms.note -->Fresh <em>bread</em> daily.<!-- /print.cms.note --></article><h2><!-- print.i18n.about(\'opening_hours\') -->'));
 		try {
 			await page.goto(base + '/about');
 			await page.waitForTimeout(500);
@@ -406,11 +406,15 @@ async function multilingual(browser) {
 			const f = await focused();
 			if (f.kind === 'item') { first = f.text; break; }
 		}
-		const firstItem = page.locator('[data-raster-item]').first();
-		check(first !== null && await firstItem.evaluate(el => el === document.activeElement), 'Tab lands on the first item');
+		check(first !== null && await page.locator('[data-raster-item]').first().evaluate(el => el === document.activeElement), 'Tab lands on the first item');
+		// the hidden dish (Flat white, hidden above; Cortado sorts first)
+		const firstItem = page.locator('[data-raster-item]', { hasText: 'Flat white' }).first();
+		check(await firstItem.getAttribute('data-raster-state') === 'draft', 'the dish to show is hidden');
+		await firstItem.focus();
 		await page.keyboard.press('Enter');
 		check(await inShadow(page, h => !!h.shadowRoot.activeElement && !!h.shadowRoot.activeElement.closest('.handle')), 'Enter on an item moves into its handle');
 		for (let i = 0; i < 8 && !(await inShadow(page, h => h.shadowRoot.activeElement && h.shadowRoot.activeElement.getAttribute('aria-label') === 'Show')); i++) await page.keyboard.press('Tab');
+		check(await inShadow(page, h => h.shadowRoot.activeElement && h.shadowRoot.activeElement.getAttribute('aria-label') === 'Show'), 'Tab reaches Show in the handle');
 		await page.keyboard.press('Enter');
 		await page.waitForTimeout(900);
 		check(await firstItem.getAttribute('data-raster-state') === 'live', 'Show, from the keyboard, shows the hidden dish');
