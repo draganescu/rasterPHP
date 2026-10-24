@@ -10166,6 +10166,14 @@ test('P2.C: read_asset and write_asset: a theme\'s CSS, JS and SVG, with write_v
 		list(, $body) = http('POST', "$base/mcp", json_encode(array('jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/list')), array('Authorization: Bearer test-token'));
 		$names = array_column(json_decode($body, true)['result']['tools'], 'name');
 		check(in_array('read_asset', $names, true) && !in_array('write_asset', $names, true), json_encode($names));
+		// so do the tools that write the dictionaries and the config
+		check(in_array('read_strings', $names, true) && in_array('translation_status', $names, true), 'reading is offered');
+		check(!in_array('write_strings', $names, true) && !in_array('set_languages', $names, true), 'writing files waits for mcp_write_views');
+		foreach (array(array('set_languages', array('languages' => array('en', 'ro'))), array('write_strings', array('file' => 'zzp2c', 'lang' => 'en', 'strings' => array('a' => 'b')))) as $call) {
+			list(, $body) = http('POST', "$base/mcp", json_encode(array('jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => array('name' => $call[0], 'arguments' => $call[1]))), array('Authorization: Bearer test-token'));
+			same(-32602, json_decode($body, true)['error']['code'], $call[0]);
+		}
+		check(strpos(file_get_contents(APPBASE.'config/the_app.php'), "'multilingual'") === false, 'the config is untouched');
 		list(, $body) = http('POST', "$base/mcp", json_encode(array('jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => array('name' => 'write_asset', 'arguments' => array('path' => 'style.css', 'content' => 'x')))), array('Authorization: Bearer test-token'));
 		same(-32602, json_decode($body, true)['error']['code']);
 		same(strlen($kept) + 21, strlen(file_get_contents($css)));

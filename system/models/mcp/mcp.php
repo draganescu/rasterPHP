@@ -303,7 +303,7 @@ class mcp
 				array(), array(), array('readOnlyHint' => false, 'destructiveHint' => false, 'idempotentHint' => true, 'openWorldHint' => false)),
 		);
 		if (!self::may_write_views()) {
-			$tools = array_values(array_filter($tools, function ($t) { return !in_array($t['name'], array('write_view', 'write_asset'), true); }));
+			$tools = array_values(array_filter($tools, function ($t) { return !in_array($t['name'], array('write_view', 'write_asset', 'set_languages', 'write_strings'), true); }));
 		}
 		return $tools;
 	}
@@ -458,7 +458,10 @@ class mcp
 		return array_values(array_unique(array_merge($fields, array_intersect(cms_types::translated($page['type']), array_keys($page['fields'])))));
 	}
 
+	// a tool that writes the site's files: outside production, and over
+	// HTTP only with mcp_write_views, as write_view
 	protected function dev_only($tool) {
+		if (!self::may_write_views()) throw new RuntimeException("$tool writes the site's files, which is off over HTTP. Set config mcp_write_views to true to allow it, or use MCP over stdio on the machine with the files.");
 		if (config::get('environment') === 'production') throw new InvalidArgumentException("$tool only works outside production: change a development copy of the site and deploy it");
 	}
 

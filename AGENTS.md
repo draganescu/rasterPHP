@@ -2484,7 +2484,8 @@ of lists and filter pages come along; drafts and the editor don't.
   same way.
 - **`write_view` edits code, not content**, since a template can call any
   model, and so does `write_asset`: a script runs in every visitor's
-  browser. Over stdio the agent is already on the machine with the files, so
+  browser. `set_languages` and `write_strings` change the site's files too.
+  Over stdio the agent is already on the machine with the files, so
   they are available. Over HTTP they are not offered until the site sets
   `config::set('mcp_write_views')->to(true)`.
 - Results come back as compact JSON, in `structuredContent` and as text.
@@ -2609,7 +2610,7 @@ Set in `config/the_app.php` with `config::set('name')->to(value)`.
 | `page_cache`, `page_cache_ttl`, `page_cache_skip` | on in production, 3600, none | |
 | `asset_versions` | true | false leaves theme asset URLs as they are written |
 | `mcp_token` | none | same as `RASTER_MCP_TOKEN` |
-| `mcp_write_views` | false | lets MCP over HTTP write templates and theme files (`write_view`, `write_asset`); over stdio it always can |
+| `mcp_write_views` | false | lets MCP over HTTP write templates, theme files, dictionaries and the languages setting (`write_view`, `write_asset`, `write_strings`, `set_languages`); over stdio it always can |
 | `api_system_models` | `cms` | system models reachable at `/api`, for what their `api()` lists |
 | `spam_min_seconds` | 3 | a post sooner than this after its form was shown is `too_fast`; false turns the stamp checks off |
 | `spam_max_age` | 86400 | a stamp older than this many seconds is `stamp_old`; false allows any age |
