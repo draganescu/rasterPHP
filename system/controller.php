@@ -381,7 +381,7 @@ class controller {
 		// a 404 without error_document_404, printed once the session has
 		// started (route_set), so PHP has nothing to warn about
 		if (!$route) {
-			exit('<h1>404 Not Found</h1>');
+			controller::refuse(404);
 		}
 		
 		// just a hook
@@ -413,11 +413,11 @@ class controller {
 
 	// Rejects posts that come from another site (controller::is_foreign()),
 	// posts from bots that filled the honeypot, and posts from logged in
-	// users without the token.
+	// users without the token. The two refusals are 403s with the alerts
+	// cross_site and form_expired, for the site's error_document_403 to word.
 	static function guard_post() {
 		if (controller::is_foreign()) {
-			http_response_code(403);
-			exit('Forbidden: this form was sent from another site.');
+			controller::refuse(403, 'cross_site');
 		}
 		if (isset($_POST['raster_hp']) && $_POST['raster_hp'] !== '') {
 			// pretend it worked so the bot moves on
@@ -425,10 +425,28 @@ class controller {
 			exit;
 		}
 		util::session();
-		if (!empty($_SESSION['uid']) && !util::csrf_valid(isset($_POST['csrf']) ? $_POST['csrf'] : null)) {
-			http_response_code(403);
-			exit('This form has expired. Go back, reload the page and send it again.');
+		// a picture over post_max_size arrives as an empty post, with no
+		// token: the editor is told it is too big, not that its page is stale
+		if (!$_POST && !$_FILES && implode('/', array_slice((array)config::get('uri_segments'), 0, 3)) === 'api/cms/editor_upload'
+			&& controller::too_big_to_post()) {
+			controller::refuse(400, 'upload_too_big');
 		}
+		if (!empty($_SESSION['uid']) && !util::csrf_valid(isset($_POST['csrf']) ? $_POST['csrf'] : null)) {
+			controller::refuse(403, 'form_expired');
+		}
+	}
+
+	// is the request's body larger than PHP's post_max_size (8M, 512K, 0 for
+	// no limit), so PHP dropped it?
+	static function too_big_to_post() {
+		$length = isset($_SERVER['CONTENT_LENGTH']) ? (int)$_SERVER['CONTENT_LENGTH'] : 0;
+		$max = trim((string)ini_get('post_max_size'));
+		$bytes = (int)$max;
+		$unit = strtolower(substr($max, -1));
+		if ($unit === 'g') $bytes *= 1073741824;
+		elseif ($unit === 'm') $bytes *= 1048576;
+		elseif ($unit === 'k') $bytes *= 1024;
+		return $bytes > 0 && $length > $bytes;
 	}
 
 	// Renders a view into a string without touching the page being built,
@@ -460,9 +478,11 @@ class controller {
 		}
 	}
 
-	// Sets the status and gives the view for it (config error_document_404,
-	// error_document_503), or false when the site has none. It prints
-	// nothing: the session may not have started yet.
+	// The first step of a refusal, used inside the framework: sets the
+	// status and gives the path of the view for it (config
+	// error_document_403, _404, _500, _503), or false when the site has
+	// none. It prints nothing: the session may not have started yet. To
+	// answer a refusal, call controller::refuse(), which shows that view.
 	public static function error($error, $document = false) {
 		if (!headers_sent()) {
 			http_response_code((int)$error);
@@ -471,6 +491,59 @@ class controller {
 			$document = config::get('error_document_'.$error, false);
 		}
 		return $document ? controller::build_view_path($document) : false;
+	}
+
+	// true while refuse() renders the site's view, so a view that fails
+	// itself ends in the bare status
+	static $refusing = false;
+
+	// Every refusal ends here: the status, and the site's view for it
+	// (controller::error) when it has one and the page is HTML, else a body
+	// with no words in it, only the code. $alert is raised for the view to
+	// word (cross_site, form_expired, not_allowed). /api answers it as JSON,
+	// {"error":"not_allowed","problems":["not_allowed"]}. A refused post is
+	// never handed to the view's forms, and nothing is cached.
+	static function refuse($code, $alert = null) {
+		raster_cache::$cacheable = false;
+		$document = controller::error($code);
+		$segments = (array)config::get('uri_segments');
+		if (isset($segments[0]) && $segments[0] === 'api') {
+			if (!headers_sent()) header('Content-Type: application/json');
+			exit(json_encode($alert ? array('error' => $alert, 'problems' => array($alert)) : array('error' => 'refused')));
+		}
+		if ($document && file_exists($document) && config::get('format', 'html') === 'html' && !self::$refusing) {
+			self::$refusing = true;
+			$_POST = array();
+			$_FILES = array();
+			$_REQUEST = $_GET;
+			$_SERVER['REQUEST_METHOD'] = 'GET';
+			if ($alert) validation::get()->raise($alert);
+			// a page half made is dropped; what was set on it stays: its
+			// flags and values (if.logged_in, print.self.x, kept in vars)
+			// and its replacements
+			$made = template::swap(null);
+			$template = template::instance();
+			if ($made) {
+				$template->vars = $made->vars;
+				$template->replace = $made->replace;
+			}
+			// a post refused before the route was found (guard_post) has no
+			// if.live or if.static yet
+			if (!isset($template->vars['live'])) {
+				$static = (bool)getenv('RASTER_EXPORT');
+				template::set('live')->to(!$static);
+				template::set('static')->to($static);
+			}
+			// the refused page's fields aren't the view's: a new cms shows
+			// the view as it is written, without the editor
+			$controller = controller::instance();
+			unset($controller->objects['cms']);
+			$controller->current_route = $document;
+			$controller->handle_response();
+			exit;
+		}
+		if (!headers_sent()) header('Content-Type: text/html; charset=utf-8');
+		exit("<!doctype html><meta charset='utf-8'><title>$code</title><h1>$code</h1>");
 	}
 
 	// The database can't be reached (cms::setup asks). Outside development
@@ -484,16 +557,8 @@ class controller {
 			if (!headers_sent()) http_response_code(500);
 			exit("<!doctype html><meta charset='utf-8'><title>No database</title><p>The database can't be reached: ".htmlspecialchars($reason)."</p>");
 		}
-		$document = controller::error('503');
-		// the view is a page: feeds and data views (news.rss) get the plain line
-		if ($document && file_exists($document) && config::get('format', 'html') === 'html') {
-			$controller = controller::instance();
-			$controller->current_route = $document;
-			$controller->handle_response();
-			exit;
-		}
-		echo "<!doctype html><meta charset='utf-8'><title>Unavailable</title><p>This site is unavailable for a moment. Try again shortly.</p>";
-		exit;
+		// the view is a page: feeds and data views (news.rss) get the bare status
+		controller::refuse(503);
 	}
 	
 	// internal method of the controller used in handle_response
@@ -580,15 +645,11 @@ class controller {
 			$this->render($template, $data);
 		} catch (Throwable $e) {
 			if (!$strict) {
-				// production: log it and show a plain error, never the details,
-				// whatever was thrown (a missing named query is a LogicException)
+				// production: log it and answer 500 (the site's
+				// error_document_500), never the details, whatever was thrown
+				// (a missing named query is a LogicException)
 				error_log('Raster error: '.get_class($e).': '.$e->getMessage().' in '.$e->getFile().':'.$e->getLine());
-				if (!headers_sent()) {
-					http_response_code(500);
-					header('Content-Type: text/html; charset=utf-8');
-				}
-				echo "<!doctype html><meta charset='utf-8'><title>Error</title><p>This page could not be shown.</p>";
-				exit;
+				controller::refuse(500);
 			}
 			// development: PHP's own error, with the trace, for anything but a template error
 			if (!($e instanceof RuntimeException)) throw $e;

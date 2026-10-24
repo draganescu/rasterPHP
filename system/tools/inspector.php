@@ -854,8 +854,9 @@ class raster_inspector {
 			}
 		}
 		// what a records form raises when the visitor may not create, and
-		// when a value isn't of its field's type (guests_invalid)
-		$names = array_merge($names, array('login_required', 'not_allowed'));
+		// when a value isn't of its field's type (guests_invalid); and the
+		// refused posts' alerts, for error_document_403 (controller::guard_post)
+		$names = array_merge($names, array('login_required', 'not_allowed', 'cross_site', 'form_expired'));
 		foreach (cms_records::types() as $info) {
 			foreach ($info['types'] as $field => $type) if ($type !== 'text') $names[] = $field.'_invalid';
 		}

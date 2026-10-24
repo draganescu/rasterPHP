@@ -90,6 +90,19 @@ return array(
 
 Missing keys stay in English. The full list of keys is at the top of `system/models/cms/editor/editor.js` (and translated in `system/models/cms/editor/lang/ro.php`).
 
+What the site refuses comes back as a name, and the editor shows the words for `problem_<name>`. Reword any of them the same way:
+
+| Name | When |
+|---|---|
+| `type_int`, `type_number`, `type_bool`, `type_date`, `type_datetime`, `type_time`, `type_text` | a value that isn't of its field's type (`{field}` in the words is the field) |
+| `upload_too_big`, `upload_missing`, `upload_not_a_picture`, `upload_not_stored` | a picture that is too big, didn't arrive whole, isn't a JPEG, PNG, GIF or WebP, or couldn't be saved |
+| `form_expired`, `not_allowed` | the page is out of date (reload it), or you are no longer logged in as staff |
+
+```php
+'problem_type_number' => '{field}: write a number, like 4.50',
+'problem_upload_too_big' => 'Pictures up to 12 MB, please',
+```
+
 ## How it works (for developers)
 
 - For a logged-in editor, the CMS surrounds everything it prints with invisible markers such as `<!--raster:s 3-->…<!--raster:e 3-->` and adds a JSON description of them (`<script id="raster-editor-config">`) plus the editor script before `</body>`. Your page needs a `</body>` tag for this.

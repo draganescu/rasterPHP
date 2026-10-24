@@ -44,8 +44,8 @@ Because of that same `<base>` tag, `#section` points at the theme folder. Write 
 
 - The `<form>` must have `method="post"` and be **inside** the `render.<model>.<method>` block that handles it. `lint` warns about a post form outside any render block.
 - The handler must check `validation::get()->submitted()`. It's `false` for other forms on the page, for GET requests, and for calls through `/api`.
-- **403 "this form was sent from another site"**: the browser reported a different origin. This happens when you open the site under one host name (`127.0.0.1:8000`) and the form posts to another, or behind a proxy that changes the host. Set `RASTER_URL` to the address people use.
-- **403 "This form has expired"**: a logged-in user's session changed (they logged out and in elsewhere). Reload the page and send again.
+- **403 on a post, alert `cross_site`** (your `error_document_403` words it; without one the page says only `403`): the browser reported a different origin. This happens when you open the site under one host name (`127.0.0.1:8000`) and the form posts to another, or behind a proxy that changes the host. Set `RASTER_URL` to the address people use.
+- **403 on a post, alert `form_expired`**: a logged-in user's session changed (they logged out and in elsewhere). Reload the page and send again.
 
 ## A validation message never shows
 

@@ -382,10 +382,9 @@ class authentication
 		$view = '/'.controller::instance()->current_view;
 		foreach (self::protection($uri) + ($view === '/' ? array() : self::protection($view)) as $pattern => $role) {
 			if (self::can($role)) continue;
-			if ($user) {
-				http_response_code(403);
-				exit('You do not have access to this page.');
-			}
+			// logged in without the role: 403, the site's error_document_403
+			// with the alert not_allowed
+			if ($user) controller::refuse(403, 'not_allowed');
 			$this->redirect(util::url(config::get('login_page', 'login')).'?next='.rawurlencode(strtok($uri, '?')));
 		}
 		return true;

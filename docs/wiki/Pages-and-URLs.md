@@ -127,15 +127,31 @@ Most sites need no routes at all. CMS collection URLs such as `/news/news_item/3
 
 `php bin/raster lint` reports routes that point to missing views or aren't valid regular expressions as errors.
 
-## 404 pages
+## Error pages
 
-By default an unknown URL gets a bare "404 Not Found" heading. To use your own page, create a view (for example `404.html`) and set:
+Raster prints no words of its own to visitors. Without a view of yours, an unknown URL gets the bare status: a page whose body is only `404`. To use your own page, create a view (for example `404.html`) and set:
 
 ```php
 config::set('error_document_404')->to('404');
 ```
 
 The page is rendered with status 404, so it can use the layout and CMS fields like any other page. It is always an HTML page, also for a missing `/about.json` or `/feed.rss`. A CMS item URL whose item doesn't exist (`/news/news_item/no-such-post`) also returns 404.
+
+The other refusals work the same way, each with its own setting:
+
+```php
+config::set('error_document_403')->to('403');   // a refused post, a page the account can't open
+config::set('error_document_500')->to('500');   // a page that broke, outside development
+config::set('error_document_503')->to('503');   // the database can't be reached
+```
+
+A 403 has three causes, and each raises an alert the view words: `cross_site` (the form was sent from another site), `form_expired` (a logged in person's form was open too long; reload and send again) and `not_allowed` (logged in, but without the role a `protected` page needs):
+
+```html
+<!-- print.validation.alert('form_expired') --><p>That form was open a long time. Reload the page and send it again.</p><!-- /print.validation.alert('form_expired') -->
+```
+
+These pages show the view as it is written: their CMS fields show the template's text, and the post that was refused never reaches a form on them.
 
 ## Sites in a subfolder, and servers without URL rewriting
 

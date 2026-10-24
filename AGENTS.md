@@ -436,7 +436,7 @@ model's, so the editor's endpoints stay. Posts
 there pass the same site check as forms, but they are not form submissions:
 `validation::get()->submitted()` is false, so form models do nothing over
 `/api`. A method listed for any role but `visitor` answers 403
-`{"error":"cross-site"}` to a request another site started, on every verb,
+`{"error":"cross_site","problems":["cross_site"]}` to a request another site started, on every verb,
 GET too: the session cookie (SameSite=Lax) comes along when someone follows
 a link from another site. The browser says so with `Origin` (`Origin: null`
 counts, unless `Sec-Fetch-Site` says it is this site), `Sec-Fetch-Site` or
@@ -544,7 +544,11 @@ of your own. Staff read the feedback on a page that renders
   (below).
 - **Refused automatically:** posts from other sites (an `Origin: null`
   counts as another site unless `Sec-Fetch-Site` says it is this one), and
-  bots that fill the honeypot. The bots get a fake success.
+  bots that fill the honeypot. The bots get a fake success. A post from
+  another site, and a logged in person's post without the session token
+  (the form was open for too long), answer 403 with the alert
+  `cross_site` or `form_expired`, for the site's `error_document_403` to
+  word (see **Error pages**); nothing on that page handles the post.
 - **Spam checks.** A form model asks after `valid()`, once per post:
 
   ```php
@@ -1083,7 +1087,14 @@ bundled model declares none of its types, and `lint` warns.
 - A protected page answers a visitor with a 303 to the login page, and
   `raster render` (MCP `render_url`) does the same: it prints `Location:
   …` and `HTTP 303` on stderr, no page, and exits 1. `--as` renders it
-  as that person sees it.
+  as that person sees it. Someone logged in without the role gets 403,
+  the site's `error_document_403` with the alert `not_allowed` (see
+  **Error pages**).
+- The login page says why nobody can log in yet with two alerts that
+  `print.cms.login_message` raises (it prints nothing itself):
+  `no_database` (none is configured for this environment) and `no_users`
+  (make one with `php bin/raster user`). The starter's `login.html` words
+  both, and `raster upgrade` adds them to an older view that has the tag.
 - Five wrong passwords lock an account for 15 minutes, at the login and
   in the account form's `current_password` alike. Once 15 minutes have
   passed since the last wrong one, counting starts again from zero. Each
@@ -1954,7 +1965,9 @@ from `php demo/seed.php`, and are the worked example of all of it.
      (`demo/seed.php`), so `places` is an int before anyone opens the list.
 
 **mail**: emails are views. `mail::send_view('_email/welcome', $to,
-array('name' => 'Ada'))` uses the view's `<title>` as the subject.
+array('name' => 'Ada'))` uses the view's `<title>` as the subject. A view
+without one is sent with the site's name as the subject (the `site_name`
+field every page shares, `print.cms.site_name`), else its host.
 - Transport, set with `RASTER_MAIL`:
   - `log://` writes to `application/data/mail/` (the development default);
     `log:///some/folder` writes to that folder instead.
@@ -2029,8 +2042,8 @@ use `'model.method'`: `method(true)` returns
   an error before Raster starts would still show.
 - **A database that can't be reached** (MySQL down, an SQLite file the web
   server can't read) is not a missing table: outside development every page
-  answers 503 (`/api` too, as JSON), as the view `error_document_503` when the site sets one, or a
-  plain line. The error is logged and nothing is cached, so the real pages
+  answers 503 (`/api` too, as JSON), as the view `error_document_503` when the site sets one, or the
+  bare status (see **Error pages**). The error is logged and nothing is cached, so the real pages
   show as soon as the database is back. Development shows the error
   instead.
 - **The site's address:** set `RASTER_URL=https://example.com/` (or
@@ -2210,6 +2223,19 @@ of lists and filter pages come along; drafts and the editor don't.
   - Its words are in English; `system/models/cms/editor/lang/<lang>.php`
     translates them (Romanian is included), and
     `application/i18n/<lang>/raster_editor.php` overrides any of them.
+  - What the server refuses comes back as names, `problems` in the
+    answer, and the editor words each as `problem_<name>` (a record's
+    `check()` included): a value that isn't of its field's type is
+    `type_<type>` (`type_int`, `type_number`, `type_bool`, `type_date`,
+    `type_datetime`, `type_time`, `type_text`), with `field`, which the
+    words print as `{field}` (`'problem_type_number' => '{field} needs a
+    number, like 4.50'`); a picture is `upload_too_big` (also over PHP's
+    `upload_max_filesize` or `post_max_size`), `upload_missing`
+    (it didn't arrive whole), `upload_not_a_picture` (also for a file the
+    browser can't show) or `upload_not_stored`; `form_expired` (the session
+    token is stale: reload) and `not_allowed` (not logged in as staff) come
+    from the 403 every refused post gets on `/api`. Reword any of them in
+    `raster_editor.php`: `'problem_upload_too_big' => 'Pictures up to 12 MB, please'`.
 - **MCP** is available in two ways:
   - over stdio: `php bin/raster mcp`, already set up in `.mcp.json`. A PHP
     error in the site's code answers the call with its file and line
@@ -2320,8 +2346,31 @@ of lists and filter pages come along; drafts and the editor don't.
   view there is a page of the site like any other: `schema` (and
   `--apply`), `describe` and MCP `get_page`/`update_page` know its fields
   (`/print/menu`), and `describe` names its `theme`.
-- **A 404 page:** `config::set('error_document_404')->to('404')` renders
-  `404.html` with status 404.
+- **Error pages.** The framework prints no words of its own to visitors:
+  every refusal goes through `controller::refuse($code, $alert)`, which
+  sets the status and renders the site's view for it,
+  `error_document_<code>` (`controller::error($code)` gives that view, or
+  false), and without one answers the bare status: a page whose body is
+  only the code (`<h1>403</h1>`). A site words them:
+  - `config::set('error_document_404')->to('404')` renders `404.html`
+    with status 404, for a URL no view answers.
+  - `error_document_403`: a post from another site (alert `cross_site`),
+    a logged in person's post with a stale session token (`form_expired`),
+    and a protected page someone logged in without the role asked for
+    (`not_allowed`). Word each alert in the view
+    (`<!-- print.validation.alert('form_expired') -->…`). The refused post
+    is never handed to the forms on the 403 page.
+  - `error_document_500`: a page that broke outside development (the
+    error goes to the log, the visitor never sees it). A 500 page that
+    breaks too answers the bare status.
+  - `error_document_503`: below.
+
+  A 403, 500 or 503 page is rendered as written: its `cms` fields show
+  their defaults, there is no in-page editor, and it is never cached. On `/api` the answer
+  is JSON instead, `{"error":"not_allowed","problems":["not_allowed"]}`
+  (`{"error":"refused"}` for a refusal without an alert). A file the
+  server never serves (`system/private_paths.php`) gets the same bare 403
+  from `index.php` under `php -S`.
 - **A page for a database outage:** `config::set('error_document_503')->to('503')`
   renders `503.html` with status 503 when the database can't be reached
   (see **Environments and cache**). Keep it to models that don't need the
@@ -2339,6 +2388,8 @@ Set in `config/the_app.php` with `config::set('name')->to(value)`.
 | `rewrite` | true | false puts `index.php/` in every link, for servers without rewrites |
 | `strict_templates` | true in development | template errors stop the page with a list (500) |
 | `error_document_404` | none | a view for 404s |
+| `error_document_403` | none | a view for refusals: a post from another site, a stale form, a protected page without the role (see **Error pages**) |
+| `error_document_500` | none | a view for a page that broke (outside development) |
 | `error_document_503` | none | a view for when the database can't be reached (outside development) |
 | `site_url` | none | the site's address (same as `RASTER_URL`) |
 | `cms_enabled` | true | the CMS and the editor toolbar |

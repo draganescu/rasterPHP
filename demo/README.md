@@ -59,6 +59,7 @@ day before, so the waitlist is easy to see.
 | A11 | code, config, data, raw views and tooling are 403 |
 | A12 | query strings don't change the route |
 | A13 | a custom 404 page (`error_document_404`) |
+| A19 | the café words its refusals: a 403 page (`error_document_403`) with the alerts `cross_site`, `form_expired` and `not_allowed`, and a 500 page (`error_document_500`); without them the framework answers the bare status, no words |
 | A14 | a route to a view in another theme (`->from('print')`) |
 | A15 | `rewrite` off: every link goes through index.php |
 | A16 | the private extensions are 403, `composer.phar` too (system/private_paths.php) |

@@ -9,7 +9,7 @@
   <main class="narrow">
     <h1>Log in</h1>
     <!-- print.validation.alert('login_failed') --><p class="error">Wrong email or password.</p><!-- /print.validation.alert('login_failed') -->
-    <!-- print.cms.login_message /-->
+    <!-- print.cms.login_message /--><!-- print.validation.alert('no_database') --><p class="notice">No database is configured for this environment (application/config/db/).</p><!-- /print.validation.alert('no_database') --><!-- print.validation.alert('no_users') --><p class="notice">There are no users yet. Create one from the project folder: <code>php bin/raster user admin</code></p><!-- /print.validation.alert('no_users') -->
     <!-- render.authentication.login -->
     <form method="post" class="stack">
       <label>Email or username <input type="text" name="login" autocomplete="username" required></label>

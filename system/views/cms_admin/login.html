@@ -12,7 +12,7 @@
       <!-- render.authentication.login -->
       <form action="" method="post" class="bootstrap-frm">
         <h1>Raster CMS<span>Log in to edit this site.</span></h1>
-        <!-- print.cms.login_message /-->
+        <!-- print.cms.login_message /--><!-- print.validation.alert('no_database') --><p class="notice">No database is configured for this environment (application/config/db/).</p><!-- /print.validation.alert('no_database') --><!-- print.validation.alert('no_users') --><p class="notice">There are no users yet. Create one from the project folder: <code>php bin/raster user admin</code></p><!-- /print.validation.alert('no_users') -->
         <!-- print.validation.alert('login_failed') --><p class="notice">Wrong username or password.</p><!-- /print.validation.alert('login_failed') -->
         <!-- print.validation.alert('slow_down') --><p class="notice">Too many tries from here. Try again in an hour.</p><!-- /print.validation.alert('slow_down') -->
         <p>

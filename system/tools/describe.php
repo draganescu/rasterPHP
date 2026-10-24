@@ -23,7 +23,7 @@ class raster_describe
 	// password) is deliberately not here.
 	static $settings = array(
 		'theme', 'default_view', 'views_ext', 'rewrite', 'strict_templates',
-		'error_document_404', 'error_document_503', 'site_url', 'cms_enabled', 'raster_page_size',
+		'error_document_403', 'error_document_404', 'error_document_500', 'error_document_503', 'site_url', 'cms_enabled', 'raster_page_size',
 		'raster_media_folder', 'feed_limit', 'sitemap_skip', 'protected', 'mail_from',
 		'languages', 'domain_language', 'language_cookie', 'page_cache',
 		'page_cache_ttl', 'page_cache_skip', 'api_system_models',
