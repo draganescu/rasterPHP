@@ -11292,8 +11292,9 @@ test('P3 kickoff: off, and in the default language, the $lang arguments change n
 	});
 });
 
-// takes an index away if it is there: SQLite and MariaDB know DROP INDEX
-// IF EXISTS, MySQL doesn't
+// takes an index away if it is there: SQLite knows DROP INDEX IF EXISTS;
+// MySQL doesn't, and MariaDB, which the adapter also reports as mysql,
+// takes the same ALTER TABLE
 function p3_drop_index($table, $index) {
 	$adapter = R::getDatabaseAdapter();
 	if ($adapter->getDatabase()->getDatabaseType() !== 'mysql') {
@@ -12476,6 +12477,117 @@ test('P3 integration: on /ro/ Duplicate copies the stored item in every language
 	} finally {
 		cms_store::connect();
 		R::getDatabaseAdapter()->exec("DROP TABLE IF EXISTS $type");
+		cms_store::forget();
+	}
+});
+
+// ## P3 review: one address one item, the slug per language, visibility
+
+test('P3 review: an English slug that is another item\'s Romanian address gets a Romanian slug of its own; switcher, cache, history', function () {
+	p3b_table();
+	try {
+		$a = p3b_save(0, array('name' => 'Milk coffee', 'name__ro' => 'Latte'));
+		same(array('milk-coffee', 'latte'), array($a['slug'], $a['slug__ro']));
+		$b = p3b_save(0, array('name' => 'Latte'));
+		same(array('latte', 'latte-2'), array($b['slug'], $b['slug__ro']), 'one /ro/ address, one item');
+		$c = p3b_save(0, array('name' => 'Espresso'));
+		same(null, $c['slug__ro'], 'a slug no one has in Romanian stays the Romanian address');
+		check(p3b_indexed('slughistory', 'slughistory_type_slug'), 'slughistory is indexed by type and slug');
+		with_settings(p2a_on(), function () use ($a, $b) {
+			same((string)$a['id'], (string)cms_store::slug_item('zzp3bmenudata', 'latte', 'ro')['id']);
+			same((string)$b['id'], (string)cms_store::slug_item('zzp3bmenudata', 'latte-2', 'ro')['id']);
+			// asked again, from what the request already knows
+			same(array(), p2a_sql(function () { cms_store::slug_item('zzp3bmenudata', 'latte', 'ro'); }));
+			same('zzp3bmenu/zzp3bmenu_item/latte-2', cms::path_in('zzp3bmenu/zzp3bmenu_item/latte', 'ro', 'en'));
+		});
+		// a draft's Romanian address is not in a visitor's switcher
+		p3b_save($b['id'], array('enabled' => 0));
+		with_settings(p2a_on(), function () {
+			same('zzp3bmenu/zzp3bmenu_item/latte', cms::path_in('zzp3bmenu/zzp3bmenu_item/latte', 'ro', 'en'));
+		});
+		// an old slug two items had: the one still there
+		$m = p3b_save(0, array('name' => 'Mocha'));
+		p3b_save($m['id'], array('slug' => 'mocha-classic'));
+		$n = p3b_save(0, array('name' => 'Mocha'));
+		same('mocha', $n['slug']);
+		p3b_save($n['id'], array('slug' => 'mocha-new'));
+		with_settings(p2a_on(), function () use ($n) { cms_store::delete_item('zzp3bmenudata', $n['id']); });
+		with_settings(p2a_on(), function () use ($m) {
+			same(array('id' => (int)$m['id'], 'slug' => 'mocha-classic'), cms_store::resolve_slug('zzp3bmenudata', 'mocha', 'en'));
+		});
+	} finally {
+		p3b_drop();
+	}
+});
+
+test('P3 review: a new record on a frozen database leaves a declared field without its column to the model', function () {
+	p3a_model(function () {
+		cms_store::connect();
+		cms_types::ensure('zzp3abookdata', array('name' => 'text', 'slug' => 'text', 'enabled' => 'bool', 'published_at' => 'datetime', 'updated_at' => 'datetime', 'created_at' => 'datetime'));
+		$was = database::$frozen;
+		database::$frozen = true;
+		R::freeze(true);
+		try {
+			$saved = cms_store::save_item('zzp3abookdata', 0, array('name' => 'Ana'), array(), 'model');
+			same('Ana', $saved['name']);
+			check(!array_key_exists('note', cms_store::columns('zzp3abookdata')), 'no column made');
+		} finally {
+			database::$frozen = $was;
+			R::freeze($was);
+		}
+		// fluid, the column comes with the default, as always
+		$saved = cms_store::save_item('zzp3abookdata', 0, array('name' => 'Bo'), array(), 'model');
+		same('', $saved['note']);
+	});
+});
+
+test('P3 review: the editor on /ro/ writes the Romanian address, never the English one, and a protected item never redirects for a visitor', function () {
+	$type = 'zzp3rmenudata';
+	try {
+		p2b_site(function ($dir) use ($type) {
+			file_put_contents("$dir/application/views/default/zzp3rmenu.html", '<!doctype html><html><head><title>Menu</title></head><body><ul>'
+				.'<!-- render.cms.zzp3rmenu --><li><b><!-- print.name -->Zz seed<!-- /print.name --></b></li><!-- /render.cms.zzp3rmenu --></ul></body></html>');
+			p2b_server($dir, function ($base) use ($type) {
+				same(200, http('GET', "$base/zzp3rmenu")[0]);
+				cms_store::connect();
+				cms_store::forget();
+				check(!isset(cms_store::columns($type)['slug__ro']), 'no Romanian slugs yet');
+				R::exec("DELETE FROM $type");
+				$id = with_settings(p2a_on(), function () use ($type) { return cms_store::save_item($type, 0, array('name' => 'Apple'), array('name'))['id']; });
+				$editor = p2b_login($base);
+				list($config) = p2b_config("$base/ro/zzp3rmenu", $editor);
+				list($status, $json, $body) = (function () use ($base, $editor, $config, $id) {
+					list($status, $body) = form_post("$base/ro/api/cms/editor_save_item", array('collection' => 'zzp3rmenu', 'id' => $id, 'fields' => array('slug' => 'mar'), 'lang' => 'ro', 'csrf' => $config['csrf']), array("Cookie: $editor"));
+					return array($status, json_decode($body, true), $body);
+				})();
+				same(200, $status, $body);
+				cms_store::forget();
+				same(array('apple', 'mar'), array_values(R::getRow("SELECT slug, slug__ro FROM $type WHERE id = ?", array($id))));
+				check(cms_types::index_slug($type, 'slug__ro') === false, 'made with its index');
+				// the old English address on /ro/ answers 301 to the Romanian one
+				list($status, , $headers) = http('GET', "$base/ro/zzp3rmenu/zzp3rmenu_item/apple");
+				same(301, $status);
+				check(in_array("Location: $base/ro/zzp3rmenu/zzp3rmenu_item/mar", $headers, true), json_encode($headers));
+			});
+			// the same list behind a role: a visitor is sent to log in, not to the Romanian slug
+			$events = "$dir/application/config/the_events.php";
+			$kept = file_get_contents($events);
+			file_put_contents($events, $kept."\nconfig::set('protected')->to(array('zzp3rmenu' => 'editor'));\n");
+			try {
+				p2b_server($dir, function ($base) {
+					list($status, , $headers) = http('GET', "$base/ro/zzp3rmenu/zzp3rmenu_item/apple");
+					check($status !== 301 && !preg_grep('#zzp3rmenu_item/mar#', $headers), "$status ".json_encode($headers));
+					$editor = p2b_login($base);
+					same(301, http('GET', "$base/ro/zzp3rmenu/zzp3rmenu_item/apple", null, array("Cookie: $editor"))[0], 'the editor is redirected');
+				});
+			} finally {
+				file_put_contents($events, $kept);
+			}
+		});
+	} finally {
+		cms_store::connect();
+		R::getDatabaseAdapter()->exec("DROP TABLE IF EXISTS $type");
+		R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS slughistory');
 		cms_store::forget();
 	}
 });

@@ -872,8 +872,9 @@ mock-up is stored only when the collection's table is made.
   names, `field_shared` for a shared field), keeps `saved_lang`, and
   `cms.item_saved` carries `lang`. In the editor on `/ro/menu` an item's
   translated fields are saved in Romanian and its shared ones (a photo, a
-  price) for every language; an item added there is made in the default
-  language. Duplicate copies the stored item, every language of it, and
+  price) for every language, and its address there is its Romanian slug
+  (`slug__ro`, made by that save), never the English one; an item added
+  there is made in the default language. Duplicate copies the stored item, every language of it, and
   undoing a Delete brings its translations back; an item's default slug
   is always made from its default language's words.
 - **Item addresses.** An item's slug in a translation language is in
@@ -889,9 +890,12 @@ mock-up is stored only when the collection's table is made.
   `lang`. A Romanian slug is unique among the Romanian addresses
   (`cms_store::unique_slug($type, $text, $id, $lang)`): other items'
   `slug__ro`, or their `slug` where they have none. The default slug is
-  unique among the default slugs, as always; should it later equal
-  another item's Romanian slug, `/ro/` shows the item whose Romanian slug
-  it is. Every slug an item gets, in every language, is kept in the table
+  unique among the default slugs, as always; when it equals another
+  item's Romanian slug (an English "Latte" after a "Milk coffee" whose
+  Romanian is "Latte"), the item gets a Romanian slug of its own
+  (`latte-2`) on that save, so one Romanian address is one item. The
+  slugs in `slughistory` are looked up by type and slug (an index
+  `slughistory_type_slug`). Every slug an item gets, in every language, is kept in the table
   `slughistory` (`type`, `item`, `lang`, `slug`, `created_at`;
   `cms_store::record_slug()`), with the one it had before when it
   changes, and is never deleted. An item URL whose slug is another
@@ -900,10 +904,14 @@ mock-up is stored only when the collection's table is made.
   item's address in the URL's language, query kept, with no body and not
   cached (`cms_store::resolve_slug()`, answered in `cms::route()` before
   anything prints); a slug an item has now wins over one another item
-  had, a number no item has as its slug is still an id, and drafts and
-  private records redirect only for whoever may see them. GET and HEAD
+  had (of the items that had it, the newest one still there, a published
+  one before a draft), a number no item has as its slug is still an id,
+  drafts and private records redirect only for whoever may see them, and
+  under a `protected` address nothing redirects for a visitor without
+  the role (they get the login or 403 first). GET and HEAD
   only. `i18n::alternates()` (the switcher, `hreflang`) spells an item
-  page with each language's slug (`cms::path_in($path, $lang)`), and
+  page with each language's slug (`cms::path_in($path, $lang)`; a draft's
+  only for whoever may see it), and
   `cms::item_alternates($name, $row)` gives an item's addresses from its
   row with no query. The table is made on the first save in development
   and by `schema --apply` (listed with the system tables) only while

@@ -211,8 +211,22 @@ class cms
 		} catch (Exception $e) {
 			return $path;
 		}
+		// a draft, or a private record, has no other address for whoever
+		// may not see it
+		if ($row && !cms::item_visible($url['name'], (int)$row['id'])) $row = null;
 		$slug = $row ? cms_store::slug_in($row, $lang) : '';
 		return $slug === '' ? $path : substr($path, 0, -strlen($key)).$slug;
+	}
+
+	// whether the person asking may see item $id of collection $name, as
+	// its list would show it (drafts for editors, a private type's records
+	// for whoever may read them); asked once a request per item, until an
+	// item is saved (kept with slug_item's answers)
+	static function item_visible($name, $id) {
+		$key = "visible\n".$name."\n".$id."\n".(cms::loggedin() ? 1 : 0);
+		if (array_key_exists($key, cms_store::$slug_items)) return cms_store::$slug_items[$key];
+		$where = cms_store::list_where($name, array(), array('id' => (int)$id), array());
+		return cms_store::$slug_items[$key] = $where !== null && (bool)R::count(cms::collection_type($name), $where[0], $where[1]);
 	}
 
 	// an item's address in every language, as i18n::alternates() gives a
@@ -327,7 +341,7 @@ class cms
 				// only views that actually render this collection
 				if (cms::renders_collection($view, $url['name'])) {
 					controller::route(preg_quote($in.'/'.$url['name'].'_'.$url['kind'], '%').'(/|$)')->to($view);
-					if ($url['kind'] === 'item') cms::moved_item($url);
+					if ($url['kind'] === 'item') cms::moved_item($url, $view);
 					break;
 				}
 			}
@@ -340,8 +354,17 @@ class cms
 	// never cached. Only an item the visitor may see, only for GET and HEAD,
 	// and only multilingual: off, an old slug is a 404 as it always was.
 	// $url is collection_uri()'s.
-	static function moved_item($url) {
+	static function moved_item($url, $view = null) {
 		if (!i18n::enabled() || count($url['rest']) !== 1 || $url['rest'][0] === '') return;
+		// a page that needs a role the visitor lacks says nothing of its
+		// items, not even their slug in another language: authentication
+		// answers it (login or 403) as for any other address
+		if (class_exists('authentication')) {
+			$uri = '/'.ltrim((string)config::get('uri_string'), '/');
+			foreach (authentication::protection($uri) + ($view === null ? array() : authentication::protection('/'.$view)) as $role) {
+				if (!authentication::can($role)) return;
+			}
+		}
 		if (!in_array(isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : 'GET', array('GET', 'HEAD'), true)) return;
 		// on the command line only `raster render` follows it
 		if (PHP_SAPI === 'cli' && !defined('RASTER_RENDER')) return;
@@ -720,13 +743,16 @@ class cms
 				$lacks = $column !== 'slug' && empty($item[$column]) && cms_store::slug_source($source, $skip, i18n::current()) !== cms_store::slug_source($source, $skip);
 				if (!empty($source['slug']) && !$lacks) continue;
 				$bean = R::load($this->data_name, $item['id']);
-				if (empty($source['slug'])) $bean->slug = cms_store::unique_slug($this->data_name, cms_store::slug_source($source, $skip), $item['id']);
-				if ($lacks) cms_store::translate_slugs($this->data_name, $bean, $skip);
+				$made = empty($source['slug']);
+				if ($made) $bean->slug = cms_store::unique_slug($this->data_name, cms_store::slug_source($source, $skip), $item['id']);
+				// a new default slug that is another item's address in a
+				// language gets one of its own there
+				if ($lacks || $made) cms_store::translate_slugs($this->data_name, $bean, $skip);
 				R::store($bean);
 				cms_store::record_slugs($this->data_name, $bean, $source);
 				// shown as the row shows it: this language's slug, else the default's
 				$data[$key]['slug'] = $column !== 'slug' && !empty($bean->$column) ? $bean->$column : $bean->slug;
-				if ($lacks) $data[$key][$column] = $bean->$column;
+				if ($column !== 'slug' && $bean->$column !== null) $data[$key][$column] = $bean->$column;
 			}
 		}
 		if (empty($data) && (isset($filters['id']) || isset($filters['slug'])) && !headers_sent()) {
