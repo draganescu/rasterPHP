@@ -65,7 +65,7 @@ Compares the content model your templates declare with the database, and changes
 php bin/raster doctor [--json]
 ```
 
-A health check: PHP version and extensions, whether the app needs upgrade steps, whether framework files were edited, whether `.htaccess` has every protection rule, whether `data/` and `media/` are writable, template errors, database drift, deprecated features in use, and in production the site address, mail transport, MCP token, `RASTER_ENV`, `display_errors` and whether PHP takes uploads as large as the editor's (12 MB: `upload_max_filesize` and `post_max_size`). Exit code 1 when something must be fixed. Run it on the server after every deploy.
+A health check: PHP version and extensions, whether the app needs upgrade steps, whether framework files were edited, whether `.htaccess` has every protection rule, whether `data/` and `media/` are writable, template errors, database drift, deprecated features in use, language settings (a code it can't read, `multilingual` with fewer than two languages, and on a multilingual site the translation columns the database still lacks), and in production the site address, mail transport, MCP token, `RASTER_ENV`, `display_errors` and whether PHP takes uploads as large as the editor's (12 MB: `upload_max_filesize` and `post_max_size`). Exit code 1 when something must be fixed. Run it on the server after every deploy.
 
 ## Accounts
 

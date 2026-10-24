@@ -58,6 +58,12 @@ Exactly what the templates declare, nothing more:
 
 A field editors can't reach means the template doesn't declare it. Add the annotation and it's editable. See [The CMS](The-CMS).
 
+## On a multilingual site
+
+On a [multilingual site](Translations) the editor edits the language of the page you are on: on `/ro/about` you write the Romanian, and `/about` keeps its English. The dock says so ("editing: RO (falls back to EN)"). A field with no Romanian yet shows the English and is marked, and the Page panel lists the fields not translated yet and the ones that are the same in every language: a photo or a price changed on `/ro/` changes everywhere. On `/ro/menu` a dish's name is saved in Romanian and its price for every language; a dish added there is made in the default language. The history says which language each revision changed, and Restore brings back every language of that version.
+
+On a production server, run `php bin/raster schema --apply` after adding a language: until then a text field saved in that language is refused, with a message saying so, instead of landing in the default language.
+
 ## Matching your site's look
 
 The editor's own controls take their colours and fonts from the page: the body text and background, and the colour of the first button as the accent. To choose them yourself, set any of these CSS variables on `:root` in your stylesheet:
@@ -77,7 +83,7 @@ The editor's own controls take their colours and fonts from the page: the body t
 
 ## The editor's language
 
-The editor's words are in English. If the page's language (see [Translations](Translations)) has a translation, it's used: Romanian ships with Raster. To translate it into another language, or to change individual words, create `application/i18n/<lang>/raster_editor.php`:
+The editor's words are in English, and Romanian ships with Raster. On a site without `multilingual` the editor speaks the page's language (see [Translations](Translations)) when it has words for it. On a multilingual site it speaks the editor's own language, apart from the page's: the one picked in the dock's language menu (kept with the account), else the first of the browser's languages it has words for, else the site's default language. So an English-speaking owner fixing `/ro/` gets English buttons. To translate it into another language, or to change individual words, create `application/i18n/<lang>/raster_editor.php`:
 
 ```php
 <?php

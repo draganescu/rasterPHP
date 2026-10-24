@@ -176,8 +176,9 @@ Visitors don't see drafts or scheduled items, on lists, detail pages, feeds or s
 ## Names you can use
 
 - Field and collection names: lowercase letters, digits and `_`, starting with a letter.
-- Reserved field names: `slug`, `id`, `updated_at`, `enabled`, `published_at`, and the names of the `cms` model's own methods (`style`, `login`, `logout`, `route`, `setup`, and others).
+- Reserved field names: `slug`, `id`, `updated_at`, `enabled`, `published_at`, `saved_lang`, and the names of the `cms` model's own methods (`style`, `login`, `logout`, `route`, `setup`, and others).
 - Reserved collection names: `users`, `raster`.
+- No field or collection name may contain two underscores in a row (`__`): a translation's column joins a field and a language that way (`headline__ro`, see [Translations](Translations)).
 - Words SQL keeps for itself (`when`, `from`, `group`, `order`) are fine as field names: lists sort and filter by them like any other field.
 - A collection's table leaves out the `_`s: `team_members` is stored in `teammembersdata`. So `team_members` and `teammembers` would share one table and each show the other's items; `lint` reports that as an error.
 

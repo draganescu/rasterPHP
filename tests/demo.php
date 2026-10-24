@@ -3975,8 +3975,8 @@ test('H13', 'signing up twice: one subscriber, one mail within 5 minutes, the sa
 	same("$base/members?done=password_changed", header_value(http('POST', "$base/password/new?token={$t[1]}", array('raster_form' => 'authentication.reset', 'token' => $t[1], 'password' => 'second password', 'password_again' => 'second password'))[2], 'Location'), 'the first link works:');
 });
 
-// the café is multilingual: its readers here read English (--lang=en), and
-// each language is its own issue that a plain rerun reports as sent
+// the café is multilingual: each language is an issue of its own; a plain
+// rerun skips the ones already sent (Romanian, read by nobody here)
 test('H14', 'an interrupted send goes on where it stopped (#86)', function () use ($base) {
 	database::instance('cms');
 	$readers = R::getCol("SELECT email FROM subscriber WHERE status = 'confirmed' ORDER BY id");
@@ -3993,13 +3993,13 @@ test('H14', 'an interrupted send goes on where it stopped (#86)', function () us
 	test_fixture($dir); @mkdir($dir);
 	try {
 		with_file("$dir/zzstop.php", "<?php\nclass zzstop {\n\tstatic \$n = 0;\n\tstatic function listens() { return array('mail.sent' => 'stop'); }\n\tfunction stop() { if (++self::\$n === (int)getenv('ZZ_STOP_AFTER')) exit(3); }\n}\n", function () use ($base) {
-			same(3, raster(array('send', '/journal', '--lang=en'), array('RASTER_URL' => "$base/", 'ZZ_STOP_AFTER' => '2'))[0], 'the run was stopped');
+			same(3, raster(array('send', '/journal'), array('RASTER_URL' => "$base/", 'ZZ_STOP_AFTER' => '2'))[0], 'the run was stopped');
 		});
 	} finally { @rmdir($dir); }
 	same(2, array_sum($got($before)), 'mailed before the stop');
-	list($code, $out) = raster(array('send', '/journal', '--lang=en', '--dry-run'), array('RASTER_URL' => "$base/"));
+	list($code, $out) = raster(array('send', '/journal', '--dry-run'), array('RASTER_URL' => "$base/"));
 	has($out, 'Would send "Journal" (en) to '.(count($readers) - 1).' subscriber(s) who don\'t have it yet');
-	list($code, $out) = raster(array('send', '/journal', '--lang=en'), array('RASTER_URL' => "$base/"));
+	list($code, $out) = raster(array('send', '/journal'), array('RASTER_URL' => "$base/"));
 	same(0, $code, $out);
 	has($out, 'Sent "Journal" (en) to '.(count($readers) - 1).' more subscriber(s), '.count($readers).' in all');
 	$counts = $got($before);
@@ -4007,7 +4007,7 @@ test('H14', 'an interrupted send goes on where it stopped (#86)', function () us
 	// the second was handed over as the run was stopped, before it was noted
 	same(2, $counts[$readers[1]], 'the second reader:');
 	foreach (array_slice($readers, 2) as $email) same(1, isset($counts[$email]) ? $counts[$email] : 0, "$email:");
-	list($code, $out) = raster(array('send', '/journal', '--lang=en'), array('RASTER_URL' => "$base/"));
+	list($code, $out) = raster(array('send', '/journal'), array('RASTER_URL' => "$base/"));
 	same(1, $code, $out);
 	has($out, '/journal was already sent');
 	has($out, 'to '.count($readers).' subscribers');
@@ -4030,10 +4030,10 @@ test('H15', 'readers a send failed get it on a plain rerun, over one SMTP connec
 		return array(array_count_values($m[1]), substr_count($text, "C: EHLO "));
 	};
 	file_put_contents("$log.refuse", $readers[1]."\n");
-	list($code, $out) = raster(array('send', '/about', '--lang=en', '--dry-run'), $env);
+	list($code, $out) = raster(array('send', '/about', '--dry-run'), $env);
 	has($out, 'via smtp://127.0.0.1:'.$port);
 	lacks($out, 'pass@');
-	list($code, $out) = raster(array('send', '/about', '--lang=en'), $env);
+	list($code, $out) = raster(array('send', '/about'), $env);
 	same(1, $code, $out);
 	has($out, $readers[1].': ');
 	has($out, 'Sent "About" (en) to '.(count($readers) - 1).' subscriber(s), 1 failed', $out);
@@ -4043,18 +4043,18 @@ test('H15', 'readers a send failed get it on a plain rerun, over one SMTP connec
 	has((string)file_get_contents($log), 'C: '.base64_encode('s3cret@pass')."\n", 'the whole password is sent:');
 	same(count($readers) - 1, array_sum($counts));
 	unlink("$log.refuse");
-	list($code, $out) = raster(array('send', '/about', '--lang=en'), $env);
+	list($code, $out) = raster(array('send', '/about'), $env);
 	same(0, $code, $out);
 	has($out, 'Sent "About" (en) to 1 more subscriber(s), '.count($readers).' in all');
 	list($counts) = $accepted();
 	foreach ($readers as $email) same(1, isset($counts[$email]) ? $counts[$email] : 0, "$email:");
-	same(1, raster(array('send', '/about', '--lang=en'), $env)[0], 'sent to everyone: once only');
-	list($code, $out) = raster(array('send', '/about', '--lang=en', '--again'), $env);
+	same(1, raster(array('send', '/about'), $env)[0], 'sent to everyone: once only');
+	list($code, $out) = raster(array('send', '/about', '--again'), $env);
 	same(0, $code, $out);
 	has($out, 'Sent "About" (en) to '.count($readers).' subscriber(s)');
 	list($counts) = $accepted();
 	foreach ($readers as $email) same(2, $counts[$email], "--again mails $email again:");
-	list($code, $out) = raster(array('send', '/about', '--lang=en', '--to=test@example.com'), $env);
+	list($code, $out) = raster(array('send', '/about', '--to=test@example.com'), $env);
 	same(0, $code, $out);
 	lacks($out, 'pass@');
 });

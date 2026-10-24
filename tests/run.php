@@ -13804,6 +13804,50 @@ test('P4 review: raster send skips a language already sent, and refuses a langua
 	}
 });
 
+// ## P5.B: doctor names missing translation columns
+
+test('P5.B: doctor names the translation columns a multilingual site lacks, and says nothing of them off', function () use ($root) {
+	$view = "$root/application/views/default/zzp5bdoctor.html";
+	test_fixture($view);
+	file_put_contents($view, '<html><head><title>D</title></head><body>'
+		.'<h1><!-- print.cms.headline -->Hello<!-- /print.cms.headline --></h1>'
+		.'<p><!-- print.cms.seats -->14<!-- /print.cms.seats --></p></body></html>');
+	$type = cms::page_type('/zzp5bdoctor');
+	$schema = new raster_schema();
+	$checks = function ($environment) use ($root) {
+		$found = array();
+		foreach (raster_project::doctor($root, 'application', $environment) as $c) {
+			if (strpos($c['title'], 'translation column') !== false) $found[] = $c;
+		}
+		return $found;
+	};
+	$changes = array();
+	try {
+		// the table as a one-language site makes it
+		$changes = $schema->apply();
+		same(array(), $checks('development'), 'off: nothing about translations');
+		with_settings(array('languages' => array('en', 'ro')), function () use ($checks) {
+			same(array(), $checks('development'), 'languages without multilingual: nothing either');
+		});
+		with_settings(p2a_on(), function () use ($checks, $schema, $type, &$changes) {
+			$found = $checks('development');
+			same(1, count($found), json_encode($found));
+			same('warn', $found[0]['status']);
+			check(preg_match('/^\d+ translation column\(s\) missing$/', $found[0]['title']) === 1, $found[0]['title']);
+			check(strpos($found[0]['detail'], "$type: headline__ro, saved_lang") !== false, $found[0]['detail']);
+			check(strpos($found[0]['detail'], 'seats__ro') === false, 'a shared field has no translation');
+			check(strpos($found[0]['detail'], 'php bin/raster schema --apply') !== false, 'says how to add them');
+			same('fail', $checks('production')[0]['status'], 'production: a fail');
+			// once --apply made them, this page is no longer named
+			$changes = array_merge($changes, $schema->apply());
+			foreach ($checks('development') as $c) check(strpos($c['detail'], $type) === false, $c['detail']);
+		});
+	} finally {
+		@unlink($view);
+		p2a_undo($changes, array($type));
+	}
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";
 foreach ($skipped as $skip) echo "  - $skip\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";

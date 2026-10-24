@@ -505,6 +505,18 @@ class raster_project
 			} else {
 				$add('ok', 'Database matches the templates');
 			}
+			// multilingual: a translated field without its column in some
+			// language shows the default there and can't be translated (#200 R8)
+			if (i18n::enabled()) {
+				$lines = array();
+				$count = 0;
+				foreach ($schema['tables'] as $table) {
+					if (empty($table['missing_translations'])) continue;
+					$lines[] = $table['table'].': '.implode(', ', $table['missing_translations']);
+					$count += count($table['missing_translations']);
+				}
+				if ($lines) $add($environment === 'production' ? 'fail' : 'warn', "$count translation column(s) missing", implode("\n", $lines)."\nphp bin/raster schema --apply adds them, empty: each language shows the default until it is translated");
+			}
 		} catch (Exception $e) {
 			$add('fail', 'No database', $e->getMessage());
 		}

@@ -2258,9 +2258,16 @@ every language is **Multilingual sites**, below).
   has no `languages`, so the mock-up's value stays), and `print.i18n.dir`
   `rtl` for a language written right to left (Arabic, Hebrew, Persian,
   Urdu, …), else `ltr`. Every page in the starter, the demo and the shop
-  starts with them, so the mock-up reads `lang="en"` (emails say
-  `lang="en"` as written for now):
+  starts with them, so the mock-up reads `lang="en"`; so do the demo's
+  emails, which a multilingual site renders in the recipient's language
+  (see **mail**), while the starter's emails keep `lang="en"` as written,
+  so a template-only site's mail never takes the visitor's language:
   `<!-- print.@lang.i18n.language --><!-- print.@dir.i18n.dir --><html lang="en" dir="ltr"><!-- /print.@dir.i18n.dir --><!-- /print.@lang.i18n.language -->`.
+- **Dates print as they are stored** (`2026-10-05`, a time `19:30`) in
+  every language: no month or day name is printed in a language
+  anywhere, in pages or emails. A page that wants "5 octombrie"
+  words it itself (a model returning the parts, or a dictionary key per
+  month). Printing dates in the page's language is issue #238.
 - `render.i18n.languages` gives a switcher with `code`, `url` (this page in
   that language), `state` (`active` for the current one) and `current`
   (true for it). Multilingual, `url` is the language's own address
@@ -2365,6 +2372,7 @@ as a one-language site. Each part is described where it lives:
 | What | Where |
 |---|---|
 | the settings and the language API (`i18n::current()`, `suffix()`, `with()`, …) | **i18n** |
+| `<html lang dir>`, the switcher (`render.i18n.languages`), canonical and `hreflang` links in `<head>`, dates as printed | **i18n** |
 | addresses (`/ro/menu`), links, redirects, headers, cache | **Multilingual URLs** |
 | which fields are translated, columns (`headline__ro`), fallback, `update_page($…, $lang)` | **The CMS**: Translations, Page fields in a language |
 | items in a language: display, sort and filter, `save_item($…, $lang)`; a record type's `translate`/`shared` | **The CMS**: Items in a language; **Records**: Languages |
@@ -2372,13 +2380,19 @@ as a one-language site. Each part is described where it lives:
 | translation columns in `schema`, kept translations | **The CMS**: Changing fields |
 | `untranslatable_text`, `missing_translation_key`, `html_lang_fixed` | **i18n**: Lint, multilingual on |
 | the language emails go out in, the stored `lang` of rows that email | **mail** |
+| `raster send`: each language's rendering to its readers, `--lang` | **Bundled models**: newsletter, Sending an issue |
+| dates as typed: `5/10/2026` day first unless `en-us` | **The CMS**: Types |
+| the sitemap: every language's address, with `hreflang` alternates | **Bundled models**: feed |
+| a static export, a folder per language (`ro/`) | **Static export** |
+| `doctor`: fewer than two languages, a code it can't read, missing translation columns | **Keeping Raster up to date** |
 | the editor on `/ro/…` and the editor's own language | **Editors and agents**: the in-page editor |
-| `set_languages`, `translation_status`, `read_strings`, `write_strings`, `lang` on the page tools | **Editors and agents**: Tools for languages |
+| `set_languages`, `translation_status`, `read_strings`, `write_strings`, `lang` on the page and item tools | **Editors and agents**: Tools for languages |
 
 - **Words have one home each.** Words editors change are CMS fields
   (`print.cms.x`), with a value per language. Fixed words (a button, a
   label the site never changes) are dictionary keys,
-  `print.i18n.common('menu')`. Words a model returns can't be translated,
+  `print.i18n.common('menu')`, an email's too (the starter's and the
+  demo's emails use `print.i18n.emails('key')`). Words a model returns can't be translated,
   so a model returns data (addresses, states, flags) and the view words
   it: the starter's `site::nav()` gives each link its `url` and `state`
   and `_layout.html` says "Home"; the shop's order mail gets the flags
@@ -2922,6 +2936,7 @@ Set in `config/the_app.php` with `config::set('name')->to(value)`.
 | `raster_media_folder` | `media` | where uploads go |
 | `feed_limit` | 20 | items in `feed.items` |
 | `sitemap_skip` | none | views left out of `feed.pages`, besides private pages and the pages the models in use name in `requires()` (login, account, the newsletter's answers, …) |
+| `export_skip` | none | paths (a prefix, or a `#regex#`) `raster export` leaves out, besides pages that need an account and the pages the models in use name in `requires()` (see **Static export**) |
 | `protected` | none | `array('path' => 'role')` |
 | `registration` | true | false turns sign-up off |
 | `login_page`, `after_login`, `reset_page` | `login`, none, `reset` | account pages |
@@ -2953,6 +2968,7 @@ Set in `config/the_app.php` with `config::set('name')->to(value)`.
 | `mcp_token` | none | same as `RASTER_MCP_TOKEN` |
 | `mcp_write_views` | false | lets MCP over HTTP write templates, theme files, dictionaries and the languages setting (`write_view`, `write_asset`, `write_strings`, `set_languages`); over stdio it always can |
 | `api_system_models` | `cms` | system models reachable at `/api`, for what their `api()` lists |
+| `api_blocked` | `mcp`, `api` | models never reachable at `/api`; setting it replaces the list, so keep those two in it |
 | `spam_min_seconds` | 3 | a post sooner than this after its form was shown is `too_fast`; false turns the stamp checks off |
 | `spam_max_age` | 86400 | a stamp older than this many seconds is `stamp_old`; false allows any age |
 | `spam_per_ip`, `spam_per_email` | 5, 3 | posts of one form in an hour from one IP, with one address; false turns that limit off |
@@ -3036,8 +3052,11 @@ stamp check, so people with a page open send it again.
   says are on purpose), a `data/secret` the user running it can't read or
   that isn't a key, a language code it can't read, `multilingual` with
   fewer than two languages and, multilingual, a `domain_language` without
-  a site address (`RASTER_URL`, `site_url`) on a host of no language,
-  and, in production, one address that sent one form many different
+  a site address (`RASTER_URL`, `site_url`) on a host of no language and
+  the translation columns the database lacks (each table with the
+  columns `schema` lists in `missing_translations`, `headline__ro`,
+  `saved_lang`: a warning in development, a failure in production, fixed
+  by `schema --apply`), and, in production, one address that sent one form many different
   emails today (many people share it), the site address, mail, tokens,
   whether PHP shows errors (`display_errors`) and whether PHP takes the
   editor's pictures: it warns when `upload_max_filesize` is below 12M or
