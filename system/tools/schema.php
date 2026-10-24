@@ -15,7 +15,9 @@
 //   (missing_translations), and so is a table without saved_lang.
 //   Off, and for a language or field no longer used, they are kept
 //   translations: never orphans, never renamed, never drift, so turning
-//   multilingual on again brings them back.
+//   multilingual on again brings them back. An item's slug in a language
+//   (slug__ro) is drift the same way, and --apply indexes it; slughistory
+//   (the slugs items had) is listed with the system tables only when on.
 //
 // In development missing columns appear on the next request that renders
 // them. In production the database is frozen: run `raster schema --apply`.
@@ -112,6 +114,9 @@ class raster_schema {
 				if ($class && method_exists($class, 'schema')) $tables += $class::schema();
 			}
 		}
+		// every slug an item has had, for the redirects (#138); multilingual
+		// only, so a site without languages lists what it always did
+		if (i18n::enabled()) $tables += array('slughistory' => cms_store::$slughistory);
 		return $tables;
 	}
 
@@ -144,6 +149,11 @@ class raster_schema {
 				$orphans[] = $column;
 				continue;
 			}
+			// an item's slug in a language (slug__ro) is Raster's, as the slug is
+			if ($base === 'slug' && $kind !== 'page') {
+				if (!in_array(substr($column, strlen($base)), $suffixes, true)) $kept[] = $column;
+				continue;
+			}
 			// on, a field's own translation belongs to it, and one of a
 			// field no template has any more goes with that field's orphan
 			$known = in_array(substr($column, strlen($base)), $suffixes, true);
@@ -167,6 +177,14 @@ class raster_schema {
 				}
 			}
 			if (!array_key_exists('saved_lang', $columns)) $missing_translations[] = 'saved_lang';
+		}
+		// an item's slug in each language (slug__ro), looked up as its slug is
+		$missing_slugs = array();
+		if (i18n::enabled() && $kind !== 'page') {
+			foreach (i18n::available() as $lang) {
+				$column = cms_store::slug_column($lang);
+				if ($column !== 'slug' && !array_key_exists($column, $columns)) $missing_slugs[] = $column;
+			}
 		}
 
 		// An orphan next to a new field is most likely a renamed annotation.
@@ -227,6 +245,7 @@ class raster_schema {
 			$table['translated'] = array_keys(array_filter($fields, function ($f) { return !empty($f['translate']); }));
 			$table['missing_translations'] = $missing_translations;
 		}
+		if (i18n::enabled() && $kind !== 'page') $table['missing_translations'] = array_merge(isset($table['missing_translations']) ? $table['missing_translations'] : array(), $missing_slugs);
 		return $table + array('kept' => $kept);
 	}
 
@@ -311,10 +330,20 @@ class raster_schema {
 				$bean->updated_at = R::isoDateTime();
 				R::store($bean);
 			}
-			// every table with slugs gets its index, new or made before 2.1.10
+			// every table with slugs gets its index, new or made before 2.1.10;
+			// multilingual, also a slug column per language (slug__ro), each
+			// with its own index
 			foreach ($status['tables'] as $table) {
 				if (!cms_store::table_exists($table['table']) || !array_key_exists('slug', cms_store::columns($table['table']))) continue;
 				if (cms_types::index_slug($table['table'])) $changes[] = "indexed {$table['table']}.slug";
+				if (!i18n::enabled() || $table['kind'] === 'page') continue;
+				$had = cms_store::columns($table['table']);
+				cms_types::ensure($table['table'], array(), array('slug'));
+				foreach (cms_store::slug_columns(cms_store::columns($table['table'])) as $column) {
+					if ($column === 'slug') continue;
+					if (!array_key_exists($column, $had) && !in_array("added {$table['table']}.$column", $changes, true)) $changes[] = "added {$table['table']}.$column";
+					if (cms_types::index_slug($table['table'], $column)) $changes[] = "indexed {$table['table']}.$column";
+				}
 			}
 			// bundled and model-declared tables: each column declared as the
 			// type of its default (TEXT, INT), with no row written. A stored
@@ -407,6 +436,9 @@ class raster_schema {
 		cms_store::connect();
 		if (!array_key_exists($column, cms_store::columns($table))) throw new InvalidArgumentException("$table has no column $column");
 		if ($dry_run) return "would drop $table.$column";
+		// a slug column per language (slug__ro) has an index, which SQLite
+		// won't drop the column under; MySQL drops it with the column
+		if (strpos($column, 'slug__') === 0 && R::getDatabaseAdapter()->getDatabase()->getDatabaseType() !== 'mysql') R::exec("DROP INDEX IF EXISTS `{$table}_{$column}`");
 		R::exec("ALTER TABLE `$table` DROP COLUMN `$column`");
 		return "dropped $table.$column";
 	}

@@ -64,6 +64,8 @@ This covers page fields, the `site_` fields every page shares, and collection it
 
 Behind the scenes a translated field `headline` keeps its Romanian in a column `headline__ro` (`pt-br` gives `headline__pt_br`). That's why field and collection names may not contain two underscores in a row. In development the columns appear on their own; on a production server, run `php bin/raster schema --apply` after adding a language. Turning multilingual off keeps every translation, ready for when it's turned on again.
 
+An item has an address in every language. Once a dish has a Romanian name, it gets a Romanian slug made from it, so the flat white is at `/menu/menu_item/flat-white` and `/ro/menu/menu_item/cafea-cu-lapte`. Until it has one, its Romanian page is at its English slug (`/ro/menu/menu_item/flat-white`). The language switcher and the `hreflang` links follow. An item's address in the wrong language, or one it had before you renamed it, sends the visitor to the right one with a permanent redirect (301), so old links and search results keep working. Raster remembers every slug an item has had (table `slughistory`); this needs multilingual on, and without it a renamed item's old address is a 404 as before.
+
 ## Keep words out of models
 
 A model's PHP can't be translated, so a model returns data and the template has the words. The starter's menu is an example: `site::nav()` returns each link's address and whether it is the current page, and `_layout.html` says "Home", "News" and "About". When a model needs to say one thing or another, it sets a flag and the template words each case with `print.if`, as the shop's order emails do for "paid by card" and "to be paid on delivery".
