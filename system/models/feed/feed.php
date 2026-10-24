@@ -65,8 +65,9 @@ class feed
 			$path = cms::page_path($view, $inspector->ext);
 			if ($path === null) continue;
 			$name = substr($view, 0, -strlen($inspector->ext));
-			if (preg_match('/^([a-z0-9_]+)_item$/', basename($name), $m)) {
-				if ($open('/'.$name) && $open(cms::item_path($m[1]))) $item_views[] = $m[1]; else $closed[] = $m[1];
+			$collection = cms::item_view($name);
+			if ($collection !== null) {
+				if ($open('/'.$name) && $open(cms::item_path($collection))) $item_views[] = $collection; else $closed[] = $collection;
 				continue;
 			}
 			if (in_array($name, $skip)) continue;

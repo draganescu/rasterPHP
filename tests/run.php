@@ -8375,7 +8375,10 @@ test('P0.B off is identical: the old copies and the one parser agree', function 
 		'/news/news_items/tag/php', '/news/news_items/tag/php/news_page/2', '/news/news_items/headline/Filler%201', '/news/news_items/tag/php/tag/js',
 		'/news/news_items/tag', '/news/news_item/3', '/news/news_item/007', '/news/news_item/raster-runs', '/news/news_item', '/news/news_item/a/b',
 		'/landing_page', '/landing_items/', '/docs/news_page', '/archive/news_page/2', '/events/events_item/jazz-night', '/events/events_items/date/2026-10-10',
-		'/menu/menu_items/price/14.50', '/news/news_page/2.rss', '/journal/journal_page/2.rss', '/team_members/team_members_item/ada', '/news_page/2');
+		'/menu/menu_items/price/14.50', '/news/news_page/2.rss', '/journal/journal_page/2.rss', '/team_members/team_members_item/ada', '/news_page/2',
+		// a page with two paged lists: the pager keeps the other list's page in its links
+		'/news/news_page/2/events_page/2', '/news/events_page/2/news_page/2', '/events/events_item/jazz/news_page/2', '/news/news_items/tag/php/events_page/3',
+		'/news/news_items/tag/php/news_page/2/events_page/3', '/events/events_page/3/news_page/2', '/news/news_item/3/events_page/2', '/menu/news_page/2/menu_items/price/4');
 	$uri_segments = config::get('uri_segments');
 	try {
 		foreach ($urls as $url) {
@@ -8401,6 +8404,31 @@ test('P0.B off is identical: the old copies and the one parser agree', function 
 		}
 	} finally {
 		config::set('uri_segments')->to($uri_segments);
+	}
+	// the pager's links, filter links and _item views, as each copy made them
+	$old_page = function ($name, $n, $uri) {
+		$base = preg_replace('#/'.preg_quote($name, '#').'_page/\d+/?$#', '', rtrim($uri, '/'));
+		if ($base === '') $base = '/';
+		$link = rtrim(config::get('link_uri'), '/');
+		return $n <= 1 ? $link.($base === '/' ? '/' : $base) : $link.rtrim($base, '/').'/'.$name.'_page/'.$n;
+	};
+	foreach ($urls as $url) {
+		foreach (array('news', 'events') as $name) {
+			foreach (array(1, 2, 3) as $n) same($old_page($name, $n, $url), cms::page_link($name, $n, $url), "page $n of $name at $url");
+		}
+	}
+	foreach (array(array('tag'), array('tag', 'year'), array('tag', 'empty'), array('empty')) as $fields) {
+		$item = array('tag' => 'a b/ç', 'year' => 2026, 'empty' => '');
+		$old = config::get('link_uri').'news/news_items/';
+		foreach ($fields as $field) $old .= $field.'/'.rawurlencode(isset($item[$field]) ? $item[$field] : '').'/';
+		same(rtrim($old, '/'), cms::filter_link('news', $fields, $item), implode(',', $fields));
+	}
+	foreach (array('news_item', 'staff/booking_item', 'news', 'docs/news_items', 'item', '_item', 'a/b/x2_item') as $view) {
+		$feed = preg_match('/^([a-z0-9_]+)_item$/', basename($view), $m) ? $m[1] : null;
+		$inspector = preg_match('/^(?:(.*)\/)?([a-z0-9_]+)_item$/', $view, $m) ? $m[2] : null;
+		same($feed, cms::item_view($view), "feed: $view");
+		same($inspector, cms::item_view($view), "inspector: $view");
+		same((bool)preg_match('/_item$/', $view), cms::item_view($view) !== null || $view === '_item', "Admin menu: $view");
 	}
 	// item links: the slug, encoded, else the id
 	foreach (array(array('id' => 3, 'slug' => 'raster-runs'), array('id' => 4, 'slug' => ''), array('id' => 5, 'slug' => 'a b/ç')) as $item) {
@@ -8500,6 +8528,18 @@ test('P0.B saving a team_members item sends collection team_members, and lint fl
 		cms_store::delete_item('zzp0bmembersdata', $item['id'], 'zzp0b_members');
 		cms_store::save_item('zzp0bmembersdata', 0, array('name' => 'Bare'), array('name'));
 		same(array('zzp0b_members', 'zzp0b_members', 'zzp0bmembers'), $p0b_events, 'cms_store');
+		// a declared type is called by its own name, whatever name the editor posts
+		temp_model(APPBASE.'models/zzp0brec', array('zzp0brec.php' => "<?php\nclass zzp0brec\n{\n\tstatic function types() {\n\t\treturn array('zzp0brec' => array('fields' => array('name' => '')));\n\t}\n}\n"));
+		try {
+			controller::forget_models();
+			cms_records::forget();
+			same('zzp0brec', cms_store::collection_of('zzp0brecdata', 'zzp0b_rec'));
+			same('zzp0brec', cms_store::collection_of('zzp0brecdata'));
+		} finally {
+			remove_dir(APPBASE.'models/zzp0brec');
+			controller::forget_models();
+			cms_records::forget();
+		}
 		// a second name for the same table is an error, next to the first
 		file_put_contents("$theme/zzp0bteam2.html", "<html><head><title>Team 2</title></head><body>\n<!-- render.cms.zzp0bmembers --><h2><!-- print.name -->Ada<!-- /print.name --></h2><!-- /render.cms.zzp0bmembers --></body></html>");
 		$problems = (new raster_inspector())->lint_collections();

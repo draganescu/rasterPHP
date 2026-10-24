@@ -43,15 +43,11 @@ class pagination
 			// a limit list is one page
 			if ($limited) $total = min($total, $perpage);
 			$current = max(1, $asked['page']);
-			$uri = (string)config::get('uri_string');
-			$base = preg_replace('#/'.preg_quote($name, '#').'_page/\d+/?$#', '', rtrim($uri, '/'));
-			if ($base === '') $base = '/';
-			$link = rtrim(config::get('link_uri'), '/');
 			// a list filtered from the URL (stylist=?stylist) keeps its query
 			$query = http_build_query(array_diff_key($_GET, array('done' => 1)));
 			$query = $query === '' ? '' : '?'.$query;
-			$url = function ($n) use ($link, $base, $name, $query) {
-				return ($n <= 1 ? $link.($base === '/' ? '/' : $base) : $link.rtrim($base, '/').'/'.$name.'_page/'.$n).$query;
+			$url = function ($n) use ($name, $query) {
+				return cms::page_link($name, $n).$query;
 			};
 		} else {
 			controller::load_model($model);

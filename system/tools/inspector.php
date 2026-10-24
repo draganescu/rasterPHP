@@ -1417,9 +1417,8 @@ class raster_inspector {
 	// item page, wherever it is.
 	function slug_for_view($view) {
 		$name = substr($view, 0, -strlen($this->ext));
-		if (preg_match('/^(?:(.*)\/)?([a-z0-9_]+)_item$/', $name, $m)) {
-			return cms::item_path($m[2]);
-		}
+		$collection = cms::item_view($name);
+		if ($collection !== null) return cms::item_path($collection);
 		return cms::slug_for_uri('/'.$name);
 	}
 

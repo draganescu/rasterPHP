@@ -645,7 +645,7 @@ class authentication
 			$path = cms::page_path($view, $inspector->ext);
 			if ($path === null) continue;
 			$name = substr($view, 0, -strlen($inspector->ext));
-			if (preg_match('/_item$/', $name)) continue;
+			if (cms::item_view($name) !== null) continue;
 			$role = null;
 			foreach (self::protection('/'.$name) as $needs) {
 				if ($needs === 'edit') $needs = 'editor';

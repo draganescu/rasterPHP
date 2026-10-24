@@ -124,23 +124,53 @@ class cms
 	// What the URL asks of the list $name: the item ('' for
 	// /news/news_item with nothing after it, null for none), the filters and
 	// the page (0 when it names none). An item and filters are under the
-	// collection's own name (/news/news_item/3); a page is the list's
-	// wherever it shows (/events/news_page/2).
+	// collection's own name (/news/news_item/3). A page is the list's
+	// wherever it shows and whatever other lists the URL pages too:
+	// /events/news_page/2, /news/news_page/2/events_page/3.
 	static function collection_request($name, $uri = null) {
-		$url = cms::collection_uri($uri === null ? config::get('uri_string') : $uri);
+		$uri = $uri === null ? config::get('uri_string') : $uri;
 		$asked = array('item' => null, 'filters' => array(), 'page' => 0);
-		if (!$url || $url['name'] !== $name) return $asked;
-		$own = substr($url['path'], -strlen($name) - 1) === '/'.$name;
+		$segments = explode('/', trim(preg_replace('#/+#', '/', (string)$uri), '/'));
+		$at = array_keys($segments, $name.'_page', true);
+		if ($at && isset($segments[end($at) + 1])) $asked['page'] = (int)$segments[end($at) + 1];
+		$url = cms::collection_uri($uri);
+		if (!$url || $url['name'] !== $name || substr($url['path'], -strlen($name) - 1) !== '/'.$name) return $asked;
 		$rest = $url['rest'];
-		if ($url['kind'] === 'item' && $own) $asked['item'] = isset($rest[0]) ? $rest[0] : '';
-		if ($url['kind'] === 'page' && isset($rest[0])) $asked['page'] = (int)$rest[0];
+		if ($url['kind'] === 'item') $asked['item'] = isset($rest[0]) ? $rest[0] : '';
 		if ($url['kind'] === 'items') {
 			for ($i = 0; $i + 1 < count($rest); $i += 2) {
-				if ($rest[$i] === $name.'_page') $asked['page'] = (int)$rest[$i + 1];
-				elseif ($own) $asked['filters'][$rest[$i]] = $rest[$i + 1];
+				if ($rest[$i] !== $name.'_page') $asked['filters'][$rest[$i]] = $rest[$i + 1];
 			}
 		}
 		return $asked;
+	}
+
+	// The collection a view is the item page of (news_item, or
+	// staff/booking_item, is news's or booking's), or null. $view is the
+	// view's name, without its extension.
+	static function item_view($view) {
+		return preg_match('#^(?:.*/)?([a-z0-9_]+)_item$#', (string)$view, $m) ? $m[1] : null;
+	}
+
+	// page $n of the list $name on the page at $uri (the current one), as
+	// the pager links it: /news/news_page/2, /news/news_items/tag/php/news_page/2,
+	// and the page without a number for page 1
+	static function page_link($name, $n, $uri = null) {
+		$uri = $uri === null ? (string)config::get('uri_string') : (string)$uri;
+		$base = preg_replace('#/'.preg_quote($name, '#').'_page/\d+/?$#', '', rtrim($uri, '/'));
+		if ($base === '') $base = '/';
+		$link = rtrim(config::get('link_uri'), '/');
+		return $n <= 1 ? $link.($base === '/' ? '/' : $base) : $link.rtrim($base, '/').'/'.$name.'_page/'.$n;
+	}
+
+	// the list $name filtered by the $fields of $item:
+	// /news/news_items/tag/php, without the last slash, as item links are (#131)
+	static function filter_link($name, $fields, $item) {
+		$link = config::get('link_uri').$name.'/'.$name.'_items/';
+		foreach ($fields as $field) {
+			$link .= $field.'/'.rawurlencode(isset($item[$field]) ? $item[$field] : '').'/';
+		}
+		return rtrim($link, '/');
 	}
 
 	// /news/news_item, the page every item of news shows on, and with $key
@@ -529,12 +559,7 @@ class cms
 			$base = config::get("link_uri");
 			$data[$key]['raster_detail_link'] = cms::item_url($name, $item);
 			foreach ($filter_link_params as $at_key => $filter_fields) {
-				$filter_link = $base.$name.'/'.$name.'_items/';
-				foreach ($filter_fields as $field) {
-					$filter_link .= $field.'/'.rawurlencode(isset($item[$field]) ? $item[$field] : '').'/';
-				}
-				// without the last slash, as item links are (#131)
-				$data[$key]['raster_filter@'.$at_key] = rtrim($filter_link, '/');
+				$data[$key]['raster_filter@'.$at_key] = cms::filter_link($name, $filter_fields, $item);
 			}
 		}
 

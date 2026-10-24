@@ -546,14 +546,14 @@ class cms_store {
 		return true;
 	}
 
-	// The collection whose item an event is about: the name the caller
-	// knows, else a declared type's own. Only code that passes a bare table
-	// gets its name back from the table (newsdata -> news), which has lost
-	// any underscores (teammembersdata, #33).
+	// The collection whose item an event is about: a declared type's own
+	// name, else the name the caller knows. Only code that passes a bare
+	// table gets its name back from the table (newsdata -> news), which has
+	// lost any underscores (teammembersdata, #33).
 	static function collection_of($type, $name = null) {
-		if ($name !== null) return $name;
 		$info = cms_records::for_table($type);
-		return $info ? $info['name'] : preg_replace('/data$/', '', $type);
+		if ($info) return $info['name'];
+		return $name !== null ? $name : preg_replace('/data$/', '', $type);
 	}
 
 	// ##Users (kept for older code; see the authentication model)
