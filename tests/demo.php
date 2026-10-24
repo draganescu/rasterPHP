@@ -5013,6 +5013,99 @@ test('S7', 'a member sees their replies on /account and changes one without a to
 	has(http('GET', "$base/account", null, $h)[1], 'no, 2 people: no');
 });
 
+// ## P1.D: export through the live prefixes (#137)
+
+// a stand-in for the live site with /<lang>/ addresses (P1.B), so the crawl
+// is tested on its own: the export's server is replaced by canned pages
+function p1d_fake_export($root, $out, $multilingual) {
+	global $tmp;
+	$script = "$tmp/p1d-export.php";
+	file_put_contents($script, '<?php require '.var_export("$root/system/boot.php", true).'; boot::$appname = "demo"; boot::cli();'
+		.' require_once BASE."tools/inspector.php"; require_once BASE."tools/export.php";'
+		.' config::set("multilingual")->to('.var_export($multilingual, true).');'
+		.' class p1d_export extends raster_export {'
+		.'  public $asked = array();'
+		.'  protected function start_server() { $this->base = "http://127.0.0.1:9/"; }'
+		.'  protected function stop_server() {}'
+		.'  protected function fetch($path, $headers = array()) {'
+		.'   $this->asked[] = $path.($headers ? " ".implode(" ", $headers) : "");'
+		.'   $site = array("/" => array("menu", "ro/"), "/menu" => array("", "menu/menu_item/coffee", "ro/menu"), "/menu/menu_item/coffee" => array("menu", "ro/menu/menu_item/cafea"),'
+		.'    "/ro/" => array("ro/", "ro/menu", ""), "/ro/menu" => array("ro/", "ro/menu/menu_item/cafea", "menu", "about?lang=en", "login"), "/ro/menu/menu_item/cafea" => array("ro/menu", "ro/login"));'
+		.'   if ($path === "/ro") return array(301, "", "text/html");'
+		.'   if (!isset($site[$path])) return array(404, "<!doctype html><p>".(strpos($path, "/ro/") === 0 ? "Negasit" : "Not found")."</p>", "text/html");'
+		.'   if (!i18n::enabled()) $site[$path] = preg_grep("#^ro/#", $site[$path], PREG_GREP_INVERT);'
+		.'   $html = "<!doctype html><html><body>"; foreach ($site[$path] as $link) $html .= "<a href=\"".$this->base.$link."\">x</a>";'
+		.'   return array(200, $html."</body></html>", "text/html; charset=utf-8");'
+		.'  }'
+		.' }'
+		.' @mkdir('.var_export($out, true).', 0775, true);'
+		.' $e = (new p1d_export('.var_export($root, true).', '.var_export($out, true).', "https://cafe.example/"))->run();'
+		.' echo json_encode(array("errors" => $e->errors, "asked" => $e->asked));');
+	list($code, $output) = raster_php($script);
+	same(0, $code, $output);
+	$result = json_decode($output, true);
+	check(is_array($result), $output);
+	return $result;
+}
+test('N9', 'P1.D export: a multilingual site is crawled from each language\'s own address', function () use ($root, $tmp) {
+	$out = "$tmp/p1d-multilingual";
+	$result = p1d_fake_export($root, $out, true);
+	same(array(), $result['errors']);
+	foreach (array('index.html', 'menu/index.html', 'menu/menu_item/coffee/index.html', 'ro/index.html', 'ro/menu/index.html', 'ro/menu/menu_item/cafea/index.html', '404.html', 'ro/404.html') as $file) {
+		check(is_file("$out/$file"), "missing $file");
+	}
+	check(!file_exists("$out/ro/menu/menu_item/coffee/index.html"), 'the default paths are not fetched again in ro');
+	check(in_array('/ro/', $result['asked']), 'the language\'s home is /ro/ (D5)');
+	check(!in_array('/ro', $result['asked']), 'not /ro, which redirects');
+	check(!in_array('/ro/login', $result['asked']), '/ro/login is left out like /login');
+	same(array(), preg_grep('/Cookie:/', $result['asked']), 'no language cookie');
+	$ro = file_get_contents("$out/ro/menu/index.html");
+	has($ro, 'href="https://cafe.example/ro/menu/menu_item/cafea"');
+	has($ro, 'href="https://cafe.example/menu"', 'the link to English is left as the page has it');
+	has($ro, 'href="https://cafe.example/about?lang=en"', 'no ?lang= rewriting');
+	has(file_get_contents("$out/ro/404.html"), 'Negasit');
+	lacks(file_get_contents("$out/404.html"), 'Negasit');
+});
+test('N9', 'P1.D export: multilingual off still fetches the pages again with the language cookie', function () use ($root, $tmp) {
+	$out = "$tmp/p1d-off";
+	$result = p1d_fake_export($root, $out, false);
+	same(array(), $result['errors']);
+	check(in_array('/menu Cookie: cafe_lang=ro', $result['asked']), implode(', ', $result['asked']));
+	same(array(), preg_grep('#^/ro(/|$)#', $result['asked']), 'no /ro/ addresses are crawled');
+	check(is_file("$out/ro/menu/index.html") && is_file("$out/ro/menu/menu_item/coffee/index.html"), 'each page again in /ro/');
+	check(!file_exists("$out/ro/404.html"), 'one 404 page');
+	// the page in ro links to ro pages
+	has(file_get_contents("$out/ro/menu/index.html"), 'href="https://cafe.example/ro/menu/menu_item/coffee"');
+});
+test('N9', 'P1.D export: the demo in multilingual mode stays in /ro/ (needs the live prefixes)', function () use ($root, $tmp) {
+	$config = "$root/demo/config/the_app.php";
+	$out = "$tmp/p1d-demo";
+	with_file($config, file_get_contents($config)."\nconfig::set('multilingual')->to(true);\n", function () use ($out) {
+		list($code, $output) = raster(array('export', $out, '--url=https://cafe.example/'));
+		same(0, $code, $output);
+		foreach (array('index.html', 'menu/index.html', 'ro/index.html', 'ro/menu/index.html', 'ro/about/index.html', '404.html') as $file) check(is_file("$out/$file"), "missing $file");
+		foreach (array('ro/index.html', 'ro/menu/index.html', 'ro/about/index.html') as $file) {
+			$html = file_get_contents("$out/$file");
+			lacks($html, '?lang=', "$file: no ?lang= links");
+			// every link in the page but the language switcher stays in /ro/
+			preg_match_all('#<a\b(?![^>]*class="lang)[^>]*href="https://cafe\.example/([^"]*)"#', $html, $links);
+			check($links[1], "$file has links");
+			foreach ($links[1] as $link) check(strpos($link, 'ro/') === 0 || preg_match('#^(demo|media)/|\.(rss|atom|xml|json|txt)$#', $link), "$file links to /$link");
+		}
+		has(file_get_contents("$out/ro/menu/index.html"), 'href="https://cafe.example/ro/about"');
+		lacks(file_get_contents("$out/index.html"), 'href="https://cafe.example/ro/menu/menu_item/', 'the English pages link in English');
+	});
+});
+test('N9', 'P1.D export: the site\'s address comes from site_url when --url and RASTER_URL are not set (#137)', function () use ($tmp) {
+	$out = "$tmp/p1d-site-url";
+	list($code, $output) = raster(array('export', $out), array('RASTER_URL' => '', 'CAFE_SITE_URL' => 'https://cafe.example/shop/'));
+	same(0, $code, $output);
+	has($output, 'linked to https://cafe.example/shop/');
+	has(file_get_contents("$out/index.html"), 'href="https://cafe.example/shop/menu"');
+	list($code, $output) = raster(array('export', $out, '--url=https://other.example/'), array('RASTER_URL' => '', 'CAFE_SITE_URL' => 'https://cafe.example/shop/'));
+	has($output, 'linked to https://other.example/', '--url wins');
+});
+
 // ## No PHP warnings, notices or deprecations on any request
 
 $log = is_file("$tmp/php-errors.log") ? file_get_contents("$tmp/php-errors.log") : '';

@@ -2148,10 +2148,16 @@ of lists and filter pages come along; drafts and the editor don't.
 
 - `/about` becomes `about/index.html`, feeds keep their names, a missing
   page becomes `404.html`, and theme files and `media/` are copied.
-- Links point at `--url` (the site's address, `RASTER_URL`, or root-relative
-  links when neither is set).
-- Every language after the first goes in `/<lang>/`, and the language
-  switcher links there.
+- Links point at `--url`, else the site's address (`RASTER_URL`, then
+  `site_url`), else they are root-relative.
+- Every language after the first goes in `/<lang>/`: `/ro/` becomes
+  `ro/index.html` and `/ro/menu` `ro/menu/index.html`. A multilingual site
+  (`multilingual` on) is crawled from each language's own address (`/`,
+  `/ro/`), following the links its pages carry, so a language's pages are
+  the ones it links to, and each language gets its own `404.html`
+  (`ro/404.html`). With languages but `multilingual` off, each page is
+  fetched again in every other language, and the export rewrites its links
+  and the language switcher's `?lang=` links to `/<lang>/`.
 - **Forms need PHP**, so a page that still shows one stops the export and
   nothing is written. Wrap forms in `<!-- print.if.live -->` and write what
   the static site shows instead in `<!-- print.if.static -->` (a phone
@@ -2162,7 +2168,8 @@ of lists and filter pages come along; drafts and the editor don't.
 - Left out: pages that need an account, the pages the models in use name
   in `requires()` (login, sign-up, password and newsletter pages, wherever
   their settings put them), `/api`, and paths in
-  `config::set('export_skip')` or `--skip=/path`. The command lists links to left-out pages and query
+  `config::set('export_skip')` or `--skip=/path`, under every language's
+  prefix too (`/ro/login`). The command lists links to left-out pages and query
   strings, since a static host can't answer them.
 - **Exporting again** to the same folder writes only files that changed and
   removes the ones the site no longer has, so a deploy uploads just those.
