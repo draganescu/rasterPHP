@@ -35,6 +35,9 @@ class cms
 	private $pages = array();
 	// fields whose translation columns were looked for (development)
 	private $translations = array();
+	// field => where the page prints it (null for words, '@href' …), read
+	// from the page once (development, multilingual)
+	private $print_places = null;
 
 	// ##Naming
 	// Bean types must be lowercase letters and digits only.
@@ -388,10 +391,27 @@ class cms
 		// mock-up's type and starts as the mock-up
 		$example = trim(template::get('current_block'));
 		$multilingual = i18n::enabled();
-		// D7: printed here, does the field have a translation per language?
+		// D7: does the field have a translation per language? Only when every
+		// place the page prints it (its view and the layouts dried into it)
+		// is a place for words, as the content model says: a URL printed as a
+		// link's text and in its href stays one value
+		if ($multilingual && !database::$frozen && $this->print_places === null) {
+			// read before the first cms print runs, while every one is still there
+			$this->print_places = array();
+			preg_match_all('/<!-- print\.(?:([@+])([a-zA-Z0-9_:-]+)\.)?cms\.([a-z0-9_]+)\b[^>]*?-->/', (string)template::instance()->output, $prints, PREG_SET_ORDER);
+			foreach ($prints as $print) $this->print_places[$print[3]][] = $print[1] === '' ? null : $print[1].$print[2];
+		}
 		$attr = $multilingual ? template::get('current_attr') : null;
-		$translates = function ($field_type) use ($name, $attr) {
-			return cms_types::translates($field_type, $attr === null ? null : substr($attr, 1)) ? array($name) : array();
+		$places = $this->print_places;
+		$translates = function ($field_type) use ($name, $attr, $places) {
+			$where = isset($places[$name]) ? $places[$name] : array();
+			$where[] = $attr;
+			foreach (array_unique($where) as $at) {
+				// an attribute a print adds to (+class) is never words
+				if ($at !== null && $at[0] === '+') return array();
+				if (!cms_types::translates($field_type, $at === null ? null : substr($at, 1))) return array();
+			}
+			return array($name);
 		};
 		if (!array_key_exists($name, $page->getProperties())) {
 			if (database::$frozen) return false;
@@ -432,6 +452,9 @@ class cms
 				if ($translated) {
 					$mark['untranslated'] = !isset($row[$column]) || (string)$row[$column] === '';
 					$mark['fallback'] = (string)cms_types::show($row[$name]);
+					// what is stored in this language: an undo puts back
+					// nothing, never the default language's words shown
+					if ($mark['untranslated']) $mark['value'] = '';
 				}
 			}
 		}

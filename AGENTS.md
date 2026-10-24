@@ -818,9 +818,11 @@ mock-up is stored only when the collection's table is made.
   Page tables and `sitepage` get them, and a `saved_lang` column (the
   language a revision was saved in, managed by Raster); collections' items
   come later. Raster makes a translation column before anything is stored
-  in it, which is what keeps `name__id` a plain text column: RedBean reads
-  `x_id` as a link and, on MySQL, would make a column it created itself an
-  int.
+  in it (every write path declares it first), which is what keeps
+  `name__id` a plain text column. A column RedBean creates itself takes its
+  type from the first value stored, and one ending in `_id` also gets an
+  index and an attempt at a foreign key to a table `name_`, and on MySQL
+  is made an integer column, which refuses text.
 - **Relationships are by value.** `print.@href.raster_filter@author` links to
   the items with the same `author`. For real references, write a model.
 - **Page edits are versioned:** every save is a new revision. Values can be
@@ -833,7 +835,8 @@ mock-up is stored only when the collection's table is made.
   field shows its Romanian, and the default language's value while that
   is empty (`cms_store::localized($row, $type, $lang)`, for showing only,
   never for a write). In development a field's first print makes its
-  translation columns. `cms_store::update_page($type, $slug, $values,
+  translation columns, when every place the page (and the layouts dried
+  into it) prints it is a place for words, as `schema` reads it. `cms_store::update_page($type, $slug, $values,
   $allowed, $lang)` writes `$values` (named by the fields themselves,
   `headline`) in `$lang`: a translated field into its column, and a shared
   one is refused with `field_shared`, nothing stored; without `$lang` it
@@ -2414,8 +2417,14 @@ of lists and filter pages come along; drafts and the editor don't.
     to EN)"); a field with no Romanian yet shows the English and is
     marked, and the Page panel says which fields are not translated yet
     and which are the same in every language (a photo saved on `/ro/` is
-    the photo everywhere). The history says which language each revision
-    changed. The config's `lang` is the page's language, and it adds
+    the photo everywhere). An untranslated field holds nothing in that
+    language, so an undo there empties it again. The history says which
+    language each revision changed, and its Restore brings back every
+    language of that version, as it says. In production before
+    `schema --apply` has made a language's columns, a text field saved in
+    that language is refused (`translation_columns_missing`, worded "run
+    php bin/raster schema --apply") instead of landing in the default
+    language's column. The config's `lang` is the page's language, and it adds
     `editor_lang`, `languages` and `editor_languages`; off it is as it
     always was.
   - Its colours and fonts come from the page (body text, background, the
@@ -2429,7 +2438,8 @@ of lists and filter pages come along; drafts and the editor don't.
     Which language: without `multilingual`, the page's (`?lang=`, as
     detected). Multilingual, the editor's own, apart from the page's: the
     one the person chose with the dock's picker (kept on the account,
-    `user.editor_lang`, which `schema --apply` adds), else the first of
+    `user.editor_lang`, which `schema --apply` adds on a multilingual
+    site), else the first of
     the browser's languages it has words for, else the site's default
     language, else English. So an English owner fixing `/ro/` gets English
     words.
