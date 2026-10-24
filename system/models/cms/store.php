@@ -172,12 +172,16 @@ class cms_store {
 	}
 
 	// the id of the item at $key (item_at()), or null: one at its default
-	// slug looked up, a number that is no item's slug taken as an id
+	// slug looked up, a number that is no item's slug taken as an id. Off,
+	// and in the default language, it asks what it always asked: the item
+	// at that slug, else the number as an id
 	static function item_id($type, $key, $lang = null) {
-		$at = self::item_at($type, $key, $lang);
+		$lang = $lang === null ? i18n::current() : (string)$lang;
+		$at = i18n::enabled() && !i18n::is_default($lang) ? self::item_at($type, $key, $lang) : array('slug' => (string)$key);
 		if (isset($at['id'])) return $at['id'];
 		$bean = self::table_exists($type) ? R::findOne($type, ' slug = ? ', array($at['slug'])) : null;
-		return $bean ? (int)$bean->id : null;
+		if ($bean) return (int)$bean->id;
+		return ctype_digit($at['slug']) ? (int)$at['slug'] : null;
 	}
 
 	// Gives the item $bean the slug it lacks in each translation language,

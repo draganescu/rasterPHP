@@ -14017,6 +14017,19 @@ test('2.2.52: multilingual off, rsvp::page_event and an item URL\'s lookup send 
 				});
 				same($was, $now, "$what: page_event");
 				check(!preg_grep('/slug__|slughistory/', $now), "$what: ".implode(' | ', $now));
+				// a number: the item at that slug first, then the number as an id
+				foreach (array('99999', (string)$event['id']) as $number) {
+					$now = with_settings(array('uri_string' => "/events/events_item/$number"), function () use ($number) {
+						rsvp::forget();
+						return p2a_sql(function () { rsvp::page_event(); });
+					});
+					rsvp::forget();
+					$was = p2a_sql(function () use ($number) {
+						$bean = cms_store::table_exists('eventsdata') ? R::findOne('eventsdata', ' slug = ? ', array($number)) : null;
+						rsvp::item($bean ? (int)$bean->id : (int)$number);
+					});
+					same($was, $now, "$what: page_event at $number");
+				}
 				// render.cms: a slug is a filter, no query of its own; a number
 				// is asked for as a slug first, with 2.2.51's query
 				same(array(), p2a_sql(function () { same(array('slug' => 'poetry-evening'), cms_store::item_at('eventsdata', 'poetry-evening')); }), "$what: item_at, a slug");
@@ -14037,8 +14050,13 @@ test('2.2.52: no bundled model but cms finds an item by a slug query of its own'
 		if (basename($dir) === 'cms') continue;
 		$files = array_merge(glob("$dir/*.php"), glob("$dir/sql/*.sql") ?: array());
 		foreach ($files as $file) {
-			foreach (file($file) as $n => $line) {
-				if (preg_match('/\bslug`?\s*(=|LIKE|GLOB|IN)\s*[?(:]|findOne\([^;]*slug|find(One|All)?\([^;]*\'slug\'\s*=>|slug_item\(|resolve_slug\(/i', $line)) $found[] = substr($file, strlen($root) + 1).':'.($n + 1).': '.trim($line);
+			// the whole file, so a call split over lines is seen too
+			$code = file_get_contents($file);
+			// SQL comparing a slug column (slug, slug__ro; not $slug = or
+			// ->slug =), a find with a slug filter, or the CMS's own slug calls
+			$lookup = '/(?<![$>\w])slug(__[a-z_]+)?`?\s*(=(?![=>])|LIKE\b|GLOB\b|IN\b)|find(One|All)?\s*\([^;]*?[\'"]slug(__[a-z_]+)?[\'"]\s*=>|slug_item\s*\(|resolve_slug\s*\(/s';
+			if (preg_match_all($lookup, $code, $m, PREG_OFFSET_CAPTURE)) {
+				foreach ($m[0] as $hit) $found[] = substr($file, strlen($root) + 1).':'.(substr_count(substr($code, 0, $hit[1]), "\n") + 1).': '.trim(preg_replace('/\s+/', ' ', $hit[0]));
 			}
 		}
 	}
@@ -14147,6 +14165,37 @@ test('2.2.52: every alert of the starter and of the demo\'s visitor pages is wor
 		}
 	}
 	same(array(), $plain);
+});
+
+// the starter's alerts, now dictionary keys, print 2.2.51's bytes when
+// they show, multilingual off
+test('2.2.52: a new starter site prints its alerts with 2.2.51\'s bytes', function () use ($root) {
+	$tmp = sys_get_temp_dir().'/raster-2252-'.getmypid();
+	@mkdir($tmp, 0775, true);
+	$site = "$tmp/site";
+	exec(php_cmd().' '.escapeshellarg("$root/bin/raster").' new '.escapeshellarg($site).' 2>&1', $out, $code);
+	same(0, $code, implode("\n", $out));
+	try {
+		$alerts = array(
+			'/login?done=login_failed' => '<!-- print.validation.alert(\'login_failed\') --><p class="error">Wrong email or password.</p><!-- /print.validation.alert(\'login_failed\') -->',
+			'/reset?done=reset_invalid' => '<p class="error">This link has expired or was already used. <a href="http://localhost:8000/forgot">Get a new one</a>.</p>',
+			'/register?done=email_taken' => '<p class="error">There is already an account with that email. <a href="http://localhost:8000/login">Log in</a> instead?</p>',
+			'/newsletter-confirm?done=confirmed' => '<h1>You are subscribed</h1><p>Thanks for confirming. The next issue will reach you by email.</p>',
+			'/?done=check_email' => '<p class="notice">Almost there: check your inbox to confirm.</p>',
+		);
+		foreach ($alerts as $page => $bytes) {
+			$db = "$tmp/".md5($page).'.sqlite';
+			$env = 'RASTER_APP=application RASTER_ENV= RASTER_DB='.escapeshellarg($db).' RASTER_URL=http://localhost:8000/';
+			$now = shell_exec('cd '.escapeshellarg($site).' && '.$env.' '.php_cmd().' bin/raster render '.escapeshellarg($page).' 2>&1');
+			@unlink($db);
+			// 2.2.51 printed the alert's block as it is in the view, its annotations gone
+			$bytes = preg_replace('/<!-- \/?print\.validation\.alert\(\'[a-z_]+\'\) -->/', '', $bytes);
+			check(strpos($now, "    $bytes\n") !== false || strpos($now, "  $bytes\n") !== false || strpos($now, "      $bytes\n") !== false, "$page: $bytes in ".$now);
+			check(strpos($now, 'print.i18n') === false, "$page: no annotation left");
+		}
+	} finally {
+		remove_dir($tmp);
+	}
 });
 
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";

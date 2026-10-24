@@ -1846,8 +1846,9 @@ from `php demo/seed.php`, and are the worked example of all of it.
   `rsvp.promoted` with `who` `staff`.
 - `render.rsvp.event`: one row for the page's event, on its item page
   (`/events/events_item/{slug}`, found as `render.cms.events` finds
-  it, `cms_store::item_id()`: on `/ro/` by its Romanian slug) or on any page by `?event=<id>`: `event` (its id), `places` and
-  `left` (`''` for no limit), `going` (people), `waiting` (replies),
+  it, `cms_store::item_id()`: on `/ro/` by its Romanian slug) or on any
+  page by `?event=<id>`: `event` (its id), `places` and `left` (`''` for
+  no limit), `going` (people), `waiting` (replies),
   `state` (`open`; `full`, a yes goes on the waitlist; `closed`, past the
   deadline; `over`, it has started) and `deadline` (`2026-11-20 18:00`).
   Nothing for an event visitors can't see (editors get it). Never
@@ -2423,8 +2424,8 @@ as a one-language site. Each part is described where it lives:
     URL's key names, as `render.cms` finds it (on `/ro/` its Romanian
     slug, else its default slug, else a number as its id), as
     `array('id' => n)` or `array('slug' => $key)`; `cms_store::item_id()`
-    gives its id, or null. No other model writes a slug query (a test
-    checks it);
+    gives its id, or null, drafts included. No bundled model writes a
+    slug query of its own (a test checks it);
   - `cms_store::localized($row, $type)`: a stored row as the visitor's
     language shows it (each translation, else the default's words);
   - `mail::send_view($view, $to, $vars, $headers, $lang)`, inside
@@ -2434,10 +2435,15 @@ as a one-language site. Each part is described where it lives:
   function event() {                                   // render.party.event
       $key = cms::collection_request('party')['item'];   // /party/party_item/<key>
       $id = $key === null ? null : cms_store::item_id('partydata', $key);
-      $row = $id ? cms_store::get_item('partydata', $id) : null;
-      return $row ? array(cms_store::localized($row, 'partydata')) : array();
+      $row = $id ? cms_store::get_item('partydata', $id) : null;   // drafts and scheduled items too
+      $live = $row && $row['enabled'] !== false && (string)$row['enabled'] !== '0' && ((string)$row['published_at'] === '' || $row['published_at'] <= date('Y-m-d H:i:s'));
+      return $live ? array(cms_store::localized($row, 'partydata')) : array();
   }
   ```
+
+  `get_item()` reads any item, a draft or a scheduled one too, so a
+  model that shows one to visitors checks `enabled` and `published_at`
+  itself, as `rsvp::item()`'s `visible` does.
 
 - **Making a site multilingual, as an agent** (MCP):
   1. `set_languages` with `["en", "ro"]`, the default first.

@@ -5,7 +5,7 @@ file changes for you; `php bin/raster doctor` shows what is left.
 
 ## 2.2.52
 
-Nothing for sites to do.
+What sites need to do: a multilingual site may see new `untranslatable_text` warnings for plain words inside alerts; move them into a `print.i18n` key inside the alert.
 
 **On a multilingual site an event's page in another language now takes replies.** The Romanian page of an evening (`/ro/events/events_item/seara-de-poezie`, its Romanian slug) said "this evening doesn't take replies here" while the English page took them: the rsvp model looked the event up by its default slug only. It now finds it as the list does, through the new `cms_store::item_at()` and `item_id()`: the language's slug, else the default slug, else a number as an id. That is now the one place an item's address is read (`render.cms` uses it too), and a test checks no other bundled model writes a slug lookup of its own. AGENTS.md has a short "Writing a model for a multilingual site" with the four core calls a model uses.
 
