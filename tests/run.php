@@ -8167,17 +8167,18 @@ test('P0.C: off is identical: the login page with accounts, and a page that pass
 	$view = file_get_contents("$theme/login.html");
 	$old = preg_replace("#<!-- print\.validation\.alert\('no_(database|users)'\) -->.*?<!-- /print\.validation\.alert\('no_(database|users)'\) -->#", '', $view);
 	check($old !== $view && strpos($old, '<!-- print.cms.login_message /-->') !== false, 'the alerts are in the starter\'s login.html');
-	test_fixture("$theme/zzp0c_oldlogin.html");
-	file_put_contents("$theme/zzp0c_oldlogin.html", $old);
+	// the same URL renders both, so whatever earlier tests stored (the site's
+	// name, accounts) is the same for each
+	$clean = function ($html) { return preg_replace('/name="raster_ts" value="[^"]*"/', '', $html); };
+	file_put_contents("$theme/login.html", $old);
 	try {
-		$clean = function ($html) { return preg_replace('/name="raster_ts" value="[^"]*"/', '', $html); };
-		list($status, $now) = http('GET', "$base/login");
-		list(, $before) = http('GET', "$base/zzp0c_oldlogin");
-		same(200, $status);
-		same($clean($before), $clean($now), 'byte for byte, the stamp aside');
+		list(, $before) = http('GET', "$base/login");
 	} finally {
-		@unlink("$theme/zzp0c_oldlogin.html");
+		file_put_contents("$theme/login.html", $view);
 	}
+	list($status, $now) = http('GET', "$base/login");
+	same(200, $status);
+	same($clean($before), $clean($now), 'byte for byte, the stamp aside');
 	// a post from this site, a mail with a <title>: untouched
 	same(303, form_post("$base/about", array('raster_form' => 'newsletter.signup', 'email' => 'zzp0c-ok@example.test'))[0]);
 	$dir = "$theme/_email";
