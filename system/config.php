@@ -203,47 +203,52 @@ class config {
 	// prefix is taken off here, before the one-address rule and before
 	// anything reads the path, so routes, `protected`, /api, /mcp, forms and
 	// the cache key see /menu, and every link keeps the language through
-	// link_uri. /ro answers 301 to /ro/, /en/menu (the default) to /menu, and
-	// ?lang=ro to the same page in that language. Returns the path left.
+	// link_uri. /ro answers 301 to /ro/, /en/menu (the default) to /menu,
+	// /ro/menu to example.ro/menu when ro has its own domain (one language,
+	// one address), and ?lang=ro to the same page at that language's
+	// address. Returns the path left.
 	static function language_of_url($config, $path, $site, $redirects) {
 		$languages = i18n::available();
 		$codes = array_map('strtolower', $languages);
-		$host = preg_replace('/:\d+$/', '', (string)$config->host);
+		$host = strtolower(preg_replace('/:\d+$/', '', (string)$config->host));
 		$domains = array_change_key_case((array)$config->domain_language);
-		$redirect = null;
+		$domain_of = array();
+		foreach ($domains as $domain => $language) {
+			if (in_array(strtolower($language), $codes, true) && !isset($domain_of[strtolower($language)])) $domain_of[strtolower($language)] = $domain;
+		}
 		$on_domain = isset($domains[$host]) && in_array(strtolower($domains[$host]), $codes, true);
+		// the folder and the index file, after the host
+		$after_host = substr($config->link_base, strlen($config->protocol.'://'.$config->host));
+		// where a language's pages start, as i18n::address() says: its own
+		// domain when it has one, else the host that takes prefixes, with its
+		// prefix; null when that host isn't known
+		$address = function ($code) use ($config, $codes, $domain_of, $host, $on_domain, $site, $domains, $after_host) {
+			if (isset($domain_of[$code])) return $domain_of[$code] === $host ? $config->link_base : $config->protocol.'://'.$domain_of[$code].$after_host;
+			$prefix = $code === $codes[0] ? '' : $code.'/';
+			if (!$on_domain) return $config->link_base.$prefix;
+			if (empty($site['host']) || isset($domains[strtolower($site['host'])])) return null;
+			return $config->protocol.'://'.strtolower($site['host']).(isset($site['port']) ? ':'.$site['port'] : '').$after_host.$prefix;
+		};
+		$redirect = null;
 		if ($on_domain) {
 			$config->url_language = $languages[array_search(strtolower($domains[$host]), $codes, true)];
-		} elseif (preg_match('#^/([^/]+)(/.*)?$#', $path, $m) && ($index = array_search($m[1], $codes, true)) !== false) {
+		} elseif (preg_match('#^/([^/]+)(/.*)?\z#s', $path, $m) && ($index = array_search($m[1], $codes, true)) !== false) {
 			$rest = isset($m[2]) ? $m[2] : '';
 			if ($index > 0) $config->url_language = $languages[$index];
-			// the default language has no prefix; a language's home is /ro/
-			if ($index === 0 || $rest === '') $redirect = $config->link_base.($index > 0 ? $m[1].'/' : '');
+			// the default language has no prefix, a language with its own
+			// domain lives there, and a language's home is /ro/
+			if ($index === 0 || isset($domain_of[$m[1]]) || $rest === '') $redirect = $address($m[1]);
 			$path = $rest === '' ? '/' : $rest;
 		}
 		$config->link_uri = $config->link_base.i18n::prefix($config->url_language);
 		$query = isset($_SERVER['QUERY_STRING']) ? (string)$_SERVER['QUERY_STRING'] : '';
-		// ?lang=xx is a link from before: the same page at its language's address
-		$lang = isset($_GET['lang']) && is_string($_GET['lang']) ? array_search(strtolower($_GET['lang']), $codes, true) : false;
-		if ($lang !== false) {
-			$code = $codes[$lang];
-			$address = null;
-			// the path after the host: the folder and the index file
-			$after_host = substr($config->link_base, strlen($config->protocol.'://'.$config->host));
-			if (!$on_domain) {
-				$address = $config->link_base.($lang > 0 ? $code.'/' : '');
-			} elseif ($code === strtolower($config->url_language)) {
-				$address = $config->link_base;
-			} elseif (($domain = array_search($code, array_map('strtolower', $domains), true)) !== false) {
-				$address = $config->protocol.'://'.$domain.$after_host;
-			} elseif (!empty($site['host']) && !isset($domains[strtolower($site['host'])])) {
-				// from a language's own domain to the site's address
-				$address = $config->protocol.'://'.strtolower($site['host']).(isset($site['port']) ? ':'.$site['port'] : '').$after_host.($lang > 0 ? $code.'/' : '');
-			}
-			if ($address !== null) {
-				$redirect = $address;
-				$query = implode('&', array_filter(explode('&', $query), function ($pair) { return $pair !== '' && urldecode(strtok($pair, '=')) !== 'lang'; }));
-			}
+		// ?lang=xx is a link from before: the same page at its language's
+		// address. ro, RO and ro-RO all name ro, as i18n matches languages.
+		$lang = isset($_GET['lang']) && is_string($_GET['lang']) ? strtolower($_GET['lang']) : '';
+		$code = in_array($lang, $codes, true) ? $lang : (in_array(substr($lang, 0, 2), $codes, true) ? substr($lang, 0, 2) : null);
+		if ($code !== null && ($target = $address($code)) !== null) {
+			$redirect = $target;
+			$query = implode('&', array_filter(explode('&', $query), function ($pair) { return $pair !== '' && urldecode(strtok($pair, '=')) !== 'lang'; }));
 		}
 		if ($redirects && $redirect !== null) {
 			$tail = implode('/', array_map('rawurlencode', explode('/', trim($path, '/'))));
