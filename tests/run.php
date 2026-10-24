@@ -9176,7 +9176,7 @@ test('P1.B: off is identical: no prefix, no header, no redirect, same cache key 
 		check(raster_cache::key() !== $default, 'a key per language');
 	} finally {
 		config::set('languages')->to($was);
-		config::set('multilingual')->to(null);
+		config::set('multilingual')->to(false);
 		config::set('url_language')->to('');
 	}
 });

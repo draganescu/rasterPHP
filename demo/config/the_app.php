@@ -66,8 +66,11 @@ config::set('rsvp_staff_email')->to('staff@cafe.test');
 
 // the contact form on /visit and the reset form keep the older validation regions on purpose, so
 // the suite still covers them (D14). doctor counts them apart instead of warning.
+// The café still shows template-only translation (languages without
+// multilingual) until it becomes a multilingual site.
 config::set('allow_deprecated')->to(array(
 	'legacy-validation-regions' => '#^views/cafe/(visit|password/new)\.html$#',
+	'template-only-languages' => true,
 ));
 
 // text replaced in pages under /lab only (template::replace)
