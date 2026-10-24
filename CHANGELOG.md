@@ -3,6 +3,15 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.47
+
+Nothing for most sites to do. A listener of `cms.item_saved` or `cms.item_deleted` that compared `collection` with a name rebuilt from the table (`teammembers` for a `team_members` collection) now gets the collection's own name.
+
+- **One place reads and writes collection and item URLs** (#40). `cms::collection_uri()` parses `/<view>/<name>_item|_items|_page/…`, `cms::collection_request()` says what a list is asked for, and `cms::item_url()`, `cms::page_link()` and `cms::filter_link()` build the links. The router, page fields, pagination, feed, the sitemap, records, RSVP, the inspector, `describe` and MCP all call them, so the URLs a site's links write render as before. On a page with two paginated lists, each pager now keeps the other's page, and `/landing_page/landing_page/2` shows page 2.
+- **One place matches `protected` paths**, `authentication::protection($path)`, ignoring case. The page check, the sitemap, the Admin menu, lint and `describe` agree: `Faq` protects `/faq` and the Admin menu now lists it.
+- **Item URLs are written `/<name>/<name>_item/{slug}` everywhere** (#37): `describe`, MCP's `site_overview` and the inspector said `{id}`.
+- **`cms.item_saved` and `cms.item_deleted` carry the collection's own name** (#33), and lint reports two collection names that share one table (`team_members` and `teammembers`) as an error.
+
 ## 2.2.46
 
 Two things for some sites to check, after `php bin/raster update`:

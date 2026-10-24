@@ -238,7 +238,7 @@ class cms_editor {
 		$allowed = $record ? cms_records::writable($record) : array_diff(array_keys($columns), array('id', 'updated_at'));
 		try {
 			// the page prints text, so the editor gets the item as text too
-			return cms_types::show_row(cms_store::save_item($type, (int)util::post('id'), $fields, $allowed), self::examples());
+			return cms_types::show_row(cms_store::save_item($type, (int)util::post('id'), $fields, $allowed, 'editor', $collection), self::examples());
 		} catch (cms_refused $e) {
 			return self::refused($e);
 		} catch (Exception $e) {
@@ -261,7 +261,7 @@ class cms_editor {
 		$record = cms_records::info($collection);
 		if ($record) $item = cms_records::shown($record, $item);
 		try {
-			cms_store::delete_item($type, (int)util::post('id'));
+			cms_store::delete_item($type, (int)util::post('id'), $collection);
 		} catch (cms_refused $e) {
 			return self::refused($e);
 		} catch (Throwable $e) {

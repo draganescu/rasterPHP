@@ -163,7 +163,7 @@ class raster_export {
 		$inspector = new raster_inspector();
 		$paths = array('/');
 		foreach ($inspector->views() as $view) {
-			if (preg_match('#(^|/)_#', $view)) continue;
+			if (controller::is_partial($view)) continue;
 			if (preg_match('/\.(rss|atom|xml|json|txt)$/', $view)) { $paths[] = '/'.$view; continue; }
 			$url = $inspector->url_for_view($view);
 			if (strpos($url, '{') === false) $paths[] = $url;

@@ -83,17 +83,116 @@ class cms
 		if ($slug === '/' || $slug === '/'.config::get('default_view', 'index')) return 'home';
 		$routed = cms::route_slug($route);
 		if ($routed !== null) return $routed;
-		if (preg_match('#^/(.+?)/([a-z0-9_]+)_(page|items)(/.*)?$#', $slug, $m) && cms::renders_collection($m[1], $m[2])) {
-			$slug = '/'.$m[1];
-		} elseif (preg_match('#^/([a-z0-9_]+)_(page|items)/.+$#', $slug, $m)) {
+		$url = cms::collection_uri($slug);
+		if ($url && $url['kind'] !== 'item' && $url['path'] !== '/' && cms::renders_collection(ltrim($url['path'], '/'), $url['name'])) {
+			$slug = $url['path'];
+		} elseif ($url && $url['kind'] !== 'item' && $url['path'] === '/' && $url['rest']) {
 			// a list on the home page has no page of its own (/news_page/2)
-			$slug = '/'.$m[1];
-		} elseif (preg_match('#^(?:/.*?)?/([a-z0-9_]+)_item(/.*)?$#', $slug, $m)) {
+			$slug = '/'.$url['name'];
+		} elseif ($url && $url['kind'] === 'item') {
 			// an item shown by the collection's own view (no news_item.html)
 			// shares that view's page fields
-			$slug = file_exists(controller::build_view_path($m[1].'_item')) ? '/'.$m[1].'/'.$m[1].'_item' : '/'.$m[1];
+			$slug = file_exists(controller::build_view_path($url['name'].'_item')) ? cms::item_path($url['name']) : '/'.$url['name'];
 		}
 		return $slug;
+	}
+
+	// ##Collection URLs
+	// A collection's URLs, read and written only here (#40):
+	//   /news/news_item/<slug>         one item (its id when it has no slug)
+	//   /news/news_page/2              page 2 of the list
+	//   /news/news_items/tag/php       the list where tag is php; its page
+	//                                  comes last: .../tag/php/news_page/2
+
+	// What a URL says about a collection, from its first segment that is
+	// <name>_item, <name>_items or <name>_page: /news/news_page/2 is
+	// array('path' => '/news', 'name' => 'news', 'kind' => 'page', 'rest' => array('2')).
+	// A list is on a page, so the first segment counts last:
+	// /landing_page/landing_page/2 is page 2 on /landing_page. Null for a
+	// URL that is no collection's.
+	static function collection_uri($uri) {
+		$segments = explode('/', trim(preg_replace('#/+#', '/', (string)$uri), '/'));
+		$order = array_keys($segments);
+		$order[] = array_shift($order);
+		foreach ($order as $i) {
+			if (!preg_match('/^([a-z0-9_]+)_(item|items|page)$/', $segments[$i], $m)) continue;
+			return array('path' => '/'.implode('/', array_slice($segments, 0, $i)), 'name' => $m[1], 'kind' => $m[2], 'rest' => array_slice($segments, $i + 1));
+		}
+		return null;
+	}
+
+	// What the URL asks of the list $name: the item ('' for
+	// /news/news_item with nothing after it, null for none), the filters and
+	// the page (0 when it names none). An item and filters are under the
+	// collection's own name (/news/news_item/3). A page is the list's
+	// wherever it shows and whatever other lists the URL pages too:
+	// /events/news_page/2, /news/news_page/2/events_page/3.
+	static function collection_request($name, $uri = null) {
+		$uri = $uri === null ? config::get('uri_string') : $uri;
+		$asked = array('item' => null, 'filters' => array(), 'page' => 0);
+		$segments = explode('/', trim(preg_replace('#/+#', '/', (string)$uri), '/'));
+		$at = array_keys($segments, $name.'_page', true);
+		if ($at && isset($segments[end($at) + 1])) $asked['page'] = (int)$segments[end($at) + 1];
+		$url = cms::collection_uri($uri);
+		if (!$url || $url['name'] !== $name || substr($url['path'], -strlen($name) - 1) !== '/'.$name) return $asked;
+		$rest = $url['rest'];
+		if ($url['kind'] === 'item') $asked['item'] = isset($rest[0]) ? $rest[0] : '';
+		if ($url['kind'] === 'items') {
+			for ($i = 0; $i + 1 < count($rest); $i += 2) {
+				if ($rest[$i] !== $name.'_page') $asked['filters'][$rest[$i]] = $rest[$i + 1];
+			}
+		}
+		return $asked;
+	}
+
+	// The collection a view is the item page of (news_item, or
+	// staff/booking_item, is news's or booking's), or null. $view is the
+	// view's name, without its extension.
+	static function item_view($view) {
+		return preg_match('#^(?:.*/)?([a-z0-9_]+)_item$#', (string)$view, $m) ? $m[1] : null;
+	}
+
+	// page $n of the list $name on the page at $uri (the current one), as
+	// the pager links it: /news/news_page/2, /news/news_items/tag/php/news_page/2,
+	// and the page without a number for page 1
+	static function page_link($name, $n, $uri = null) {
+		$uri = $uri === null ? (string)config::get('uri_string') : (string)$uri;
+		$base = preg_replace('#/'.preg_quote($name, '#').'_page/\d+/?$#', '', rtrim($uri, '/'));
+		if ($base === '') $base = '/';
+		$link = rtrim(config::get('link_uri'), '/');
+		return $n <= 1 ? $link.($base === '/' ? '/' : $base) : $link.rtrim($base, '/').'/'.$name.'_page/'.$n;
+	}
+
+	// the list $name filtered by the $fields of $item:
+	// /news/news_items/tag/php, without the last slash, as item links are (#131)
+	static function filter_link($name, $fields, $item) {
+		$link = config::get('link_uri').$name.'/'.$name.'_items/';
+		foreach ($fields as $field) {
+			$link .= $field.'/'.rawurlencode(isset($item[$field]) ? $item[$field] : '').'/';
+		}
+		return rtrim($link, '/');
+	}
+
+	// /news/news_item, the page every item of news shows on, and with $key
+	// one item's address: /news/news_item/raster-runs. Where the address
+	// stands for any item (describe, MCP, the inspector) the key is {slug} (#37).
+	static function item_path($name, $key = null) {
+		return '/'.$name.'/'.$name.'_item'.($key === null ? '' : '/'.$key);
+	}
+
+	// an item's link, by its slug, or its id when it has none
+	static function item_url($name, $item) {
+		return util::url(cms::item_path($name, !empty($item['slug']) ? rawurlencode($item['slug']) : $item['id']));
+	}
+
+	// The address of a view that is a page (about.html is /about, the
+	// default view /), or null for one that is never a page: partials and
+	// folders starting with _ (_layout, _email/), and feeds (news.rss).
+	static function page_path($view, $ext = null) {
+		$ext = $ext ?: config::get('views_ext', '.html');
+		if (controller::is_partial($view) || substr($view, -strlen($ext)) !== $ext) return null;
+		$name = substr($view, 0, -strlen($ext));
+		return $name === config::get('default_view', 'index') ? '/' : '/'.$name;
 	}
 
 	// Visitors don't get a session cookie; editors get one when they log in.
@@ -110,22 +209,19 @@ class cms
 		$segments = (array)config::get('uri_segments');
 		// /news/news_page/2.rss is page 2 of the feed
 		$segments[count($segments) - 1] = preg_replace('/\.(rss|atom|xml|json|txt)$/', '', (string)end($segments));
+		$url = cms::collection_uri(implode('/', $segments));
+		if (!$url || $url['name'] !== $name) return true;
+		$rest = $url['rest'];
 		$page = function ($value) { return (bool)preg_match('/^[1-9][0-9]*$/', $value) && $value !== '1'; };
-		foreach ($segments as $i => $segment) {
-			$rest = array_slice($segments, $i + 1);
-			if ($segment === $name.'_page') return count($rest) === 1 && $page($rest[0]);
-			if ($segment === $name.'_item') return count($rest) === 1 && (!ctype_digit($rest[0]) || $rest[0] === (string)(int)$rest[0]);
-			if ($segment === $name.'_items') {
-				if (count($rest) % 2) return false;
-				$seen = array();
-				for ($j = 0; $j < count($rest); $j += 2) {
-					if (isset($seen[$rest[$j]])) return false;
-					$seen[$rest[$j]] = true;
-					// the page comes last: /news/news_items/tag/php/news_page/2
-					if ($rest[$j] === $name.'_page') return $j + 2 === count($rest) && $page($rest[$j + 1]);
-				}
-				return true;
-			}
+		if ($url['kind'] === 'page') return count($rest) === 1 && $page($rest[0]);
+		if ($url['kind'] === 'item') return count($rest) === 1 && (!ctype_digit($rest[0]) || $rest[0] === (string)(int)$rest[0]);
+		if (count($rest) % 2) return false;
+		$seen = array();
+		for ($j = 0; $j < count($rest); $j += 2) {
+			if (isset($seen[$rest[$j]])) return false;
+			$seen[$rest[$j]] = true;
+			// the page comes last: /news/news_items/tag/php/news_page/2
+			if ($rest[$j] === $name.'_page') return $j + 2 === count($rest) && $page($rest[$j + 1]);
 		}
 		return true;
 	}
@@ -173,15 +269,16 @@ class cms
 		// /news/news_item/3  -> news_item.html (or news.html)
 		// /news/news_page/2  -> news.html
 		// /news/news_items/tag/php -> news.html
-		$uri = config::get('uri_string');
-		if (preg_match('#^/(.+?)/([a-z0-9_]+)_(item|items|page)(/|$)#', (string)$uri, $m)) {
+		$url = cms::collection_uri(config::get('uri_string'));
+		if ($url && $url['path'] !== '/') {
+			$in = ltrim($url['path'], '/');
 			// item URLs live under the collection's own name: /news/news_item/x
-			if ($m[3] === 'item' && $m[1] !== $m[2]) return;
-			$candidates = $m[3] === 'item' ? array($m[2].'_item', $m[1]) : array($m[1]);
+			if ($url['kind'] === 'item' && $in !== $url['name']) return;
+			$candidates = $url['kind'] === 'item' ? array($url['name'].'_item', $in) : array($in);
 			foreach ($candidates as $view) {
 				// only views that actually render this collection
-				if (cms::renders_collection($view, $m[2])) {
-					controller::route(preg_quote($m[1].'/'.$m[2].'_'.$m[3], '%').'(/|$)')->to($view);
+				if (cms::renders_collection($view, $url['name'])) {
+					controller::route(preg_quote($in.'/'.$url['name'].'_'.$url['kind'], '%').'(/|$)')->to($view);
 					break;
 				}
 			}
@@ -326,30 +423,21 @@ class cms
 			$expected_properties[$property] = $content;
 		}
 
-		$page = (int)util::param($name.'_page', 0);
+		$asked = cms::collection_request($name);
+		$page = $asked['page'];
 		// /news/news_page/02 shows page 2, but is not a page worth keeping
 		if (!cms::canonical_uri($name)) raster_cache::skip();
 
 		// one item: /news/news_item/3 or /news/news_item/raster-runs-on-php-8
-		if (util::param($name) == $name.'_item') {
-			$wanted = (string)util::param($name.'_item');
+		if ($asked['item'] !== null) {
+			$wanted = $asked['item'];
 			if (ctype_digit($wanted)) $filters['id'] = (int)$wanted;
 			else $filters['slug'] = $wanted;
 		}
 
 		// uri filters: /news/news_items/tag/php
-		$uri_filters = array();
-		if (util::param($name) == $name.'_items') {
-			$uri_segments = config::get('uri_segments');
-			$start_key = array_search($name.'_items', $uri_segments);
-			foreach ($uri_segments as $key => $value) {
-				if ($key > $start_key && ($key - $start_key)%2 == 0) {
-					$uri_filters[$uri_segments[$key-1]] = $value;
-				}
-			}
-			unset($uri_filters[$name.'_page']);
-			$filters = $uri_filters + $filters;
-		}
+		$uri_filters = $asked['filters'];
+		$filters = $uri_filters + $filters;
 
 		// param filters: render.cms.news('featured=1&order=newest&limit=3'),
 		// render.cms.booking('stylist=?stylist&date>=today&order=date,time')
@@ -429,8 +517,8 @@ class cms
 		}
 		// an item titled 1984 has the slug 1984: a number that is a slug opens
 		// that item, and only a number no item has as its slug is an id (#90)
-		if (util::param($name) == $name.'_item' && isset($filters['id']) && array_key_exists('slug', $fields)) {
-			$wanted = (string)util::param($name.'_item');
+		if ($asked['item'] !== null && isset($filters['id']) && array_key_exists('slug', $fields)) {
+			$wanted = $asked['item'];
 			if (R::getCell('SELECT COUNT(*) FROM `'.$this->data_name.'` WHERE slug = ?', array($wanted))) {
 				unset($filters['id']);
 				$filters['slug'] = $wanted;
@@ -469,14 +557,9 @@ class cms
 		// building auto detail links
 		foreach ($data as $key => $item) {
 			$base = config::get("link_uri");
-			$data[$key]['raster_detail_link'] = $base.$name.'/'.$name.'_item/'.(!empty($item['slug']) ? rawurlencode($item['slug']) : $item['id']);
+			$data[$key]['raster_detail_link'] = cms::item_url($name, $item);
 			foreach ($filter_link_params as $at_key => $filter_fields) {
-				$filter_link = $base.$name.'/'.$name.'_items/';
-				foreach ($filter_fields as $field) {
-					$filter_link .= $field.'/'.rawurlencode(isset($item[$field]) ? $item[$field] : '').'/';
-				}
-				// without the last slash, as item links are (#131)
-				$data[$key]['raster_filter@'.$at_key] = rtrim($filter_link, '/');
+				$data[$key]['raster_filter@'.$at_key] = cms::filter_link($name, $filter_fields, $item);
 			}
 		}
 

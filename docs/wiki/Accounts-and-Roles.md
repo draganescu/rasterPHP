@@ -123,11 +123,11 @@ config::set('protected')->to(array(
 ));
 ```
 
-Each key is a path pattern (a regular expression matched from the start of the path); each value is the lowest role allowed. Matching is by prefix, so `'members'` also protects `/membership`. Write `'members(/|$)'` to protect only `/members` and the pages under it.
+Each key is a path pattern (a regular expression matched from the start of the path); each value is the lowest role allowed. Matching is by prefix and ignores case, so `'members'` also protects `/membership`, and `'Faq'` protects `/faq`. Write `'members(/|$)'` to protect only `/members` and the pages under it.
 
 - Visitors who aren't logged in are sent to the log-in page, with `?next=` so they come back afterwards.
 - Logged-in users without the role get **403**.
-- Protected pages are left out of the sitemap and the static export.
+- Protected pages are left out of the sitemap and the static export. The sitemap, the Admin menu and `lint` match the patterns the same way the pages do.
 - Pages protected for `editor` or `admin` are admin pages: the [in-page editor](The-In-Page-Editor#admin-pages) lists them in its **Admin** menu.
 
 ## In your own models

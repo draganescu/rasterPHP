@@ -418,7 +418,7 @@ class mcp
 			) + raster_describe::types($collection['fields']) + array(
 				'items' => cms_store::table_exists($collection['type']) ? (int)R::count($collection['type']) : 0,
 				'used_in' => $collection['views'],
-				'item_url' => '/'.$collection['name'].'/'.$collection['name'].'_item/{id}',
+				'item_url' => cms::item_path($collection['name'], '{slug}'),
 			);
 			// records of a type a model declares: private unless it says public,
 			// with fields only the model writes, and actions
@@ -507,13 +507,13 @@ class mcp
 		cms_store::connect();
 		$collection = $this->find_collection($this->arg($arguments, 'collection'));
 		if (!isset($collection['model'])) $this->ensure_columns($collection['type'], $collection['fields'], array('slug', 'enabled', 'published_at', 'updated_at'));
-		return cms_store::save_item($collection['type'], 0, $this->fields_argument($arguments), array_keys($collection['fields']));
+		return cms_store::save_item($collection['type'], 0, $this->fields_argument($arguments), array_keys($collection['fields']), 'editor', $collection['name']);
 	}
 
 	protected function tool_update_item($arguments) {
 		cms_store::connect();
 		$collection = $this->find_collection($this->arg($arguments, 'collection'));
-		return cms_store::save_item($collection['type'], (int)$this->arg($arguments, 'id'), $this->fields_argument($arguments), array_keys($collection['fields']));
+		return cms_store::save_item($collection['type'], (int)$this->arg($arguments, 'id'), $this->fields_argument($arguments), array_keys($collection['fields']), 'editor', $collection['name']);
 	}
 
 	protected function tool_run_action($arguments) {
@@ -530,7 +530,7 @@ class mcp
 		cms_store::connect();
 		$collection = $this->find_collection($this->arg($arguments, 'collection'));
 		$id = (int)$this->arg($arguments, 'id');
-		if (!cms_store::delete_item($collection['type'], $id)) throw new InvalidArgumentException('No item with that id');
+		if (!cms_store::delete_item($collection['type'], $id, $collection['name'])) throw new InvalidArgumentException('No item with that id');
 		return array('deleted' => $id);
 	}
 

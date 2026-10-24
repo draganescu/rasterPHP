@@ -273,7 +273,7 @@ class cms_records {
 			if (!is_array($row) || !isset($row['id'])) continue;
 			$row = self::for_template($info, self::decode($info, $row));
 			$row['raster_record'] = $info['name'];
-			$row['raster_detail_link'] = config::get('link_uri').$info['name'].'/'.$info['name'].'_item/'.(!empty($row['slug']) ? rawurlencode($row['slug']) : $row['id']);
+			$row['raster_detail_link'] = cms::item_url($info['name'], $row);
 			$listed[] = $row;
 		}
 		return $listed;
