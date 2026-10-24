@@ -933,7 +933,9 @@ mock-up is stored only when the collection's table is made.
     its column in a language, or a table lacking `saved_lang`, is drift (marked `+`,
     `missing_translations` in `--json`, with the table's `translated`
     fields): `--apply` adds them, empty, so each language shows the default
-    text until it is translated. A translation column of a field no
+    text until it is translated. In development a list or a record type
+    gets them, a slug per language and `saved_lang` included, the first time
+    a page shows it, so browsing a multilingual site leaves no drift. A translation column of a field no
     template has any more is an orphan with it.
   - Translation columns no language uses now (multilingual off, a language
     taken out of `languages`) are **kept translations**: listed per table

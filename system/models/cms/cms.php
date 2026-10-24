@@ -868,6 +868,15 @@ class cms
 		if (isset($this->translations['collection.'.$type])) return;
 		$this->translations['collection.'.$type] = true;
 		$columns = cms_store::columns($type);
+		// what schema asks of every multilingual list: a slug per language
+		// and the language of the last save
+		$slugs = false;
+		foreach (i18n::available() as $lang) {
+			if (array_key_exists('slug', $columns) && !array_key_exists(cms_types::column('slug', $lang), $columns)) $slugs = true;
+		}
+		if ($slugs) cms_types::ensure($type, array(), array('slug'));
+		if (!array_key_exists('saved_lang', $columns)) cms_types::ensure($type, array('saved_lang' => 'text'));
+		if ($slugs || !array_key_exists('saved_lang', $columns)) $columns = cms_store::columns($type);
 		$types = cms_types::of_table($type);
 		$candidates = array();
 		foreach ($prints as $value) {

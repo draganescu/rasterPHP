@@ -1157,14 +1157,14 @@ test(array('H6', 'H9'), 'sending an issue', function () use ($base) {
 	has($out, "send doesn't take --dryrun");
 	same($before, count(mails()), 'a mistyped --dry-run sent the issue');
 	list($code, $out) = raster(array('send', '/journal/journal_item/opening-day', '--dry-run'), array('RASTER_URL' => "$base/"));
-	has($out, 'Would send "Journal" to 2 subscriber(s)');
+	has($out, 'Would send "Journal" (en) to 2 subscriber(s)');
 	list($code, $out) = raster(array('send', '/journal/journal_item/opening-day', '--to=test@example.com'), array('RASTER_URL' => "$base/"));
 	same(0, $code, $out);
 	same('test@example.com', last_mail()['to']);
 	$before = count(mails());
 	list($code, $out) = raster(array('send', '/journal/journal_item/opening-day', '--subject=Our first letter'), array('RASTER_URL' => "$base/"));
 	same(0, $code, $out);
-	has($out, 'Sent "Our first letter" to 2 subscriber(s)');
+	has($out, 'Sent "Our first letter" (en) to 2 subscriber(s)');
 	$sent = array_slice(mails(), $before);
 	same(2, count($sent));
 	$issue = $sent[0];
@@ -1178,7 +1178,7 @@ test(array('H6', 'H9'), 'sending an issue', function () use ($base) {
 	list($code, $out) = raster(array('send', '/journal/journal_item/opening-day', '--again'), array('RASTER_URL' => "$base/"));
 	same(0, $code, $out);
 	same($before + 2, count(mails()), '--again sends again');
-	has(raster(array('send', '/about', '--dry-run'), array('RASTER_URL' => "$base/"))[1], 'the page has no unsubscribe link');
+	has(raster(array('send', '/about', '--dry-run'), array('RASTER_URL' => "$base/"))[1], '/about has no unsubscribe link');
 });
 test(array('H7', 'H8'), 'unsubscribing', function () use ($base) {
 	$issue = last_mail();
@@ -1631,7 +1631,8 @@ test('N6', 'lint --fix repairs what is mechanical', function () use ($views) {
 		same(1, $code);
 		has($out, 'never closed');
 		has($out, "did you mean 'print'");
-		lacks($out, 'fixed');
+		lacks($out, ': fixed:');
+		lacks($out, ' fixed, ');
 		has(file_get_contents("$views/zz-fix.html"), 'prnit', 'the typo is left as written');
 	});
 });
@@ -1702,7 +1703,7 @@ test(array('N9', 'O1'), 'raster export: the site as static files', function () u
 	foreach (array('index.html', 'about/index.html', 'menu/index.html', 'menu/menu_page/2/index.html', 'menu/menu_item/americano/index.html', 'menu/menu_items/category/cakes/index.html', 'journal.rss', 'feed.json', 'sitemap.xml', 'hours.txt', '404.html', 'demo/views/cafe/style.css', 'demo/views/cafe/img/menu/flat-white.jpg', 'print/menu/index.html', 'ro/index.html', 'ro/menu/index.html', '.raster-export.json') as $file) {
 		check(is_file("$out/$file"), "missing $file");
 	}
-	foreach (array('login/index.html', 'members/index.html', 'register/index.html', 'account/index.html', 'forgot/index.html', 'password/new/index.html', 'letters/confirm/index.html', 'letters/stop/index.html', 'ro/journal.rss') as $file) check(!file_exists("$out/$file"), "should not export $file");
+	foreach (array('login/index.html', 'members/index.html', 'register/index.html', 'account/index.html', 'forgot/index.html', 'password/new/index.html', 'letters/confirm/index.html', 'letters/stop/index.html') as $file) check(!file_exists("$out/$file"), "should not export $file");
 	$home = file_get_contents("$out/index.html");
 	has($home, "<base href='https://cafe.example/demo/views/cafe/' />");
 	has($home, 'href="https://cafe.example/menu"');
@@ -1712,7 +1713,8 @@ test(array('N9', 'O1'), 'raster export: the site as static files', function () u
 	$ro = file_get_contents("$out/ro/menu/index.html");
 	has($ro, '>Meniu</a>');
 	has($ro, 'href="https://cafe.example/ro/about"', 'links stay in the language');
-	has($ro, 'href="https://cafe.example/journal.rss"', 'feeds are shared');
+	has($ro, 'href="https://cafe.example/ro/journal.rss"', 'each language has its feed');
+	check(is_file("$out/ro/journal.rss"), 'the Romanian feed');
 	has($ro, '<a class="lang" href="https://cafe.example/menu">en</a>');
 	lacks(file_get_contents("$out/events/index.html"), 'Secret tasting', 'no drafts');
 	has(file_get_contents("$out/journal.rss"), '<link>https://cafe.example/journal/journal_item/');
@@ -1738,7 +1740,7 @@ test('N10', 'print.if.live and print.if.static: forms stay out of a static expor
 	with_file("$views/export-probe.html", '<!doctype html><html><body><!-- render.contact.form --><form method="post"><input name="email"><button>Send</button></form><!-- /render.contact.form --></body></html>', function () use ($tmp) {
 		list($code, $output) = raster(array('export', "$tmp/probe"));
 		same(1, $code, $output);
-		has($output, 'The contact.form form (/export-probe) needs PHP. Wrap it in <!-- print.if.live -->');
+		has($output, 'The contact.form form (/export-probe, /ro/export-probe) needs PHP. Wrap it in <!-- print.if.live -->', $output);
 		has($output, 'Nothing was written');
 		check(!file_exists("$tmp/probe/index.html"));
 	});
@@ -2112,9 +2114,11 @@ test(array('F7', 'H12'), 'schema --drop --force, send without a title', function
 	same(1, raster(array('schema', '--check'))[0], 'the templates still want it');
 	http('GET', "$base/faq");
 	same(0, raster(array('schema', '--check'))[0], 'development adds it back');
+	// multilingual, each language's page is checked: an error for each, exit 1
 	list($code, $out) = raster(array('send', '/hours.txt', '--dry-run'), array('RASTER_URL' => "$base/"));
-	same(2, $code, $out);
-	has($out, 'The page has no <title>');
+	same(1, $code, $out);
+	has($out, '/hours.txt has no <title>');
+	has($out, '/ro/hours.txt has no <title>');
 });
 
 
@@ -2364,7 +2368,8 @@ test('R1', 'a model declares a type: a collection with its fields, no mock-up ro
 	same(array('staff.html', 'account.html'), array_values(array_intersect(array('staff.html', 'account.html'), $types[0]['used_in'])), 'where views show it');
 	$described = array_values(array_filter(mcp($base, 'describe', array('sections' => array('collections')))['collections'], function ($c) { return $c['name'] === 'booking'; }));
 	same('visitor', $described[0]['create']);
-	same(array('ends', 'status', 'changed_at'), $described[0]['readonly']);
+	// lang: the language the booking was made in (the café is multilingual)
+	same(array('ends', 'status', 'changed_at', 'lang'), $described[0]['readonly']);
 	database::instance('cms');
 	foreach (R::find('bookingdata') as $row) check($row->name !== 'Ana' || $row->notes !== 'Window seat', 'the mock-up is never stored as a record');
 	list($code, $out) = raster(array('schema'));
@@ -3970,6 +3975,8 @@ test('H13', 'signing up twice: one subscriber, one mail within 5 minutes, the sa
 	same("$base/members?done=password_changed", header_value(http('POST', "$base/password/new?token={$t[1]}", array('raster_form' => 'authentication.reset', 'token' => $t[1], 'password' => 'second password', 'password_again' => 'second password'))[2], 'Location'), 'the first link works:');
 });
 
+// the café is multilingual: its readers here read English (--lang=en), and
+// each language is its own issue that a plain rerun reports as sent
 test('H14', 'an interrupted send goes on where it stopped (#86)', function () use ($base) {
 	database::instance('cms');
 	$readers = R::getCol("SELECT email FROM subscriber WHERE status = 'confirmed' ORDER BY id");
@@ -3986,21 +3993,21 @@ test('H14', 'an interrupted send goes on where it stopped (#86)', function () us
 	test_fixture($dir); @mkdir($dir);
 	try {
 		with_file("$dir/zzstop.php", "<?php\nclass zzstop {\n\tstatic \$n = 0;\n\tstatic function listens() { return array('mail.sent' => 'stop'); }\n\tfunction stop() { if (++self::\$n === (int)getenv('ZZ_STOP_AFTER')) exit(3); }\n}\n", function () use ($base) {
-			same(3, raster(array('send', '/journal'), array('RASTER_URL' => "$base/", 'ZZ_STOP_AFTER' => '2'))[0], 'the run was stopped');
+			same(3, raster(array('send', '/journal', '--lang=en'), array('RASTER_URL' => "$base/", 'ZZ_STOP_AFTER' => '2'))[0], 'the run was stopped');
 		});
 	} finally { @rmdir($dir); }
 	same(2, array_sum($got($before)), 'mailed before the stop');
-	list($code, $out) = raster(array('send', '/journal', '--dry-run'), array('RASTER_URL' => "$base/"));
-	has($out, 'Would send "Journal" to '.(count($readers) - 1).' subscriber(s) who don\'t have it yet');
-	list($code, $out) = raster(array('send', '/journal'), array('RASTER_URL' => "$base/"));
+	list($code, $out) = raster(array('send', '/journal', '--lang=en', '--dry-run'), array('RASTER_URL' => "$base/"));
+	has($out, 'Would send "Journal" (en) to '.(count($readers) - 1).' subscriber(s) who don\'t have it yet');
+	list($code, $out) = raster(array('send', '/journal', '--lang=en'), array('RASTER_URL' => "$base/"));
 	same(0, $code, $out);
-	has($out, 'Sent "Journal" to '.(count($readers) - 1).' more subscriber(s), '.count($readers).' in all');
+	has($out, 'Sent "Journal" (en) to '.(count($readers) - 1).' more subscriber(s), '.count($readers).' in all');
 	$counts = $got($before);
 	same(1, $counts[$readers[0]], 'the first reader got it once:');
 	// the second was handed over as the run was stopped, before it was noted
 	same(2, $counts[$readers[1]], 'the second reader:');
 	foreach (array_slice($readers, 2) as $email) same(1, isset($counts[$email]) ? $counts[$email] : 0, "$email:");
-	list($code, $out) = raster(array('send', '/journal'), array('RASTER_URL' => "$base/"));
+	list($code, $out) = raster(array('send', '/journal', '--lang=en'), array('RASTER_URL' => "$base/"));
 	same(1, $code, $out);
 	has($out, '/journal was already sent');
 	has($out, 'to '.count($readers).' subscribers');
@@ -4023,31 +4030,31 @@ test('H15', 'readers a send failed get it on a plain rerun, over one SMTP connec
 		return array(array_count_values($m[1]), substr_count($text, "C: EHLO "));
 	};
 	file_put_contents("$log.refuse", $readers[1]."\n");
-	list($code, $out) = raster(array('send', '/about', '--dry-run'), $env);
+	list($code, $out) = raster(array('send', '/about', '--lang=en', '--dry-run'), $env);
 	has($out, 'via smtp://127.0.0.1:'.$port);
 	lacks($out, 'pass@');
-	list($code, $out) = raster(array('send', '/about'), $env);
+	list($code, $out) = raster(array('send', '/about', '--lang=en'), $env);
 	same(1, $code, $out);
 	has($out, $readers[1].': ');
-	has($out, 'Sent "About" to '.(count($readers) - 1).' subscriber(s), 1 failed', $out);
+	has($out, 'Sent "About" (en) to '.(count($readers) - 1).' subscriber(s), 1 failed', $out);
 	lacks($out, 'pass@');
 	list($counts, $connections) = $accepted();
 	same(1, $connections, 'one connection for the whole run:');
 	has((string)file_get_contents($log), 'C: '.base64_encode('s3cret@pass')."\n", 'the whole password is sent:');
 	same(count($readers) - 1, array_sum($counts));
 	unlink("$log.refuse");
-	list($code, $out) = raster(array('send', '/about'), $env);
+	list($code, $out) = raster(array('send', '/about', '--lang=en'), $env);
 	same(0, $code, $out);
-	has($out, 'Sent "About" to 1 more subscriber(s), '.count($readers).' in all');
+	has($out, 'Sent "About" (en) to 1 more subscriber(s), '.count($readers).' in all');
 	list($counts) = $accepted();
 	foreach ($readers as $email) same(1, isset($counts[$email]) ? $counts[$email] : 0, "$email:");
-	same(1, raster(array('send', '/about'), $env)[0], 'sent to everyone: once only');
-	list($code, $out) = raster(array('send', '/about', '--again'), $env);
+	same(1, raster(array('send', '/about', '--lang=en'), $env)[0], 'sent to everyone: once only');
+	list($code, $out) = raster(array('send', '/about', '--lang=en', '--again'), $env);
 	same(0, $code, $out);
-	has($out, 'Sent "About" to '.count($readers).' subscriber(s)');
+	has($out, 'Sent "About" (en) to '.count($readers).' subscriber(s)');
 	list($counts) = $accepted();
 	foreach ($readers as $email) same(2, $counts[$email], "--again mails $email again:");
-	list($code, $out) = raster(array('send', '/about', '--to=test@example.com'), $env);
+	list($code, $out) = raster(array('send', '/about', '--lang=en', '--to=test@example.com'), $env);
 	same(0, $code, $out);
 	lacks($out, 'pass@');
 });

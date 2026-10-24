@@ -229,7 +229,10 @@ class cms_records {
 	static function ensure($info, $even_frozen = false) {
 		if (database::$frozen && !$even_frozen) return;
 		$want = self::columns($info);
-		$translated = i18n::enabled() ? self::translated_fields($info) : array();
+		// multilingual: the language of the last save, the translated
+		// fields' columns, and a slug per language
+		if (i18n::enabled()) $want['saved_lang'] = 'text';
+		$translated = i18n::enabled() ? array_merge(self::translated_fields($info), isset($want['slug']) ? array('slug') : array()) : array();
 		$need = $want;
 		foreach ($translated as $field) {
 			foreach (i18n::available() as $lang) $need[cms_types::column($field, $lang)] = $want[$field];
