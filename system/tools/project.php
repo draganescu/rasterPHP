@@ -534,6 +534,20 @@ class raster_project
 		}
 		if ($intended) $add('ok', "$intended use(s) of deprecated features kept on purpose", 'config allow_deprecated');
 
+		// languages (#200 D1): a code Raster can't read is skipped, and
+		// multilingual needs two of them; template-only translation is
+		// among the deprecations above
+		$codes = array_merge((array)config::get('languages', array()), array_values((array)config::get('domain_language', array())));
+		$bad = array_values(array_unique(array_filter($codes, function ($l) { return !is_string($l) || !preg_match('/^[a-z]{2,3}(-[a-z0-9]{2,8})?$/i', $l); })));
+		if ($bad) {
+			$add('fail', 'Language code(s) Raster can\'t read: '.implode(', ', array_map(function ($l) { return var_export($l, true); }, $bad)), "Raster skips them. In languages and domain_language, a code is two or three letters, then an optional region: en, ro, pt-br");
+		}
+		if (config::get('multilingual') && !i18n::enabled()) {
+			$add('fail', 'multilingual is on with fewer than two languages', "The site behaves as if it were off. List two or more, the default first:\nconfig::set('languages')->to(array('en', 'ro'))");
+		} elseif (i18n::enabled()) {
+			$add('ok', 'Multilingual: '.implode(', ', i18n::available()));
+		}
+
 		// the time zone today and scheduled items follow
 		$zone = config::get('timezone');
 		if ($zone && !in_array($zone, timezone_identifiers_list(DateTimeZone::ALL_WITH_BC), true)) {
