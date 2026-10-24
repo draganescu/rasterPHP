@@ -2579,11 +2579,14 @@ of lists and filter pages come along; drafts and the editor don't.
     and `config::set('languages')->to(array('en', 'ro'));`, replacing the
     statements that set them (a commented-out example stays; a statement a
     closing tag `?>` ends counts, and so does `\config::set`) or adding them
-    after the file's last `config::set`, and nothing else. It checks the
-    result changes no other `config::set` statement before it writes the
-    file (whole, by renaming a temporary one), and refuses, writing
-    nothing, when it would, or when a setting is the body of an `if` or
-    `else` without braces. Line endings stay as they were. The default language is first; codes are
+    after the file's last top-level `config::set` (before a top-level
+    `return`; with none, after the open tag and any `declare` or
+    `namespace` line), and nothing else; an empty file becomes one. It
+    checks the result changes no other `config::set` statement and that
+    PHP compiles it (`php -l`) before it writes the file (whole, by
+    renaming a temporary one), and refuses, writing nothing, when it
+    would not, or when a setting is set inside a block (a function, an
+    `if`, a closure) or is the body of an `if` or `else` without braces. Line endings stay as they were. The default language is first; codes are
     lowercased, and one that isn't a code (`en_US`) or is listed twice is
     refused. One code writes `languages` with `multilingual` false; `[]`
     takes both lines out. Nothing is dropped. In development it then adds the

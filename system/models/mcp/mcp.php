@@ -483,6 +483,7 @@ class mcp
 			'languages' => "config::set('languages')->to(array('".implode("', '", $languages)."'));",
 		) : array('multilingual' => null, 'languages' => null);
 		$written = self::config_lines($source, $lines);
+		if ($written !== $source && !self::compiles($written)) throw new InvalidArgumentException('The config file would not compile with the change; change it by hand');
 		if ($written !== $source && !self::write_whole($file, $written)) throw new RuntimeException('Could not write '.raster_inspector::short($file));
 		// this process goes on with them; the next call reads the file again
 		config::set('multilingual')->to(count($languages) > 1);
@@ -545,7 +546,9 @@ class mcp
 			$name = null;
 			if ($argument !== null && is_array($tokens[$argument]) && $tokens[$argument][0] === T_CONSTANT_ENCAPSED_STRING) {
 				$after = $significant($argument + 1, 1);
-				if ($after !== null && $tokens[$after] === ')') $name = stripcslashes(substr($tokens[$argument][1], 1, -1));
+				// only a double-quoted string reads escapes
+				$quoted = $tokens[$argument][1];
+				if ($after !== null && $tokens[$after] === ')') $name = $quoted[0] === '"' ? stripcslashes(substr($quoted, 1, -1)) : strtr(substr($quoted, 1, -1), array("\\\\" => "\\", "\\'" => "'"));
 			}
 			// it ends at the ; outside every bracket, or where PHP stops
 			$depth = 0;
@@ -578,6 +581,8 @@ class mcp
 	// without braces) or the result would change any other statement.
 	static function config_lines($source, $lines) {
 		$eol = strpos($source, "\r\n") !== false ? "\r\n" : "\n";
+		// an empty file is a PHP file with nothing in it yet
+		if (trim($source) === '') $source = '<?php'.$eol;
 		$statements = self::config_statements($source);
 		$others = array();
 		$first = array();
@@ -587,16 +592,23 @@ class mcp
 				continue;
 			}
 			if (!$statement['alone']) throw new InvalidArgumentException("The config sets '{$statement['name']}' inside an if or else without braces; change it there by hand");
+			// in a function, a closure or an if block it counts only when that runs
+			if ($statement['nested']) throw new InvalidArgumentException("The config sets '{$statement['name']}' inside a block (a function, an if or a loop); change it there by hand");
 			if (!isset($first[$statement['name']])) $first[$statement['name']] = $statement['start'];
 		}
 		$add = array();
 		foreach ($lines as $name => $line) {
 			if ($line !== null && !isset($first[$name])) $add[] = $line;
 		}
-		// the new ones go after the last config::set, or at the start of PHP
+		// where the file's PHP starts (after a declare or a namespace line,
+		// which must come first) and where its first top-level return is:
+		// nothing after that runs
+		list($start_of_php, $return) = self::config_shape($source);
+		// the new ones go after the last config::set before that, or at the start of PHP
 		$insert = null;
 		$closed = true;
 		foreach ($statements as $statement) {
+			if ($return !== null && $statement['start'] > $return) continue;
 			// not after a second copy, which goes
 			$ours = $statement['name'] !== null && array_key_exists($statement['name'], $lines);
 			if ($ours && $first[$statement['name']] !== $statement['start']) continue;
@@ -607,10 +619,8 @@ class mcp
 		}
 		$at_start = $insert === null;
 		if ($insert === null) {
-			foreach (token_get_all($source) as $token) {
-				if (is_array($token) && $token[0] === T_OPEN_TAG) { $insert = strpos($source, $token[1]) + strlen($token[1]); break; }
-			}
-			if ($insert === null) throw new InvalidArgumentException('The config file has no PHP to add the settings to');
+			if ($start_of_php === null) throw new InvalidArgumentException('The config file has no PHP to add the settings to');
+			$insert = $start_of_php;
 		}
 		// from the last change to the first, so the offsets stay right
 		$changes = array();
@@ -620,7 +630,7 @@ class mcp
 			// after a statement a closing tag ended, which had no ;
 			if (!$closed) $text = ';'.$text;
 			// at the start of PHP, on lines of their own
-			if ($at_start) $text = substr($text, strlen($eol)).$eol;
+			if ($at_start) $text = (preg_match('/\s$/D', substr($source, 0, $insert)) ? substr($text, strlen($eol)) : $text).$eol;
 			$changes[] = array($insert, $insert, $text);
 		}
 		foreach ($statements as $statement) {
@@ -665,6 +675,46 @@ class mcp
 		}
 		if ($kept !== $others) throw new InvalidArgumentException('The config file could not be changed without changing other settings; change it by hand');
 		return $written;
+	}
+
+	// where new statements may start in a PHP file: after its open tag and
+	// any declare or namespace statement, as offsets; and where its first
+	// return outside every block is (null when none)
+	static function config_shape($source) {
+		$tokens = token_get_all($source);
+		$offset = 0;
+		$start = null;
+		$return = null;
+		$level = 0;
+		$leading = true;
+		$in_leading = false;
+		foreach ($tokens as $token) {
+			$text = is_array($token) ? $token[1] : $token;
+			$id = is_array($token) ? $token[0] : null;
+			if ($start === null && $id === T_OPEN_TAG) { $start = $offset + strlen($text); $offset += strlen($text); continue; }
+			if ($start !== null && $leading) {
+				if (in_array($id, array(T_WHITESPACE, T_COMMENT, T_DOC_COMMENT), true)) { $offset += strlen($text); continue; }
+				if (!$in_leading && in_array($id, array(T_DECLARE, T_NAMESPACE), true)) $in_leading = true;
+				elseif (!$in_leading) $leading = false;
+				if ($in_leading && $text === '{') throw new InvalidArgumentException('The config file has a namespace or declare block; change it by hand');
+				if ($in_leading && $text === ';') { $in_leading = false; $start = $offset + 1; }
+			}
+			if ($text === '{' || in_array($id, array(T_CURLY_OPEN, T_DOLLAR_OPEN_CURLY_BRACES), true)) $level++;
+			if ($text === '}') $level--;
+			if ($id === T_RETURN && $level === 0 && $return === null && $start !== null) $return = $offset;
+			$offset += strlen($text);
+		}
+		return array($start, $return);
+	}
+
+	// whether PHP compiles $source (php -l on it, by the command line PHP)
+	static function compiles($source) {
+		$file = tempnam(sys_get_temp_dir(), 'raster-lint-');
+		file_put_contents($file, $source);
+		$process = proc_open(array(self::php_binary(), '-l', $file), array(0 => array('file', '/dev/null', 'r'), 1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes);
+		$ok = is_resource($process) && proc_close($process) === 0;
+		@unlink($file);
+		return $ok;
 	}
 
 	// writes a file whole or not at all: a reader never sees half of it

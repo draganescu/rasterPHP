@@ -9887,7 +9887,29 @@ test('P2.C: set_languages writes the two settings in their canonical form and le
 			check(strpos($e->getMessage(), 'without braces') !== false, $e->getMessage());
 		}
 	}
-	same("<?php\nconfig::set('multilingual')->to(true);\nif (\$x) {\n\tconfig::set('languages')->to(array('en', 'ro'));\n}\n", mcp::config_lines("<?php\nif (\$x) {\n\tconfig::set('languages')->to(array('de'));\n}\n", $lines), 'inside braces it is a statement of its own; a new one never goes in the block');
+	// in a function, a closure or an if block it would count only when that runs: refused
+	foreach (array("<?php\nif (\$x) {\n\tconfig::set('languages')->to(array('de'));\n}\n", "<?php\nfunction zz() { config::set('multilingual')->to(true); }\n", "<?php\n\$f = function () { config::set('languages')->to(array('de')); };\n") as $nested) {
+		try {
+			mcp::config_lines($nested, $lines);
+			check(false, 'changed: '.$nested);
+		} catch (InvalidArgumentException $e) {
+			check(strpos($e->getMessage(), 'inside a block') !== false, $e->getMessage());
+		}
+	}
+	// after a leading declare and namespace, which must stay first
+	$declared = mcp::config_lines("<?php\ndeclare(strict_types=1);\n\$a = 1;\n", $lines);
+	same("<?php\ndeclare(strict_types=1);\nconfig::set('multilingual')->to(true);\nconfig::set('languages')->to(array('en', 'ro'));\n\n\$a = 1;\n", $declared);
+	check(mcp::compiles($declared) && !mcp::compiles("<?php\nconfig::set('x')->to(1);\ndeclare(strict_types=1);\n"), 'compiles() tells them apart');
+	check(mcp::compiles(mcp::config_lines("<?php declare(strict_types=1);\nnamespace zz;\n", $lines)), 'after a namespace line');
+	// never after a top-level return, where nothing runs
+	same("<?php\nconfig::set('theme')->to('x');\nconfig::set('multilingual')->to(true);\nconfig::set('languages')->to(array('en', 'ro'));\nreturn;\nconfig::set('db')->to(1);\n", mcp::config_lines("<?php\nconfig::set('theme')->to('x');\nreturn;\nconfig::set('db')->to(1);\n", $lines));
+	same("<?php\nconfig::set('multilingual')->to(true);\nconfig::set('languages')->to(array('en', 'ro'));\n\$a = 1;\nreturn \$a;\n", mcp::config_lines("<?php\n\$a = 1;\nreturn \$a;\n", $lines));
+	// a file with only an open tag, or nothing yet
+	$fresh = "<?php\nconfig::set('multilingual')->to(true);\nconfig::set('languages')->to(array('en', 'ro'));\n";
+	same($fresh, mcp::config_lines('<?php', $lines));
+	same($fresh, mcp::config_lines('', $lines));
+	// a single-quoted name reads no escapes but \\ and \'
+	same(array("a\\nb", "it's", "a\nb"), array_column(mcp::config_statements("<?php config::set('a\\nb')->to(1); config::set('it\\'s')->to(1); config::set(\"a\\nb\")->to(1);"), 'name'));
 	// what PHP would make of each result: every other statement as it was
 	foreach (array($source, $closed, "<?php\nconfig::set('db')->to('keep');\n?>\n<p>html</p>\n") as $file) {
 		$after = mcp::config_lines($file, $lines);
