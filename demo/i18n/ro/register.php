@@ -9,4 +9,7 @@ return array (
   'again' => 'Din nou',
   'the_passwords_are_different' => 'Parolele diferă.',
   'join' => 'Înscrie-te',
+  'there_is_already_an_account' => 'Există deja un cont cu emailul acesta.',
+  'that_email_does_not_look' => 'Emailul acesta nu pare corect.',
+  'for_this_cafe_passwords_need' => 'La cafeneaua noastră, parolele au nevoie de cel puțin 10 caractere.',
 );

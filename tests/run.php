@@ -13919,6 +13919,175 @@ test('Final review: a site\'s own record table with a lang column it no longer d
 	});
 });
 
+// ## 2.2.52: items found by their language's slug
+
+// the events table with its Romanian columns, as a multilingual site's
+// development makes them, and events with a Romanian title (so a slug__ro)
+// and without one
+function v2252_events() {
+	return with_settings(p2a_on(), function () {
+		cms_types::ensure('eventsdata', array('title' => 'text', 'date' => 'date', 'starts' => 'time', 'places' => 'int', 'rsvp_until' => 'datetime',
+			'slug' => 'text', 'enabled' => 'bool', 'published_at' => 'datetime', 'updated_at' => 'datetime'), array('title', 'slug'));
+		cms_store::forget();
+		$poetry = rsvp_event(array('title' => 'Poetry evening', 'places' => 4));
+		cms_store::save_item('eventsdata', $poetry['id'], array('title' => 'Seara de poezie'), array('title'), 'editor', 'events', 'ro');
+		$quiz = rsvp_event(array('title' => 'Quiz night'));
+		cms_store::forget();
+		$poetry = R::getRow('SELECT * FROM eventsdata WHERE id = ?', array($poetry['id']));
+		same(array('poetry-evening', 'seara-de-poezie'), array($poetry['slug'], $poetry['slug__ro']));
+		return array($poetry, R::getRow('SELECT * FROM eventsdata WHERE id = ?', array($quiz['id'])));
+	});
+}
+
+test('2.2.52: an event\'s page on /ro/, at its Romanian slug, takes a reply; the English page and a /ro/ page at the default slug too', function () use ($booking_base, $p1b_on) {
+	p1b_site($p1b_on, function () use ($booking_base) {
+		rsvp_site(function () use ($booking_base) {
+			spam_clear();
+			$history = cms_store::table_exists('slughistory');
+			try {
+				list($poetry, $quiz) = v2252_events();
+				$pages = array(
+					'ro' => array("$booking_base/ro/events/events_item/seara-de-poezie", $poetry, 'ana.ro'),
+					'en' => array("$booking_base/events/events_item/poetry-evening", $poetry, 'ana.en'),
+					'ro at the default slug' => array("$booking_base/ro/events/events_item/quiz-night", $quiz, 'ana.quiz'),
+				);
+				foreach ($pages as $what => $page) {
+					list($url, $event, $who) = $page;
+					list($status, $body) = http('GET', $url);
+					same(200, $status, "$what: $body");
+					check(strpos($body, 'ALERT not_open') === false && strpos($body, "event={$event['id']} ") !== false, "$what: the page's event: $body");
+					list($status, , $location) = rsvp_post($url, array('name' => 'Ana', 'email' => "$who@example.test"));
+					same(array(303, "$url?done=going"), array($status, $location), $what);
+					$reply = cms_records::find('rsvp', array('email' => "$who@example.test"));
+					same(array(1, (int)$event['id'], 'going'), array(count($reply), $reply ? (int)$reply[0]['event'] : null, $reply ? $reply[0]['status'] : null), $what);
+				}
+				same('ro', cms_records::find('rsvp', array('email' => 'ana.ro@example.test'))[0]['lang'], 'the reply made on /ro/ is Romanian');
+			} finally {
+				if (!$history) R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS slughistory');
+				cms_store::forget();
+			}
+		});
+	});
+});
+
+test('2.2.52: cms_store::item_at and item_id find an item by its language\'s slug, as render.cms does; rsvp::page_event uses them', function () {
+	rsvp_site(function () {
+		$history = cms_store::table_exists('slughistory');
+		try {
+			list($poetry, $quiz) = v2252_events();
+			$at = function ($key, $lang) { return with_settings(p2a_on() + array('url_language' => $lang === 'en' ? '' : $lang), function () use ($key) { cms_store::$slug_items = array(); return cms_store::item_at('eventsdata', $key); }); };
+			same(array('id' => (int)$poetry['id']), $at('seara-de-poezie', 'ro'), 'its Romanian slug');
+			same(array('id' => (int)$quiz['id']), $at('quiz-night', 'ro'), 'no Romanian slug: its default one');
+			same(array('slug' => 'poetry-evening'), $at('poetry-evening', 'ro'), 'the English slug of one with a Romanian slug: render.cms finds it by its default slug (a GET is answered 301 first)');
+			same(array('slug' => 'seara-de-poezie'), $at('seara-de-poezie', 'en'), 'in English a Romanian slug is a slug no item has');
+			same(array('slug' => 'poetry-evening'), $at('poetry-evening', 'en'));
+			same(array('id' => (int)$quiz['id']), $at((string)$quiz['id'], 'en'), 'a number no item has as its slug is an id');
+			foreach (array('ro' => array('seara-de-poezie', $poetry), 'en' => array('poetry-evening', $poetry)) as $lang => $case) {
+				$id = with_settings(p2a_on() + array('url_language' => $lang === 'en' ? '' : $lang, 'uri_string' => '/events/events_item/'.$case[0]), function () {
+					cms_store::$slug_items = array();
+					rsvp::forget();
+					$event = rsvp::page_event();
+					return $event ? $event['id'] : null;
+				});
+				same((int)$case[1]['id'], $id, "page_event in $lang");
+			}
+			same((int)$quiz['id'], cms_store::item_id('eventsdata', 'quiz-night'));
+			same(null, cms_store::item_id('eventsdata', 'nothing-here'));
+		} finally {
+			if (!$history) R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS slughistory');
+			cms_store::forget();
+			rsvp::forget();
+		}
+	});
+});
+
+test('2.2.52: multilingual off, rsvp::page_event and an item URL\'s lookup send the SQL 2.2.51 sent', function () {
+	rsvp_site(function () {
+		$event = rsvp_event(array('title' => 'Poetry evening'));
+		foreach (array('off' => array('multilingual' => false, 'languages' => array()), 'languages, switch off' => array('multilingual' => false, 'languages' => array('en', 'ro'))) as $what => $off) {
+			with_settings($off + array('uri_string' => '/events/events_item/poetry-evening'), function () use ($what, $event) {
+				rsvp::forget();
+				$now = p2a_sql(function () use ($event) { same((int)$event['id'], rsvp::page_event()['id']); });
+				// 2.2.51's page_event: the default slug, then the item
+				rsvp::forget();
+				$was = p2a_sql(function () use ($event) {
+					$bean = cms_store::table_exists('eventsdata') ? R::findOne('eventsdata', ' slug = ? ', array('poetry-evening')) : null;
+					same((int)$event['id'], (int)$bean->id);
+					rsvp::item((int)$bean->id);
+				});
+				same($was, $now, "$what: page_event");
+				check(!preg_grep('/slug__|slughistory/', $now), "$what: ".implode(' | ', $now));
+				// render.cms: a slug is a filter, no query of its own; a number
+				// is asked for as a slug first, with 2.2.51's query
+				same(array(), p2a_sql(function () { same(array('slug' => 'poetry-evening'), cms_store::item_at('eventsdata', 'poetry-evening')); }), "$what: item_at, a slug");
+				$columns = cms_store::columns('eventsdata');
+				same(array('SELECT COUNT(*) FROM `eventsdata` WHERE slug = ?'), array_values(preg_grep('/^SELECT/', p2a_sql(function () use ($columns) { same(array('id' => 7), cms_store::item_at('eventsdata', '7', null, $columns)); }))), "$what: item_at, a number");
+			});
+		}
+		rsvp::forget();
+	});
+});
+
+// one way to find an item from its address: a bundled model asks
+// cms_store::item_at() / item_id(), and no model but the CMS writes a slug
+// lookup of its own (nor shares one with another model)
+test('2.2.52: no bundled model but cms finds an item by a slug query of its own', function () use ($root) {
+	$found = array();
+	foreach (glob("$root/system/models/*", GLOB_ONLYDIR) as $dir) {
+		if (basename($dir) === 'cms') continue;
+		$files = array_merge(glob("$dir/*.php"), glob("$dir/sql/*.sql") ?: array());
+		foreach ($files as $file) {
+			foreach (file($file) as $n => $line) {
+				if (preg_match('/\bslug`?\s*(=|LIKE|GLOB|IN)\s*[?(:]|findOne\([^;]*slug|find(One|All)?\([^;]*\'slug\'\s*=>|slug_item\(|resolve_slug\(/i', $line)) $found[] = substr($file, strlen($root) + 1).':'.($n + 1).': '.trim($line);
+			}
+		}
+	}
+	same(array(), $found);
+	// the CMS's own list and rsvp ask the one method
+	check(strpos(file_get_contents("$root/system/models/cms/cms.php"), 'cms_store::item_at(') !== false, 'cms::collection asks item_at');
+	check(strpos(file_get_contents("$root/system/models/rsvp/rsvp.php"), 'cms_store::item_id(') !== false, 'rsvp::page_event asks item_id');
+	same(1, substr_count(file_get_contents("$root/system/models/cms/cms.php").file_get_contents("$root/system/models/cms/store.php"), 'WHERE slug = ?\', array($key)'), 'one number-is-a-slug query');
+});
+
+test('2.2.52: multilingual, /ro/login shows the layout\'s site fields in Romanian; off, /login keeps the template\'s words as it always did', function () use ($p1b_on) {
+	cms_store::connect();
+	$made = !cms_store::table_exists('sitepage');
+	if ($made) cms_types::ensure('sitepage', array('slug' => 'text', 'site_name' => 'text', 'updated_at' => 'datetime'));
+	$had = array_key_exists('site_name__ro', cms_store::columns('sitepage'));
+	if (!$had) cms_types::ensure('sitepage', array('site_name__ro' => 'text'));
+	cms_store::forget();
+	$row = R::dispense('sitepage');
+	$row->slug = 'site';
+	$row->site_name = 'Zz2252 Cafe';
+	$row->site_name__ro = 'Zz2252 Cafeneaua';
+	$row->updated_at = R::isoDateTime();
+	R::store($row);
+	try {
+		p1b_site($p1b_on, function () {
+			p1b_server(array(), function ($port) {
+				list($status, $body) = http('GET', "http://127.0.0.1:$port/ro/login");
+				same(200, $status);
+				check(strpos($body, 'Zz2252 Cafeneaua') !== false, '/ro/login: '.$body);
+				check(strpos($body, 'raster-editor') === false, 'no editor on the login page');
+				list(, $body) = http('GET', "http://127.0.0.1:$port/login");
+				check(strpos($body, 'Zz2252 Cafe') !== false && strpos($body, 'Cafeneaua') === false, '/login: '.$body);
+			});
+		});
+		p1b_site("config::set('languages')->to(array('en', 'ro'));", function () {
+			p1b_server(array(), function ($port) {
+				list($status, $body) = http('GET', "http://127.0.0.1:$port/login");
+				same(200, $status);
+				check(strpos($body, 'Zz2252') === false, 'off: the template\'s words: '.$body);
+			});
+		});
+	} finally {
+		R::trash($row);
+		if ($made) R::exec('DROP TABLE IF EXISTS sitepage');
+		elseif (!$had) R::exec('ALTER TABLE sitepage DROP COLUMN site_name__ro');
+		cms_store::forget();
+	}
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";
 foreach ($skipped as $skip) echo "  - $skip\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";

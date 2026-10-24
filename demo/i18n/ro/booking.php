@@ -18,4 +18,13 @@ return array (
   'move_my_booking' => 'Mută rezervarea',
   'book_a_table' => 'Rezervă o masă',
   'book_the_salon' => 'Rezervă la salon',
+  'your_booking_is_cancelled_we' => 'Rezervarea ta e anulată. Sperăm să te vedem altă dată.',
+  'your_booking_has_moved_it' => 'Rezervarea ta s-a mutat. E din nou o cerere: îți scriem după ce confirmăm noua oră.',
+  'this_link_no_longer_works' => 'Linkul acesta nu mai funcționează: rezervarea a fost anulată, a trecut sau linkul nu e întreg. Sună-ne la +40 721 000 000.',
+  'its_too_close_to_your' => 'E prea aproape de rezervarea ta ca s-o schimbi aici. Sună-ne la +40 721 000 000.',
+  'that_time_is_full_pick' => 'Ora aceasta e plină. Alege alta.',
+  'pick_one_of_the_times' => 'Alege una dintre orele arătate, într-o zi în care suntem deschiși.',
+  'that_is_too_soon_to' => 'E prea curând ca să rezervi online. Sună-ne.',
+  'we_take_bookings_up_to' => 'Primim rezervări cu cel mult două luni înainte.',
+  'that_isnt_offered_on_that' => 'Asta nu se oferă în ziua aceea.',
 );

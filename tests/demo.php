@@ -5476,6 +5476,25 @@ test('J15', 'P5.A: an agent translates the café over MCP', function () use ($ba
 	}
 });
 
+test('J16', '2.2.52: an evening\'s Romanian page takes replies, and words its alerts in Romanian', function () use ($base) {
+	p5a_seeded($base);
+	$jazz = cafe_event('Jazz night');
+	$slug = (string)R::getCell('SELECT slug__ro FROM eventsdata WHERE id = ?', array($jazz['id']));
+	check($slug !== '' && $slug !== $jazz['slug'], 'the evening has a Romanian slug: '.$slug);
+	$page = "$base/ro/events/events_item/$slug";
+	list($status, $body) = http('GET', $page);
+	same(200, $status);
+	has($body, '<form method="post"');
+	lacks($body, 'Call us.', 'no not_open');
+	list($status, , $headers) = http('POST', $page, array('raster_form' => 'rsvp.form', 'name' => 'Ioana', 'email' => 'ioana.j16@example.com', 'answer' => 'yes', 'people' => '2'));
+	same(303, $status);
+	same("$page?done=going", header_value($headers, 'Location'));
+	same(array('going', (int)$jazz['id'], 'ro'), array(reply_row('ioana.j16@example.com')['status'], (int)reply_row('ioana.j16@example.com')['event'], reply_row('ioana.j16@example.com')['lang']));
+	has(http('GET', "$page?done=going")[1], 'Ești pe listă.');
+	has(http('GET', "$page?done=not_open")[1], 'La seara aceasta nu se răspunde aici. Sună-ne.');
+	lacks(http('GET', "$page?done=not_open")[1], "doesn't take replies here");
+	has(http('GET', event_page($base, $jazz).'?done=not_open')[1], "This evening doesn't take replies here. Call us.", 'the English page keeps its words');
+});
 // ## No PHP warnings, notices or deprecations on any request
 
 $log = is_file("$tmp/php-errors.log") ? file_get_contents("$tmp/php-errors.log") : '';

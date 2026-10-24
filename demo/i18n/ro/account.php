@@ -19,4 +19,9 @@ return array (
   'your_replies_to_our_evenings' => 'Răspunsurile tale la serile noastre, date cât erai conectat.',
   'change_my_reply' => 'Schimbă răspunsul',
   'log_out' => 'Ieși din cont',
+  'saved' => 'Salvat.',
+  'your_current_password_is_not' => 'Parola actuală nu e corectă.',
+  'another_account_uses_that_email' => 'Alt cont folosește deja emailul acesta.',
+  'that_email_does_not_look' => 'Emailul acesta nu pare corect.',
+  'use_at_least_8_characters' => 'Folosește cel puțin 8 caractere.',
 );

@@ -28,6 +28,8 @@ class cms
 	private $page_variables = array();
 	private $page_data = array();
 	private $slug = NULL;
+	// the login page: only the site_* fields, multilingual (#200)
+	private $site_only = false;
 
 	private $data_name = NULL;
 
@@ -415,6 +417,15 @@ class cms
 		$slug = cms::slug_for_uri(str_replace('/'.$index_file, '', $uri_string), controller::instance()->matched_route);
 
 		if (strpos($slug, '/login') === 0) {
+			// the login page has no fields of its own and no editor. On a
+			// multilingual site its layout's site_* fields are the page's
+			// language's, as on every other page (off, the template's, as
+			// they always were)
+			if (i18n::enabled()) {
+				$this->page_name = cms::page_type($slug);
+				$this->slug = $slug;
+				$this->site_only = true;
+			}
 			return;
 		}
 
@@ -450,6 +461,7 @@ class cms
 	{
 		$action = template::get('current_action');
 		if (!$this->page_name) return false;
+		if ($this->site_only && ($action !== 'print' || cms::field_type($name, $this->page_name) !== 'sitepage')) return false;
 
 		try {
 			switch ($action) {
@@ -594,13 +606,6 @@ class cms
 		// /news/news_page/02 shows page 2, but is not a page worth keeping
 		if (!cms::canonical_uri($name)) raster_cache::skip();
 
-		// one item: /news/news_item/3 or /news/news_item/raster-runs-on-php-8
-		if ($asked['item'] !== null) {
-			$wanted = $asked['item'];
-			if (ctype_digit($wanted)) $filters['id'] = (int)$wanted;
-			else $filters['slug'] = $wanted;
-		}
-
 		// uri filters: /news/news_items/tag/php
 		$uri_filters = $asked['filters'];
 		$filters = $uri_filters + $filters;
@@ -686,23 +691,13 @@ class cms
 		foreach ($uri_filters as $key => $value) {
 			if (array_key_exists($key, $fields) && preg_match('/^[a-z0-9_]+$/', $key) && !cms::canonical_value($fields[$key], $value, isset($expected_properties[$key]) ? $expected_properties[$key] : cms::collection_example($name, $key))) raster_cache::skip();
 		}
-		// an item titled 1984 has the slug 1984: a number that is a slug opens
-		// that item, and only a number no item has as its slug is an id (#90)
-		if ($asked['item'] !== null && isset($filters['id']) && array_key_exists('slug', $fields)) {
-			$wanted = $asked['item'];
-			if (R::getCell('SELECT COUNT(*) FROM `'.$this->data_name.'` WHERE slug = ?', array($wanted))) {
-				unset($filters['id']);
-				$filters['slug'] = $wanted;
-			}
-		}
-		// multilingual, on /ro/: the item whose Romanian slug this is, or
-		// that is at its default slug while it has no Romanian one (a number
-		// is a slug first here too). Another language's slug or an old one
-		// never gets here: route() answers 301 (moved_item)
-		if ($asked['item'] !== null && !i18n::is_default() && ($found = cms_store::slug_item($this->data_name, $asked['item'])) !== null) {
-			unset($filters['slug']);
-			$filters['id'] = (int)$found['id'];
-		}
+		// one item: /news/news_item/3 or /news/news_item/raster-runs-on-php-8,
+		// found as cms_store::item_at() finds it: on /ro/ by its Romanian
+		// slug, else its default one (an item titled 1984 has the slug 1984:
+		// a number that is a slug opens that item, and only a number no item
+		// has as its slug is an id, #90). Another language's slug or an old
+		// one never gets here: route() answers 301 (moved_item)
+		if ($asked['item'] !== null) $filters = $uri_filters + cms_store::item_at($this->data_name, $asked['item'], null, $fields);
 		// what the list shows, as the pager counts it
 		// filtered and sorted in the page's language: a translation, else the
 		// default language's value (D8)
@@ -852,7 +847,7 @@ class cms
 
 	// bound to before_output: the editor, for editors
 	public function inject_toolbar() {
-		if (!cms::loggedin() || !$this->page_name) return false;
+		if (!cms::loggedin() || !$this->page_name || $this->site_only) return false;
 		cms_editor::inject($this->page_name, $this->slug);
 		return true;
 	}

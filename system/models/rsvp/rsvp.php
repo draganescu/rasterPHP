@@ -547,9 +547,8 @@ class rsvp
 			$table = self::table();
 			$wanted = $collection !== null ? cms::collection_request($collection)['item'] : null;
 			if ($wanted !== null) {
-				$bean = cms_store::table_exists($table) ? R::findOne($table, ' slug = ? ', array($wanted)) : null;
-				if ($bean) self::$page = (int)$bean->id;
-				elseif (ctype_digit($wanted)) self::$page = (int)$wanted;
+				// as render.cms finds it: on /ro/ by its Romanian slug
+				self::$page = $table === null ? null : cms_store::item_id($table, $wanted);
 			} elseif (is_string(util::get('event')) && ctype_digit(util::get('event'))) {
 				self::$page = (int)util::get('event');
 			}

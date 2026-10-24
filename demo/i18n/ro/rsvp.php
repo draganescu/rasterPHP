@@ -17,4 +17,12 @@ return array (
   'people' => 'Persoane',
   'change_my_reply' => 'Schimbă răspunsul',
   'the_evening_s_page' => 'Pagina serii',
+  'done_we_have_emailed_you' => 'Gata: ți-am trimis răspunsul pe email.',
+  'this_link_no_longer_works' => 'Linkul acesta nu mai funcționează: seara a început, a fost anulată sau linkul nu e întreg. Sună-ne la +40 721 000 000.',
+  'replies_are_closed_you_can' => 'Răspunsurile s-au închis: ne poți spune totuși că nu mai poți veni sau că veniți mai puțini.',
+  'there_arent_places_for_more' => 'Nu mai sunt locuri pentru mai mulți dintre voi. Locurile voastre rămân.',
+  'its_full_and_there_is' => 'E plin și nu avem listă de așteptare.',
+  'for_more_than_6_call' => 'Pentru mai mult de 6, sună-ne și vedem ce putem face.',
+  'how_many_of_you_are' => 'Câți veniți?',
+  'pick_yes_maybe_or_no' => 'Alege da, poate sau nu.',
 );
