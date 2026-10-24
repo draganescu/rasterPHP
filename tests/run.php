@@ -8855,6 +8855,332 @@ test('P0.B saving a team_members item sends collection team_members, and lint fl
 	}
 });
 
+// ## P1.B: /<lang>/ URLs, links, redirects, cache
+
+// English (the default) and Romanian on the starter for the length of $fn,
+// written to the_events.php (read on every request, after the_app.php),
+// with fixture views and a Romanian dictionary
+function p1b_site($settings, $fn) {
+	global $root;
+	$theme = "$root/application/views/default";
+	$views = array(
+		'zzp1b_about' => '<!doctype html><html><head><title>About</title></head><body>'
+			.'<h1><!-- print.i18n.zzp1b(\'hello\') -->Hello<!-- /print.i18n.zzp1b(\'hello\') --></h1>'
+			.'<a href="index.html">Home</a> <a href="zzp1b_menu.html">Menu</a> <a href="/zzp1b_menu">Root</a> <a href="/">Root home</a>'
+			.' <a href="/zzp1b_menu?x=1#top">Query</a> <a href="/ro/zzp1b_menu">Named</a> <a data-href="/zzp1b_menu">Data</a>'
+			.'<form method="post" action="/zzp1b_about"><button>Go</button></form>'
+			.'<a href="/media/x.jpg">Photo</a> <a href="/application/views/default/style.css">CSS</a> <a href="/system/x">Sys</a>'
+			.' <a href="/bin/raster">File</a> <a href="/zzp1b_menu.pdf">PDF</a> <a href="//cdn.example/x">CDN</a> <a href="https://example.com/about">Out</a>'
+			.'</body></html>',
+		'zzp1b_menu' => '<!doctype html><html><head><title>Menu</title></head><body>'
+			.'<h1><!-- print.i18n.zzp1b(\'menu\') -->Menu<!-- /print.i18n.zzp1b(\'menu\') --></h1>'
+			.'<a href="zzp1b_about.html">About</a> <a href="/preview/p1b42/zzp1b_about">In the folder</a> <a href="/zzp1b_about">Outside</a></body></html>',
+		'zzp1b_staff' => '<!doctype html><html><head><title>Rota</title></head><body><p>Rota</p></body></html>',
+		'_email/zzp1b_note' => '<!doctype html><html><head><title>Note</title></head><body>'
+			.'<a href="/zzp1b_menu">Root</a> <a href="zzp1b_menu.html">Menu</a> <a href="/media/x.jpg">Photo</a></body></html>',
+	);
+	foreach ($views as $name => $html) {
+		test_fixture("$theme/$name.html");
+		file_put_contents("$theme/$name.html", $html);
+	}
+	$i18n = "$root/application/i18n";
+	$made = !is_dir($i18n);
+	@mkdir("$i18n/ro", 0775, true);
+	file_put_contents("$i18n/ro/zzp1b.php", "<?php\nreturn array('hello' => 'Bună ziua', 'menu' => 'Meniu');\n");
+	$events = APPBASE.'config/the_events.php';
+	$kept = file_get_contents($events);
+	file_put_contents($events, (strpos($kept, '<?php') === 0 ? $kept : "<?php\n")."\n".$settings."\n");
+	try {
+		return $fn();
+	} finally {
+		file_put_contents($events, $kept);
+		foreach (array_keys($views) as $name) @unlink("$theme/$name.html");
+		@unlink("$i18n/ro/zzp1b.php");
+		@rmdir("$i18n/ro");
+		if ($made) @rmdir($i18n);
+	}
+}
+// a server of its own; {port} in $env is its port
+function p1b_server($env, $fn) {
+	global $root, $db;
+	$port = free_port();
+	$env = $env + array('RASTER_DB' => $db, 'RASTER_SECRET' => 'test-secret', 'RASTER_ENV' => 'development', 'PATH' => getenv('PATH'));
+	foreach ($env as $name => $value) $env[$name] = str_replace('{port}', $port, $value);
+	$server = proc_open(php_argv('-S', "127.0.0.1:$port", "$root/index.php"), array(1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes, $root, $env);
+	for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) usleep(100000);
+	try {
+		return $fn($port);
+	} finally {
+		proc_terminate($server); proc_close($server);
+	}
+}
+function p1b_header($headers, $name) {
+	foreach ($headers as $h) if (stripos($h, $name.':') === 0) return trim(substr($h, strlen($name) + 1));
+	return null;
+}
+// every link to a page of the site starts with $prefix (theme files aside)
+function p1b_links_carry($body, $base, $prefix, $what) {
+	preg_match_all('#(?:href|action)=["\']('.preg_quote($base, '#').'[^"\']*)["\']#', $body, $m);
+	check(count($m[1]) > 0, "$what has no links");
+	foreach ($m[1] as $url) {
+		if (strpos($url, "$base/application/") === 0) continue;
+		check(strpos($url, $prefix) === 0, "$what: $url doesn't carry $prefix");
+	}
+}
+$p1b_on = "config::set('languages')->to(array('en', 'ro'));\nconfig::set('multilingual')->to(true);";
+
+test('P1.B: /ro/ URLs: the prefix is taken off, /ro → /ro/, /ro/menu/ → /ro/menu, /en/menu → /menu, ?lang= → 301', function () use ($base, $p1b_on) {
+	p1b_site($p1b_on, function () use ($base) {
+		$redirect = function ($path) use ($base) {
+			list($status, , $headers) = http('GET', $base.$path);
+			check(!preg_grep('/^Set-Cookie/i', $headers), "$path sets a cookie");
+			return $status.' '.location($headers);
+		};
+		same("301 $base/ro/", $redirect('/ro'));
+		same("301 $base/ro/?x=1", $redirect('/ro?x=1'));
+		same("301 $base/ro/zzp1b_menu", $redirect('/ro/zzp1b_menu/'));
+		same("301 $base/ro/zzp1b_menu?x=1", $redirect('/ro/zzp1b_menu/?x=1'));
+		// the default language has no prefix
+		same("301 $base/zzp1b_menu", $redirect('/en/zzp1b_menu'));
+		same("301 $base/", $redirect('/en/'));
+		same("301 $base/", $redirect('/en'));
+		// ?lang= is the same page in that language, the rest of the query kept, no cookie
+		same("301 $base/ro/zzp1b_menu?x=1", $redirect('/zzp1b_menu?lang=ro&x=1'));
+		same("301 $base/zzp1b_menu", $redirect('/ro/zzp1b_menu?lang=en'));
+		same("301 $base/ro/", $redirect('/?lang=ro'));
+		same("301 $base/ro/zzp1b_menu", $redirect('/ro/zzp1b_menu/?lang=RO'));
+		// a language the site doesn't have is no prefix and no redirect
+		same(404, http('GET', "$base/de/zzp1b_menu")[0]);
+		same(200, http('GET', "$base/ro/zzp1b_menu?lang=xx")[0]);
+		same(404, http('GET', "$base/ro/nothing-here")[0]);
+		foreach (array('/ro/' => 'ro', '/ro/zzp1b_menu' => 'ro', '/zzp1b_menu' => 'en', '/' => 'en', '/ro/news.rss' => 'ro') as $path => $lang) {
+			list($status, , $headers) = http('GET', $base.$path);
+			same(200, $status, $path);
+			same($lang, p1b_header($headers, 'Content-Language'), $path);
+			check(!preg_grep('/^Set-Cookie/i', $headers), "$path sets a cookie");
+		}
+		// JSON views and refusals without a view carry no language
+		same(null, p1b_header(http('GET', "$base/ro/api/site/year")[2], 'Content-Language'));
+	});
+});
+
+test('P1.B: /ro/about renders the Romanian template text, and every link carries /ro/', function () use ($base, $p1b_on) {
+	p1b_site($p1b_on, function () use ($base) {
+		list($status, $body, $headers) = http('GET', "$base/ro/zzp1b_about");
+		same(200, $status);
+		same('ro', p1b_header($headers, 'Content-Language'));
+		check(strpos($body, '<h1>Bună ziua</h1>') !== false, 'the Romanian text');
+		// links to pages, by file name and by root path, get the language's address
+		foreach (array('<a href="'.$base.'/ro/">Home</a>', '<a href="'.$base.'/ro/zzp1b_menu">Menu</a>', '<a href="'.$base.'/ro/zzp1b_menu">Root</a>',
+			'<a href="'.$base.'/ro/">Root home</a>', '<a href="'.$base.'/ro/zzp1b_menu?x=1#top">Query</a>', '<a href="'.$base.'/ro/zzp1b_menu">Named</a>',
+			'action="'.$base.'/ro/zzp1b_about"') as $link) {
+			check(strpos($body, $link) !== false, "missing $link");
+		}
+		// links to files keep theirs
+		foreach (array('<a data-href="/zzp1b_menu">', '<a href="/media/x.jpg">', '<a href="/application/views/default/style.css">', '<a href="/system/x">',
+			'<a href="/bin/raster">', '<a href="/zzp1b_menu.pdf">', '<a href="//cdn.example/x">', '<a href="https://example.com/about">') as $link) {
+			check(strpos($body, $link) !== false, "changed: $link");
+		}
+		p1b_links_carry($body, $base, "$base/ro/", '/ro/zzp1b_about');
+		// the starter's own pages, layout and all
+		foreach (array('/ro/about', '/ro/login', '/ro/', '/ro/news') as $path) {
+			list($status, $body) = http('GET', $base.$path);
+			same(200, $status, $path);
+			p1b_links_carry($body, $base, "$base/ro/", $path);
+		}
+		// the default language: root links stay as written
+		list(, $body, $headers) = http('GET', "$base/zzp1b_about");
+		same('en', p1b_header($headers, 'Content-Language'));
+		check(strpos($body, '<h1>Hello</h1>') !== false && strpos($body, '<a href="/zzp1b_menu">Root</a>') !== false && strpos($body, 'href="'.$base.'/zzp1b_menu"') !== false, 'English page');
+		// an email rendered on a /ro/ page links to /ro/
+		cms_store::connect();
+		authentication::create_user('zzp1b-reset@example.test', 'a long password', 'member', 'Ana');
+		same(303, form_post("$base/ro/forgot", array('raster_form' => 'authentication.forgot', 'email' => 'zzp1b-reset@example.test'))[0]);
+		$mail = last_mail();
+		check($mail && strpos($mail['text'], "$base/ro/reset?token=") !== false, 'the reset link: '.($mail ? $mail['text'] : 'no mail'));
+	});
+});
+
+test('P1.B: an email rendered in a language: every page link carries its prefix, through fix_links', function () use ($root) {
+	p1b_site('', function () use ($root) {
+		$was = array(config::get('languages'), config::get('multilingual'));
+		config::set('languages')->to(array('en', 'ro'));
+		config::set('multilingual')->to(true);
+		try {
+			$base = config::get('link_base');
+			$html = i18n::with('ro', function () { return controller::render_view('_email/zzp1b_note'); });
+			check(strpos($html, 'href="'.$base.'ro/zzp1b_menu">Root') !== false, $html);
+			check(strpos($html, 'href="'.$base.'ro/zzp1b_menu">Menu') !== false, $html);
+			check(strpos($html, '/ro/media/') === false && strpos($html, 'media/x.jpg') !== false, $html);
+			same($base, config::get('link_uri'), 'with() puts link_uri back');
+			$html = i18n::with('en', function () { return controller::render_view('_email/zzp1b_note'); });
+			check(strpos($html, 'href="'.$base.'zzp1b_menu">Menu') !== false && strpos($html, '/ro/') === false, $html);
+		} finally {
+			config::set('languages')->to($was[0]);
+			config::set('multilingual')->to($was[1]);
+		}
+	});
+});
+
+test('P1.B: protected /ro/ pages: /ro/staff goes to /ro/login and back, and stays protected', function () use ($base, $p1b_on) {
+	p1b_site($p1b_on."\nconfig::set('protected')->to(array('account' => 'member', 'zzp1b_staff' => 'editor'));", function () use ($base) {
+		list($status, , $headers) = http('GET', "$base/ro/zzp1b_staff");
+		same(303, $status);
+		same("$base/ro/login?next=%2Fzzp1b_staff", location($headers));
+		// in other letter case it is not the prefix, and no page
+		same(404, http('GET', "$base/RO/zzp1b_staff")[0]);
+		cms_store::connect();
+		authentication::create_user('zzp1b-editor@example.test', 'a long password', 'editor', 'Ed');
+		authentication::create_user('zzp1b-member@example.test', 'a long password', 'member', 'Mo');
+		list($status, , $headers) = form_post("$base/ro/login?next=%2Fzzp1b_staff", array('raster_form' => 'authentication.login', 'login' => 'zzp1b-editor@example.test', 'password' => 'a long password'));
+		same(303, $status);
+		same("$base/ro/zzp1b_staff", location($headers));
+		$cookie = preg_replace('/^Set-Cookie:\s*([^;]+).*$/i', '$1', current(preg_grep('/^Set-Cookie:\s*PHPSESSID/i', $headers)));
+		list($status, $body) = http('GET', "$base/ro/zzp1b_staff", null, array("Cookie: $cookie"));
+		same(200, $status);
+		check(strpos($body, 'Rota') !== false);
+		list(, , $headers) = form_post("$base/ro/login", array('raster_form' => 'authentication.login', 'login' => 'zzp1b-member@example.test', 'password' => 'a long password'));
+		$member = preg_replace('/^Set-Cookie:\s*([^;]+).*$/i', '$1', current(preg_grep('/^Set-Cookie:\s*PHPSESSID/i', $headers)));
+		same(403, http('GET', "$base/ro/zzp1b_staff", null, array("Cookie: $member"))[0], 'a member');
+		same(403, http('GET', "$base/ro/zzp1b_staff/rota", null, array("Cookie: $member"))[0], 'under it');
+	});
+});
+
+test('P1.B: /ro/api and /ro/mcp answer as /api and /mcp, and /ro/ forms pass the cross-site check', function () use ($base, $p1b_on) {
+	p1b_site($p1b_on, function () use ($base) {
+		list($status, $body) = http('GET', "$base/ro/api/site/year");
+		same(200, $status);
+		same(http('GET', "$base/api/site/year")[1], $body);
+		same(404, http('GET', "$base/ro/api/welcome/hello")[0]);
+		list($status, $body) = http('POST', "$base/ro/mcp", json_encode(array('jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/list')), array('Authorization: Bearer test-token', 'Content-Type: application/json'));
+		same(200, $status);
+		check(strpos($body, '"describe"') !== false, $body);
+		same(401, http('POST', "$base/ro/mcp", json_encode(array('jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/list')), array('Content-Type: application/json'))[0], 'no token');
+		list($status, $body) = form_post("$base/ro/zzp1b_about", array('x' => '1'), array('Origin: https://evil.example'));
+		same(403, $status, 'a post from another site');
+		same(200, form_post("$base/ro/zzp1b_about", array('x' => '1'), array("Origin: $base"))[0], 'from this site');
+	});
+});
+
+test('P1.B: a /ro/ page is cached under its own key, with its Content-Language', function () use ($p1b_on) {
+	cache_empty();
+	p1b_site($p1b_on, function () {
+		p1b_server(array('RASTER_ENV' => 'production'), function ($port) {
+			$get = function ($path) use ($port) {
+				list($status, $body, $headers) = http('GET', "http://127.0.0.1:$port$path");
+				return array($status.' '.(p1b_header($headers, 'X-Raster-Cache') ?: 'not cached').' '.p1b_header($headers, 'Content-Language'), $body);
+			};
+			same('200 miss en', $get('/zzp1b_about')[0]);
+			same('200 miss ro', $get('/ro/zzp1b_about')[0]);
+			same('200 hit en', $get('/zzp1b_about')[0]);
+			list($answer, $body) = $get('/ro/zzp1b_about');
+			same('200 hit ro', $answer);
+			check(strpos($body, '<h1>Bună ziua</h1>') !== false, 'the Romanian copy');
+			check(strpos($get('/zzp1b_about')[1], '<h1>Hello</h1>') !== false, 'the English copy');
+			same(2, count(cached_pages()));
+			// a redirect is never kept
+			same('301 not cached ', $get('/ro/zzp1b_about/')[0]);
+		});
+	});
+	cache_empty();
+});
+
+test('P1.B: previewPathTest: /preview/<id>/ro/menu with RASTER_URL=http://127.0.0.1:<port>/preview/<id>/', function () use ($p1b_on) {
+	p1b_site($p1b_on, function () {
+		p1b_server(array('RASTER_URL' => 'http://127.0.0.1:{port}/preview/p1b42/'), function ($port) {
+			$site = "http://127.0.0.1:$port/preview/p1b42";
+			list($status, $body, $headers) = http('GET', "$site/ro/zzp1b_menu");
+			same(200, $status);
+			same('ro', p1b_header($headers, 'Content-Language'));
+			check(strpos($body, '<h1>Meniu</h1>') !== false, 'the Romanian text');
+			check(strpos($body, '<a href="'.$site.'/ro/zzp1b_about">About</a>') !== false, 'a link by file name');
+			check(strpos($body, '<a href="'.$site.'/ro/zzp1b_about">In the folder</a>') !== false, 'a root link in the folder');
+			check(strpos($body, '<a href="/zzp1b_about">Outside</a>') !== false, 'a root link outside the folder is left alone');
+			$redirect = function ($path) use ($port) {
+				list($status, , $headers) = http('GET', "http://127.0.0.1:$port$path");
+				return $status.' '.location($headers);
+			};
+			same("301 $site/ro/", $redirect('/preview/p1b42/ro'));
+			same("301 $site/ro/zzp1b_menu", $redirect('/preview/p1b42/ro/zzp1b_menu/'));
+			same("301 $site/ro/zzp1b_menu", $redirect('/preview/p1b42/zzp1b_menu?lang=ro'));
+			same("301 $site/zzp1b_menu", $redirect('/preview/p1b42/en/zzp1b_menu'));
+			same('301 /preview/p1b42/', $redirect('/preview/p1b42'));
+			same(200, http('GET', "$site/ro/")[0]);
+			list($status, $body) = http('GET', "$site/zzp1b_menu");
+			same(200, $status);
+			check(strpos($body, '<h1>Menu</h1>') !== false && strpos($body, '<a href="'.$site.'/zzp1b_about">About</a>') !== false, 'English');
+		});
+	});
+});
+
+test('P1.B: a domain_language host is its language, with no prefix', function () use ($p1b_on) {
+	p1b_site($p1b_on."\nconfig::set('domain_language')->to(array('zzp1b-ro.test' => 'ro'));", function () {
+		p1b_server(array('RASTER_URL' => 'http://127.0.0.1:{port}/'), function ($port) {
+			$ro = array("Host: zzp1b-ro.test:$port");
+			list($status, $body, $headers) = http('GET', "http://127.0.0.1:$port/zzp1b_about", null, $ro);
+			same(200, $status);
+			same('ro', p1b_header($headers, 'Content-Language'));
+			check(strpos($body, '<h1>Bună ziua</h1>') !== false, 'Romanian');
+			check(strpos($body, '<a href="http://zzp1b-ro.test:'.$port.'/zzp1b_menu">Menu</a>') !== false && strpos($body, '<a href="/zzp1b_menu">Root</a>') !== false, 'links on its own host, no prefix');
+			same(404, http('GET', "http://127.0.0.1:$port/ro/zzp1b_about", null, $ro)[0], 'no prefix on that host');
+			list($status, , $headers) = http('GET', "http://127.0.0.1:$port/zzp1b_about?lang=en", null, $ro);
+			same("301 http://127.0.0.1:$port/zzp1b_about", $status.' '.location($headers), 'English is at the site address');
+			list($status, , $headers) = http('GET', "http://127.0.0.1:$port/zzp1b_about?lang=ro", null, $ro);
+			same("301 http://zzp1b-ro.test:$port/zzp1b_about", $status.' '.location($headers));
+			// another host: exact names only
+			list(, $body, $headers) = http('GET', "http://127.0.0.1:$port/zzp1b_about", null, array("Host: www.zzp1b-ro.test:$port"));
+			same('en', p1b_header($headers, 'Content-Language'));
+			list($status, , $headers) = http('GET', "http://127.0.0.1:$port/zzp1b_about?lang=ro");
+			same("301 http://127.0.0.1:$port/ro/zzp1b_about", $status.' '.location($headers));
+		});
+	});
+});
+
+test('P1.B: off is identical: no prefix, no header, no redirect, same cache key and links', function () use ($base) {
+	$answers = array();
+	foreach (array('', "config::set('languages')->to(array('en', 'ro'));", "config::set('languages')->to(array('en', 'ro'));\nconfig::set('multilingual')->to(false);",
+		"config::set('languages')->to(array('en'));\nconfig::set('multilingual')->to(true);") as $settings) {
+		$answers[] = p1b_site($settings, function () use ($base, $settings) {
+			if ($settings !== '') {
+				same(404, http('GET', "$base/ro/zzp1b_about")[0], $settings);
+				list($status, , $headers) = http('GET', "$base/zzp1b_about/");
+				same("301 $base/zzp1b_about", $status.' '.location($headers));
+			}
+			if (strpos($settings, "'ro'") !== false) {
+				// ?lang= still picks the template's language and remembers it
+				list($status, $body, $headers) = http('GET', "$base/zzp1b_about?lang=ro");
+				same(200, $status);
+				check(strpos($body, '<h1>Bună ziua</h1>') !== false && (bool)preg_grep('/^Set-Cookie: lang=ro/i', $headers), 'the cookie');
+			}
+			list($status, $body, $headers) = http('GET', "$base/zzp1b_about");
+			same(null, p1b_header($headers, 'Content-Language'));
+			check(strpos($body, '<a href="/zzp1b_menu">Root</a>') !== false && strpos($body, '<a href="/">Root home</a>') !== false, 'root links as written');
+			return array($status, $body, array_values(preg_grep('/^Date:/i', $headers, PREG_GREP_INVERT)));
+		});
+	}
+	same($answers[0], $answers[1], 'languages without multilingual');
+	same($answers[0], $answers[2], 'multilingual false');
+	same($answers[0], $answers[3], 'multilingual with one language');
+	// in this process (no multilingual): link_base is link_uri, the URL names no language,
+	// and the cache key is what it was
+	same(config::get('link_uri'), config::get('link_base'));
+	same('', config::get('url_language'));
+	$was = config::get('languages');
+	config::set('languages')->to(array('en', 'ro'));
+	try {
+		same(sha1(config::get('protocol').'://'.config::get('host').'|'.config::get('uri_string').'|'.i18n::detect()), raster_cache::key());
+		// on, the language is in the key
+		config::set('multilingual')->to(true);
+		$default = raster_cache::key();
+		config::set('url_language')->to('ro');
+		check(raster_cache::key() !== $default, 'a key per language');
+	} finally {
+		config::set('languages')->to($was);
+		config::set('multilingual')->to(null);
+		config::set('url_language')->to('');
+	}
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";
 foreach ($skipped as $skip) echo "  - $skip\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";

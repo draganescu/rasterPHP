@@ -151,6 +151,13 @@ class config {
 		// index.php out, answer 301 to /menu, so outside links make no
 		// duplicates and the page cache keeps one copy (#131)
 		$method = isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : 'GET';
+		// link_uri without the language prefix; with multilingual on, link_uri
+		// adds the prefix of the language the URL names (url_language)
+		$config->link_base = $config->link_uri;
+		$config->url_language = '';
+		if ($config->multilingual && i18n::enabled()) {
+			$path_info = config::language_of_url($config, $path_info, $parts ?? array(), PHP_SAPI !== 'cli' && in_array($method, array('GET', 'HEAD'), true));
+		}
 		$prefixed = config::get('rewrite') == true && strpos($request_uri.'/', '/'.$config->index_file.'/') === 0 && $path_info !== '/';
 		$slashed = $path_info !== '/' && substr($path_info, -1) === '/';
 		if (PHP_SAPI !== 'cli' && in_array($method, array('GET', 'HEAD'), true) && ($prefixed || $slashed)) {
@@ -188,6 +195,62 @@ class config {
 		}
 
 		return $config;
+	}
+
+	// Multilingual (#200): the URL alone names the content language. A host
+	// in domain_language (exactly, port aside) is its language and takes no
+	// prefix; else /ro/ names ro; else it is the default language. The
+	// prefix is taken off here, before the one-address rule and before
+	// anything reads the path, so routes, `protected`, /api, /mcp, forms and
+	// the cache key see /menu, and every link keeps the language through
+	// link_uri. /ro answers 301 to /ro/, /en/menu (the default) to /menu, and
+	// ?lang=ro to the same page in that language. Returns the path left.
+	static function language_of_url($config, $path, $site, $redirects) {
+		$languages = i18n::available();
+		$codes = array_map('strtolower', $languages);
+		$host = preg_replace('/:\d+$/', '', (string)$config->host);
+		$domains = array_change_key_case((array)$config->domain_language);
+		$redirect = null;
+		$on_domain = isset($domains[$host]) && in_array(strtolower($domains[$host]), $codes, true);
+		if ($on_domain) {
+			$config->url_language = $languages[array_search(strtolower($domains[$host]), $codes, true)];
+		} elseif (preg_match('#^/([^/]+)(/.*)?$#', $path, $m) && ($index = array_search($m[1], $codes, true)) !== false) {
+			$rest = isset($m[2]) ? $m[2] : '';
+			if ($index > 0) $config->url_language = $languages[$index];
+			// the default language has no prefix; a language's home is /ro/
+			if ($index === 0 || $rest === '') $redirect = $config->link_base.($index > 0 ? $m[1].'/' : '');
+			$path = $rest === '' ? '/' : $rest;
+		}
+		$config->link_uri = $config->link_base.i18n::prefix($config->url_language);
+		$query = isset($_SERVER['QUERY_STRING']) ? (string)$_SERVER['QUERY_STRING'] : '';
+		// ?lang=xx is a link from before: the same page at its language's address
+		$lang = isset($_GET['lang']) && is_string($_GET['lang']) ? array_search(strtolower($_GET['lang']), $codes, true) : false;
+		if ($lang !== false) {
+			$code = $codes[$lang];
+			$address = null;
+			// the path after the host: the folder and the index file
+			$after_host = substr($config->link_base, strlen($config->protocol.'://'.$config->host));
+			if (!$on_domain) {
+				$address = $config->link_base.($lang > 0 ? $code.'/' : '');
+			} elseif ($code === strtolower($config->url_language)) {
+				$address = $config->link_base;
+			} elseif (($domain = array_search($code, array_map('strtolower', $domains), true)) !== false) {
+				$address = $config->protocol.'://'.$domain.$after_host;
+			} elseif (!empty($site['host']) && !isset($domains[strtolower($site['host'])])) {
+				// from a language's own domain to the site's address
+				$address = $config->protocol.'://'.strtolower($site['host']).(isset($site['port']) ? ':'.$site['port'] : '').$after_host.($lang > 0 ? $code.'/' : '');
+			}
+			if ($address !== null) {
+				$redirect = $address;
+				$query = implode('&', array_filter(explode('&', $query), function ($pair) { return $pair !== '' && urldecode(strtok($pair, '=')) !== 'lang'; }));
+			}
+		}
+		if ($redirects && $redirect !== null) {
+			$tail = implode('/', array_map('rawurlencode', explode('/', trim($path, '/'))));
+			header('Location: '.$redirect.$tail.($query !== '' ? '?'.$query : ''), true, 301);
+			exit;
+		}
+		return $path;
 	}
 
 	// the set_environment method looks up the current domain in the servers config

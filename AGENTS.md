@@ -2024,6 +2024,43 @@ use `'model.method'`: `method(true)` returns
 - `print.i18n.language` gives the current language; `render.i18n.languages`
   gives a switcher with `code`, `url` and `state`.
 
+**Multilingual URLs** (`multilingual` on, with two or more `languages`): the
+URL alone says the content's language, so one URL is always one language.
+- **Addresses.** The default language has no prefix (`/menu`); every other
+  language is under its code (`/ro/menu`). A language's home page is `/ro/`,
+  and `/ro` answers 301 to it. `/ro/menu/` answers 301 to `/ro/menu` (the
+  one-address rule), `/en/menu` (the default's code) 301 to `/menu`, and
+  `?lang=ro` 301 to the same page in that language (`/ro/menu`, the rest of
+  the query kept). A host listed in `domain_language` (exactly, port aside)
+  is that language and takes no prefix; there `?lang=` for another language
+  goes to that language's domain, or to the site's address (`RASTER_URL`).
+  The cookie and `Accept-Language` don't choose the content, and no `lang`
+  cookie is set.
+- **One place.** `config::initialize()` takes the prefix off, after the
+  site's own folder (`RASTER_URL=https://host/preview/abc/` serves
+  `/preview/abc/ro/menu`) and before anything reads the path. Routes,
+  `protected` pages (`/ro/staff` sends a visitor to `/ro/login`, and back),
+  the cross-site check, `/ro/api/…` and `/ro/mcp` see `/menu`, as without a
+  prefix. `config::get('url_language')` is the language the URL names (`''`
+  for the default, and when multilingual is off), `link_base` the site's
+  link address without a prefix, and `link_uri` adds the prefix (`…/ro/`),
+  so every link Raster builds, in pages and in emails rendered there, keeps
+  the language.
+- **Links.** On a `/ro/` page, links by file name (`href="menu.html"`) and
+  hand-written root links to pages (`href="/menu"`, `action="/contact"`)
+  become `…/ro/menu`. Links to files are left alone: anything with an
+  extension (`/menu.pdf`, `/news.rss`), under the app's folder (the theme),
+  `media/` or `system/`, and any path that is a file. A root link outside
+  the site's folder, or that already names a language (`/ro/menu`), keeps
+  that.
+- **Headers and cache.** Every HTML and feed page answers
+  `Content-Language: ro` (its language), and a cached copy goes out with it
+  too. The page cache keeps one copy per URL, so `/menu` and `/ro/menu` are
+  two copies and need no `Vary`.
+- With multilingual off none of this happens: `/ro/menu` is a 404, `?lang=`
+  picks the template's language and sets the cookie, links are as before and
+  there is no `Content-Language`.
+
 ## Environments and cache
 
 - **Environments.** `servers.php` maps host names (full-name regular
@@ -2177,7 +2214,7 @@ of lists and filter pages come along; drafts and the editor don't.
 
 - Editors (roles editor and admin) log in at `/login`. They also see drafts.
   Visitors get no cookies until they log in (except `lang`, when they pick a
-  language).
+  language on a site that isn't multilingual).
 - **The in-page editor.** For editors, the page itself is the editor: every
   `print.cms` field, collection, item and item field is editable where it
   shows, in the site's own type (`E` or the Edit button starts, changes save
