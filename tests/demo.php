@@ -1650,7 +1650,7 @@ test('N13', 'describe on the command line', function () {
 	same(0, $code, $out);
 	$described = json_decode($out, true);
 	same('demo', $described['site']['app']);
-	same(10, count($described));
+	same(11, count($described));
 	list($code, $out) = raster(array('describe', '--sections=site,vocabulary'));
 	same(0, $code, $out);
 	has($out, '## site');
