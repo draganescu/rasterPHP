@@ -395,7 +395,7 @@ alike:
 
 | Event | Payload |
 |---|---|
-| `authentication.registered`, `logged_in`, `logged_out`, `password_changed`, `account_saved` | `id`, `email`, `name`, `role` |
+| `authentication.registered`, `logged_in`, `logged_out`, `password_changed`, `account_saved` | `id`, `email`, `name`, `role` (and `lang`, the account's language, on a multilingual site) |
 | `authentication.login_failed` | `login` |
 | `newsletter.subscribed` | `email`, `name`, `status` (`pending` or `confirmed`), `source` (after the commit; the framework's listener `newsletter.confirmation_mail` emails a pending address) |
 | `newsletter.confirmed`, `newsletter.unsubscribed` | `email`, `name` (after the commit) |
@@ -773,6 +773,14 @@ mock-up is stored only when the collection's table is made.
     for `8pm`, `1` for `yes`. One that can't be (`many` for an int,
     `2026-02-30`, `x` for a date) is refused with the field and an
     example. An empty value is `null` (`false` for a bool, `''` for text).
+  - A date typed with slashes follows the language once `languages` is set
+    (#135, D14), whether or not `multilingual` is on: day first for every
+    language but `en-us`, so `5/10/2026` is 5 October on an `en`+`ro` site
+    and `31/02/2026` is refused. `en-us` reads it month first. `2026-10-05`,
+    `5.10.2026` and words (`10 May 2026`, `today`) read the same in every
+    language. With `languages` unset nothing changed: `5/10/2026` is 10 May.
+    `cms_types::parse_date($value, $lang)` does it (null `$lang`: the
+    current language, `i18n::date_order()`).
     A form's ticked checkbox is yes, whatever its `value`.
   - Lists filter and sort by type: `order=-price` puts 100 above 18 above
     9.50.
@@ -1044,7 +1052,15 @@ own: the bundled booking model has the type, its rules and its emails (see
   `'translate' => array('name', 'description')` gives those text fields a
   column per language, `'shared' => array('email', 'phone')` gives one to
   every text field but those (lists and hidden fields never get one).
-  `cms_records::translated_fields($info)` names them.
+  `cms_records::translated_fields($info)` names them. The bundled booking
+  translates `bookingresource` and `bookingservice` `name`: `/ro/` pages
+  (`render.booking.resources`, `render.booking.services`) and the
+  `resource_name`/`service_name` of the guest's page, the staff page and the
+  emails show the name in the current language, or the default's while it
+  has none. A booking's own fields, like every record a visitor sends, are
+  what was typed. An rsvp event is an item of the events collection, so its
+  title translates there: `event_title` and `event_url` are the current
+  language's (`rsvp::item()` reads each language once).
 - **Editors and agents** change records like items, except that readonly
   fields are shown and not editable, hidden fields never reach them, and the
   item's handle has the type's actions instead of Duplicate and Schedule.
@@ -1310,6 +1326,19 @@ bundled model declares none of its types, and `lint` warns.
   as the process was killed isn't noted yet, so that one reader may get it
   twice. One SMTP connection serves the whole run, and the transport is
   printed without its user, password or options.
+  - **On a multilingual site** (see **i18n**) the page is rendered once per
+    language (`/news/x`, `/ro/news/x`), and each rendering goes to the
+    subscribers who read that language (`subscriber.lang`; none, or one the
+    site dropped, reads the default), with its own `<title>` as the subject
+    and that language's unsubscribe page. Each language is an issue of its
+    own, keyed by its address, so "sent once" and "goes on after a stop"
+    hold per language. `--lang=ro` sends only that one (refused on a site
+    that isn't multilingual); `--to` sends the default's rendering unless
+    `--lang` names another; `--subject` is every language's; `--dry-run`
+    prints a line per language. A language whose page doesn't render or has
+    no `<title>` is an error for it alone: the others still go, and the exit
+    status is 1. In code, `newsletter::recipients($issue, $lang)` and the
+    `$lang` of `send_issue()`; a null `$lang`, or off, means everyone.
   - From code: `newsletter::send_issue($url, $html, $subject, $again)`
     sends a page rendered with `RASTER_SENDING=1` and passed through
     `newsletter::prepare_issue()`. It returns false when the issue already
@@ -2136,6 +2165,28 @@ field every page shares, `print.cms.site_name`), else its host.
   the mail was handed over.
 - Links in emails: `util::url('letters/confirm', array('token' => $t))` is
   the absolute address of a page of the site, with its query.
+- **The language an email goes out in** (multilingual on, #200 D13):
+  `send_view($view, $to, $vars, $headers, $lang)` renders the view in
+  `$lang` (`i18n::with`): its dictionary words, CMS fields, `<title>` (so
+  the subject), the `site_name` fallback and its links (`/ro/…`). A root
+  link (`href="/menu"`) is the page in that language, and a root file
+  (`/media/x.jpg`) the site's. Build the vars in the same language, so
+  `util::url()` links are `/ro/` too:
+  `mail::in_language($lang, function () use (…) { …util::url(…)…; mail::send_view(…, $lang); })`.
+  `$lang` null, or multilingual off, is the request's language, as before:
+  off, every email is byte-identical. Rows that email later store the
+  language they were made in, `lang` (`user`, `subscriber`, `booking`,
+  `rsvp`, `contactmessage`, the shop's `order`; declared only when on, set
+  once from `i18n::current()`, readonly), read with `i18n::of($row)` (the
+  default language for a row from before the column). So the bundled
+  senders mail each guest in theirs whoever acts (staff confirming on an
+  English `/staff`, the `promote` action, MCP `run_action`, a webhook), and
+  staff (`booking_staff_email`, `rsvp_staff_email`, `contact_staff_email`,
+  `shop_staff_email`) in the default language, with the guest's as
+  `print.self.lang` in `booking_new`, `rsvp_new` and `contact_received`.
+  A frozen database without the column skips it until `schema --apply`
+  (accounts and subscribers; a record type's column is needed, as for any
+  new field). Off again, a record table's `lang` is kept, not an orphan.
 - Many mails at once: `mail::keep_open()` keeps the SMTP connection for the
   mails that follow (`RSET` between them, a new connection if the server
   dropped it) until `mail::close()`. `mail::destination()` is the transport
@@ -2223,7 +2274,8 @@ every language is **Multilingual sites**, below).
   as written (make them `print.cms.<name>` for words editors change, or
   `print.i18n.<file>('key')` for fixed words; what a print replaces,
   comments, `remove`, scripts, styles, numbers, punctuation and lone
-  symbols are left out, and so are emails; one per line, at most ten per
+  symbols are left out; `_email/` views are read too, since each email
+  goes out in its recipient's language; one per line, at most ten per
   view and a count of the rest); `missing_translation_key`, a
   `print.i18n.<file>('key')` some language's dictionary has no entry for;
   `html_lang_fixed`, an `<html>` whose `lang` no
@@ -2311,6 +2363,7 @@ as a one-language site. Each part is described where it lives:
 | item slugs per language (`slug__ro`), `slughistory`, 301s from old and other languages' slugs | **The CMS**: Item addresses |
 | translation columns in `schema`, kept translations | **The CMS**: Changing fields |
 | `untranslatable_text`, `missing_translation_key`, `html_lang_fixed` | **i18n**: Lint, multilingual on |
+| the language emails go out in, the stored `lang` of rows that email | **mail** |
 | the editor on `/ro/…` and the editor's own language | **Editors and agents**: the in-page editor |
 | `set_languages`, `translation_status`, `read_strings`, `write_strings`, `lang` on the page tools | **Editors and agents**: Tools for languages |
 
@@ -2329,10 +2382,12 @@ as a one-language site. Each part is described where it lives:
   2. Words editors change become CMS fields, fixed words dictionary keys
      (`check_view` and `write_view` say which new fields get a translation).
   3. `translation_status` with `lang: "ro"` lists what Romanian lacks:
-     page and `site` fields, items' and records' fields, dictionary keys.
+     page and `site` fields, items' and records' fields, dictionary keys
+     (`email` for the ones only `_email/` views print).
   4. `update_page` with `lang` writes a page's translation, `update_item`
-     with `lang` an item's (`where` `menu/3` is collection `menu`, id 3),
-     `write_strings` a dictionary's.
+     with `lang` an item's or a record's (`where` `menu/3` is collection
+     `menu`, id 3; `bookingservice/2` a service's name), `write_strings` a
+     dictionary's, an email's words included.
   5. `render_url` with `/ro/…` shows the result (`/ro/menu`, and an item
      at its Romanian address).
 
@@ -2696,8 +2751,15 @@ of lists and filter pages come along; drafts and the editor don't.
     shared }], total, done }`. `kind` is `page` (`where` its URL), `site`
     (the `site_*` fields), `item` (a markup collection's item, `where`
     `<collection>/<id>`, `menu/3`), `record` (the same, for a record type
-    whose `types()` declares `translate` or `shared`) or `strings` (a
-    dictionary key the views print; `where` the dictionary). An item's slug
+    whose `types()` declares `translate` or `shared`; the bundled
+    `bookingresource` and `bookingservice` names on a site that uses
+    booking, never what people typed into a booking, rsvp, message or
+    order), `email` (a dictionary key only `_email/` views print; `where`
+    the dictionary, `view` the first email that prints it,
+    `_email/booking_confirmed`) or `strings` (a dictionary key other views
+    print; `where` the dictionary). `email` and `strings` keys are both
+    translated with `write_strings`; each key is one row, and a CMS field
+    an email prints counts once, where it is stored. An item's slug
     is never listed: it is made from its translated title. A field counts
     when the templates (or the record type) translate it and its
     default-language value isn't empty; `default_value` is cut at

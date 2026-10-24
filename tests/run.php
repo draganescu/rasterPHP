@@ -8999,9 +8999,12 @@ test('P1.B: /ro/about renders the Romanian template text, and every link carries
 		list(, $body, $headers) = http('GET', "$base/zzp1b_about");
 		same('en', p1b_header($headers, 'Content-Language'));
 		check(strpos($body, '<h1>Hello</h1>') !== false && strpos($body, '<a href="/zzp1b_menu">Root</a>') !== false && strpos($body, 'href="'.$base.'/zzp1b_menu"') !== false, 'English page');
-		// an email rendered on a /ro/ page links to /ro/
+		// an email to an account made on /ro/ links to /ro/ (since P4.A the
+		// account's stored language decides, not the page asking)
 		cms_store::connect();
-		authentication::create_user('zzp1b-reset@example.test', 'a long password', 'member', 'Ana');
+		with_settings(array('multilingual' => true, 'languages' => array('en', 'ro')), function () {
+			i18n::with('ro', function () { return authentication::create_user('zzp1b-reset@example.test', 'a long password', 'member', 'Ana'); });
+		});
 		same(303, form_post("$base/ro/forgot", array('raster_form' => 'authentication.forgot', 'email' => 'zzp1b-reset@example.test'))[0]);
 		$mail = last_mail();
 		check($mail && strpos($mail['text'], "$base/ro/reset?token=") !== false, 'the reset link: '.($mail ? $mail['text'] : 'no mail'));
@@ -10303,8 +10306,9 @@ test('P2.C: tools/list and describe grow by less than 1,000 characters (#161)', 
 			$tools = strlen(json_encode($list, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
 			$languages = strlen(json_encode(array('languages' => $mcp->call('describe', array('sections' => array('languages')))['languages']), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)) - 2;
 			// P3.D's lang on the item tools (46 characters) is P3's growth,
-			// held to its own budget by its test
-			$growth = $tools - 10954 - 46 + $languages;
+			// and P4.C's "record, email" (15) P4's, each held to its own
+			// budget by its test
+			$growth = $tools - 10954 - 46 - 15 + $languages;
 			check($growth < 1000, "tools/list is $tools characters and the languages block $languages: $growth more than at the kickoff");
 			$instructions = $mcp->message('initialize')['result']['instructions'];
 			check(strpos($instructions, 'Making a site multilingual') !== false && strpos($instructions, 'write_asset') !== false, 'the recipe and the asset tools');
@@ -11117,12 +11121,13 @@ test('P2.A: untranslatable_text warns on words no annotation prints, multilingua
 	$problems = array_values(array_filter(with_settings(p2a_on(), function () use ($many) { return lint_html($many); }), function ($p) { return strpos($p['message'], 'is the same in every language') !== false || strpos($p['message'], 'more line(s) of this view') !== false; }));
 	same(11, count($problems), json_encode($problems));
 	check(strpos($problems[10]['message'], '15 more line(s) of this view') !== false, $problems[10]['message']);
-	// emails are left out
+	// emails are read too: each goes out in its recipient's language (P4.C)
 	$file = sys_get_temp_dir().'/raster-p2a-'.getmypid().'/_email';
 	@mkdir($file, 0775, true);
 	file_put_contents("$file/zz.html", '<html><body><p>Fixed words</p></body></html>');
 	try {
-		same(array(), with_settings(p2a_on(), function () use ($file) { return (new raster_inspector())->lint_path("$file/zz.html"); }));
+		$problems = with_settings(p2a_on(), function () use ($file) { return (new raster_inspector())->lint_path("$file/zz.html"); });
+		check(strpos(json_encode($problems), "'Fixed words' is the same in every language") !== false, json_encode($problems));
 	} finally {
 		@unlink("$file/zz.html");
 		@rmdir($file);
@@ -11186,7 +11191,8 @@ test('P2.A: the starter linted multilingual: warnings only, a few per view', fun
 	$per_file = array();
 	foreach ($on as $p) if (strpos($p['message'], 'is the same in every language') !== false || strpos($p['message'], 'more line(s) of this view') !== false) $per_file[$p['file']] = (isset($per_file[$p['file']]) ? $per_file[$p['file']] : 0) + 1;
 	foreach ($per_file as $file => $count) check($count <= 11, "$file: $count");
-	foreach ($on as $p) check(strpos($p['file'], '_email/') === false || strpos($p['message'], 'the same in every language') === false, 'no email: '.$p['file']);
+	// emails are read too (P4.C): the starter's are plain words
+	check(preg_grep('#_email/password_reset#', array_keys($per_file)) !== array(), 'the emails: '.json_encode(array_keys($per_file)));
 });
 
 test('P2.A: schema --rename moves a field\'s translation columns with it', function () {
@@ -12140,7 +12146,8 @@ test('P3.D: tools/list grows by less than 100 characters with lang on the item t
 			foreach ($tools as $tool) {
 				if (in_array($tool['name'], array('list_items', 'get_item', 'create_item', 'update_item'), true)) check(isset($tool['inputSchema']['properties']['lang']), $tool['name']);
 			}
-			$size = strlen(json_encode(array('tools' => $tools), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+			// less P4.C's "record, email" in translation_status (15), P4's
+			$size = strlen(json_encode(array('tools' => $tools), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)) - 15;
 			check($size - 11805 < 100, "tools/list is $size characters, ".($size - 11805).' more than P2 left it');
 		});
 	});
@@ -12586,6 +12593,1052 @@ test('P3 review: the editor on /ro/ writes the Romanian address, never the Engli
 		R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS slughistory');
 		cms_store::forget();
 	}
+});
+
+// ## P4 kickoff: the contracts the P4 packages code against
+
+// the settings a P4 off test runs under: every way multilingual is off
+function p4_off_settings() {
+	return array(
+		'off' => array('multilingual' => false, 'languages' => array()),
+		'languages, switch off' => array('multilingual' => false, 'languages' => array('en', 'ro')),
+		'one language' => array('multilingual' => true, 'languages' => array('en')),
+	);
+}
+// a sent mail with what changes every time (date, id, boundary) taken out
+function p4_mail_shape($raw) {
+	$raw = preg_replace('/^(Date|Message-ID): .*$/m', '$1: x', $raw);
+	$raw = preg_replace('/raster-[0-9a-f]{16}/', 'raster-x', $raw);
+	return $raw;
+}
+
+test('P4 kickoff: off, send_view and render_view with a language send and render what they always did', function () use ($root) {
+	$dir = "$root/application/views/default/_email";
+	test_fixture("$dir/zzp4kick.html");
+	file_put_contents("$dir/zzp4kick.html", '<!doctype html><html><head><title>Your table</title></head><body><p>Hi <!-- print.self.name -->there<!-- /print.self.name --></p>'
+		.'<a href="/zzp4kick_menu">Menu</a> <a href="https://example.com/x">Out</a></body></html>');
+	try {
+		foreach (p4_off_settings() as $what => $setting) {
+			with_settings($setting, function () use ($what) {
+				$html = controller::render_view('_email/zzp4kick', array('name' => 'Ana'));
+				foreach (array('en', 'ro', '') as $lang) {
+					same($html, controller::render_view('_email/zzp4kick', array('name' => 'Ana'), 'html', $lang), "$what: render_view in '$lang'");
+				}
+				same(true, mail::send_view('_email/zzp4kick', 'ana@example.test', array('name' => 'Ana')));
+				$plain = p4_mail_shape(last_mail()['raw']);
+				foreach (array('en', 'ro') as $lang) {
+					same(true, mail::send_view('_email/zzp4kick', 'ana@example.test', array('name' => 'Ana'), array(), $lang));
+					same($plain, p4_mail_shape(last_mail()['raw']), "$what: send_view in $lang");
+				}
+				// in_language just runs the function: the request's language and links stay
+				$current = i18n::current();
+				$link = config::get('link_uri');
+				same(array($current, $link), mail::in_language('ro', function () { return array(i18n::current(), config::get('link_uri')); }), "$what: in_language");
+				same('x', mail::in_language(null, function () { return 'x'; }));
+			});
+		}
+		// on, a mail with no language is the request's, as before
+		with_settings(array('multilingual' => true, 'languages' => array('en', 'ro')), function () {
+			same(array('ro', 'en'), array(mail::in_language('ro', function () { return i18n::current(); }), i18n::current()), 'on: in_language runs in the language, then restores it');
+			same(i18n::current(), mail::in_language(null, function () { return i18n::current(); }));
+		});
+	} finally {
+		@unlink("$dir/zzp4kick.html");
+	}
+});
+
+test('P4 kickoff: i18n::of names the language a row is for, the default for rows without one', function () {
+	cms_store::connect();
+	with_settings(array('multilingual' => true, 'languages' => array('en', 'ro', 'pt-br')), function () {
+		same('ro', i18n::of(array('lang' => 'ro')));
+		same('ro', i18n::of(array('lang' => 'RO')));
+		same('pt-br', i18n::of(array('lang' => 'pt-br')));
+		same('en', i18n::of(array('lang' => '')), 'a row from before the column');
+		same('en', i18n::of(array('name' => 'Ana')), 'no column');
+		same('en', i18n::of(array('lang' => 'fr')), 'a language the site dropped');
+		same('en', i18n::of(null));
+		$bean = R::dispense('zzp4kick');
+		$bean->lang = 'ro';
+		same('ro', i18n::of($bean), 'a bean');
+		same('en', i18n::of(R::dispense('zzp4kick')), 'a bean without one');
+	});
+	with_settings(array('multilingual' => false, 'languages' => array()), function () {
+		same('', i18n::of(array('lang' => 'ro')), 'no languages: none');
+	});
+});
+
+test('P4 kickoff: the lang columns are declared on a multilingual site only, so off schema asks nothing new (D13)', function () use ($root) {
+	if (!class_exists('order')) require_once "$root/shop/models/order/order.php";
+	$records = array('booking' => array('booking', 'booking'), 'rsvp' => array('rsvp', 'rsvp'), 'contact' => array('contact', 'contactmessage'), 'order' => array('order', 'order'));
+	$declared = function () use ($records) {
+		$found = array(
+			'user' => array_key_exists('lang', authentication::schema()['user']),
+			'subscriber' => array_key_exists('lang', newsletter::schema()['subscriber']),
+		);
+		foreach ($records as list($class, $type)) {
+			$types = call_user_func(array($class, 'types'));
+			$found[$type] = array_key_exists('lang', $types[$type]['fields']);
+			// the model writes it; staff and agents see it, and it is in the events' payloads
+			if ($found[$type]) check(in_array('lang', $types[$type]['readonly'], true), "$type: lang is readonly");
+		}
+		return $found;
+	};
+	$none = array('user' => false, 'subscriber' => false, 'booking' => false, 'rsvp' => false, 'contactmessage' => false, 'order' => false);
+	foreach (p4_off_settings() as $what => $setting) {
+		same($none, with_settings($setting, $declared), $what);
+	}
+	same(array_map(function () { return true; }, $none), with_settings(array('multilingual' => true, 'languages' => array('en', 'ro')), $declared), 'on');
+	// off, schema status of this database names no lang column as missing
+	$status = with_settings(array('multilingual' => false, 'languages' => array('en', 'ro')), function () {
+		cms_records::forget();
+		try {
+			return (new raster_schema())->status();
+		} finally {
+			cms_records::forget();
+		}
+	});
+	foreach (array_merge($status['tables'], $status['system_tables']) as $table) {
+		check(!in_array('lang', $table['missing'], true), $table['table'].' asks for lang off');
+	}
+});
+
+test('P4 kickoff: without languages, dates are read as they always were, through parse_date (#135)', function () {
+	with_settings(array('multilingual' => false, 'languages' => array()), function () {
+		foreach (array('5/10/2026', '2026-10-05', '5.10.2026', '10 May 2026', 'today', '5/10/2026 19:30') as $typed) {
+			same(strtotime($typed), cms_types::parse_date($typed), $typed);
+			same(strtotime($typed), cms_types::parse_date($typed, 'ro'), "$typed in ro");
+		}
+		same(null, cms_types::parse_date('31/02/2026'));
+		same('2026-05-10', cms_types::clean('date', '5/10/2026', 'when'), 'the American reading, as before');
+		same('2026-05-10 19:30:00', cms_types::clean('datetime', '5/10/2026 19:30', 'when'));
+	});
+});
+
+test('P4 kickoff: off, newsletter recipients in a language are everyone, as before', function () {
+	foreach (p4_off_settings() as $what => $setting) {
+		with_settings($setting, function () use ($what) {
+			same(newsletter::recipients(null), newsletter::recipients(null, 'ro'), $what);
+			same(newsletter::recipients(null), newsletter::recipients(null, 'en'), $what);
+		});
+	}
+});
+
+// ## P4.A: mail in the recipient's language
+
+$p4a_on = array('multilingual' => true, 'languages' => array('en', 'ro'));
+// A Romanian dictionary for the fixture emails, and $settings (PHP) in
+// config/the_events.php for the servers
+function p4a_site($settings, $fn) {
+	global $root;
+	$i18n = "$root/application/i18n";
+	$made = !is_dir($i18n);
+	$made_ro = !is_dir("$i18n/ro");
+	@mkdir("$i18n/ro", 0775, true);
+	test_fixture("$i18n/ro/zzp4a.php");
+	file_put_contents("$i18n/ro/zzp4a.php", "<?php\nreturn array('subject' => 'Masa ta', 'hello' => 'Bună', 'confirmed' => 'Rezervare confirmată', 'new' => 'Rezervare nouă', 'promoted' => 'Ai intrat');\n");
+	$events = APPBASE.'config/the_events.php';
+	$kept = file_get_contents($events);
+	if ($settings !== '') file_put_contents($events, (strpos($kept, '<?php') === 0 ? $kept : "<?php\n")."\n".$settings."\n");
+	try {
+		return $fn();
+	} finally {
+		file_put_contents($events, $kept);
+		@unlink("$i18n/ro/zzp4a.php");
+		if ($made_ro) @rmdir("$i18n/ro");
+		if ($made) @rmdir($i18n);
+	}
+}
+// an email view of the fixture theme: a translated <title> and greeting,
+// $body, and the links an email has
+function p4a_email($name, $title, $body = '') {
+	$file = APPBASE.config::get('views_path', 'views').'/'.config::get('theme', 'default')."/_email/$name.html";
+	test_fixture($file);
+	file_put_contents($file, "<!doctype html><html><head><title><!-- print.i18n.zzp4a('$title') -->".ucfirst($title)."<!-- /print.i18n.zzp4a('$title') --></title></head>"
+		."<body><p><!-- print.i18n.zzp4a('hello') -->Hello<!-- /print.i18n.zzp4a('hello') --> <!-- print.self.name -->Ana<!-- /print.self.name --></p>$body"
+		.'<a href="/zzp4a_menu">Menu</a> <a href="zzp4a_menu.html">Page</a> <a href="/media/zzp4a.jpg">Photo</a> <a href="logo.png">Logo</a></body></html>');
+	return $file;
+}
+// a mail's subject, decoded
+function p4a_subject($raw) {
+	return preg_match('/^Subject: (.*)$/m', $raw, $m) ? mb_decode_mimeheader(trim($m[1])) : null;
+}
+// a sent mail with its links' tokens and ids taken out too
+function p4a_shape($raw) {
+	$raw = p4_mail_shape($raw);
+	// the parts are base64: decode them so a token in the text can go
+	$raw = preg_replace_callback('/(Content-Transfer-Encoding: base64\r\n\r\n)(.*?)(\r\n--)/s', function ($m) {
+		return $m[1].preg_replace('/token=[a-f0-9]+/', 'token=x', base64_decode($m[2])).$m[3];
+	}, $raw);
+	return $raw;
+}
+
+test('P4.A: send_view in a language: its words, the <title> as the subject, /ro/ links and root links made absolute (D13)', function () use ($p4a_on) {
+	p4a_site('', function () use ($p4a_on) {
+		$file = p4a_email('zzp4a_note', 'subject', '<p><a href="<!-- print.self.url /-->">Go</a></p>');
+		try {
+			with_settings($p4a_on, function () {
+				$base = config::get('link_base');
+				$site = preg_replace('#^([a-z]+://[^/]+).*$#', '$1', config::get('base_uri'));
+				$theme = config::get('base_uri').trim(boot::$appname.'/'.config::get('views_path'), '/').'/'.config::get('theme').'/';
+				same('en', i18n::current(), 'an English request');
+				// the vars are built in the language too (in_language), as senders do
+				$sent = mail::in_language('ro', function () { return mail::send_view('_email/zzp4a_note', 'ana@example.test', array('name' => 'Ana', 'url' => util::url('zzp4a_menu')), array(), 'ro'); });
+				same(true, $sent);
+				$mail = last_mail();
+				same('Masa ta', p4a_subject($mail['raw']), 'the subject is the Romanian <title>');
+				check(strpos($mail['text'], 'Bună Ana') !== false, $mail['text']);
+				check(strpos($mail['text'], "Go ({$base}ro/zzp4a_menu)") !== false, 'a link the sender made: '.$mail['text']);
+				check(strpos($mail['text'], "Menu ({$base}ro/zzp4a_menu)") !== false, 'a root page link: '.$mail['text']);
+				check(strpos($mail['text'], "Page ({$base}ro/zzp4a_menu)") !== false, 'a page.html link: '.$mail['text']);
+				check(strpos($mail['text'], "Photo ($site/media/zzp4a.jpg)") !== false, 'a root file link is the site\'s: '.$mail['text']);
+				check(strpos($mail['text'], "Logo ({$theme}logo.png)") !== false, 'a relative file is the theme\'s: '.$mail['text']);
+				same('en', i18n::current(), 'the request\'s language after');
+				same($base, config::get('link_uri'));
+				// in the default language: English, and a root link is still the page's
+				mail::send_view('_email/zzp4a_note', 'ana@example.test', array('name' => 'Ana', 'url' => util::url('zzp4a_menu')), array(), 'en');
+				$mail = last_mail();
+				same('Subject', p4a_subject($mail['raw']));
+				check(strpos($mail['text'], 'Hello Ana') !== false, $mail['text']);
+				check(strpos($mail['text'], "Menu ({$base}zzp4a_menu)") !== false && strpos($mail['text'], '/ro/') === false, $mail['text']);
+				// render_view alone, in a language
+				$html = controller::render_view('_email/zzp4a_note', array('name' => 'Ana'), 'html', 'ro');
+				check(strpos($html, '<title>Masa ta</title>') !== false && strpos($html, 'href="'.$base.'ro/zzp4a_menu">Menu') !== false, $html);
+				// no language: the request's, as before
+				mail::send_view('_email/zzp4a_note', 'ana@example.test', array('name' => 'Ana'));
+				same('Subject', p4a_subject(last_mail()['raw']));
+				$ro = i18n::with('ro', function () {
+					mail::send_view('_email/zzp4a_note', 'ana@example.test', array('name' => 'Ana'));
+					return last_mail();
+				});
+				same('Masa ta', p4a_subject($ro['raw']), 'a /ro/ request without a language');
+			});
+			// off, a root link is the theme's, as it always was
+			foreach (p4_off_settings() as $what => $setting) {
+				with_settings($setting, function () use ($what) {
+					$theme = config::get('base_uri').trim(boot::$appname.'/'.config::get('views_path'), '/').'/'.config::get('theme').'/';
+					$html = controller::render_view('_email/zzp4a_note', array('name' => 'Ana'), 'html', 'ro');
+					check(strpos($html, 'href="'.$theme.'zzp4a_menu">Menu') !== false && strpos($html, 'href="'.$theme.'media/zzp4a.jpg"') !== false, "$what: $html");
+					check(strpos($html, '<title>Subject</title>') !== false, "$what: English");
+				});
+			}
+		} finally {
+			@unlink($file);
+		}
+	});
+});
+
+test('P4.A: a view without a <title> is sent with the site\'s name in the recipient\'s language', function () use ($root, $p4a_on) {
+	$file = "$root/application/views/default/_email/zzp4a_untitled.html";
+	test_fixture($file);
+	file_put_contents($file, '<!doctype html><html><head></head><body><p>Hi</p></body></html>');
+	cms_store::connect();
+	$made = !cms_store::table_exists('sitepage');
+	if ($made) cms_types::ensure('sitepage', array('slug' => 'text', 'site_name' => 'text', 'updated_at' => 'datetime'));
+	$had = array_key_exists('site_name__ro', cms_store::columns('sitepage'));
+	if (!$had) cms_types::ensure('sitepage', array('site_name__ro' => 'text'));
+	cms_store::forget();
+	$row = R::dispense('sitepage');
+	$row->slug = '/';
+	$row->site_name = 'The Cafe';
+	$row->site_name__ro = 'Cafeneaua';
+	$row->updated_at = R::isoDateTime();
+	R::store($row);
+	try {
+		with_settings($p4a_on, function () {
+			mail::send_view('_email/zzp4a_untitled', 'ana@example.test', array(), array(), 'ro');
+			same('Cafeneaua', p4a_subject(last_mail()['raw']));
+			mail::send_view('_email/zzp4a_untitled', 'ana@example.test', array(), array(), 'en');
+			same('The Cafe', p4a_subject(last_mail()['raw']));
+		});
+		foreach (p4_off_settings() as $what => $setting) {
+			with_settings($setting, function () use ($what) {
+				mail::send_view('_email/zzp4a_untitled', 'ana@example.test', array(), array(), 'ro');
+				same('The Cafe', p4a_subject(last_mail()['raw']), $what);
+			});
+		}
+	} finally {
+		R::trash($row);
+		if ($made) R::exec('DROP TABLE IF EXISTS sitepage');
+		elseif (!$had) R::exec('ALTER TABLE sitepage DROP COLUMN site_name__ro');
+		cms_store::forget();
+		@unlink($file);
+	}
+});
+
+test('P4.A: a staff member on English /staff confirms a booking made on /ro/: the guest\'s email is Romanian, with /ro/ links (D13)', function () use ($booking_base, $p1b_on, $p4a_on) {
+	p4a_site($p1b_on, function () use ($booking_base, $p4a_on) {
+		booking_site(function () use ($booking_base, $p4a_on) {
+			p4a_email('booking_requested', 'subject', '<p>Manage: <!-- print.self.manage_url -->none<!-- /print.self.manage_url --></p>');
+			p4a_email('booking_confirmed', 'confirmed', '<p>Manage: <!-- print.self.manage_url -->none<!-- /print.self.manage_url --></p>');
+			p4a_email('booking_new', 'new', '<p>Wrote in <!-- print.self.lang -->x<!-- /print.self.lang -->, <!-- print.self.book_url -->x<!-- /print.self.book_url --></p>');
+			with_settings($p4a_on, function () use ($booking_base) {
+				cms_records::forget();
+				try {
+					$tue = booking_cafe();
+					cms_records::ensure(cms_records::info('booking'), true);
+					// the guest books on /ro/zzbook
+					$mails = booking_mails(function () use ($booking_base, $tue) {
+						same(303, form_post("$booking_base/ro/zzbook", array('raster_form' => 'booking.form', 'name' => 'Ioana', 'email' => 'ioana@example.test', 'date' => $tue, 'time' => '19:00', 'people' => '2'))[0]);
+					});
+					same(array('Masa ta ioana@example.test', 'New staff@zz.test'), booking_sent($mails), 'the guest\'s in Romanian, staff\'s in English');
+					check(strpos($mails[0]['text'], "$booking_base/ro/booking?token=") !== false && strpos($mails[0]['text'], "Menu ($booking_base/ro/zzp4a_menu)") !== false, $mails[0]['text']);
+					check(strpos($mails[1]['text'], 'Hello Ioana') !== false && strpos($mails[1]['text'], 'Wrote in ro') !== false, $mails[1]['text']);
+					check(strpos($mails[1]['text'], "$booking_base/book") !== false && strpos($mails[1]['text'], '/ro/') === false, 'staff\'s links are English: '.$mails[1]['text']);
+					$b = cms_records::find('booking', array('email' => 'ioana@example.test'))[0];
+					same('ro', $b['lang']);
+					// staff confirm it from an English page (MCP run_action and the page's button call act)
+					same('en', i18n::current());
+					$base = config::get('link_base');
+					$mails = booking_mails(function () use ($b) {
+						booking_as_editor(function () use ($b) { cms_records::act('booking', $b['id'], 'confirm', array(), true); });
+					});
+					same(array('Rezervare confirmată ioana@example.test'), booking_sent($mails));
+					check(strpos($mails[0]['text'], 'Bună Ioana') !== false, $mails[0]['text']);
+					check(strpos($mails[0]['text'], "{$base}ro/booking?token=") !== false, 'the manage link is /ro/: '.$mails[0]['text']);
+					check(strpos($mails[0]['text'], "Menu ({$base}ro/zzp4a_menu)") !== false, $mails[0]['text']);
+					same('en', i18n::current(), 'the request stays English');
+					// staff can't change it, and a later write keeps it
+					same(array(), booking_problems(function () use ($b) {
+						try {
+							booking_staff(array('lang' => 'en'), $b['id']);
+							check(false, 'staff set lang');
+						} catch (InvalidArgumentException $e) {
+							check(strpos($e->getMessage(), "'lang'") !== false, $e->getMessage());
+						}
+					}));
+					booking_staff(array('notes' => 'window seat'), $b['id']);
+					same('ro', cms_records::get('booking', $b['id'])['lang']);
+					// a booking staff take by phone on the English page is English
+					$phone = booking_staff(array('email' => 'phone@example.test', 'date' => $tue, 'time' => '19:00', 'people' => 2));
+					same('en', cms_records::get('booking', $phone['id'])['lang']);
+					// a booking from before the column reads as the default language
+					R::exec('UPDATE bookingdata SET lang = ? WHERE id = ?', array('', $phone['id']));
+					$mails = booking_mails(function () use ($phone) {
+						booking_as_editor(function () use ($phone) { cms_records::act('booking', $phone['id'], 'confirm', array(), true); });
+					});
+					same(array('Confirmed phone@example.test'), booking_sent($mails));
+					check(strpos($mails[0]['text'], '/ro/') === false, $mails[0]['text']);
+				} finally {
+					cms_records::forget();
+				}
+			});
+		});
+	});
+});
+
+test('P4.A: rsvp: a waiting guest who replied on /ro/ is promoted by staff in Romanian; staff\'s copy is English', function () use ($p4a_on) {
+	p4a_site('', function () use ($p4a_on) {
+		rsvp_site(function () use ($p4a_on) {
+			p4a_email('rsvp_promoted', 'promoted', '<p>Manage: <!-- print.self.manage_url -->none<!-- /print.self.manage_url --></p>');
+			p4a_email('rsvp_new', 'new', '<p>Wrote in <!-- print.self.lang -->x<!-- /print.self.lang --></p>');
+			with_settings($p4a_on + array('rsvp_staff_email' => 'staff@zz.test'), function () {
+				cms_records::forget();
+				try {
+					// past its deadline, so only staff move the waitlist in
+					$event = rsvp_event(array('date' => date('Y-m-d', strtotime('+1 day')), 'places' => 1, 'rsvp_until' => date('Y-m-d H:i', time() - 3600)));
+					$first = rsvp_reply(array('event' => $event['id'], 'email' => 'first@example.test'));
+					$waiting = i18n::with('ro', function () use ($event) { return rsvp_reply(array('event' => $event['id'], 'email' => 'ioana@example.test', 'name' => 'Ioana'), 'editor'); });
+					same(array('waiting', 'ro'), array(rsvp_status($waiting['id']), cms_records::get('rsvp', $waiting['id'])['lang']));
+					cms_records::update('rsvp', $first['id'], array('answer' => 'no'));
+					$base = config::get('link_base');
+					$mails = booking_mails(function () use ($waiting) {
+						booking_as_editor(function () use ($waiting) { cms_records::act('rsvp', $waiting['id'], 'promote', array(), true); });
+					});
+					same(array('Ai intrat ioana@example.test'), booking_sent($mails));
+					check(strpos($mails[0]['text'], 'Bună Ioana') !== false && strpos($mails[0]['text'], "{$base}ro/rsvp?token=") !== false, $mails[0]['text']);
+					// staff hear of a guest's own reply in English, with the guest's language
+					rsvp::forget();
+					$mails = booking_mails(function () use ($event) {
+						i18n::with('ro', function () use ($event) {
+							$reply = rsvp_reply(array('event' => $event['id'], 'email' => 'maria@example.test', 'name' => 'Maria', 'answer' => 'no'));
+							(new rsvp())->replied_mail(rsvp::payload($reply, 'guest'));
+						});
+					});
+					$staff = array_values(array_filter($mails, function ($m) { return $m['to'] === 'staff@zz.test'; }));
+					same(1, count($staff), json_encode(booking_sent($mails)));
+					same('New', $staff[0]['view']);
+					check(strpos($staff[0]['text'], 'Wrote in ro') !== false && strpos($staff[0]['text'], 'Hello Maria') !== false, $staff[0]['text']);
+				} finally {
+					cms_records::forget();
+				}
+			});
+		});
+	});
+});
+
+test('P4.A: the password reset, newsletter confirmation and contact emails follow the stored language', function () use ($base, $p1b_on, $p4a_on) {
+	p4a_site($p1b_on, function () use ($base, $p4a_on) {
+		with_settings($p4a_on, function () use ($base) {
+			cms_store::connect();
+			// an account made on /ro/ asks for a reset on an English page
+			$id = i18n::with('ro', function () { return authentication::create_user('zzp4a-reset@example.test', 'a long password', 'member', 'Ioana'); });
+			same('ro', R::load('user', $id)->lang);
+			same('ro', authentication::payload($id)['lang'], 'the events say it');
+			same(303, form_post("$base/forgot", array('raster_form' => 'authentication.forgot', 'email' => 'zzp4a-reset@example.test'))[0]);
+			$mail = last_mail();
+			check($mail && strpos($mail['text'], "$base/ro/reset?token=") !== false, 'the reset link: '.($mail ? $mail['text'] : 'no mail'));
+			// one made in English gets English
+			$en = authentication::create_user('zzp4a-reset-en@example.test', 'a long password', 'member', 'Ana');
+			same('en', R::load('user', $en)->lang);
+			// signing up on /ro/, confirming from anywhere: the link is /ro/
+			$link = config::get('link_base');
+			same('pending', i18n::with('ro', function () { return newsletter::subscribe('zzp4a-news@example.test', 'Ioana'); }));
+			same('ro', R::findOne('subscriber', ' email = ? ', array('zzp4a-news@example.test'))->lang);
+			// signing up again in English keeps it
+			newsletter::subscribe('zzp4a-news@example.test', 'Ioana');
+			same('ro', R::findOne('subscriber', ' email = ? ', array('zzp4a-news@example.test'))->lang);
+			R::exec('UPDATE subscriber SET confirm_sent_at = NULL WHERE email = ?', array('zzp4a-news@example.test'));
+			(new newsletter())->confirmation_mail(array('email' => 'zzp4a-news@example.test', 'status' => 'pending'));
+			$mail = last_mail();
+			check(strpos($mail['text'], "{$link}ro/newsletter-confirm?token=") !== false, $mail['text']);
+		});
+		// contact: staff's email in the default language, with the page as the sender read it
+		contact_site(function () use ($p4a_on) {
+			p4a_email('contact_received', 'new', '<p>Wrote in <!-- print.self.lang -->x<!-- /print.self.lang --> on <!-- print.self.page_url -->x<!-- /print.self.page_url --></p>');
+			with_settings($p4a_on + array('contact_staff_email' => 'desk@zz.test'), function () {
+				cms_records::forget();
+				try {
+					cms_records::ensure(cms_records::info('contactmessage'), true);
+					$link = config::get('link_base');
+					$message = i18n::with('ro', function () { return cms_records::create('contactmessage', array('email' => 'ioana@example.test', 'name' => 'Ioana', 'message' => 'Bună', 'page' => '/contact')); });
+					same('ro', $message['lang']);
+					(new contact())->staff_mail(contact::payload($message, 'visitor'));
+					$mail = last_mail();
+					same('New', p4a_subject($mail['raw']));
+					check(strpos($mail['text'], 'Hello Ioana') !== false && strpos($mail['text'], "Wrote in ro on {$link}ro/contact") !== false, $mail['text']);
+				} finally {
+					cms_records::forget();
+				}
+			});
+		});
+	});
+});
+
+// the mails $fn sends, shaped (p4a_shape), in order
+function p4a_sent($fn) {
+	return array_map(function ($m) { return p4a_shape($m['raw']); }, booking_mails($fn));
+}
+
+test('P4.A: off, every bundled sender\'s mail is what it was, byte for byte (D13)', function () {
+	$off = array('none' => array('multilingual' => false, 'languages' => array())) + p4_off_settings();
+	$token = str_repeat('ab', 32);
+	// booking: the guest's request with staff's copy, and a confirmation
+	booking_site(function () use ($off, $token) {
+		$tue = booking_cafe();
+		cms_records::ensure(cms_records::info('booking'), true);
+		$b = booking_guest(array('name' => 'Ana', 'email' => 'ana@example.test', 'date' => $tue, 'time' => '19:00', 'people' => 2));
+		check(!array_key_exists('lang', cms_records::get('booking', $b['id'])), 'off, no lang is stored');
+		$payload = booking::payload(cms_records::get('booking', $b['id']), 'guest');
+		check(!array_key_exists('lang', $payload), 'off, the payload has no lang');
+		// what 2.2.50 sent: the booking's fields and the links, as send_view gets them
+		$vars = $payload + array('manage_url' => util::url('booking', array('token' => $token)), 'resource_name' => 'Dining room', 'service_name' => '', 'site_url' => util::url(''), 'book_url' => util::url('book'));
+		$then = p4a_sent(function () use ($vars) {
+			mail::send_view('_email/booking_requested', 'ana@example.test', $vars);
+			mail::send_view('_email/booking_new', 'staff@zz.test', array('manage_url' => '') + $vars);
+			mail::send_view('_email/booking_confirmed', 'ana@example.test', $vars);
+		});
+		foreach ($off as $what => $setting) {
+			with_settings($setting, function () use ($what, $payload, $b, $token, $then) {
+				cms_records::forget();
+				same($then, p4a_sent(function () use ($payload, $b, $token) {
+					booking::$links[(int)$b['id']] = $token;
+					(new booking())->requested_mail($payload);
+					booking::$links[(int)$b['id']] = $token;
+					(new booking())->confirmed_mail($payload);
+				}), "booking, $what");
+			});
+		}
+		cms_records::forget();
+	});
+	// rsvp: a promotion, and a guest's reply with staff's copy
+	rsvp_site(function () use ($off, $token) {
+		with_settings(array('rsvp_staff_email' => 'staff@zz.test'), function () use ($off, $token) {
+			$event = rsvp_event(array('places' => 4));
+			$reply = rsvp_reply(array('event' => $event['id'], 'email' => 'ana@example.test', 'name' => 'Ana'));
+			$payload = rsvp::payload($reply, 'guest');
+			check(!array_key_exists('lang', $payload), 'off, the payload has no lang');
+			$item = rsvp::item($event['id']);
+			$vars = $payload + array('manage_url' => util::url('rsvp', array('token' => $token)), 'position' => '', 'event_url' => $item['url'], 'deadline' => date('Y-m-d H:i', $item['deadline']), 'site_url' => util::url(''));
+			$then = p4a_sent(function () use ($vars) {
+				mail::send_view('_email/rsvp_going', 'ana@example.test', $vars);
+				mail::send_view('_email/rsvp_new', 'staff@zz.test', array('manage_url' => '') + $vars);
+				mail::send_view('_email/rsvp_promoted', 'ana@example.test', $vars);
+			});
+			foreach ($off as $what => $setting) {
+				with_settings($setting, function () use ($what, $payload, $reply, $token, $then) {
+					cms_records::forget();
+					same($then, p4a_sent(function () use ($payload, $reply, $token) {
+						rsvp::$links[(int)$reply['id']] = $token;
+						(new rsvp())->replied_mail($payload);
+						rsvp::$links[(int)$reply['id']] = $token;
+						(new rsvp())->promoted_mail($payload);
+					}), "rsvp, $what");
+				});
+			}
+			cms_records::forget();
+		});
+	});
+	// contact: staff's email
+	contact_site(function () use ($off) {
+		with_settings(array('contact_staff_email' => 'desk@zz.test'), function () use ($off) {
+			cms_records::ensure(cms_records::info('contactmessage'), true);
+			$message = contact::payload(cms_records::create('contactmessage', array('email' => 'ana@example.test', 'name' => 'Ana', 'subject' => 'Table', 'message' => 'Hi', 'page' => '/contact')), 'visitor');
+			$then = p4a_sent(function () use ($message) {
+				mail::send_view('_email/contact_received', 'desk@zz.test', $message + array('page_url' => util::url('/contact'), 'staff_url' => util::url('staff'), 'site_url' => util::url('')), array('Reply-To' => '"Ana" <ana@example.test>'));
+			});
+			foreach ($off as $what => $setting) {
+				with_settings($setting, function () use ($what, $message, $then) {
+					cms_records::forget();
+					same($then, p4a_sent(function () use ($message) { (new contact())->staff_mail($message); }), "contact, $what");
+				});
+			}
+			cms_records::forget();
+		});
+	});
+	// newsletter: the confirmation
+	cms_store::connect();
+	newsletter::subscribe('zzp4a-off@example.test', 'Ana');
+	$subscriber = R::findOne('subscriber', ' email = ? ', array('zzp4a-off@example.test'));
+	check(!isset($subscriber->lang), 'off, no lang is stored');
+	$then = p4a_sent(function () use ($subscriber) {
+		mail::send_view('_email/newsletter_confirm', 'zzp4a-off@example.test', array('confirm_url' => util::url('newsletter-confirm', array('token' => $subscriber->token)), 'name' => 'Ana'));
+	});
+	foreach ($off as $what => $setting) {
+		with_settings($setting, function () use ($what, $then) {
+			R::exec('UPDATE subscriber SET confirm_sent_at = NULL WHERE email = ?', array('zzp4a-off@example.test'));
+			same($then, p4a_sent(function () { (new newsletter())->confirmation_mail(array('email' => 'zzp4a-off@example.test', 'status' => 'pending')); }), "newsletter, $what");
+		});
+	}
+	R::exec('DELETE FROM subscriber WHERE email = ?', array('zzp4a-off@example.test'));
+	// accounts: none gets a language off
+	$id = authentication::create_user('zzp4a-off@example.test', 'a long password');
+	check(!isset(R::load('user', $id)->lang), 'off, no lang is stored');
+	same(array('id', 'email', 'name', 'role'), array_keys(authentication::payload($id)));
+	R::exec('DELETE FROM user WHERE id = ?', array($id));
+});
+
+test('P4.A: a record\'s lang column is kept, not an orphan, when multilingual is turned off again (D13)', function () use ($p4a_on) {
+	booking_site(function () use ($p4a_on) {
+		with_settings($p4a_on, function () {
+			cms_records::forget();
+			cms_records::ensure(cms_records::info('booking'), true);
+			cms_records::forget();
+		});
+		check(array_key_exists('lang', cms_store::columns('bookingdata')), 'on made the column');
+		$status = with_settings(array('multilingual' => false, 'languages' => array('en', 'ro')), function () {
+			cms_records::forget();
+			try {
+				return (new raster_schema())->status();
+			} finally {
+				cms_records::forget();
+			}
+		});
+		$table = null;
+		foreach ($status['tables'] as $row) if ($row['table'] === 'bookingdata') $table = $row;
+		check($table !== null, 'bookingdata is listed');
+		check(!in_array('lang', $table['orphans'], true), 'lang is an orphan: '.json_encode($table['orphans']));
+		same(array('lang'), isset($status['translations']['bookingdata']) ? $status['translations']['bookingdata'] : null, 'it is kept');
+	});
+});
+
+test('P4.A: a frozen database without the lang columns still takes accounts and subscribers (D13)', function () use ($root) {
+	$db = test_db(sys_get_temp_dir().'/raster-p4a-frozen-'.getmypid().'.sqlite');
+	$env = 'RASTER_ENV=production RASTER_DB='.escapeshellarg($db).' RASTER_URL=http://example.test/';
+	$raster = php_cmd().' '.escapeshellarg("$root/bin/raster");
+	try {
+		exec("$env $raster schema --apply 2>&1", $out, $code);
+		same(0, $code, implode("\n", $out));
+		p4a_site("config::set('languages')->to(array('en', 'ro'));\nconfig::set('multilingual')->to(true);", function () use ($env, $raster, $root) {
+			// (raster user unfreezes, as it adds the columns accounts need)
+			$result = shell_exec("$env ".php_cmd().' -r '.escapeshellarg('require "'.$root.'/system/boot.php"; boot::$appname = "application"; boot::cli(); authentication::connect(); newsletter::connect();'
+				.' $id = authentication::create_user("zzp4a@example.test", "secret-pass");'
+				.' echo json_encode(array(database::$frozen, i18n::enabled(), (bool)authentication::check_login("zzp4a@example.test", "secret-pass"), newsletter::subscribe("zzp4a@example.test"),'
+				.' array_key_exists("lang", cms_store::columns("user")), array_key_exists("lang", cms_store::columns("subscriber"))));').' 2>&1');
+			same('[true,true,true,"pending",false,false]', trim((string)$result));
+		});
+	} finally {
+		array_map('unlink', glob("$db*") ?: array());
+	}
+});
+
+// ## P4.B: newsletter per language, record names, dates (#135)
+
+// the subscriber table set aside for $fn, so it starts with none; the rows
+// $fn makes are thrown away and the table put back after
+function p4b_subscribers($fn) {
+	cms_store::connect();
+	$kept = cms_store::table_exists('subscriber');
+	if ($kept) R::exec('ALTER TABLE subscriber RENAME TO zzp4b_subscriber');
+	try {
+		return $fn(function ($email, $fields = array()) {
+			$subscriber = R::dispense('subscriber');
+			foreach ($fields + array('email' => $email, 'name' => '', 'status' => 'confirmed', 'token' => sha1($email), 'source' => '', 'created_at' => R::isoDateTime()) as $name => $value) $subscriber->$name = $value;
+			return (int)R::store($subscriber);
+		});
+	} finally {
+		if (cms_store::table_exists('subscriber')) R::exec('DROP TABLE subscriber');
+		if ($kept) R::exec('ALTER TABLE zzp4b_subscriber RENAME TO subscriber');
+	}
+}
+
+test('P4.B: newsletter recipients in a language are those who read it; no lang, or none known, reads the default', function () {
+	$on = array('multilingual' => true, 'languages' => array('en', 'ro'));
+	p4b_subscribers(function ($add) use ($on) {
+		$ana = $add('ana@example.test');
+		$bob = $add('bob@example.test');
+		$add('gone@example.test', array('status' => 'unsubscribed'));
+		$emails = function ($rows) { return array_map(function ($row) { return $row['email']; }, $rows); };
+		with_settings($on, function () use ($emails) {
+			// a table from before the column: everyone reads the default
+			check(!array_key_exists('lang', cms_store::columns('subscriber')), 'the fixture has no lang column yet');
+			same(array('ana@example.test', 'bob@example.test'), $emails(newsletter::recipients(null, 'en')), 'no column: the default');
+			same(array(), newsletter::recipients(null, 'ro'), 'no column: nobody reads ro');
+		});
+		$cy = $add('cy@example.test', array('lang' => 'ro'));
+		$add('dan@example.test', array('lang' => 'fr'));
+		$add('eve@example.test', array('lang' => 'RO'));
+		$add('fay@example.test', array('lang' => 'en'));
+		$add('gil@example.test', array('lang' => 'ro', 'status' => 'pending'));
+		with_settings($on, function () use ($emails, $cy) {
+			same(array('cy@example.test', 'eve@example.test'), $emails(newsletter::recipients(null, 'ro')), 'ro');
+			same(array('ana@example.test', 'bob@example.test', 'dan@example.test', 'fay@example.test'), $emails(newsletter::recipients(null, 'en')), "en: '' and a dropped language too");
+			$row = newsletter::recipients(null, 'ro')[0];
+			same(array('id', 'email', 'name', 'token'), array_keys($row), 'the rows keep their keys');
+			// an issue: only those it has not reached
+			$issue = R::dispense('newsletterissue');
+			$issue->url = '/ro/zzp4b-issue';
+			R::store($issue);
+			$delivery = R::dispense('newsletterdelivery');
+			$delivery->issue = (int)$issue->id;
+			$delivery->email = 'cy@example.test';
+			R::store($delivery);
+			try {
+				same(array('eve@example.test'), $emails(newsletter::recipients($issue, 'ro')), 'ro, not reached yet');
+				same(4, count(newsletter::recipients($issue, 'en')));
+				// no language: everyone, as before
+				same(5, count(newsletter::recipients($issue)));
+			} finally {
+				R::trash($delivery);
+				R::trash($issue);
+			}
+		});
+		// off, a language changes nothing: the same rows, keys and order
+		foreach (p4_off_settings() as $what => $setting) {
+			with_settings($setting, function () use ($what) {
+				same(newsletter::recipients(null), newsletter::recipients(null, 'ro'), $what);
+				same(array('id', 'email', 'name', 'token'), array_keys(newsletter::recipients(null, 'ro')[0]), $what);
+			});
+		}
+	});
+});
+
+test('P4.B: raster send on a bilingual site sends each subscriber the page in their language (#200)', function () use ($root, $db, $maildir, $base, $p1b_on) {
+	$theme = "$root/application/views/default";
+	test_fixture("$theme/zzp4b_issue.html");
+	file_put_contents("$theme/zzp4b_issue.html", '<!doctype html><html><head><title><!-- print.i18n.zzp1b(\'hello\') -->Hello<!-- /print.i18n.zzp1b(\'hello\') --></title></head><body>'
+		.'<p>Issue</p><a href="<!-- print.newsletter.unsubscribe_url /-->">Unsubscribe</a></body></html>');
+	$env = 'RASTER_DB='.escapeshellarg($db).' RASTER_MAIL='.escapeshellarg("log://$maildir").' RASTER_URL='.escapeshellarg("$base/");
+	$send = function ($args) use ($env, $root) {
+		return shell_exec("$env ".php_cmd().' '.escapeshellarg("$root/bin/raster").' send '.$args.' 2>&1; echo "exit=$?"');
+	};
+	$sent = function ($fn) use ($maildir) {
+		$before = glob("$maildir/*.eml") ?: array();
+		$out = $fn();
+		$mails = array();
+		foreach (array_diff(glob("$maildir/*.eml") ?: array(), $before) as $file) {
+			$raw = file_get_contents($file);
+			preg_match('/^To: (.*)$/m', $raw, $to);
+			preg_match('/^Subject: (.*)$/m', $raw, $subject);
+			$mails[trim($to[1])] = array('subject' => iconv_mime_decode(trim($subject[1]), 0, 'UTF-8'), 'raw' => $raw);
+		}
+		ksort($mails);
+		return array($out, $mails);
+	};
+	try {
+		p4b_subscribers(function ($add) use ($p1b_on, $send, $sent) {
+			$add('old@example.test');
+			$add('ro@example.test', array('lang' => 'ro'));
+			$add('en@example.test', array('lang' => 'en'));
+			p1b_site($p1b_on, function () use ($send, $sent) {
+				$out = $send('/zzp4b_issue --dry-run');
+				check(strpos($out, 'Would send "Hello" (en) to 2 subscriber(s)') !== false && strpos($out, 'Would send "Bună ziua" (ro) to 1 subscriber(s)') !== false && strpos($out, 'exit=0') !== false, "dry run: $out");
+				list($out, $mails) = $sent(function () use ($send) { return $send('/zzp4b_issue'); });
+				check(strpos($out, 'Sent "Hello" (en) to 2 subscriber(s)') !== false && strpos($out, 'Sent "Bună ziua" (ro) to 1 subscriber(s)') !== false && strpos($out, 'exit=0') !== false, "send: $out");
+				same(array('en@example.test', 'old@example.test', 'ro@example.test'), array_keys($mails));
+				same(array('Hello', 'Hello', 'Bună ziua'), array_values(array_map(function ($m) { return $m['subject']; }, $mails)), 'each in their language; a subscriber from before the column in the default');
+				check(preg_match('#List-Unsubscribe: <[^>]*/ro/newsletter-unsubscribe\?token=#', $mails['ro@example.test']['raw']) === 1, 'the Romanian reader unsubscribes on the Romanian page');
+				check(preg_match('#List-Unsubscribe: <[^>]*/newsletter-unsubscribe\?token=#', $mails['old@example.test']['raw']) === 1 && strpos($mails['old@example.test']['raw'], '/ro/newsletter-unsubscribe') === false, 'the default reader on the default one');
+				// each language is an issue of its own, keyed by its address
+				same(array('/zzp4b_issue', '/ro/zzp4b_issue'), R::getCol("SELECT url FROM newsletterissue WHERE url LIKE '%zzp4b_issue' ORDER BY id"));
+				list($out, $mails) = $sent(function () use ($send) { return $send('/zzp4b_issue'); });
+				check(strpos($out, '/zzp4b_issue was already sent') !== false && strpos($out, '/ro/zzp4b_issue was already sent') !== false && strpos($out, 'exit=1') !== false && !$mails, "sent once: $out");
+				// a new reader of ro gets it on the next run with --lang
+				R::exec("UPDATE newsletterissue SET incomplete = 1 WHERE url = '/ro/zzp4b_issue'");
+				return null;
+			});
+			$add('ro2@example.test', array('lang' => 'ro'));
+			p1b_site($p1b_on, function () use ($send, $sent) {
+				list($out, $mails) = $sent(function () use ($send) { return $send('/zzp4b_issue --lang=ro'); });
+				check(strpos($out, 'Sent "Bună ziua" (ro) to 1 more subscriber(s), 2 in all') !== false && strpos($out, '(en)') === false, "--lang=ro: $out");
+				same(array('ro2@example.test'), array_keys($mails));
+				// --to: the default's rendering, or --lang's
+				list($out, $mails) = $sent(function () use ($send) { return $send('/zzp4b_issue --to=me@example.test'); });
+				same(array('me@example.test'), array_keys($mails));
+				same('Hello', $mails['me@example.test']['subject'], "--to: $out");
+				list(, $mails) = $sent(function () use ($send) { return $send('/zzp4b_issue --to=me@example.test --lang=ro --subject=Salut'); });
+				same('Salut', $mails['me@example.test']['subject'], '--subject applies to every language');
+				check(strpos($send('/zzp4b_issue --lang=fr --dry-run'), 'exit=2') !== false, 'a language the site lacks');
+				// a language that doesn't render is an error for it; the others still go
+				$out = $send('/zzp4b_nothing --dry-run');
+				check(strpos($out, '/ro/zzp4b_nothing did not render') !== false && strpos($out, 'error: /zzp4b_nothing did not render') !== false && strpos($out, 'exit=1') !== false, "missing page: $out");
+				return null;
+			});
+			// off: no language, everyone gets the one page, and --lang is refused
+			list($out, $mails) = $sent(function () use ($send) { return $send('/zzp4b_issue --again'); });
+			check(strpos($out, 'Sent "Hello" to 4 subscriber(s) via') !== false && strpos($out, 'exit=0') !== false, "off: $out");
+			same(4, count($mails));
+			check(strpos($send('/zzp4b_issue --lang=ro --dry-run'), 'exit=2') !== false, 'off, --lang is refused');
+		});
+	} finally {
+		@unlink("$theme/zzp4b_issue.html");
+		cms_store::connect();
+		if (cms_store::table_exists('newsletterissue') && cms_store::table_exists('newsletterdelivery')) R::exec("DELETE FROM newsletterdelivery WHERE issue IN (SELECT id FROM newsletterissue WHERE url LIKE '%zzp4b_issue')");
+		if (cms_store::table_exists('newsletterissue')) R::exec("DELETE FROM newsletterissue WHERE url LIKE '%zzp4b_issue'");
+	}
+});
+
+test('P4.B: dates are typed day first in every language but en-us; ISO and words everywhere; no languages, as before (D14)', function () {
+	$day = function ($typed, $lang = null) {
+		$time = cms_types::parse_date($typed, $lang);
+		return $time === null ? null : date('Y-m-d H:i', $time);
+	};
+	with_settings(array('multilingual' => true, 'languages' => array('en', 'ro')), function () use ($day) {
+		same('2026-10-05 00:00', $day('5/10/2026'), 'en+ro: 5 October');
+		same('2026-10-05 00:00', $day('5/10/2026', 'ro'));
+		same('2026-10-05 00:00', $day('05/10/2026', 'en'), 'en is day first too');
+		same('2026-10-05 19:30', $day('5/10/2026 19:30'), 'with a time');
+		same('2026-10-05 00:00', $day('5.10.2026'), 'dots, as PHP reads them');
+		same('2026-10-05 00:00', $day('5-10-2026'), 'dashes, as PHP reads them');
+		same('2026-10-05 00:00', $day('2026-10-05'), 'ISO');
+		same('2026-05-10 00:00', $day('10 May 2026'), 'words');
+		same(date('Y-m-d 00:00'), $day('today'));
+		same('2026-12-25 00:00', $day('25/12/2026'), 'a day past 12, which American order refuses');
+		same(null, $day('13/13/2026'));
+		same(null, $day('31/02/2026'));
+		same(null, $day('5/10/2026 nonsense'));
+		same('2026-05-10 00:00', $day('5/10/2026', 'en-us'), 'en-us is month first');
+		// what is stored, through clean()
+		same('2026-10-05', cms_types::clean('date', '5/10/2026', 'when'));
+		same('2026-10-05 19:30:00', cms_types::clean('datetime', '5/10/2026 19:30', 'when'));
+		same('2026-10-05', i18n::with('ro', function () { return cms_types::clean('date', '5/10/2026', 'when'); }), 'in the current language');
+	});
+	with_settings(array('multilingual' => true, 'languages' => array('en-us', 'es')), function () use ($day) {
+		same('2026-05-10 00:00', $day('5/10/2026'), 'an en-us site reads it the American way');
+		same('2026-10-05 00:00', $day('5/10/2026', 'es'));
+	});
+	// languages set, the switch off: the order still follows them (D14)
+	with_settings(array('multilingual' => false, 'languages' => array('ro')), function () use ($day) {
+		same('2026-10-05 00:00', $day('5/10/2026'), 'a site in Romanian only');
+	});
+	with_settings(array('multilingual' => false, 'languages' => array()), function () use ($day) {
+		same('2026-05-10 00:00', $day('5/10/2026'), 'no languages: unchanged');
+		same('2026-05-10', cms_types::clean('date', '5/10/2026', 'when'));
+		same(strtotime('25/12/2026') === false ? null : date('Y-m-d H:i', strtotime('25/12/2026')), $day('25/12/2026'), 'no languages: as strtotime');
+	});
+});
+
+test('P4.B: booking resource and service names in a language: the translation, else the default; off, as before (#200)', function () use ($p1b_on) {
+	booking_site(function () use ($p1b_on) {
+		same(array('name'), cms_records::info('bookingservice')['translate'], 'bookingservice translates its name');
+		same(array('name'), cms_records::info('bookingresource')['translate']);
+		same(array(), cms_records::info('bookingservice')['unknown']);
+		same(array(), cms_records::info('booking')['translate'], "a booking's fields are what the guest typed");
+		$on = array('multilingual' => true, 'languages' => array('en', 'ro'));
+		$date = with_settings($on, function () {
+			$date = booking_salon();
+			$cut = (int)R::getCell("SELECT id FROM bookingservicedata WHERE slug = 'cut'");
+			$ana = (int)R::getCell("SELECT id FROM bookingresourcedata WHERE slug = 'ana'");
+			cms_store::save_item('bookingservicedata', $cut, array('name' => 'Tuns'), array('name'), 'editor', null, 'ro');
+			cms_store::save_item('bookingresourcedata', $ana, array('name' => 'Ana (RO)'), array('name'), 'editor', null, 'ro');
+			return $date;
+		});
+		$names = function ($rows) { return array_map(function ($row) { return $row['name']; }, $rows); };
+		$name_of = new ReflectionMethod('booking', 'name_of');
+		$name_of->setAccessible(true);
+		with_settings($on, function () use ($names, $name_of) {
+			booking::forget();
+			same(array('Cut', 'Colour'), $names((new booking())->services()), 'en');
+			same(array('Ana', 'Mihai'), $names((new booking())->resources()));
+			$ro = i18n::with('ro', function () use ($names, $name_of) {
+				return array($names((new booking())->services()), $names((new booking())->resources()), $name_of->invoke(null, booking::setup(), 'services', 'cut'), $name_of->invoke(null, booking::setup(), 'resources', 'mihai'));
+			});
+			same(array(array('Tuns', 'Colour'), array('Ana (RO)', 'Mihai'), 'Tuns', 'Mihai'), $ro, 'ro: translated, and an untranslated name in English');
+			same('Cut', $name_of->invoke(null, booking::setup(), 'services', 'cut'), 'the setup is read once for every language');
+			same('', $name_of->invoke(null, booking::setup(), 'services', 'nothing'));
+		});
+		// off: the stored name, whatever the columns
+		foreach (p4_off_settings() as $what => $setting) {
+			with_settings($setting, function () use ($names, $name_of, $what) {
+				booking::forget();
+				same(array('Cut', 'Colour'), $names((new booking())->services()), $what);
+				same('Cut', i18n::with('ro', function () use ($name_of) { return $name_of->invoke(null, booking::setup(), 'services', 'cut'); }), $what);
+			});
+		}
+		// the pages: /ro/ shows the Romanian names
+		p1b_site($p1b_on, function () {
+			$ro = booking_render('/ro/zzbook');
+			check(strpos($ro, '<i class="service">Tuns</i>') !== false && strpos($ro, '<i class="service">Colour</i>') !== false && strpos($ro, '<b class="resource">Ana (RO)</b>') !== false, "/ro/zzbook: $ro");
+			$en = booking_render('/zzbook');
+			check(strpos($en, '<i class="service">Cut</i>') !== false && strpos($en, 'Tuns') === false, "/zzbook: $en");
+		});
+		booking::forget();
+	});
+});
+
+test('P4.B: an rsvp event reads in the current language, each language cached on its own (#200)', function () {
+	rsvp_site(function () {
+		$on = array('multilingual' => true, 'languages' => array('en', 'ro'));
+		with_settings($on, function () {
+			$id = (int)rsvp_event(array('title' => 'Jazz night'))['id'];
+			cms_types::ensure('eventsdata', array(), array('title'));
+			cms_store::save_item('eventsdata', $id, array('title' => 'Seară de jazz', 'slug' => 'seara-de-jazz'), array('title', 'slug'), 'editor', null, 'ro');
+			rsvp::forget();
+			$en = rsvp::item($id);
+			$ro = i18n::with('ro', function () use ($id) { return rsvp::item($id); });
+			same('Jazz night', $en['title']);
+			same('Seară de jazz', $ro['title'], 'ro: the title translated');
+			same('jazz-night', $ro['slug'], 'the slug the event is known by stays');
+			check(substr($ro['url'], -strlen('/seara-de-jazz')) === '/seara-de-jazz' && strpos($ro['url'], '/ro/') !== false, 'ro url: '.$ro['url']);
+			check(substr($en['url'], -strlen('/jazz-night')) === '/jazz-night' && strpos($en['url'], '/ro/') === false, 'en url: '.$en['url']);
+			same('Jazz night', rsvp::item($id)['title'], 'the English one is still English after');
+			// an event without a translation reads in English
+			$plain = (int)rsvp_event(array('title' => 'Quiz'))['id'];
+			same('Quiz', i18n::with('ro', function () use ($plain) { return rsvp::item($plain)['title']; }));
+		});
+		foreach (p4_off_settings() as $what => $setting) {
+			with_settings($setting, function () use ($what) {
+				rsvp::forget();
+				$id = (int)R::getCell("SELECT id FROM eventsdata WHERE slug = 'jazz-night'");
+				same('Jazz night', rsvp::item($id)['title'], $what);
+				same('Jazz night', i18n::with('ro', function () use ($id) { return rsvp::item($id)['title']; }), "$what, in ro");
+			});
+		}
+		rsvp::forget();
+	});
+});
+
+// ## P4.C: the coding MCP translates emails and records
+
+// The starter with a booking page (render.booking.form) and the booking
+// emails, whose words are keys of the zzp4c_mail dictionary: 'hello' is
+// printed by every email, 'book' by an email and the page too. Its own
+// database, the_app.php and the dictionaries as they were, put back after.
+function p4c_site($fn) {
+	global $root;
+	$theme = "$root/application/views/default";
+	$lang = '<!doctype html><!-- print.@lang.i18n.language --><html lang="en"><!-- /print.@lang.i18n.language -->';
+	$key = function ($key, $text) { return "<!-- print.i18n.zzp4c_mail('$key') -->$text<!-- /print.i18n.zzp4c_mail('$key') -->"; };
+	$body = '<body><p>'.$key('hello', 'Hello').' <!-- print.self.name -->there<!-- /print.self.name -->,</p>'
+		.'<p><!-- print.self.date -->2026-10-20<!-- /print.self.date --> <!-- print.self.time -->19:00<!-- /print.self.time -->:'
+		.' <!-- print.self.service_name -->Dinner<!-- /print.self.service_name --> <!-- print.self.resource_name -->Dining room<!-- /print.self.resource_name --></p>';
+	$views = array(
+		'zzp4c_book' => $lang.'<head><title>Book</title></head><body><h1>'.$key('book', 'Book a table').'</h1>'
+			.'<!-- render.booking.form --><form method="post"><input name="name" required><input type="email" name="email"><input type="date" name="date" required>'
+			.'<input name="time" required><input type="number" name="people"><input name="resource"><input name="service"><button>Book</button></form><!-- /render.booking.form --></body></html>',
+		'_email/booking_requested' => $lang.'<head><title>'.$key('requested_subject', 'We have your booking').'</title></head>'.$body
+			.'<p><a href="<!-- print.self.manage_url /-->">'.$key('book', 'Book a table').'</a></p></body></html>',
+		'_email/booking_confirmed' => $lang.'<head><title>'.$key('confirmed_subject', 'Your booking is confirmed').'</title></head>'.$body.'</body></html>',
+		'_email/booking_new' => $lang.'<head><title>'.$key('new_subject', 'A new booking').'</title></head>'.$body.'</body></html>',
+	);
+	// the rest of what render.booking.form sends, with a fixed subject each
+	foreach (array('booking_declined', 'booking_cancelled', 'booking_changed') as $email) $views["_email/$email"] = $lang."<head><title>$email</title></head>".$body.'</body></html>';
+	foreach ($views as $name => $html) {
+		test_fixture("$theme/$name.html");
+		file_put_contents("$theme/$name.html", $html);
+	}
+	$config = APPBASE.'config/the_app.php';
+	$kept = file_get_contents($config);
+	$i18n = APPBASE.'i18n';
+	$made = !is_dir($i18n);
+	$dictionaries = array();
+	foreach (glob("$i18n/*/*.php") ?: array() as $file) $dictionaries[$file] = file_get_contents($file);
+	$db = sys_get_temp_dir().'/raster-p4c-'.getmypid().'.sqlite';
+	controller::forget_models();
+	cms_records::forget();
+	try {
+		return $fn($db);
+	} finally {
+		file_put_contents($config, $kept);
+		foreach (array_keys($views) as $name) @unlink("$theme/$name.html");
+		foreach (glob("$i18n/*/*.php") ?: array() as $file) {
+			if (!isset($dictionaries[$file])) unlink($file);
+		}
+		foreach ($dictionaries as $file => $source) file_put_contents($file, $source);
+		foreach (glob("$i18n/*", GLOB_ONLYDIR) ?: array() as $dir) @rmdir($dir);
+		if ($made) @rmdir($i18n);
+		array_map('unlink', glob("$db*") ?: array());
+		controller::forget_models();
+		cms_records::forget();
+	}
+}
+// the rows translation_status lists, every page of them
+function p4c_status($mcp) {
+	$rows = array();
+	$offset = 0;
+	do {
+		$batch = $mcp->call('translation_status', array('lang' => 'ro', 'limit' => 50, 'offset' => $offset));
+		$rows = array_merge($rows, $batch['missing']);
+		$offset += 50;
+	} while ($offset < $batch['total']);
+	return $rows;
+}
+// the dining room, open every evening, and dinner there
+function p4c_setup($mcp) {
+	foreach (array(
+		array('bookingresource', array('name' => 'Dining room', 'people' => 20)),
+		array('bookinghours', array('resource' => 'dining-room', 'days' => 'daily', 'starts' => '19:00', 'ends' => '21:00', 'every' => 120)),
+		array('bookingservice', array('name' => 'Dinner', 'minutes' => 120, 'resources' => 'dining-room')),
+	) as list($collection, $fields)) {
+		$made = $mcp->call('create_item', array('collection' => $collection, 'fields' => $fields));
+		check(!isset($made['error']), "$collection: ".json_encode($made));
+	}
+}
+
+test('P4.C: off, emails lint as before and describe counts nothing', function () use ($root) {
+	require_once BASE.'tools/describe.php';
+	$dir = "$root/application/views/default/_email";
+	test_fixture("$dir/zzp4c.html");
+	file_put_contents("$dir/zzp4c.html", '<html lang="en"><head><title>Fixed words</title></head><body><p>Fixed words</p></body></html>');
+	try {
+		foreach (p4_off_settings() as $what => $setting) {
+			with_settings($setting, function () use ($what, $dir) {
+				$problems = (new raster_inspector())->lint_path("$dir/zzp4c.html");
+				same(array(), array_values(array_filter($problems, function ($p) { return strpos($p['message'], 'the same in every language') !== false || strpos($p['message'], 'names one language') !== false; })), $what);
+				same(array(), (array)raster_describe::languages()['missing'], $what);
+			});
+		}
+		// on, an email's fixed words and its <html lang> are warned about, as a page's are
+		$on = with_settings(p2a_on(), function () use ($dir) { return json_encode((new raster_inspector())->lint_path("$dir/zzp4c.html")); });
+		check(strpos($on, "'Fixed words' is the same in every language") !== false, $on);
+		check(strpos($on, "names one language on every language's pages") !== false, $on);
+	} finally {
+		@unlink("$dir/zzp4c.html");
+	}
+});
+
+test('P4.C: translation_status lists the keys only emails print as kind email, with the first email', function () {
+	p4c_site(function ($db) {
+		p2c_session(array('RASTER_DB' => $db), function ($mcp) {
+			$mcp->call('set_languages', array('languages' => array('en', 'ro')));
+			$mail = array_values(array_filter(p4c_status($mcp), function ($row) { return $row['where'] === 'zzp4c_mail'; }));
+			usort($mail, function ($a, $b) { return strcmp($a['field'], $b['field']); });
+			$row = function ($kind, $field, $text, $view = null) {
+				return array('kind' => $kind, 'where' => 'zzp4c_mail', 'field' => $field) + ($view ? array('view' => $view) : array()) + array('default_value' => $text, 'length' => mb_strlen($text), 'shared' => false);
+			};
+			same(array(
+				// the page prints it too: one strings row
+				$row('strings', 'book', 'Book a table'),
+				$row('email', 'confirmed_subject', 'Your booking is confirmed', '_email/booking_confirmed'),
+				// several emails print it: the first, sorted
+				$row('email', 'hello', 'Hello', '_email/booking_cancelled'),
+				$row('email', 'new_subject', 'A new booking', '_email/booking_new'),
+				$row('email', 'requested_subject', 'We have your booking', '_email/booking_requested'),
+			), $mail);
+			// counted once, in total and in describe's missing
+			$total = $mcp->call('translation_status', array('lang' => 'ro'))['total'];
+			same(array('ro' => $total), $mcp->call('describe', array('sections' => array('languages')))['languages']['missing']);
+			// write_strings translates them like any key
+			same(5, $mcp->call('write_strings', array('file' => 'zzp4c_mail', 'lang' => 'ro', 'strings' => array('book' => 'Rezervă o masă', 'confirmed_subject' => 'Rezervarea ta e confirmată',
+				'hello' => 'Bună', 'new_subject' => 'O rezervare nouă', 'requested_subject' => 'Am primit rezervarea ta')))['written']);
+			same(array(), array_values(array_filter(p4c_status($mcp), function ($row) { return $row['where'] === 'zzp4c_mail'; })));
+			same($total - 5, $mcp->call('translation_status', array('lang' => 'ro'))['total']);
+		});
+	});
+});
+
+test('P4.C: what people typed into a booking is never a record row', function () {
+	p4c_site(function ($db) {
+		p2c_session(array('RASTER_DB' => $db), function ($mcp) {
+			$mcp->call('set_languages', array('languages' => array('en', 'ro')));
+			p4c_setup($mcp);
+			$made = $mcp->call('create_item', array('collection' => 'booking', 'fields' => array('name' => 'Ana Pop', 'email' => 'ana@example.test', 'date' => date('Y-m-d', strtotime('next tuesday')), 'time' => '19:00', 'people' => 2, 'resource' => 'dining-room', 'service' => 'dinner', 'notes' => 'By the window')));
+			check(!isset($made['error']), json_encode($made));
+			$records = array_values(array_filter(p4c_status($mcp), function ($row) { return $row['kind'] === 'record'; }));
+			$collections = array_unique(array_map(function ($row) { return explode('/', $row['where'])[0]; }, $records));
+			same(array(), array_values(array_diff($collections, array('bookingresource', 'bookingservice'))), json_encode($records));
+			check(strpos(json_encode($records), 'By the window') === false && strpos(json_encode($records), 'Ana Pop') === false, json_encode($records));
+		});
+	});
+});
+
+test('P4.C: an agent translates the booking emails and service names over MCP, and translation_status reports 0 (needs P4.A, P4.B)', function () {
+	global $maildir;
+	p4c_site(function ($db) use ($maildir) {
+		p2c_session(array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir-booking", 'RASTER_MAIL_FROM' => 'staff@zz.test'), function ($mcp) use ($db) {
+			$mcp->call('set_languages', array('languages' => array('en', 'ro')));
+			p4c_setup($mcp);
+			// 1. the emails' keys and the names, beside the rest
+			$rows = p4c_status($mcp);
+			$listed = array();
+			foreach ($rows as $row) if (in_array($row['kind'], array('email', 'record'), true)) $listed[] = $row['kind'].' '.$row['where'].' '.$row['field'];
+			sort($listed);
+			same(array('email zzp4c_mail confirmed_subject', 'email zzp4c_mail hello', 'email zzp4c_mail new_subject', 'email zzp4c_mail requested_subject', 'record bookingresource/1 name', 'record bookingservice/1 name'), $listed);
+			// 2. everything translated the way its kind says
+			$words = array('Dining room' => 'Sala de mese', 'Dinner' => 'Cină', 'Hello' => 'Bună', 'We have your booking' => 'Am primit rezervarea ta', 'Your booking is confirmed' => 'Rezervarea ta e confirmată');
+			$pages = $items = $strings = array();
+			foreach ($rows as $row) {
+				$text = isset($words[$row['default_value']]) ? $words[$row['default_value']] : 'RO '.$row['default_value'];
+				if ($row['kind'] === 'page' || $row['kind'] === 'site') $pages[$row['where']][$row['field']] = $text;
+				elseif ($row['kind'] === 'item' || $row['kind'] === 'record') $items[$row['where']][$row['field']] = $text;
+				else $strings[$row['where']][$row['field']] = $text;
+			}
+			foreach ($pages as $where => $fields) check(!isset($mcp->call('update_page', array('page' => $where, 'fields' => $fields, 'lang' => 'ro'))['error']), $where);
+			foreach ($items as $where => $fields) {
+				list($collection, $id) = explode('/', $where);
+				$saved = $mcp->call('update_item', array('collection' => $collection, 'id' => (int)$id, 'fields' => $fields, 'lang' => 'ro'));
+				check(!isset($saved['error']), "$where: ".json_encode($saved));
+			}
+			foreach ($strings as $file => $keys) same(count($keys), $mcp->call('write_strings', array('file' => $file, 'lang' => 'ro', 'strings' => $keys))['written'], $file);
+			// 3. nothing left
+			$status = $mcp->call('translation_status', array('lang' => 'ro'));
+			same(0, $status['total'], json_encode($status['missing']));
+			same(array('ro' => 0), $mcp->call('describe', array('sections' => array('languages')))['languages']['missing']);
+			// 4. a booking made on /ro/ mails Romanian, its staff copy English,
+			// and so does staff's confirmation over MCP, in English
+			list($base, $log) = booking_server(array('RASTER_DB' => $db));
+			$tue = date('Y-m-d', strtotime('next tuesday'));
+			$mails = booking_mails(function () use ($base, $tue, $log) {
+				list($status, $body) = form_post("$base/ro/zzp4c_book", array('raster_form' => 'booking.form', 'name' => 'Ana', 'email' => 'ana@example.test', 'date' => $tue, 'time' => '19:00', 'people' => '2', 'resource' => 'dining-room', 'service' => 'dinner'));
+				same(303, $status, (string)@file_get_contents($log).substr(strip_tags((string)$body), 0, 1500));
+			});
+			same(array('Am primit rezervarea ta ana@example.test', 'A new booking staff@zz.test'), booking_sent($mails));
+			check(strpos($mails[0]['text'], 'Bună Ana') !== false && strpos($mails[0]['text'], 'Cină Sala de mese') !== false, $mails[0]['text']);
+			check(strpos($mails[1]['text'], 'Hello Ana') !== false && strpos($mails[1]['text'], 'Dinner Dining room') !== false, $mails[1]['text']);
+			$booking = $mcp->call('list_items', array('collection' => 'booking'))['items'][0];
+			$mails = booking_mails(function () use ($mcp, $booking) {
+				$done = $mcp->call('run_action', array('collection' => 'booking', 'id' => $booking['id'], 'action' => 'confirm'));
+				check(!isset($done['error']), json_encode($done));
+			});
+			same(array('Rezervarea ta e confirmată ana@example.test'), booking_sent($mails));
+			check(strpos($mails[0]['text'], 'Bună Ana') !== false && strpos($mails[0]['text'], 'Cină Sala de mese') !== false, $mails[0]['text']);
+		});
+	});
+});
+
+test('P4.C: tools/list grows by the translation_status words only; the recipe stays under 120 words (#161)', function () {
+	// translation_status's description says "record, email" (15 characters)
+	// more than P3 left it; P2.C's and P3.D's budgets leave them out
+	p4c_site(function ($db) {
+		p2c_session(array('RASTER_DB' => $db), function ($mcp) {
+			$tools = $mcp->message('tools/list')['result']['tools'];
+			$status = array_values(array_filter($tools, function ($tool) { return $tool['name'] === 'translation_status'; }))[0];
+			same('What a language lacks: page, site, item, record, email and dictionary words, with the default text.', $status['description']);
+			$instructions = $mcp->message('initialize')['result']['instructions'];
+			check(strpos($instructions, '_email/') !== false, 'the recipe says emails are translated too');
+			preg_match('/Making a site multilingual.*$/s', $instructions, $m);
+			check(str_word_count($m[0]) <= 120, 'the recipe is at most 120 words: '.str_word_count($m[0]));
+		});
+	});
 });
 
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";

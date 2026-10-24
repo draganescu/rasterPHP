@@ -96,9 +96,12 @@ class booking
 	static $managed = array();
 
 	static function types() {
-		return array(
+		$types = array(
+			// a resource's and a service's name have a column per language
+			// on a multilingual site (#200 D7); nothing else here does
 			'bookingresource' => array(
 				'fields' => array('name' => '', 'people' => 0, 'bookings' => 0, 'active' => true),
+				'translate' => array('name'),
 			),
 			'bookinghours' => array(
 				'fields' => array('resource' => '', 'days' => 'daily', 'starts' => '', 'ends' => '', 'every' => 30, 'from' => '', 'until' => ''),
@@ -110,6 +113,7 @@ class booking
 			),
 			'bookingservice' => array(
 				'fields' => array('name' => '', 'minutes' => 30, 'resources' => '', 'active' => true),
+				'translate' => array('name'),
 			),
 			'booking' => array(
 				'fields' => array(
@@ -129,6 +133,14 @@ class booking
 				'actions' => array('confirm' => 'editor', 'decline' => 'editor', 'cancel' => 'editor'),
 			),
 		);
+		// the guest's language, which their emails go out in: only a
+		// multilingual site's; staff and agents see it, and only the
+		// model writes it (#200 D13)
+		if (i18n::enabled()) {
+			$types['booking']['fields']['lang'] = '';
+			$types['booking']['readonly'][] = 'lang';
+		}
+		return $types;
 	}
 
 	// every write of the setup changes the slots, so what was read of it is
@@ -209,6 +221,9 @@ class booking
 		// after writing() is done, at the commit of a transaction around it
 		if ($before) unset(self::$moved[(int)$before['id']]);
 		if ($before && $placed && self::is_staff() && !self::$writing) self::$moved[(int)$before['id']] = true;
+		// the language it was booked in, which the guest's emails go out in:
+		// set once, when it is made (#200 D13)
+		if (!$before && i18n::enabled()) $values['lang'] = i18n::current();
 		return $values;
 	}
 
@@ -561,33 +576,53 @@ class booking
 	// The guest's email, with their new link when the change made one, and
 	// staff's when the guest made the change. The views get the booking's
 	// fields, manage_url, resource_name, service_name, site_url and book_url.
+	// Multilingual (#200 D13): the guest's goes in the language they booked
+	// in (i18n::of), whoever made the change, and staff's in the default
+	// language, with the guest's as lang; the links and names are made in
+	// each one's.
 	protected static function mail($booking, $guest, $staff) {
 		if (!is_array($booking) || !isset($booking['id']) || !self::ready()) return null;
 		$id = (int)$booking['id'];
 		$setup = self::setup();
-		$vars = $booking;
-		$vars['manage_url'] = isset(self::$links[$id]) ? util::url(config::get('booking_manage_page', 'booking'), array('token' => self::$links[$id])) : '';
+		$token = isset(self::$links[$id]) ? self::$links[$id] : null;
 		unset(self::$links[$id]);
-		$vars['resource_name'] = isset($setup['resources'][$booking['resource']]) ? $setup['resources'][$booking['resource']]['name'] : '';
-		$vars['service_name'] = isset($setup['services'][$booking['service']]) ? $setup['services'][$booking['service']]['name'] : '';
-		$vars['site_url'] = util::url('');
-		$vars['book_url'] = util::url(config::get('booking_page', 'book'));
-		if (trim((string)$booking['email']) !== '') self::send('_email/'.$guest, $booking['email'], $vars);
+		$vars = function ($token) use ($booking, $setup) {
+			$vars = $booking;
+			$vars['manage_url'] = $token !== null ? util::url(config::get('booking_manage_page', 'booking'), array('token' => $token)) : '';
+			$vars['resource_name'] = self::name_of($setup, 'resources', $booking['resource']);
+			$vars['service_name'] = self::name_of($setup, 'services', $booking['service']);
+			$vars['site_url'] = util::url('');
+			$vars['book_url'] = util::url(config::get('booking_page', 'book'));
+			return $vars;
+		};
+		$lang = i18n::of($booking);
+		if (trim((string)$booking['email']) !== '') {
+			mail::in_language($lang, function () use ($guest, $booking, $vars, $token, $lang) {
+				self::send('_email/'.$guest, $booking['email'], $vars($token), $lang);
+			});
+		}
 		if (!$staff || !isset($booking['who']) || $booking['who'] !== 'guest') return null;
-		$vars['manage_url'] = '';
 		$to = trim((string)config::get('booking_staff_email', ''));
 		if ($to === '') $to = trim((string)(getenv('RASTER_MAIL_FROM') ?: config::get('mail_from', '')));
-		if ($to === '') log::warning('booking: no address for staff emails: set booking_staff_email or mail_from');
-		else self::send('_email/'.$staff, $to, $vars);
+		if ($to === '') {
+			log::warning('booking: no address for staff emails: set booking_staff_email or mail_from');
+			return null;
+		}
+		$default = i18n::default_language();
+		mail::in_language($default, function () use ($staff, $to, $vars, $lang, $default) {
+			$staff_vars = $vars(null);
+			if (i18n::enabled()) $staff_vars['lang'] = $lang;
+			self::send('_email/'.$staff, $to, $staff_vars, $default);
+		});
 		return null;
 	}
 
 	// a booking stays made when its email can't go: the failure is logged,
-	// without the address or the link
-	protected static function send($view, $to, $vars) {
+	// without the address or the link. $lang: the recipient's language
+	protected static function send($view, $to, $vars, $lang = null) {
 		$mail = controller::model_class('mail');
 		try {
-			if ($mail::send_view($view, $to, $vars)) return true;
+			if ($mail::send_view($view, $to, $vars, array(), $lang)) return true;
 		} catch (Exception $e) {
 			log::error("booking: $view: ".$e->getMessage());
 			return false;
@@ -644,6 +679,23 @@ class booking
 	static function forget() {
 		self::$setup = null;
 		self::$managed = array();
+	}
+
+	// a setup row ($group 'resources' or 'services') as it reads in the
+	// current language: its translated name, or the default language's
+	// while it has none. setup() keeps every column, so it is read once
+	// for every language.
+	protected static function localized_row($group, $row) {
+		$info = cms_records::info($group === 'resources' ? 'bookingresource' : 'bookingservice');
+		return $info ? cms_store::localized($row, $info['type']) : $row;
+	}
+
+	// the name of the resource or service $slug names, in the current
+	// language, or '' when it names none
+	protected static function name_of($setup, $group, $slug) {
+		if (!isset($setup[$group][$slug])) return '';
+		$row = self::localized_row($group, $setup[$group][$slug]);
+		return $row['name'];
 	}
 
 	// ##Time
@@ -907,7 +959,7 @@ class booking
 		$rows = array();
 		foreach (self::setup()['resources'] as $slug => $row) {
 			if (!$row['active'] || (isset($options['service']) && !self::offers($options['service'], $slug))) continue;
-			$rows[] = $row;
+			$rows[] = self::localized_row('resources', $row);
 		}
 		return cms_records::listed('bookingresource', $rows);
 	}
@@ -919,7 +971,7 @@ class booking
 		$rows = array();
 		foreach (self::setup()['services'] as $slug => $row) {
 			if (!$row['active'] || (isset($options['resource']) && !self::offers($slug, $options['resource']))) continue;
-			$rows[] = $row;
+			$rows[] = self::localized_row('services', $row);
 		}
 		return cms_records::listed('bookingservice', $rows);
 	}
@@ -995,8 +1047,8 @@ class booking
 		}
 		$setup = self::setup();
 		$row = cms_records::shown(cms_records::info('booking'), $booking);
-		$row['resource_name'] = isset($setup['resources'][$booking['resource']]) ? $setup['resources'][$booking['resource']]['name'] : '';
-		$row['service_name'] = isset($setup['services'][$booking['service']]) ? $setup['services'][$booking['service']]['name'] : '';
+		$row['resource_name'] = self::name_of($setup, 'resources', $booking['resource']);
+		$row['service_name'] = self::name_of($setup, 'services', $booking['service']);
 		return array(cms_records::for_template(cms_records::info('booking'), $row));
 	}
 
@@ -1088,8 +1140,8 @@ class booking
 			$key = $b['date'].'|'.$b['resource'];
 			$row = cms_records::shown($info, $b);
 			$row['attention'] = self::reason($b, isset($taken[$key]) ? $taken[$key] : array());
-			$row['resource_name'] = isset($setup['resources'][$b['resource']]) ? $setup['resources'][$b['resource']]['name'] : '';
-			$row['service_name'] = isset($setup['services'][$b['service']]) ? $setup['services'][$b['service']]['name'] : '';
+			$row['resource_name'] = self::name_of($setup, 'resources', $b['resource']);
+			$row['service_name'] = self::name_of($setup, 'services', $b['service']);
 			$rows[] = $row;
 		}
 		return cms_records::listed('booking', $rows);

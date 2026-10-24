@@ -28,7 +28,7 @@ class order
 	const HOLD_MINUTES = 60;
 
 	static function types() {
-		return array('order' => array(
+		$types = array('order' => array(
 			'fields' => array(
 				'number' => '', 'email' => '', 'name' => '', 'address' => '', 'city' => '', 'postcode' => '', 'country' => '',
 				'lines' => array(), 'total' => '0.00', 'currency' => '', 'status' => 'unpaid',
@@ -48,6 +48,14 @@ class order
 			'hidden' => array('provider_ref', 'provider_url'),
 			'actions' => array('ship' => 'editor', 'mark_paid' => 'editor', 'cancel' => 'editor', 'refund' => 'admin'),
 		));
+		// the buyer's language, which their emails go out in: only a
+		// multilingual site's; staff and agents see it, and only the
+		// model writes it (#200 D13)
+		if (i18n::enabled()) {
+			$types['order']['fields']['lang'] = '';
+			$types['order']['readonly'][] = 'lang';
+		}
+		return $types;
 	}
 
 	// Every change to an order passes here, from the checkout, the studio's
@@ -194,11 +202,14 @@ class order
 					);
 					$total += $cents * (int)$qty;
 				}
-				$order = cms_records::create('order', $buyer + array(
+				$values = $buyer + array(
 					'payment' => $payment,
 					'lines' => $lines, 'total' => number_format($total / 100, 2, '.', ''),
 					'currency' => config::get('shop_currency', 'EUR'), 'status' => 'unpaid',
-				));
+				);
+				// the language the buyer ordered in, which their emails go out in (#200 D13)
+				if (i18n::enabled()) $values['lang'] = i18n::current();
+				$order = cms_records::create('order', $values);
 				return cms_records::update('order', $order['id'], array('number' => 'BH-'.(1000 + (int)$order['id'])));
 			});
 		} catch (cms_refused $e) {
@@ -303,30 +314,44 @@ class order
 	// an order paid on delivery: the buyer knows what to have ready, the studio what to pack
 	function placed_mail($order) {
 		if (!is_array($order) || empty($order['email'])) return null;
-		$vars = self::mail_vars($order);
-		mail::send_view('_email/order_placed', $order['email'], $vars);
-		mail::send_view('_email/new_order', config::get('shop_staff_email'), $vars);
+		self::mail_buyer('_email/order_placed', $order);
+		self::mail_staff('_email/new_order', $order);
 		return null;
 	}
 
 	function paid_mail($order) {
 		if (!is_array($order) || empty($order['email'])) return null;
-		$vars = self::mail_vars($order);
-		mail::send_view('_email/order_confirmation', $order['email'], $vars);
-		mail::send_view('_email/new_order', config::get('shop_staff_email'), $vars);
+		self::mail_buyer('_email/order_confirmation', $order);
+		self::mail_staff('_email/new_order', $order);
 		return null;
 	}
 
 	function shipped_mail($order) {
 		if (!is_array($order) || empty($order['email'])) return null;
-		mail::send_view('_email/order_shipped', $order['email'], self::mail_vars($order) + array('tracking' => (string)$order['tracking']));
+		self::mail_buyer('_email/order_shipped', $order, array('tracking' => (string)$order['tracking']));
 		return null;
 	}
 
 	function late_mail($order) {
 		if (!is_array($order) || empty($order['number'])) return null;
-		mail::send_view('_email/late_payment', config::get('shop_staff_email'), self::mail_vars($order));
+		self::mail_staff('_email/late_payment', $order);
 		return null;
+	}
+
+	// the buyer's email goes in the language they ordered in, staff's in the
+	// default language (#200 D13)
+	static function mail_buyer($view, $order, $more = array()) {
+		$lang = i18n::of($order);
+		return mail::in_language($lang, function () use ($view, $order, $more, $lang) {
+			return mail::send_view($view, $order['email'], self::mail_vars($order) + $more, array(), $lang);
+		});
+	}
+
+	static function mail_staff($view, $order) {
+		$lang = i18n::default_language();
+		return mail::in_language($lang, function () use ($view, $order, $lang) {
+			return mail::send_view($view, config::get('shop_staff_email'), self::mail_vars($order), array(), $lang);
+		});
 	}
 
 	static function mail_vars($order) {

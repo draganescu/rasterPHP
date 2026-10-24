@@ -94,7 +94,7 @@ The mock-up still says `lang="en"`, and the page says the language it is shown i
 
 ## With an AI agent
 
-Over [MCP](Working-with-AI-Agents), an agent can do the whole job: `set_languages` turns languages on (and adds the columns), `translation_status` lists what a language still lacks (page fields, items, dictionary words), `update_page` with a `lang` writes a page's translation and `update_item` with a `lang` an item's, `read_strings` and `write_strings` handle the dictionaries, and `render_url` with `/ro/…` shows the result. `set_languages` and `write_strings` change the site's files, so they refuse on a production server, and over HTTP they are offered only when the site sets `config::set('mcp_write_views')->to(true)` (over stdio they always are).
+Over [MCP](Working-with-AI-Agents), an agent can do the whole job: `set_languages` turns languages on (and adds the columns), `translation_status` lists what a language still lacks (page fields, items, records such as booking service names, dictionary words, and the words of the `_email/` views), `update_page` with a `lang` writes a page's translation and `update_item` with a `lang` an item's, `read_strings` and `write_strings` handle the dictionaries, and `render_url` with `/ro/…` shows the result. `set_languages` and `write_strings` change the site's files, so they refuse on a production server, and over HTTP they are offered only when the site sets `config::set('mcp_write_views')->to(true)` (over stdio they always are).
 
 ## From a model
 
@@ -113,6 +113,8 @@ Without `multilingual`, only the templates' words are translated (dictionaries),
 The cookie is the only cookie a visitor gets without logging in, and only after they pick a language. A multilingual site sets no such cookie: the address decides.
 
 A site with a single language (`array('ro')`) is fine this way: its pages say `lang="ro"`, dates are read day first, and the editor speaks Romanian.
+
+Dates typed with slashes follow `languages` whether or not `multilingual` is on: `5/10/2026` is 5 October for every language except `en-us`, which reads it as May 10. `2026-10-05` and dates in words read the same everywhere. A site without `languages` reads dates as it always did (`5/10/2026` is May 10).
 
 ## Other places languages matter
 

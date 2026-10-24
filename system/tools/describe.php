@@ -198,9 +198,10 @@ class raster_describe
 	// Everything that has words in the default language and could have
 	// them in $lang: each translated page and site_* field whose shown value
 	// isn't empty, and each dictionary key the views print with a mock-up
-	// text, and each translated field of every item and record (where is
+	// text (kind email, with the view, when only _email/ views print it),
+	// and each translated field of every item and record (where is
 	// <collection>/<id>), with done telling whether $lang has it. For
-	// translation_status and the missing counts above; P4 adds emails.
+	// translation_status and the missing counts above.
 	static function translations($lang, $inspector = null) {
 		return self::translations_in(array($lang), $inspector)[$lang];
 	}
@@ -250,13 +251,14 @@ class raster_describe
 				}
 			}
 		}
+		$emails = self::strings_in_emails($inspector);
 		foreach (self::strings_used($inspector) as $file => $keys) {
 			foreach ($langs as $lang) {
 				$strings = self::dictionary($file, $lang);
 				foreach ($keys as $key => $default) {
 					// a key with no text in the template has nothing to translate
 					if (trim($default) === '') continue;
-					$rows[$lang][] = array('kind' => 'strings', 'where' => $file, 'field' => (string)$key, 'default_value' => $default, 'done' => isset($strings[$key]) && trim((string)$strings[$key]) !== '');
+					$rows[$lang][] = array('kind' => isset($emails[$file][$key]) ? 'email' : 'strings', 'where' => $file, 'field' => (string)$key, 'default_value' => $default, 'done' => isset($strings[$key]) && trim((string)$strings[$key]) !== '') + (isset($emails[$file][$key]) ? array('view' => $emails[$file][$key]) : array());
 				}
 			}
 		}
@@ -293,6 +295,34 @@ class raster_describe
 		}
 		ksort($used);
 		return $used;
+	}
+
+	// file => key => the first email (_email/booking_confirmed) that prints
+	// it, for the keys only _email/ views print: a key another view prints
+	// too is one strings row, so a missing word counts once
+	static function strings_in_emails($inspector) {
+		$emails = array();
+		$elsewhere = array();
+		$themes = array_unique(array_merge(array($inspector->theme), array_column($inspector->routes(), 'theme')));
+		foreach ($themes as $theme) {
+			if (!is_dir($inspector->theme_dir($theme))) continue;
+			foreach ($inspector->views($theme) as $view) {
+				$used = array();
+				list($blocks) = raster_inspector::blocks(file_get_contents($inspector->theme_dir($theme).'/'.$view));
+				self::collect_strings($blocks, $used);
+				$email = preg_match('#(^|/)_email/#', $view) ? preg_replace('/\.[a-z]+$/', '', $view) : null;
+				foreach ($used as $file => $keys) {
+					foreach (array_keys($keys) as $key) {
+						if ($email === null) $elsewhere[$file][$key] = true;
+						elseif (!isset($emails[$file][$key]) || strcmp($email, $emails[$file][$key]) < 0) $emails[$file][$key] = $email;
+					}
+				}
+			}
+		}
+		foreach ($emails as $file => $keys) {
+			$emails[$file] = isset($elsewhere[$file]) ? array_diff_key($keys, $elsewhere[$file]) : $keys;
+		}
+		return $emails;
 	}
 
 	static protected function collect_strings($blocks, &$used) {

@@ -35,7 +35,7 @@ class newsletter
 
 	// the tables this model uses, for `raster schema --apply`
 	static function schema() {
-		return array(
+		$tables = array(
 			// confirm_sent_at: when the confirmation was last mailed, so signing up
 			// again at once mails nothing
 			'subscriber' => array('email' => '', 'name' => '', 'status' => '', 'token' => '', 'source' => '', 'created_at' => '', 'confirmed_at' => '', 'unsubscribed_at' => '', 'confirm_sent_at' => ''),
@@ -44,6 +44,9 @@ class newsletter
 			// one row per address an issue was handed over to
 			'newsletterdelivery' => array('issue' => 0, 'email' => '', 'sent_at' => ''),
 		);
+		// the language a subscriber reads, only a multilingual site's (#200 D13)
+		if (i18n::enabled()) $tables['subscriber']['lang'] = '';
+		return $tables;
 	}
 
 	// what a site using the newsletter needs: the confirmation email's view,
@@ -114,6 +117,10 @@ class newsletter
 				$subscriber = R::dispense('subscriber');
 				$subscriber->email = $email;
 				$subscriber->created_at = R::isoDateTime();
+				// the language they signed up in, which they read (#200 D13);
+				// signing up again leaves it; a frozen database without the
+				// column skips it
+				if (i18n::enabled() && (!R::getRedBean()->isFrozen() || array_key_exists('lang', cms_store::columns('subscriber')))) $subscriber->lang = i18n::current();
 			}
 			$subscriber->name = trim((string)$name);
 			if ($subscriber->status !== 'pending' || !$subscriber->token) {
@@ -144,10 +151,14 @@ class newsletter
 		$mail = controller::model_class('mail');
 		$subscriber = self::claim_confirmation(strtolower(trim((string)$subscribed['email'])), $mail);
 		if (!$subscriber) return null;
-		$sent = $mail::send_view('_email/newsletter_confirm', $subscriber->email, array(
-			'confirm_url' => util::url(config::get('newsletter_confirm_page', 'newsletter-confirm'), array('token' => $subscriber->token)),
-			'name' => (string)$subscriber->name,
-		));
+		// in the subscriber's language, the link too (#200 D13)
+		$lang = i18n::of($subscriber);
+		$sent = $mail::in_language($lang, function () use ($mail, $subscriber, $lang) {
+			return $mail::send_view('_email/newsletter_confirm', $subscriber->email, array(
+				'confirm_url' => util::url(config::get('newsletter_confirm_page', 'newsletter-confirm'), array('token' => $subscriber->token)),
+				'name' => (string)$subscriber->name,
+			), array(), $lang);
+		});
 		if (!$sent) log::error('Newsletter confirmation email failed: '.$mail::$last_error);
 		return null;
 	}
@@ -268,11 +279,35 @@ class newsletter
 	}
 
 	// the confirmed subscribers an issue has not reached yet (all of them for
-	// null), as rows (sql/unreached_subscribers.sql)
-	static function recipients($issue) {
+	// null), as rows (sql/unreached_subscribers.sql). $lang: on a
+	// multilingual site, only those who read that language (i18n::of: a
+	// subscriber with none reads the default); null, or off, all of them
+	// (#200).
+	static function recipients($issue, $lang = null) {
+		if ($lang !== null && i18n::enabled()) return self::reading($issue, (string)$lang);
 		if (!$issue || !$issue->id || !cms_store::table_exists('newsletterdelivery')) return self::subscribers();
 		if (!self::table_ready()) return array();
 		return database::instance('newsletter')->unreached_subscribers((int)$issue->id);
+	}
+
+	// recipients() of those who read $lang, with the rows' usual keys. A
+	// database without subscriber.lang (frozen before the column, or nobody
+	// signed up on a multilingual site yet) reads the default language only.
+	protected static function reading($issue, $lang) {
+		$self = i18n::of(array('lang' => $lang));
+		if (!self::table_ready() || !array_key_exists('lang', cms_store::columns('subscriber'))) {
+			return $self === i18n::default_language() ? self::recipients($issue) : array();
+		}
+		self::connect();
+		$query = database::instance('newsletter');
+		$rows = $issue && $issue->id && cms_store::table_exists('newsletterdelivery') ? $query->unreached_subscribers_lang((int)$issue->id) : $query->confirmed_subscribers_lang();
+		$found = array();
+		foreach ($rows as $row) {
+			if (i18n::of($row) !== $self) continue;
+			unset($row['lang']);
+			$found[] = $row;
+		}
+		return $found;
 	}
 
 	// Sends a prepared issue (see prepare_issue) to the confirmed subscribers
@@ -283,7 +318,11 @@ class newsletter
 	// recipients counts every address it reached.
 	// A mail handed over just as the process is killed is not noted yet, so
 	// that one reader may get it twice.
-	static function send_issue($url, $html, $subject, $again = false) {
+	// $lang: the language $html is in, sent to recipients($issue, $lang)
+	// only, with the unsubscribe page at that language's address; null, or
+	// off, to everyone. On, `raster send` passes each language's own address
+	// of the page as $url (ro/news), so each language is sent once.
+	static function send_issue($url, $html, $subject, $again = false, $lang = null) {
 		self::connect();
 		self::$sent = 0;
 		self::$failures = array();
@@ -310,8 +349,8 @@ class newsletter
 		$mail = controller::model_class('mail');
 		$mail::keep_open();
 		try {
-			foreach (self::recipients($issue) as $subscriber) {
-				if (!self::deliver($html, $subject, $subscriber['email'], $subscriber['token'])) {
+			foreach (self::recipients($issue, $lang) as $subscriber) {
+				if (!self::deliver($html, $subject, $subscriber['email'], $subscriber['token'], $lang)) {
 					self::$failures[$subscriber['email']] = $mail::$last_error;
 					continue;
 				}
@@ -352,9 +391,13 @@ class newsletter
 		return preg_match('/<title>(.*?)<\/title>/is', $html, $m) ? html_entity_decode(trim(strip_tags($m[1])), ENT_QUOTES) : '';
 	}
 
-	// sends a prepared issue to one address; returns true when handed over
-	static function deliver($html, $subject, $email, $token) {
-		$unsubscribe = util::url(config::get('newsletter_unsubscribe_page', 'newsletter-unsubscribe'), array('token' => $token));
+	// sends a prepared issue to one address; returns true when handed over.
+	// $lang (a multilingual site's): the unsubscribe link is that language's page.
+	static function deliver($html, $subject, $email, $token, $lang = null) {
+		$link = function () use ($token) {
+			return util::url(config::get('newsletter_unsubscribe_page', 'newsletter-unsubscribe'), array('token' => $token));
+		};
+		$unsubscribe = $lang !== null && i18n::enabled() ? i18n::with($lang, $link) : $link();
 		$body = str_replace(self::MARKER, htmlspecialchars($unsubscribe, ENT_QUOTES), $html);
 		$mail = controller::model_class('mail');
 		return $mail::send($email, $subject, $body, null, array(

@@ -99,7 +99,7 @@ class rsvp
 	// what staff's writes changed, id => was, was_people and whether the
 	// answer, people or event did, for saved()
 	static $changed = array();
-	// the events read in this request, id => event (item())
+	// the events read in this request, language => id => event (item())
 	static $events = array();
 	// the guest's new links, id => raw token: this request only, for the
 	// model's own email listener, never stored, logged or sent with an event
@@ -114,7 +114,7 @@ class rsvp
 	static $made = array();
 
 	static function types() {
-		return array(
+		$types = array(
 			'rsvp' => array(
 				// name first: the slug is made from it, never from the email
 				'fields' => array(
@@ -135,6 +135,14 @@ class rsvp
 				'actions' => array('promote' => 'editor'),
 			),
 		);
+		// the guest's language, which their emails go out in: only a
+		// multilingual site's; staff and agents see it, and only the
+		// model writes it (#200 D13)
+		if (i18n::enabled()) {
+			$types['rsvp']['fields']['lang'] = '';
+			$types['rsvp']['readonly'][] = 'lang';
+		}
+		return $types;
 	}
 
 	// ##Replies
@@ -192,6 +200,9 @@ class rsvp
 			unset(self::$changed[$id]);
 			if (self::is_staff() && !self::$writing) self::$changed[$id] = array('was' => $was, 'was_people' => (int)$before['people'], 'answered' => $answered);
 		}
+		// the language the guest replied in, which their emails go out in:
+		// set once, when the reply is made (#200 D13)
+		if (!$before && i18n::enabled()) $values['lang'] = i18n::current();
 		return $values;
 	}
 
@@ -481,22 +492,28 @@ class rsvp
 	static function item($id) {
 		$id = (int)$id;
 		if ($id < 1) return null;
-		if (array_key_exists($id, self::$events)) return self::$events[$id];
+		// each language's own: a mail in another language reads it in that one
+		$lang = i18n::current();
+		if (isset(self::$events[$lang]) && array_key_exists($id, self::$events[$lang])) return self::$events[$lang][$id];
 		$table = self::table();
-		return self::$events[$id] = self::from_item($table === null ? null : cms_store::get_item($table, $id));
+		return self::$events[$lang][$id] = self::from_item($table === null ? null : cms_store::get_item($table, $id));
 	}
 
 	// an item of the events collection as the model reads it (item()), or
-	// null
+	// null. Its title and url are the current language's (the title's
+	// translation, or the default's while it has none); slug is the
+	// default language's, the one the item is known by.
 	protected static function from_item($item) {
 		$event = null;
 		if ($item && isset($item['date']) && (string)$item['date'] !== '') {
+			$table = self::table();
+			$shown = $table === null ? $item : cms_store::localized($item, $table);
 			$starts = isset($item['starts']) && (string)$item['starts'] !== '' ? $item['starts'] : (isset($item['time']) && (string)$item['time'] !== '' ? $item['time'] : '00:00');
 			$starts = substr((string)$starts, 0, 5);
 			$published = isset($item['published_at']) ? (string)$item['published_at'] : '';
 			$event = array(
 				'id' => (int)$item['id'],
-				'title' => (string)cms_store::slug_source($item),
+				'title' => (string)cms_store::slug_source($shown),
 				'slug' => (string)$item['slug'],
 				'date' => (string)$item['date'],
 				'starts' => $starts,
@@ -504,7 +521,7 @@ class rsvp
 				'rsvp_until' => isset($item['rsvp_until']) ? (string)$item['rsvp_until'] : '',
 				'visible' => (!isset($item['enabled']) || ($item['enabled'] !== false && (string)$item['enabled'] !== '0')) && ($published === '' || $published <= date('Y-m-d H:i:s')),
 				'starts_at' => strtotime($item['date'].' '.$starts),
-				'url' => cms::item_url(self::collection(), $item),
+				'url' => cms::item_url(self::collection(), $shown),
 			);
 			if ($event['starts_at'] === false) $event = null;
 			else $event['deadline'] = self::deadline($event);
@@ -658,23 +675,48 @@ class rsvp
 	// the guest made the change and the site set it. The views get the
 	// reply's fields, who, manage_url, position, event_title, event_date,
 	// event_starts, event_url, deadline and site_url.
+	// Multilingual (#200 D13): the guest's goes in the language they replied
+	// in (i18n::of), whoever made the change, and staff's in the default
+	// language, with the guest's as lang; the links and the event's title,
+	// date and start are made in each one's.
 	protected static function mail($reply, $guest, $staff) {
 		if (!is_array($reply) || !isset($reply['id'], $reply['event'], $reply['email']) || !self::ready()) return null;
 		$id = (int)$reply['id'];
 		$event = self::item($reply['event']);
-		$vars = $reply;
-		$vars['manage_url'] = isset(self::$links[$id]) ? util::url(config::get('rsvp_manage_page', 'rsvp'), array('token' => self::$links[$id])) : '';
+		$token = isset(self::$links[$id]) ? self::$links[$id] : null;
 		unset(self::$links[$id]);
-		$vars['position'] = (string)self::position($reply);
-		$vars['event_url'] = $event ? $event['url'] : '';
-		$vars['deadline'] = $event ? date('Y-m-d H:i', $event['deadline']) : '';
-		$vars['site_url'] = util::url('');
-		if ($guest !== null && trim((string)$reply['email']) !== '') self::send('_email/'.$guest, $reply['email'], $vars);
+		$position = (string)self::position($reply);
+		$vars = function ($token) use ($reply, $event, $position) {
+			$vars = $reply;
+			// the payload's are the request's language's: read again in this one
+			if (i18n::enabled()) {
+				$event = self::item($reply['event']);
+				$vars['event_title'] = $event ? $event['title'] : '';
+				$vars['event_date'] = $event ? $event['date'] : '';
+				$vars['event_starts'] = $event ? $event['starts'] : '';
+			}
+			$vars['manage_url'] = $token !== null ? util::url(config::get('rsvp_manage_page', 'rsvp'), array('token' => $token)) : '';
+			$vars['position'] = $position;
+			$vars['event_url'] = $event ? $event['url'] : '';
+			$vars['deadline'] = $event ? date('Y-m-d H:i', $event['deadline']) : '';
+			$vars['site_url'] = util::url('');
+			return $vars;
+		};
+		$lang = i18n::of($reply);
+		if ($guest !== null && trim((string)$reply['email']) !== '') {
+			mail::in_language($lang, function () use ($guest, $reply, $vars, $token, $lang) {
+				self::send('_email/'.$guest, $reply['email'], $vars($token), $lang);
+			});
+		}
 		// staff asked for these, or a jazz night would send forty
 		$to = trim((string)config::get('rsvp_staff_email', ''));
 		if (!$staff || $to === '' || !isset($reply['who']) || $reply['who'] !== 'guest') return null;
-		$vars['manage_url'] = '';
-		self::send('_email/rsvp_new', $to, $vars);
+		$default = i18n::default_language();
+		mail::in_language($default, function () use ($to, $vars, $lang, $default) {
+			$staff_vars = $vars(null);
+			if (i18n::enabled()) $staff_vars['lang'] = $lang;
+			self::send('_email/rsvp_new', $to, $staff_vars, $default);
+		});
 		return null;
 	}
 
@@ -692,10 +734,10 @@ class rsvp
 	// a reply stays made when its email can't go: the failure is logged,
 	// without the address or the link, so not the error's text either (an
 	// SMTP server's reply can name the recipient)
-	protected static function send($view, $to, $vars) {
+	protected static function send($view, $to, $vars, $lang = null) {
 		$mail = controller::model_class('mail');
 		try {
-			if ($mail::send_view($view, $to, $vars)) return true;
+			if ($mail::send_view($view, $to, $vars, array(), $lang)) return true;
 		} catch (Exception $e) {
 			log::error("rsvp: $view: not sent (".get_class($e).")");
 			return false;
@@ -1028,7 +1070,7 @@ class rsvp
 		foreach (database::instance('rsvp')->query("SELECT * FROM `$table` WHERE `date` >= ? ORDER BY `date`, id", array($from)) as $row) {
 			$row['id'] = (int)$row['id'];
 			$event = self::from_item(cms_types::read_row($table, $row));
-			if ($event) $events[$event['id']] = self::$events[$event['id']] = $event;
+			if ($event) $events[$event['id']] = self::$events[i18n::current()][$event['id']] = $event;
 		}
 		uasort($events, function ($a, $b) { return ($a['starts_at'] - $b['starts_at']) ?: ($a['id'] - $b['id']); });
 		return $events;

@@ -109,6 +109,9 @@ class authentication
 				$user->email = $is_email ? strtolower($login) : '';
 				$user->username = $is_email ? '' : $login;
 				$user->created_at = R::isoDateTime();
+				// the language it was made in, which its emails go out in
+				// (#200 D13); a frozen database without the column skips it
+				if (i18n::enabled() && (!R::getRedBean()->isFrozen() || array_key_exists('lang', cms_store::columns('user')))) $user->lang = i18n::current();
 			}
 			if ($name !== null || empty($user->name)) $user->name = $name !== null ? $name : preg_replace('/@.*$/', '', $login);
 			if ($role !== null) $user->role = $role;
@@ -125,8 +128,12 @@ class authentication
 			'created_at' => '', 'last_login' => '', 'failed_count' => 0, 'failed_at' => '',
 			'reset_hash' => '', 'reset_expires' => '', 'login_hash' => '', 'login_expires' => '',
 		);
-		// the editor's own language (D9), only a multilingual site's
-		if (i18n::enabled()) $user['editor_lang'] = '';
+		// the editor's own language (D9) and the language the account's
+		// email goes out in (D13), only a multilingual site's
+		if (i18n::enabled()) {
+			$user['editor_lang'] = '';
+			$user['lang'] = '';
+		}
 		return array('user' => $user);
 	}
 
@@ -212,7 +219,10 @@ class authentication
 	// what the authentication.* events carry: id, email, name, role
 	static function payload($id) {
 		$bean = R::load('user', (int)$id);
-		return array('id' => (int)$bean->id, 'email' => (string)$bean->email, 'name' => (string)$bean->name, 'role' => (string)$bean->role);
+		$payload = array('id' => (int)$bean->id, 'email' => (string)$bean->email, 'name' => (string)$bean->name, 'role' => (string)$bean->role);
+		// multilingual: the account's language (i18n::of), for its emails
+		if (i18n::enabled()) $payload['lang'] = i18n::of($bean);
+		return $payload;
 	}
 
 	static function log_in($id) {
@@ -516,10 +526,15 @@ class authentication
 			$user->reset_hash = hash('sha256', $token);
 			$user->reset_expires = date('Y-m-d H:i:s', time() + 3600);
 			R::store($user);
-			// through the site's the_mail, when it has one
+			// through the site's the_mail, when it has one; in the account's
+			// language, its link too (#200 D13)
 			$mail = controller::model_class('mail');
-			$reset = util::url(config::get('reset_page', 'reset'), array('token' => $token));
-			if (!$mail::send_view('_email/password_reset', $user->email, array('reset_url' => $reset, 'name' => $user->name))) {
+			$lang = i18n::of($user);
+			$sent = $mail::in_language($lang, function () use ($mail, $user, $token, $lang) {
+				$reset = util::url(config::get('reset_page', 'reset'), array('token' => $token));
+				return $mail::send_view('_email/password_reset', $user->email, array('reset_url' => $reset, 'name' => $user->name), array(), $lang);
+			});
+			if (!$sent) {
 				log::error('Password reset email failed: '.$mail::$last_error);
 			}
 		}
