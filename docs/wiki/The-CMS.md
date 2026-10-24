@@ -123,7 +123,7 @@ Each collection gets URLs without any routing work:
 
 **List URLs** (`_page` and `_items`) start with the page that shows the list: `/news/news_page/2` for `news.html`, `/archive/news_page/2` for `archive.html`. A collection listed on the home page is an exception: `/news_page/2` has no page to attach to and gives a 404, so put long, paginated lists on a page of their own.
 
-**Page fields on these URLs.** List pages (`/news/news_page/2`, `/news/news_items/tag/php`) share their page fields with `/news`. Only a `_page` or `_items` segment with something after it is a list URL: `/landing_page` is the view `landing_page.html`, with page fields of its own. All item pages of a collection share one set of page fields (for example a common sidebar text): their own when `news_item.html` exists, otherwise those of `/news`.
+**Page fields on these URLs.** List pages (`/news/news_page/2`, `/news/news_items/tag/php`) share their page fields with `/news`. So do `/news/news_page` and `/news/news_items` with nothing after them: a `_page` or `_items` segment is a list URL when the page before it (`news.html`) renders the list. `/landing_page` is the view `landing_page.html`, with page fields of its own. All item pages of a collection share one set of page fields (for example a common sidebar text): their own when `news_item.html` exists, otherwise those of `/news`.
 
 ### Links to items: `raster_detail_link`
 
