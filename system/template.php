@@ -329,6 +329,8 @@ class template {
 		}
 		// print.if.languages: the language switcher has somewhere to go
 		if (!array_key_exists('languages', $template->vars)) $template->vars['languages'] = count(i18n::available()) > 1;
+		// print.if.multilingual: every language has its own addresses (the sitemap's alternates)
+		if (!array_key_exists('multilingual', $template->vars)) $template->vars['multilingual'] = i18n::enabled();
 		
 		// mock-up content goes first, so models inside it are never called
 		$template->remove();

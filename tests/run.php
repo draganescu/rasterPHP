@@ -10302,7 +10302,9 @@ test('P2.C: tools/list and describe grow by less than 1,000 characters (#161)', 
 			same(array(), array_values(array_diff(array_column($list['tools'], 'name'), $kickoff, $added)), 'a tool this baseline does not know: move the baseline (see above)');
 			$tools = strlen(json_encode($list, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
 			$languages = strlen(json_encode(array('languages' => $mcp->call('describe', array('sections' => array('languages')))['languages']), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)) - 2;
-			$growth = $tools - 10954 + $languages;
+			// P3.D's lang on the item tools (46 characters) is P3's growth,
+			// held to its own budget by its test
+			$growth = $tools - 10954 - 46 + $languages;
 			check($growth < 1000, "tools/list is $tools characters and the languages block $languages: $growth more than at the kickoff");
 			$instructions = $mcp->message('initialize')['result']['instructions'];
 			check(strpos($instructions, 'Making a site multilingual') !== false && strpos($instructions, 'write_asset') !== false, 'the recipe and the asset tools');
@@ -10779,6 +10781,8 @@ function p2a_undo($changes, $tables = array()) {
 	foreach ($changes as $change) {
 		if (!preg_match('/^added ([a-z0-9_]+)\.([a-z0-9_]+)$/', $change, $m) || in_array($m[1], $tables, true)) continue;
 		cms_store::forget();
+		// a slug column per language has an index, which SQLite drops first (P3.B)
+		if (strpos($m[2], 'slug__') === 0 && R::getDatabaseAdapter()->getDatabase()->getDatabaseType() !== 'mysql') R::getDatabaseAdapter()->exec("DROP INDEX IF EXISTS `{$m[1]}_{$m[2]}`");
 		if (array_key_exists($m[2], cms_store::columns($m[1]))) R::getDatabaseAdapter()->exec("ALTER TABLE `{$m[1]}` DROP COLUMN `{$m[2]}`");
 	}
 	foreach ($tables as $table) R::getDatabaseAdapter()->exec("DROP TABLE IF EXISTS `$table`");
@@ -11246,6 +11250,1230 @@ test('P2.D: newsletter\'s fixed queries are sql/ files and show in vocabulary (#
 		check(in_array($query, $vocabulary['models']['newsletter']['queries'], true), 'vocabulary: '.json_encode($vocabulary['models']['newsletter']['queries']));
 	}
 	check(strpos(file_get_contents("$root/system/models/newsletter/newsletter.php"), "R::find('subscriber'") === false, 'no confirmed-subscriber SQL left in newsletter.php');
+});
+
+// ## P3 kickoff: the contracts the P3 packages code against
+
+test('P3 kickoff: off, and in the default language, the $lang arguments change no SQL string', function () {
+	$columns = array('id' => 'INTEGER', 'slug' => 'TEXT', 'slug__ro' => 'TEXT', 'name' => 'TEXT', 'name__ro' => 'TEXT', 'price' => 'INT', 'published_at' => 'DATETIME', 'updated_at' => 'DATETIME');
+	$conditions = array(array('name', '=', 'Flat white'), array('price', '>', '4'), array('name', '!=', 'x'), array('slug', '=', 'flat-white'));
+	// today's SQL, written out once so a change to it can't hide
+	same(array(" AND `name` = :c0_name  AND `price` > :c1_price  AND (`name` IS NULL OR `name` != :c2_name)  AND `slug` = :c3_slug ", array(':c0_name' => 'Flat white', ':c1_price' => 4, ':c2_name' => 'x', ':c3_slug' => 'flat-white')), cms_store::conditions_sql($conditions, $columns));
+	same('`name` ASC, `price` DESC, id ASC', cms_store::order_sql('name,-price', $columns));
+	$settings = array(
+		'off' => array('multilingual' => false, 'languages' => array()),
+		'languages, switch off' => array('multilingual' => false, 'languages' => array('en', 'ro')),
+		'one language' => array('multilingual' => true, 'languages' => array('en')),
+		'on' => array('multilingual' => true, 'languages' => array('en', 'ro')),
+	);
+	foreach ($settings as $what => $setting) {
+		with_settings($setting, function () use ($what, $columns, $conditions) {
+			$conditions_sql = cms_store::conditions_sql($conditions, $columns);
+			$order_sql = cms_store::order_sql('name,-price,newest', $columns);
+			// on, only the default language (and null) is promised to be today's
+			$langs = $what === 'on' ? array(null, 'en') : array(null, 'en', 'ro', 'pt-br');
+			foreach ($langs as $lang) {
+				same($conditions_sql, cms_store::conditions_sql($conditions, $columns, 'c', $lang), "$what, conditions in ".var_export($lang, true));
+				same($order_sql, cms_store::order_sql('name,-price,newest', $columns, $lang), "$what, order in ".var_export($lang, true));
+				if ($what !== 'on') {
+					same('slug', cms_store::slug_column($lang), "$what, slug column");
+					same(null, cms_store::resolve_slug('zzp3kickdata', 'flat-white', $lang), "$what, resolve_slug");
+					same('menu/menu_item/flat-white', cms::path_in('menu/menu_item/flat-white', $lang), "$what, path_in");
+				}
+			}
+		});
+	}
+	with_settings($settings['on'], function () {
+		same('slug', cms_store::slug_column('en'));
+		same('slug__ro', cms_store::slug_column('ro'));
+	});
+});
+
+// takes an index away if it is there: SQLite and MariaDB know DROP INDEX
+// IF EXISTS, MySQL doesn't
+function p3_drop_index($table, $index) {
+	$adapter = R::getDatabaseAdapter();
+	if ($adapter->getDatabase()->getDatabaseType() !== 'mysql') {
+		$adapter->exec("DROP INDEX IF EXISTS `$index`");
+		return;
+	}
+	if ($adapter->getCell('SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?', array($table, $index))) $adapter->exec("ALTER TABLE `$table` DROP INDEX `$index`");
+}
+
+test('P3 kickoff: off, list_where and index_slug send the SQL they always did', function () {
+	cms_store::connect();
+	$adapter = R::getDatabaseAdapter();
+	try {
+		cms_types::ensure('zzp3kickdata', array('slug' => 'text', 'name' => 'text', 'price' => 'int', 'enabled' => 'bool', 'published_at' => 'datetime', 'updated_at' => 'datetime'));
+		with_settings(array('multilingual' => false, 'languages' => array('en', 'ro')), function () {
+			$conditions = cms_store::list_options('price>4&order=name')['conditions'];
+			$plain = cms_store::list_where('zzp3kick', $conditions, array('slug' => 'flat-white'), array());
+			foreach (array('en', 'ro') as $lang) same($plain, cms_store::list_where('zzp3kick', $conditions, array('slug' => 'flat-white'), array(), $lang), "list_where in $lang");
+		});
+		// the slug index: the same statements with and without the column named
+		p3_drop_index('zzp3kickdata', 'zzp3kickdata_slug');
+		$plain = p2a_sql(function () { same(true, cms_types::index_slug('zzp3kickdata')); });
+		p3_drop_index('zzp3kickdata', 'zzp3kickdata_slug');
+		same($plain, p2a_sql(function () { same(true, cms_types::index_slug('zzp3kickdata', 'slug')); }));
+		same(false, cms_types::index_slug('zzp3kickdata', 'slug'), 'made once');
+		try {
+			cms_types::index_slug('zzp3kickdata', 'name');
+			check(false, 'only a slug column is indexed as one');
+		} catch (InvalidArgumentException $e) {
+			check(true);
+		}
+	} finally {
+		$adapter->exec('DROP TABLE IF EXISTS zzp3kickdata');
+		cms_store::forget();
+	}
+});
+
+// ## P3.A: items in a language, translated sort and filter
+
+// a cms.item_saved listener, bound once
+function p3a_saved($payload) { $GLOBALS['p3a_events'][] = $payload; }
+function p3a_events() {
+	static $bound = false;
+	if (!$bound) event::bind('cms.item_saved')->to(null, 'p3a_saved');
+	$bound = true;
+	$GLOBALS['p3a_events'] = array();
+}
+// the SQL $fn sends, with the clock taken out (updated_at differs a second later)
+function p3a_sql($fn) {
+	return preg_replace('/\d{4}-\d\d-\d\d \d\d:\d\d:\d\d/', 'T', json_encode(p2a_sql($fn)));
+}
+// a model declaring three record types: one names its translated fields,
+// one its shared ones, one neither
+function p3a_model($fn) {
+	global $root;
+	$dir = "$root/application/models/zzp3a";
+	temp_model($dir, array('zzp3a.php' => '<?php class zzp3a { static function types() { return array('
+		.'"zzp3adish" => array("fields" => array("name" => "", "description" => "", "price" => 0, "lines" => array(), "email" => ""), "public" => true, "translate" => array("name", "description", "price", "lines", "nonsense")),'
+		.'"zzp3aguest" => array("fields" => array("name" => "", "email" => "", "secret" => "", "lines" => array(), "seats" => 0), "hidden" => array("secret"), "shared" => array("email")),'
+		.'"zzp3abook" => array("fields" => array("name" => "", "note" => ""))'
+		.'); } }'));
+	cms_records::forget();
+	try {
+		return $fn();
+	} finally {
+		@unlink("$dir/zzp3a.php");
+		@rmdir($dir);
+		cms_store::connect();
+		foreach (array('zzp3adishdata', 'zzp3aguestdata', 'zzp3abookdata') as $table) R::getDatabaseAdapter()->exec("DROP TABLE IF EXISTS `$table`");
+		cms_records::forget();
+		cms_store::forget();
+	}
+}
+
+test('P3.A: a translation language sorts and filters by COALESCE(NULLIF(x__ro, \'\'), x); off and the default, today\'s strings', function () {
+	$columns = array('id' => 'INTEGER', 'slug' => 'TEXT', 'slug__ro' => 'TEXT', 'name' => 'TEXT', 'name__ro' => 'TEXT', 'name__pt_br' => 'TEXT', 'note' => 'TEXT', 'price' => 'INT', 'published_at' => 'DATETIME', 'updated_at' => 'DATETIME');
+	$conditions = array(array('name', '=', 'Flat white'), array('price', '>', '4'), array('name', '!=', 'x'), array('slug', '=', 'flat-white'), array('note', '=', 'hot'), array('name', '=', ''));
+	$today = array(" AND `name` = :c0_name  AND `price` > :c1_price  AND (`name` IS NULL OR `name` != :c2_name)  AND `slug` = :c3_slug  AND `note` = :c4_note  AND `name` = :c5_name ", array(':c0_name' => 'Flat white', ':c1_price' => 4, ':c2_name' => 'x', ':c3_slug' => 'flat-white', ':c4_note' => 'hot', ':c5_name' => ''));
+	$order = '`name` ASC, `note` DESC, CASE WHEN published_at IS NULL THEN updated_at ELSE published_at END DESC, id DESC';
+	foreach (array(array('multilingual' => false, 'languages' => array()), array('multilingual' => false, 'languages' => array('en', 'ro')), p2a_on(array('en'))) as $settings) {
+		with_settings($settings, function () use ($columns, $conditions, $today, $order) {
+			foreach (array(null, 'en', 'ro', 'pt-br') as $lang) {
+				same($today, cms_store::conditions_sql($conditions, $columns, 'c', $lang));
+				same($order, cms_store::order_sql('name,-note,newest', $columns, $lang));
+				same('`name`', cms_store::field_sql('name', $columns, $lang));
+			}
+		});
+	}
+	with_settings(p2a_on(array('en', 'ro', 'pt-br')), function () use ($columns, $conditions, $today, $order) {
+		foreach (array(null, 'en', 'EN') as $lang) {
+			same($today, cms_store::conditions_sql($conditions, $columns, 'c', $lang), var_export($lang, true));
+			same($order, cms_store::order_sql('name,-note,newest', $columns, $lang));
+		}
+		// the translation where there is one, the default's value where it
+		// is empty; a field without a column in the language as today; the
+		// bindings as they were
+		$ro = "COALESCE(NULLIF(`name__ro`, ''), `name`)";
+		same(array(" AND $ro = :c0_name  AND `price` > :c1_price  AND ($ro IS NULL OR $ro != :c2_name)  AND COALESCE(NULLIF(`slug__ro`, ''), `slug`) = :c3_slug  AND `note` = :c4_note  AND $ro = :c5_name ", $today[1]),
+			cms_store::conditions_sql($conditions, $columns, 'c', 'ro'));
+		same("$ro ASC, `note` DESC, CASE WHEN published_at IS NULL THEN updated_at ELSE published_at END DESC, id DESC", cms_store::order_sql('name,-note,newest', $columns, 'ro'));
+		same("$ro DESC, id ASC", cms_store::order_sql('-name', $columns, 'ro'));
+		same("COALESCE(NULLIF(`name__pt_br`, ''), `name`) ASC, `slug` ASC, id ASC", cms_store::order_sql('name,slug', $columns, 'pt-br'), 'pt-br has no slug column');
+		same('`name`', cms_store::field_sql('name', $columns, 'de'), 'a language the site doesn\'t list');
+		same(array(" AND COALESCE(NULLIF(`name__ro`, ''), `name`) = :f0_name ", array(':f0_name' => 'Cafea')), cms_store::conditions_sql(array(array('name', '=', 'Cafea')), $columns, 'f', 'ro'));
+	});
+});
+
+test('P3.A: types() translate and shared: translated_fields, the content model, ensure', function () {
+	p3a_model(function () {
+		same(array('name', 'description'), cms_records::translated_fields(cms_records::info('zzp3adish')), 'translate: its text fields, no int, no list, nothing unknown');
+		same(array('name'), cms_records::translated_fields(cms_records::info('zzp3aguest')), 'shared: every other text field but lists and hidden ones');
+		same(array(), cms_records::translated_fields(cms_records::info('zzp3abook')), 'neither: none');
+		same(array(), cms_records::info('zzp3adish')['unknown'], 'translate and shared are known keys');
+		$fields = (new raster_inspector())->content_model()['collections']['zzp3adish']['fields'];
+		same(array('name' => true, 'description' => true, 'price' => false, 'lines' => false, 'email' => false), array_map(function ($f) { return $f['translate']; }, $fields));
+		cms_store::connect();
+		// off: the columns it always had, and the same SQL
+		$off = p3a_sql(function () { cms_records::ensure(cms_records::info('zzp3adish')); });
+		same(array('id', 'name', 'description', 'price', 'lines', 'email', 'slug', 'enabled', 'published_at', 'updated_at', 'created_at'), p2a_columns('zzp3adishdata'));
+		R::getDatabaseAdapter()->exec('DROP TABLE zzp3adishdata');
+		cms_store::forget();
+		same($off, with_settings(array('multilingual' => false, 'languages' => array('en', 'ro')), function () { return p3a_sql(function () { cms_records::ensure(cms_records::info('zzp3adish')); }); }));
+		// on: a column per language for the translated ones
+		with_settings(p2a_on(), function () {
+			cms_records::ensure(cms_records::info('zzp3adish'));
+			$columns = p2a_columns('zzp3adishdata');
+			check(in_array('name__ro', $columns) && in_array('description__ro', $columns) && !in_array('email__ro', $columns) && !in_array('price__ro', $columns), implode(', ', $columns));
+			$again = p2a_sql(function () { cms_records::ensure(cms_records::info('zzp3adish')); });
+			same(array(), preg_grep('/ALTER/i', $again), 'nothing the second time');
+		});
+	});
+});
+
+test('P3.A: save_item in a language writes its column, refuses a shared field, keeps saved_lang and sends lang; off as before', function () {
+	cms_store::connect();
+	$type = 'zzp3amenudata';
+	p3a_events();
+	try {
+		cms_types::ensure($type, array('slug' => 'text', 'enabled' => 'bool', 'published_at' => 'datetime', 'updated_at' => 'datetime', 'name' => 'text', 'photo' => 'text'));
+		$allowed = array('name', 'photo');
+		// off: lang changes no SQL, no saved_lang, the event as it was
+		$item = cms_store::save_item($type, 0, array('name' => 'Flat white', 'photo' => 'a.jpg'), $allowed, 'editor', 'zzp3a_menu');
+		$id = $item['id'];
+		foreach (array(array('multilingual' => false, 'languages' => array()), array('multilingual' => false, 'languages' => array('en', 'ro'))) as $settings) {
+			with_settings($settings, function () use ($type, $id, $allowed) {
+				$plain = p3a_sql(function () use ($type, $id, $allowed) { cms_store::save_item($type, $id, array('name' => 'Flat white'), $allowed); });
+				same($plain, p3a_sql(function () use ($type, $id, $allowed) { cms_store::save_item($type, $id, array('name' => 'Flat white'), $allowed, 'editor', null, 'ro'); }));
+				check(strpos($plain, 'saved_lang') === false && strpos($plain, '__ro') === false, $plain);
+			});
+		}
+		same(array('id', 'slug', 'enabled', 'published_at', 'updated_at', 'name', 'photo'), p2a_columns($type), 'off: no columns added');
+		foreach ($GLOBALS['p3a_events'] as $event) same(array('collection', 'created', 'item'), array_keys($event));
+		$GLOBALS['p3a_events'] = array();
+		with_settings(p2a_on(), function () use ($type, $id, $allowed) {
+			cms_types::ensure($type, array(), array('name'));
+			$en = cms_store::save_item($type, $id, array('photo' => 'b.jpg'), $allowed, 'editor', 'zzp3a_menu');
+			same('en', $en['saved_lang'], 'saved_lang, made in development');
+			$ro = cms_store::save_item($type, $id, array('name' => 'Cafea cu lapte'), $allowed, 'editor', 'zzp3a_menu', 'ro');
+			same(array('Flat white', 'Cafea cu lapte', 'ro', 'b.jpg'), array($ro['name'], $ro['name__ro'], $ro['saved_lang'], $ro['photo']));
+			same(array(array('zzp3a_menu', 'en'), array('zzp3a_menu', 'ro')), array_map(function ($e) { return array($e['collection'], $e['lang']); }, $GLOBALS['p3a_events']));
+			// a shared field in a translation: refused, nothing stored
+			try {
+				cms_store::save_item($type, $id, array('name' => 'X', 'photo' => 'c.jpg'), $allowed, 'editor', null, 'ro');
+				check(false, 'a shared field in ro');
+			} catch (cms_refused $e) {
+				same(array('field_shared'), $e->problems);
+			}
+			try {
+				cms_store::save_item($type, $id, array('name' => 'X'), $allowed, 'editor', null, 'xx');
+				check(false, 'an unknown language');
+			} catch (InvalidArgumentException $e) {
+				check(strpos($e->getMessage(), 'Unknown language') !== false, $e->getMessage());
+			}
+			// a translation column is no field of its own
+			try {
+				cms_store::save_item($type, $id, array('name__ro' => 'X'), $allowed);
+				check(false, 'name__ro');
+			} catch (InvalidArgumentException $e) {
+				check(true);
+			}
+			$row = cms_store::get_item($type, $id);
+			same(array('Flat white', 'Cafea cu lapte', 'b.jpg'), array($row['name'], $row['name__ro'], $row['photo']));
+			// shown in Romanian, the default's value when the translation is empty
+			same('Cafea cu lapte', cms_store::localized($row, $type, 'ro')['name']);
+			cms_store::save_item($type, $id, array('name' => ''), $allowed, 'editor', null, 'ro');
+			same('Flat white', cms_store::localized(cms_store::get_item($type, $id), $type, 'ro')['name']);
+		});
+	} finally {
+		R::getDatabaseAdapter()->exec("DROP TABLE IF EXISTS $type");
+		cms_store::forget();
+	}
+});
+
+test('P3.A: a record in a language: save_item, and find() filters and sorts by the translation; off its SQL is today\'s', function () {
+	p3a_model(function () {
+		cms_store::connect();
+		$sql = function ($fn) {
+			$logs = p3a_sql($fn);
+			preg_match_all('/SELECT [^"]*?zzp3adishdata[^"]*/', $logs, $m);
+			return $m[0];
+		};
+		$find = function () { cms_records::find('zzp3adish', array('name' => 'Ciorbă'), 'name'); cms_records::find('zzp3adish', 'name=Ciorbă&order=-name'); };
+		cms_records::ensure(cms_records::info('zzp3adish'));
+		$today = $sql($find);
+		check(count($today) === 2 && strpos($today[0], ' AND `name` = :f_name  ORDER BY `name` ASC, id ASC') !== false && strpos($today[1], ' AND `name` = :c0_name  ORDER BY `name` DESC, id ASC') !== false, json_encode($today));
+		same($today, with_settings(array('multilingual' => false, 'languages' => array('en', 'ro')), function () use ($sql, $find) { return $sql(function () use ($find) { i18n::with('ro', $find); }); }), 'languages, switch off');
+		with_settings(p2a_on(), function () use ($sql, $find, $today) {
+			cms_records::ensure(cms_records::info('zzp3adish'));
+			same($today, $sql($find), 'on, the default language');
+			$ro = $sql(function () use ($find) { i18n::with('ro', $find); });
+			$coalesce = "COALESCE(NULLIF(`name__ro`, ''), `name`)";
+			check(strpos($ro[0], " AND $coalesce = :f_name  ORDER BY $coalesce ASC, id ASC") !== false && strpos($ro[1], " AND $coalesce = :c0_name  ORDER BY $coalesce DESC, id ASC") !== false, json_encode($ro));
+			$writable = cms_records::writable(cms_records::info('zzp3adish'));
+			$soup = cms_store::save_item('zzp3adishdata', 0, array('name' => 'Soup', 'email' => 'a@example.test'), $writable);
+			$bread = cms_store::save_item('zzp3adishdata', 0, array('name' => 'Bread'), $writable);
+			cms_store::save_item('zzp3adishdata', 0, array('name' => 'Apple pie'), $writable);
+			cms_store::save_item('zzp3adishdata', $soup['id'], array('name' => 'Ciorbă'), $writable, 'editor', null, 'ro');
+			cms_store::save_item('zzp3adishdata', $bread['id'], array('name' => 'Pâine'), $writable, 'editor', null, 'ro');
+			try {
+				cms_store::save_item('zzp3adishdata', $soup['id'], array('email' => 'b@example.test'), $writable, 'editor', null, 'ro');
+				check(false, 'email is shared');
+			} catch (cms_refused $e) {
+				same(array('field_shared'), $e->problems);
+			}
+			$names = function ($rows) { return array_map(function ($r) { return $r['name']; }, $rows); };
+			// Romanian: Apple pie (no Romanian), Ciorbă, Pâine
+			same(array($soup['id']), array_map(function ($r) { return $r['id']; }, i18n::with('ro', function () { return cms_records::find('zzp3adish', array('name' => 'Ciorbă')); })), 'a filter matches Romanian text');
+			same(array(), i18n::with('ro', function () { return cms_records::find('zzp3adish', 'name=Soup'); }), 'not its English');
+			same(array('Apple pie'), $names(i18n::with('ro', function () { return cms_records::find('zzp3adish', 'name=Apple pie'); })), 'an untranslated one by its English');
+			same(array('Apple pie', 'Soup', 'Bread'), $names(i18n::with('ro', function () { return cms_records::find('zzp3adish', array(), 'name'); })), 'sorted by the Romanian (rows as stored)');
+			same(array('Apple pie', 'Bread', 'Soup'), $names(cms_records::find('zzp3adish', array(), 'name')), 'and by the English');
+		});
+	});
+});
+
+test('P3.A: on /ro/ a list sorts by the Romanian name, a filter matches Romanian text, an untranslated item shows English; the editor saves Romanian', function () {
+	$type = 'zzp3amenudata';
+	try {
+		p2b_site(function ($dir) use ($type) {
+			$view = "$dir/application/views/default/zzp3amenu.html";
+			file_put_contents($view, '<!doctype html><html><head><title>Menu</title></head><body><ul>'
+				."<!-- render.cms.zzp3a_menu('name=?name&order=name') --><li><b><!-- print.name -->Zz seed<!-- /print.name --></b>"
+				.'<!-- print.@src.photo --><img src="seed.jpg" alt=""><!-- /print.@src.photo --></li>'
+				."<!-- /render.cms.zzp3a_menu('name=?name&order=name') --></ul></body></html>");
+			$feed = "$dir/application/views/default/zzp3afeed.html";
+			file_put_contents($feed, "<!doctype html><html><head><title>F</title></head><body><!-- render.feed.items('zzp3a_menu') --><i><!-- print.name -->x<!-- /print.name --></i><!-- /render.feed.items('zzp3a_menu') --></body></html>");
+			p2b_server($dir, function ($base) use ($type) {
+				$names = function ($path) use ($base) {
+					list($status, $body) = http('GET', $base.$path);
+					same(200, $status, $path);
+					preg_match_all('#<b>(.*?)</b>#', (string)$body, $m);
+					return $m[1];
+				};
+				// the first request makes the table, and, multilingual, the
+				// name's Romanian column; the photo is shared
+				same(array('Zz seed'), $names('/zzp3amenu'));
+				cms_store::forget();
+				$columns = cms_store::columns($type);
+				check(isset($columns['name__ro']) && !isset($columns['photo__ro']), implode(', ', array_keys($columns)));
+				R::exec("DELETE FROM $type");
+				$ids = with_settings(p2a_on(), function () use ($type) {
+					$ids = array();
+					foreach (array('Apple' => 'Măr', 'Banana' => 'Banană', 'Cherry' => null) as $en => $ro) {
+						$item = cms_store::save_item($type, 0, array('name' => $en, 'photo' => strtolower($en).'.jpg'), array('name', 'photo'));
+						if ($ro !== null) cms_store::save_item($type, $item['id'], array('name' => $ro), array('name', 'photo'), 'editor', null, 'ro');
+						$ids[$en] = $item['id'];
+					}
+					return $ids;
+				});
+				same(array('Apple', 'Banana', 'Cherry'), $names('/zzp3amenu'), 'English, by the English name');
+				same(array('Banană', 'Cherry', 'Măr'), $names('/ro/zzp3amenu'), 'Romanian, by the Romanian name; Cherry in English');
+				same(array('Măr'), $names('/ro/zzp3amenu?name='.rawurlencode('Măr')), 'a filter matches Romanian text');
+				same(array(), $names('/ro/zzp3amenu?name=Apple'), 'and not the English of a translated item');
+				same(array('Cherry'), $names('/ro/zzp3amenu?name=Cherry'), 'an untranslated item by its English');
+				same(array('Apple'), $names('/zzp3amenu?name=Apple'), 'English as always');
+				// feeds in the page's language too
+				$feed = http('GET', "$base/ro/zzp3afeed")[1];
+				check(strpos($feed, '<i>Măr</i>') !== false && strpos($feed, '<i>Cherry</i>') !== false, $feed);
+				// the editor on /ro/ writes the Romanian name, and the photo for every language
+				$editor = p2b_login($base);
+				list($config) = p2b_config("$base/ro/zzp3amenu", $editor);
+				$post = function ($fields, $lang = 'ro') use ($base, $editor, $config) {
+					list($status, $body) = form_post("$base/ro/api/cms/editor_save_item", $fields + array('csrf' => $config['csrf']), array("Cookie: $editor"));
+					return array($status, json_decode($body, true), $body);
+				};
+				$cherry = array('collection' => 'zzp3a_menu', 'id' => $ids['Cherry']);
+				list($status, $json, $body) = $post($cherry + array('fields' => array('name' => 'Cireșe', 'photo' => 'cirese.jpg'), 'lang' => 'ro'));
+				same(200, $status, $body);
+				same(array('Cireșe', 'cirese.jpg'), array($json['name'], $json['photo']), 'the item as /ro/ shows it');
+				same(array('Banană', 'Cireșe', 'Măr'), $names('/ro/zzp3amenu'));
+				same(array('Apple', 'Banana', 'Cherry'), $names('/zzp3amenu'), 'the English stays');
+				check(strpos(http('GET', "$base/zzp3amenu")[1], 'cirese.jpg') !== false, 'the photo is everyone\'s');
+				list($status) = $post($cherry + array('fields' => array('name' => 'Wrong'), 'lang' => 'en'));
+				same(400, $status, 'a page open in another language');
+				list($status) = $post($cherry + array('fields' => array('name' => 'Wrong')));
+				same(400, $status, 'no lang');
+				list($status) = $post($cherry + array('fields' => array('name__ro' => 'Wrong'), 'lang' => 'ro'));
+				same(400, $status, 'a language\'s column is no field');
+				check(strpos(http('GET', "$base/ro/zzp3amenu")[1], 'Wrong') === false, 'nothing refused was stored');
+			});
+		});
+	} finally {
+		cms_store::connect();
+		R::getDatabaseAdapter()->exec("DROP TABLE IF EXISTS $type");
+		cms_store::forget();
+	}
+});
+
+test('P3.A: schema knows item and record translations: missing ones are drift, --apply adds them', function () use ($root) {
+	$view = "$root/application/views/default/zzp3aschema.html";
+	test_fixture($view);
+	file_put_contents($view, '<html><head><title>S</title></head><body><!-- render.cms.zzp3a_list --><p><!-- print.title -->Hello<!-- /print.title --><!-- print.@href.link --><a href="/x">x</a><!-- /print.@href.link --></p><!-- /render.cms.zzp3a_list --></body></html>');
+	$changes = array();
+	try {
+		p3a_model(function () use (&$changes) {
+			$schema = new raster_schema();
+			$table = function ($status, $name) {
+				foreach ($status['tables'] as $t) if ($t['table'] === $name) return $t;
+				return null;
+			};
+			$changes = $schema->apply();
+			$off = $table($schema->status(), 'zzp3alistdata');
+			check(!array_key_exists('missing_translations', $off) && !array_key_exists('translated', $off), 'off: as 2.2.45');
+			with_settings(p2a_on(), function () use ($schema, $table, &$changes) {
+				$status = $schema->status();
+				$list = $table($status, 'zzp3alistdata');
+				same(array('title'), $list['translated']);
+				same(array('title__ro', 'saved_lang', 'slug__ro'), $list['missing_translations'], 'slug__ro is P3.B\'s');
+				$dish = $table($status, 'zzp3adishdata');
+				same(array('name', 'description'), $dish['translated']);
+				same(array('name__ro', 'description__ro', 'saved_lang', 'slug__ro'), $dish['missing_translations']);
+				same(true, $status['drift']);
+				$applied = $schema->apply();
+				$changes = array_merge($changes, $applied);
+				foreach (array('zzp3alistdata.title__ro', 'zzp3alistdata.saved_lang', 'zzp3adishdata.name__ro', 'zzp3adishdata.description__ro', 'zzp3adishdata.saved_lang', 'zzp3adishdata.slug__ro', 'zzp3alistdata.slug__ro') as $column) check(in_array("added $column", $applied, true), "$column: ".json_encode($applied));
+				$status = $schema->status();
+				same(array(), $table($status, 'zzp3alistdata')['missing_translations']);
+				same(array(), $table($status, 'zzp3adishdata')['missing_translations']);
+				same(array(), $table($status, 'zzp3adishdata')['orphans']);
+			});
+		});
+	} finally {
+		@unlink($view);
+		p2a_undo($changes, array('zzp3alistdata'));
+	}
+});
+
+// ## P3.B: translated slugs and their redirects (#138)
+
+// a menu table for the P3.B tests, multilingual (en, ro): name and its
+// Romanian, slug and slug__ro; dropped again, with slughistory, by p3b_drop
+function p3b_table($table = 'zzp3bmenudata') {
+	cms_store::connect();
+	p3b_drop($table);
+	with_settings(p2a_on(), function () use ($table) {
+		cms_types::ensure($table, array('name' => 'text', 'slug' => 'text', 'enabled' => 'bool', 'published_at' => 'datetime', 'updated_at' => 'datetime'), array('name', 'slug'));
+	});
+}
+function p3b_drop($table = 'zzp3bmenudata') {
+	cms_store::connect();
+	R::getDatabaseAdapter()->exec("DROP TABLE IF EXISTS `$table`");
+	R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS slughistory');
+	cms_store::forget();
+}
+// does $table have an index named $name?
+function p3b_indexed($table, $name) {
+	$adapter = R::getDatabaseAdapter();
+	if ($adapter->getDatabase()->getDatabaseType() !== 'mysql') return (bool)$adapter->getCell("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?", array($name));
+	return (bool)$adapter->getCell('SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?', array($table, $name));
+}
+function p3b_save($id, $values, $table = 'zzp3bmenudata') {
+	return with_settings(p2a_on(), function () use ($id, $values, $table) {
+		return cms_store::save_item($table, $id, $values, array_keys($values));
+	});
+}
+
+test('P3.B: off, and in the default language, slugs send the SQL they always did and keep no history', function () {
+	p3b_drop();
+	cms_types::ensure('zzp3bmenudata', array('name' => 'text', 'slug' => 'text', 'enabled' => 'bool', 'published_at' => 'datetime', 'updated_at' => 'datetime'));
+	try {
+		$settings = array(
+			'off' => array('multilingual' => false, 'languages' => array()),
+			'languages, switch off' => array('multilingual' => false, 'languages' => array('en', 'ro')),
+			'one language' => array('multilingual' => true, 'languages' => array('en')),
+		);
+		$item = null;
+		foreach ($settings as $what => $setting) {
+			with_settings($setting, function () use ($what, &$item) {
+				cms_store::forget();
+				$plain = p2a_sql(function () { same('flat-white', cms_store::unique_slug('zzp3bmenudata', 'Flat white', 0)); });
+				foreach (array('en', 'ro') as $lang) {
+					same($plain, p2a_sql(function () use ($lang) { same('flat-white', cms_store::unique_slug('zzp3bmenudata', 'Flat white', 0, $lang)); }), "$what, unique_slug in $lang");
+					same('Flat white', cms_store::slug_source(array('name' => 'Flat white', 'name__ro' => 'Cafea cu lapte'), array(), $lang), "$what, slug_source in $lang");
+				}
+				same(array(), p2a_sql(function () {
+					same(false, cms_store::record_slug('zzp3bmenudata', 1, 'flat-white', 'ro'));
+					same(null, cms_store::resolve_slug('zzp3bmenudata', 'flat-white', 'ro'));
+					same(null, cms_store::slug_item('zzp3bmenudata', 'flat-white', 'ro'));
+					same('zzp3bmenu/zzp3bmenu_item/flat-white', cms::path_in('zzp3bmenu/zzp3bmenu_item/flat-white', 'ro'));
+				}), "$what: no query");
+				// a save and a rename: no slug__ro written, no slughistory, no query naming either
+				$log = p2a_sql(function () use (&$item) {
+					$item = cms_store::save_item('zzp3bmenudata', 0, array('name' => 'Flat white'), array('name'));
+					$item = cms_store::save_item('zzp3bmenudata', $item['id'], array('slug' => 'flat-white-coffee'), array());
+				});
+				same('flat-white-coffee', $item['slug'], $what);
+				check(!preg_grep('/slughistory|slug__|name__/', $log), "$what: ".implode(' | ', preg_grep('/slughistory|slug__|name__/', $log)));
+				same(array('id', 'name', 'slug', 'enabled', 'published_at', 'updated_at'), p2a_columns('zzp3bmenudata'), "$what: no column added");
+				same(false, cms_store::table_exists('slughistory'), "$what: no slughistory");
+				$schema = new raster_schema();
+				check(!isset($schema->system_tables()['slughistory']), "$what: schema lists no slughistory");
+				R::exec('DELETE FROM zzp3bmenudata');
+			});
+		}
+		// on, the default language is today's SQL too
+		with_settings(p2a_on(), function () {
+			cms_store::forget();
+			$plain = p2a_sql(function () { cms_store::unique_slug('zzp3bmenudata', 'Flat white', 0); });
+			same($plain, p2a_sql(function () { cms_store::unique_slug('zzp3bmenudata', 'Flat white', 0, 'en'); }), 'on, unique_slug in en');
+			same('Flat white', cms_store::slug_source(array('name' => 'Flat white', 'name__ro' => 'Cafea cu lapte'), array(), 'en'));
+			same('Cafea cu lapte', cms_store::slug_source(array('name' => 'Flat white', 'name__ro' => 'Cafea cu lapte'), array(), 'ro'));
+			// a hidden field is never a slug, in any language
+			same('Latte', cms_store::slug_source(array('name' => 'Flat white', 'name__ro' => 'Cafea cu lapte', 'dish' => 'Latte'), array('name'), 'ro'));
+		});
+	} finally {
+		p3b_drop();
+	}
+});
+
+test('P3.B: slug__ro is made from the translated title, indexed, and unique within its language', function () {
+	p3b_table();
+	try {
+		check(array_key_exists('slug__ro', cms_store::columns('zzp3bmenudata')), 'slug__ro made by ensure');
+		check(p3b_indexed('zzp3bmenudata', 'zzp3bmenudata_slug__ro'), 'slug__ro has its own index');
+		check(p3b_indexed('zzp3bmenudata', 'zzp3bmenudata_slug'), 'slug keeps its own');
+		$flat = p3b_save(0, array('name' => 'Flat white', 'name__ro' => 'Cafea cu lapte'));
+		same(array('flat-white', 'cafea-cu-lapte'), array($flat['slug'], $flat['slug__ro']));
+		// no Romanian title: no Romanian slug, the default one is its /ro/ address
+		$espresso = p3b_save(0, array('name' => 'Espresso'));
+		same(array('espresso', ''), array($espresso['slug'], isset($espresso['slug__ro']) ? $espresso['slug__ro'] : ''));
+		// the same words in both: nothing to make
+		$latte = p3b_save(0, array('name' => 'Latte', 'name__ro' => 'Latte'));
+		same(array('latte', ''), array($latte['slug'], isset($latte['slug__ro']) ? $latte['slug__ro'] : ''));
+		with_settings(p2a_on(), function () use ($espresso) {
+			// taken in Romanian: cafea-cu-lapte by flat white's own, espresso
+			// by the item that is at its default slug in Romanian
+			same('cafea-cu-lapte-2', cms_store::unique_slug('zzp3bmenudata', 'Cafea cu lapte', 0, 'ro'));
+			same('espresso-2', cms_store::unique_slug('zzp3bmenudata', 'Espresso', 0, 'ro'));
+			same('espresso', cms_store::unique_slug('zzp3bmenudata', 'Espresso', $espresso['id'], 'ro'), 'its own is free to it');
+			// the default language looks at slug alone, as it always did
+			same('cafea-cu-lapte', cms_store::unique_slug('zzp3bmenudata', 'Cafea cu lapte', 0));
+			same('flat-white-2', cms_store::unique_slug('zzp3bmenudata', 'Flat white', 0));
+			same('flat-white', cms_store::unique_slug('zzp3bmenudata', 'Flat white', 0, 'ro'), "free in Romanian: flat white's is cafea-cu-lapte there");
+		});
+		// a second Cafea cu lapte gets its own Romanian slug
+		$second = p3b_save(0, array('name' => 'White coffee', 'name__ro' => 'Cafea cu lapte'));
+		same('cafea-cu-lapte-2', $second['slug__ro']);
+		// a slug once made stays when the title changes
+		$flat = p3b_save($flat['id'], array('name__ro' => 'Cafea cu lapte mare'));
+		same('cafea-cu-lapte', $flat['slug__ro']);
+	} finally {
+		p3b_drop();
+	}
+});
+
+test('P3.B: slughistory keeps every slug an item had, per language; resolve_slug says where it is now', function () {
+	p3b_table();
+	try {
+		$flat = p3b_save(0, array('name' => 'Flat white', 'name__ro' => 'Cafea cu lapte'));
+		$espresso = p3b_save(0, array('name' => 'Espresso'));
+		with_settings(p2a_on(), function () use ($flat, $espresso) {
+			same(array(array('lang' => 'en', 'slug' => 'flat-white'), array('lang' => 'ro', 'slug' => 'cafea-cu-lapte')),
+				R::getAll("SELECT lang, slug FROM slughistory WHERE `type` = 'zzp3bmenudata' AND item = ? ORDER BY id", array($flat['id'])));
+			same(false, cms_store::record_slug('zzp3bmenudata', $flat['id'], 'flat-white', 'en'), 'once');
+			same(false, cms_store::record_slug('zzp3bmenudata', $flat['id'], 'flat-white'), 'null is the default language');
+			// its slug in the URL's language: shown as it is
+			same(null, cms_store::resolve_slug('zzp3bmenudata', 'cafea-cu-lapte', 'ro'));
+			same(null, cms_store::resolve_slug('zzp3bmenudata', 'flat-white', 'en'));
+			same(null, cms_store::resolve_slug('zzp3bmenudata', 'espresso', 'ro'), 'no Romanian slug: the default is its Romanian one');
+			same(null, cms_store::resolve_slug('zzp3bmenudata', 'nothing', 'ro'), 'no item: the list 404s');
+			same(null, cms_store::resolve_slug('zzp3bmenudata', (string)$espresso['id'], 'ro'), 'an id is an id (#90)');
+			// another language's
+			same(array('id' => $flat['id'], 'slug' => 'cafea-cu-lapte'), cms_store::resolve_slug('zzp3bmenudata', 'flat-white', 'ro'));
+			same(array('id' => $flat['id'], 'slug' => 'flat-white'), cms_store::resolve_slug('zzp3bmenudata', 'cafea-cu-lapte', 'en'));
+		});
+		// renamed in English: the old slug is history
+		p3b_save($flat['id'], array('slug' => 'flat-white-coffee'));
+		// and in Romanian: slug, with lang (P3.A's mapping writes slug__ro)
+		$ro = with_settings(p2a_on(), function () use ($flat) { return cms_store::save_item('zzp3bmenudata', $flat['id'], array('slug' => 'cafea-cu-lapte-mare'), array(), 'editor', null, 'ro'); });
+		same(array('flat-white-coffee', 'cafea-cu-lapte-mare'), array($ro['slug'], $ro['slug__ro']));
+		with_settings(p2a_on(), function () use ($flat) {
+			same(array('id' => $flat['id'], 'slug' => 'flat-white-coffee'), cms_store::resolve_slug('zzp3bmenudata', 'flat-white', 'en'));
+			same(array('id' => $flat['id'], 'slug' => 'cafea-cu-lapte-mare'), cms_store::resolve_slug('zzp3bmenudata', 'flat-white', 'ro'));
+			same(array('id' => $flat['id'], 'slug' => 'cafea-cu-lapte-mare'), cms_store::resolve_slug('zzp3bmenudata', 'cafea-cu-lapte', 'ro'));
+			same(array('id' => $flat['id'], 'slug' => 'flat-white-coffee'), cms_store::resolve_slug('zzp3bmenudata', 'cafea-cu-lapte', 'en'));
+			same(4, (int)R::getCell("SELECT COUNT(*) FROM slughistory WHERE item = ?", array($flat['id'])));
+		});
+		// a slug an item has now wins over one another item had
+		$new = p3b_save(0, array('name' => 'Flat white'));
+		same('flat-white', $new['slug']);
+		with_settings(p2a_on(), function () use ($new) {
+			same(null, cms_store::resolve_slug('zzp3bmenudata', 'flat-white', 'en'));
+			same(null, cms_store::resolve_slug('zzp3bmenudata', 'flat-white', 'ro'), 'the new item is at it in Romanian too');
+		});
+		// a slug from before multilingual was on is history once it changes
+		with_settings(array('multilingual' => false, 'languages' => array('en', 'ro')), function () use (&$old) {
+			$old = cms_store::save_item('zzp3bmenudata', 0, array('name' => 'Mocha'), array('name'));
+		});
+		same(0, (int)R::getCell("SELECT COUNT(*) FROM slughistory WHERE item = ?", array($old['id'])), 'off: nothing kept');
+		p3b_save($old['id'], array('slug' => 'mocha-cup'));
+		with_settings(p2a_on(), function () use ($old) {
+			same(array('id' => $old['id'], 'slug' => 'mocha-cup'), cms_store::resolve_slug('zzp3bmenudata', 'mocha', 'en'));
+		});
+	} finally {
+		p3b_drop();
+	}
+});
+
+test('P3.B: path_in and item_alternates spell an item URL with each language\'s slug', function () {
+	p3b_table();
+	try {
+		$flat = p3b_save(0, array('name' => 'Flat white', 'name__ro' => 'Cafea cu lapte'));
+		$espresso = p3b_save(0, array('name' => 'Espresso'));
+		with_settings(p1c_on(array('uri_string' => '/zzp3bmenu/zzp3bmenu_item/cafea-cu-lapte')), function () use ($flat, $espresso) {
+			same('zzp3bmenu/zzp3bmenu_item/flat-white', cms::path_in('zzp3bmenu/zzp3bmenu_item/cafea-cu-lapte', 'en'));
+			same('zzp3bmenu/zzp3bmenu_item/cafea-cu-lapte', cms::path_in('zzp3bmenu/zzp3bmenu_item/cafea-cu-lapte', 'ro'));
+			same('/zzp3bmenu/zzp3bmenu_item/cafea-cu-lapte', cms::path_in('/zzp3bmenu/zzp3bmenu_item/flat-white', 'ro', 'en'));
+			same('zzp3bmenu/zzp3bmenu_item/espresso', cms::path_in('zzp3bmenu/zzp3bmenu_item/espresso', 'en'), 'no Romanian slug: the default');
+			same('zzp3bmenu/zzp3bmenu_item/nothing', cms::path_in('zzp3bmenu/zzp3bmenu_item/nothing', 'en'), 'no item: as it is');
+			// any other path costs no query
+			same(array(), p2a_sql(function () {
+				same('about', cms::path_in('about', 'en'));
+				same('zzp3bmenu/zzp3bmenu_page/2', cms::path_in('zzp3bmenu/zzp3bmenu_page/2', 'en'));
+				same('zzp3bmenu/zzp3bmenu_items/name/x', cms::path_in('zzp3bmenu/zzp3bmenu_items/name/x', 'en'));
+			}));
+			// the page's alternates follow
+			same(array(array('lang' => 'en', 'url' => 'http://cafe.test/zzp3bmenu/zzp3bmenu_item/flat-white'), array('lang' => 'ro', 'url' => 'http://cafe.test/ro/zzp3bmenu/zzp3bmenu_item/cafea-cu-lapte')), i18n::alternates());
+			// an item's own, from its row, with no query
+			$rows = R::getAll('SELECT * FROM zzp3bmenudata ORDER BY id');
+			same(array(), p2a_sql(function () use ($rows, &$alternates) {
+				foreach ($rows as $row) $alternates[] = cms::item_alternates('zzp3bmenu', $row);
+			}));
+			same(array(array('lang' => 'en', 'url' => 'http://cafe.test/zzp3bmenu/zzp3bmenu_item/flat-white'), array('lang' => 'ro', 'url' => 'http://cafe.test/ro/zzp3bmenu/zzp3bmenu_item/cafea-cu-lapte')), $alternates[0]);
+			same(array(array('lang' => 'en', 'url' => 'http://cafe.test/zzp3bmenu/zzp3bmenu_item/espresso'), array('lang' => 'ro', 'url' => 'http://cafe.test/ro/zzp3bmenu/zzp3bmenu_item/espresso')), $alternates[1]);
+			same('http://cafe.test/ro/zzp3bmenu/zzp3bmenu_item/7', cms::item_alternates('zzp3bmenu', array('id' => 7, 'slug' => ''))[1]['url'], 'no slug: the id');
+		});
+		// off: the stub's answer, the item's own slug in every language
+		with_settings(array('multilingual' => false, 'languages' => array('en', 'ro')), function () use ($flat) {
+			same(i18n::alternates('zzp3bmenu/zzp3bmenu_item/flat-white'), cms::item_alternates('zzp3bmenu', $flat));
+		});
+	} finally {
+		p3b_drop();
+	}
+});
+
+test('P3.B: /ro/ item URLs: its Romanian slug renders, another language\'s or an old one answers 301, off an old slug is a 404', function () {
+	global $root;
+	$view = "$root/application/views/default/zzp3bmenu.html";
+	test_fixture($view);
+	file_put_contents($view, '<!doctype html><html><head><title>Menu</title></head><body>'
+		.'<!-- render.cms.zzp3bmenu --><article><!-- print.@href.raster_detail_link --><a href="#"><!-- print.name -->Flat white<!-- /print.name --></a><!-- /print.@href.raster_detail_link --></article><!-- /render.cms.zzp3bmenu -->'
+		.'</body></html>');
+	p3b_table();
+	try {
+		$flat = p3b_save(0, array('name' => 'Flat white', 'name__ro' => 'Cafea cu lapte'));
+		p3b_save(0, array('name' => 'Espresso'));
+		$draft = p3b_save(0, array('name' => 'Cortado'));
+		p3b_save($draft['id'], array('slug' => 'cortado-mic', 'enabled' => 0));
+		// renamed: the old slug redirects
+		p3b_save($flat['id'], array('slug' => 'flat-white-coffee'));
+		$on = "config::set('languages')->to(array('en', 'ro'));\nconfig::set('multilingual')->to(true);";
+		p1b_site($on, function () {
+			p1b_server(array(), function ($port) {
+				$base = "http://127.0.0.1:$port";
+				$item = "$base/ro/zzp3bmenu/zzp3bmenu_item";
+				list($status, $body) = http('GET', "$item/cafea-cu-lapte");
+				same(200, $status, 'its Romanian slug');
+				check(strpos($body, 'Cafea cu lapte') !== false && strpos($body, 'Espresso') === false, 'the one item, in Romanian');
+				check(strpos($body, '<link rel="alternate" hreflang="en" href="'.$base.'/zzp3bmenu/zzp3bmenu_item/flat-white-coffee">') !== false, 'hreflang follows the slug: '.$body);
+				check(strpos($body, '<link rel="canonical" href="'.$item.'/cafea-cu-lapte">') !== false, 'canonical');
+				foreach (array(
+					"$item/flat-white-coffee" => "$item/cafea-cu-lapte",
+					"$item/flat-white" => "$item/cafea-cu-lapte",
+					"$base/zzp3bmenu/zzp3bmenu_item/cafea-cu-lapte" => "$base/zzp3bmenu/zzp3bmenu_item/flat-white-coffee",
+					"$base/zzp3bmenu/zzp3bmenu_item/flat-white" => "$base/zzp3bmenu/zzp3bmenu_item/flat-white-coffee",
+					"$base/zzp3bmenu/zzp3bmenu_item/flat-white?x=1" => "$base/zzp3bmenu/zzp3bmenu_item/flat-white-coffee?x=1",
+				) as $url => $to) {
+					list($status, $body, $headers) = http('GET', $url);
+					same(301, $status, $url);
+					same($to, p1b_header($headers, 'Location'), $url);
+					same('', (string)$body, "$url has no body");
+					same(null, p1b_header($headers, 'X-Raster-Cache'), "$url is not cached");
+				}
+				same(200, http('GET', "$base/zzp3bmenu/zzp3bmenu_item/flat-white-coffee")[0]);
+				same(200, http('GET', "$item/espresso")[0], 'no Romanian slug: at the default one');
+				same(404, http('GET', "$item/nothing")[0]);
+				// a draft's old slug says nothing to visitors
+				same(404, http('GET', "$item/cortado")[0], 'draft');
+				// a post is never redirected
+				check(http('POST', "$base/zzp3bmenu/zzp3bmenu_item/flat-white", 'x=1')[0] !== 301, 'a post is not redirected');
+			});
+		});
+		// off: an old slug is a 404, as it always was
+		p1b_site("config::set('languages')->to(array('en', 'ro'));", function () {
+			p1b_server(array(), function ($port) {
+				$base = "http://127.0.0.1:$port";
+				list($status, , $headers) = http('GET', "$base/zzp3bmenu/zzp3bmenu_item/flat-white");
+				same(404, $status, 'off: the old slug');
+				same(null, p1b_header($headers, 'Location'));
+				same(200, http('GET', "$base/zzp3bmenu/zzp3bmenu_item/flat-white-coffee")[0]);
+				same(404, http('GET', "$base/ro/zzp3bmenu/zzp3bmenu_item/cafea-cu-lapte")[0], 'off: no /ro/');
+			});
+		});
+	} finally {
+		@unlink($view);
+		p3b_drop();
+	}
+});
+
+test('P3.B: schema lists slug__ro and slughistory only when on, and --apply makes and indexes them', function () {
+	global $root;
+	$view = "$root/application/views/default/zzp3bschema.html";
+	test_fixture($view);
+	file_put_contents($view, '<!doctype html><html><head><title>S</title></head><body><!-- render.cms.zzp3bschema --><p><!-- print.name -->Tea<!-- /print.name --></p><!-- /render.cms.zzp3bschema --></body></html>');
+	cms_store::connect();
+	p3b_drop('zzp3bschemadata');
+	cms_types::ensure('zzp3bschemadata', array('name' => 'text', 'slug' => 'text', 'enabled' => 'bool', 'published_at' => 'datetime', 'updated_at' => 'datetime'));
+	$changes = array();
+	try {
+		$find = function ($status) {
+			foreach ($status['tables'] as $table) if ($table['table'] === 'zzp3bschemadata') return $table;
+			return null;
+		};
+		$off = (new raster_schema())->status();
+		check(!array_key_exists('missing_translations', $find($off)), 'off: nothing missing');
+		check(!in_array('slughistory', array_column($off['system_tables'], 'table'), true), 'off: no slughistory');
+		with_settings(p2a_on(), function () use ($find, &$changes) {
+			$schema = new raster_schema();
+			$status = $schema->status();
+			// the name's Romanian and saved_lang are P3.A's, slug__ro P3.B's
+			same(array('name__ro', 'saved_lang', 'slug__ro'), $find($status)['missing_translations']);
+			check($status['drift'], 'drift');
+			$history = current(array_filter($status['system_tables'], function ($t) { return $t['table'] === 'slughistory'; }));
+			same(false, $history['exists']);
+			$changes = $schema->apply();
+			check(in_array('added zzp3bschemadata.slug__ro', $changes, true), implode(' | ', $changes));
+			check(in_array('created table slughistory', $changes, true), implode(' | ', $changes));
+			check(p3b_indexed('zzp3bschemadata', 'zzp3bschemadata_slug__ro'), 'indexed');
+			check(p3b_indexed('slughistory', 'slughistory_slug'), 'slughistory indexed by slug');
+			cms_store::forget();
+			same(array(), $find($schema->status())['missing_translations']);
+		});
+		// off again: slug__ro is a kept translation, never an orphan
+		cms_store::forget();
+		$off = (new raster_schema())->status();
+		same(array(), $find($off)['orphans']);
+		$kept = $off['translations']['zzp3bschemadata'];
+		sort($kept);
+		same(array('name__ro', 'slug__ro'), $kept);
+	} finally {
+		@unlink($view);
+		p2a_undo($changes, array('zzp3bschemadata', 'slughistory'));
+	}
+});
+
+// ## P3.D: the coding MCP translates items
+
+// The starter with a fixture collection (render.cms.zzp3d: a name and a
+// description, translated, and a price, shared), its own database and
+// the_app.php as it was, put back afterwards. /zzp3d/zzp3d_item/<slug> is
+// an item's page, rendered by the same view.
+function p3d_site($fn) {
+	global $root;
+	$view = "$root/application/views/default/zzp3d.html";
+	test_fixture($view);
+	file_put_contents($view, '<!doctype html><!-- print.@lang.i18n.language --><html lang="en"><!-- /print.@lang.i18n.language --><head><title>Dishes</title></head><body>'
+		."\n<!-- render.cms.zzp3d --><article><h2><!-- print.name -->Flat white<!-- /print.name --></h2>"
+		.'<p class="d"><!-- print.description -->Milk and espresso<!-- /print.description --></p><p class="price"><!-- print.price -->14<!-- /print.price --></p></article><!-- /render.cms.zzp3d -->'
+		."\n</body></html>");
+	$config = APPBASE.'config/the_app.php';
+	$kept = file_get_contents($config);
+	$db = sys_get_temp_dir().'/raster-p3d-'.getmypid().'.sqlite';
+	try {
+		return $fn($db);
+	} finally {
+		file_put_contents($config, $kept);
+		@unlink($view);
+		array_map('unlink', glob("$db*") ?: array());
+	}
+}
+// writes columns of an item straight into the fixture's database, as a
+// translation saved some other way would
+function p3d_write($db, $table, $id, $values) {
+	$pdo = new PDO('sqlite:'.$db);
+	foreach ($values as $column => $value) {
+		$statement = $pdo->prepare("UPDATE `$table` SET `$column` = ? WHERE id = ?");
+		$statement->execute(array($value, $id));
+	}
+}
+function p3d_columns($db, $table) {
+	$pdo = new PDO('sqlite:'.$db);
+	return $pdo->query("PRAGMA table_info($table)")->fetchAll(PDO::FETCH_COLUMN, 1);
+}
+// the rows translation_status lists of one kind
+function p3d_status($mcp, $kind) {
+	$status = $mcp->call('translation_status', array('lang' => 'ro'));
+	return array_values(array_filter($status['missing'], function ($row) use ($kind) { return $row['kind'] === $kind; }));
+}
+
+test('P3.D: off, the item tools answer as before and make no translation column', function () {
+	p3d_site(function ($db) {
+		p2c_session(array('RASTER_DB' => $db), function ($mcp) use ($db) {
+			$made = $mcp->call('create_item', array('collection' => 'zzp3d', 'fields' => array('name' => 'Flat white', 'price' => 14)));
+			check(!isset($made['error']), json_encode($made));
+			$id = $made['id'];
+			$listed = $mcp->call('list_items', array('collection' => 'zzp3d'));
+			same(array('collection', 'fields', 'total', 'items'), array_keys($listed));
+			same('Flat white', $listed['items'][0]['name']);
+			$item = $mcp->call('get_item', array('collection' => 'zzp3d', 'id' => $id));
+			same(array('Flat white', 14, 'flat-white'), array($item['name'], $item['price'], $item['slug']));
+			same('Cortado', $mcp->call('update_item', array('collection' => 'zzp3d', 'id' => $id, 'fields' => array('name' => 'Cortado')))['name']);
+			foreach (array('list_items' => array(), 'get_item' => array('id' => $id), 'create_item' => array('fields' => array('name' => 'x')), 'update_item' => array('id' => $id, 'fields' => array('name' => 'x'))) as $tool => $arguments) {
+				$refused = $mcp->call($tool, array('collection' => 'zzp3d', 'lang' => 'ro') + $arguments);
+				check(isset($refused['error']) && strpos($refused['error'], 'one language') !== false, "$tool: ".json_encode($refused));
+			}
+			check(isset($mcp->call('update_item', array('collection' => 'zzp3d', 'id' => $id, 'fields' => array('name__ro' => 'x')))['error']), 'a translation column is never a field');
+			same('Cortado', $mcp->call('get_item', array('collection' => 'zzp3d', 'id' => $id))['name'], 'nothing written by a refusal');
+		});
+		check(!preg_grep('/__/', p3d_columns($db, 'zzp3ddata')), json_encode(p3d_columns($db, 'zzp3ddata')));
+	});
+});
+
+test('P3.D: without lang, or with the default one, list_items and get_item send the SQL they always did', function () {
+	p3d_site(function ($db) {
+		cms_store::connect();
+		try {
+			cms_types::ensure('zzp3ddata', array('slug' => 'text', 'name' => 'text', 'description' => 'text', 'price' => 'int', 'enabled' => 'bool', 'published_at' => 'datetime', 'updated_at' => 'datetime'));
+			$item = cms_store::save_item('zzp3ddata', 0, array('name' => 'Flat white', 'price' => 14), array('name', 'description', 'price'));
+			$settings = array(
+				'off' => array('multilingual' => false, 'languages' => array()),
+				'languages, switch off' => array('multilingual' => false, 'languages' => array('en', 'ro')),
+				'on' => array('multilingual' => true, 'languages' => array('en', 'ro')),
+			);
+			foreach ($settings as $what => $setting) {
+				with_settings($setting, function () use ($what, $item) {
+					$mcp = new mcp();
+					foreach (array('list_items' => array(), 'get_item' => array('id' => $item['id'])) as $tool => $arguments) {
+						$arguments += array('collection' => 'zzp3d');
+						$plain = $default = null;
+						$sql = p2a_sql(function () use ($mcp, $tool, $arguments, &$plain) { $plain = $mcp->call_tool($tool, $arguments); });
+						check(empty($plain['isError']), "$what, $tool: ".json_encode($plain));
+						if ($what === 'off') continue;
+						same($sql, p2a_sql(function () use ($mcp, $tool, $arguments, &$default) { $default = $mcp->call_tool($tool, $arguments + array('lang' => 'en')); }), "$what, $tool: the SQL");
+						same($plain['content'], $default['content'], "$what, $tool: the answer");
+					}
+				});
+			}
+		} finally {
+			R::getDatabaseAdapter()->exec('DROP TABLE IF EXISTS zzp3ddata');
+			cms_store::forget();
+		}
+	});
+});
+
+test('P3.D: translation_status lists items, done once their column holds a translation', function () {
+	p3d_site(function ($db) {
+		p2c_session(array('RASTER_DB' => $db), function ($mcp) use ($db) {
+			$flat = $mcp->call('create_item', array('collection' => 'zzp3d', 'fields' => array('name' => 'Flat white', 'description' => 'Milk and espresso', 'price' => 14)));
+			$mcp->call('set_languages', array('languages' => array('en', 'ro')));
+			$tea = $mcp->call('create_item', array('collection' => 'zzp3d', 'fields' => array('name' => 'Tea', 'price' => 9)));
+			// set_languages made the first item's columns, create_item the second's
+			$columns = p3d_columns($db, 'zzp3ddata');
+			foreach (array('name__ro', 'description__ro', 'slug__ro') as $column) check(in_array($column, $columns, true), "$column: ".json_encode($columns));
+			check(!in_array('price__ro', $columns, true), 'a price is shared');
+			$rows = p3d_status($mcp, 'item');
+			same(array(
+				array('kind' => 'item', 'where' => "zzp3d/{$flat['id']}", 'field' => 'name', 'default_value' => 'Flat white', 'length' => 10, 'shared' => false),
+				array('kind' => 'item', 'where' => "zzp3d/{$flat['id']}", 'field' => 'description', 'default_value' => 'Milk and espresso', 'length' => 17, 'shared' => false),
+				array('kind' => 'item', 'where' => "zzp3d/{$tea['id']}", 'field' => 'name', 'default_value' => 'Tea', 'length' => 3, 'shared' => false),
+			), $rows, 'each translated field with words, never the price or the slug; an empty description is nothing to translate');
+			$before = $mcp->call('translation_status', array('lang' => 'ro'));
+			same($before['total'], $mcp->call('describe', array('sections' => array('languages')))['languages']['missing']['ro'], 'describe counts them too');
+			p3d_write($db, 'zzp3ddata', $flat['id'], array('name__ro' => 'Cafea cu lapte'));
+			$after = $mcp->call('translation_status', array('lang' => 'ro'));
+			same($before['total'] - 1, $after['total']);
+			same($before['done'] + 1, $after['done']);
+			same(array('description', 'name'), array_column(p3d_status($mcp, 'item'), 'field'));
+		});
+	});
+});
+
+test('P3.D: get_item and list_items with lang show the item in that language', function () {
+	p3d_site(function ($db) {
+		p2c_session(array('RASTER_DB' => $db), function ($mcp) use ($db) {
+			$mcp->call('set_languages', array('languages' => array('en', 'ro')));
+			$flat = $mcp->call('create_item', array('collection' => 'zzp3d', 'fields' => array('name' => 'Flat white', 'description' => 'Milk and espresso', 'price' => 14)));
+			$item = $mcp->call('get_item', array('collection' => 'zzp3d', 'id' => $flat['id'], 'lang' => 'ro'));
+			same(array('value' => '', 'default_value' => 'Flat white', 'translated' => false, 'shared' => false), $item['name']);
+			same(array('value' => 14, 'default_value' => 14, 'translated' => false, 'shared' => true), $item['price']);
+			same(array($flat['id'], 'ro', 'flat-white', true), array($item['id'], $item['lang'], $item['slug'], $item['enabled']), 'id, slug, enabled stay plain');
+			check(!preg_grep('/__/', array_keys($item)), 'no translation columns: '.json_encode(array_keys($item)));
+			p3d_write($db, 'zzp3ddata', $flat['id'], array('name__ro' => 'Cafea cu lapte', 'slug__ro' => 'cafea-cu-lapte'));
+			$item = $mcp->call('get_item', array('collection' => 'zzp3d', 'id' => $flat['id'], 'lang' => 'ro'));
+			same(array('value' => 'Cafea cu lapte', 'default_value' => 'Flat white', 'translated' => true, 'shared' => false), $item['name']);
+			same('cafea-cu-lapte', $item['slug'], 'the slug in that language');
+			same('flat-white', $mcp->call('get_item', array('collection' => 'zzp3d', 'id' => $flat['id'], 'lang' => 'en'))['slug'], 'the default language is as without lang');
+			$listed = $mcp->call('list_items', array('collection' => 'zzp3d', 'lang' => 'ro'));
+			same(array('collection', 'lang', 'fields', 'total', 'items'), array_keys($listed));
+			$row = $listed['items'][0];
+			same(array('Cafea cu lapte', 'Milk and espresso', 14, 'cafea-cu-lapte', array('description')), array($row['name'], $row['description'], $row['price'], $row['slug'], $row['untranslated']), 'translated, else the default; with what it lacks');
+			check(!preg_grep('/__/', array_keys($row)), json_encode(array_keys($row)));
+			same('Flat white', $mcp->call('list_items', array('collection' => 'zzp3d'))['items'][0]['name'], 'without lang, as before');
+			check(isset($mcp->call('get_item', array('collection' => 'zzp3d', 'id' => $flat['id'], 'lang' => 'de'))['error']), 'a language the site lacks');
+		});
+	});
+});
+
+test('P3.D: create_item takes no translation; update_item with lang refuses shared fields', function () {
+	p3d_site(function ($db) {
+		p2c_session(array('RASTER_DB' => $db), function ($mcp) {
+			$mcp->call('set_languages', array('languages' => array('en', 'ro')));
+			$refused = $mcp->call('create_item', array('collection' => 'zzp3d', 'fields' => array('name' => 'Cafea'), 'lang' => 'ro'));
+			same('Create the item without lang, in the default language (en), then translate it with update_item and lang', isset($refused['error']) ? $refused['error'] : json_encode($refused));
+			same(0, $mcp->call('list_items', array('collection' => 'zzp3d'))['total'], 'nothing made');
+			$flat = $mcp->call('create_item', array('collection' => 'zzp3d', 'fields' => array('name' => 'Flat white', 'price' => 14), 'lang' => 'en'));
+			check(!isset($flat['error']), 'the default language is as none: '.json_encode($flat));
+			foreach (array('price' => 12, 'enabled' => false) as $field => $value) {
+				$refused = $mcp->call('update_item', array('collection' => 'zzp3d', 'id' => $flat['id'], 'fields' => array('name' => 'Cafea', $field => $value), 'lang' => 'ro'));
+				same("'$field' is shared by every language; update it without lang", isset($refused['error']) ? $refused['error'] : json_encode($refused));
+			}
+			check(isset($mcp->call('update_item', array('collection' => 'zzp3d', 'id' => $flat['id'], 'fields' => array('name__ro' => 'Cafea'), 'lang' => 'ro'))['error']), 'a column is never a field');
+			$item = $mcp->call('get_item', array('collection' => 'zzp3d', 'id' => $flat['id']));
+			same(array('Flat white', 14), array($item['name'], $item['price']), 'nothing written');
+			same('', $item['name__ro'], 'no translation either');
+		});
+	});
+});
+
+test('P3.D: tools/list grows by less than 100 characters with lang on the item tools (#161)', function () {
+	// tools/list over stdio once P2 and its review fixes are in (ml/p2
+	// 0f00c7b, what P3 builds on): 11805 characters; at the P3 kickoff
+	// (43aa961), before those fixes, it was 11739
+	p3d_site(function ($db) {
+		p2c_session(array('RASTER_DB' => $db), function ($mcp) {
+			$tools = $mcp->message('tools/list')['result']['tools'];
+			foreach ($tools as $tool) {
+				if (in_array($tool['name'], array('list_items', 'get_item', 'create_item', 'update_item'), true)) check(isset($tool['inputSchema']['properties']['lang']), $tool['name']);
+			}
+			$size = strlen(json_encode(array('tools' => $tools), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+			check($size - 11805 < 100, "tools/list is $size characters, ".($size - 11805).' more than P2 left it');
+		});
+	});
+});
+
+test('P3.D: an agent translates a collection over MCP and /ro/ shows its items (needs P3.A, P3.B)', function () {
+	p3d_site(function ($db) {
+		p2c_session(array('RASTER_DB' => $db), function ($mcp) {
+			$mcp->call('set_languages', array('languages' => array('en', 'ro')));
+			$flat = $mcp->call('create_item', array('collection' => 'zzp3d', 'fields' => array('name' => 'Flat white', 'description' => 'Milk and espresso', 'price' => 14)));
+			$mcp->call('create_item', array('collection' => 'zzp3d', 'fields' => array('name' => 'Tea', 'description' => 'Black', 'price' => 9)));
+			// what translation_status lists, translated one item at a time
+			$words = array('Flat white' => 'Cafea cu lapte', 'Milk and espresso' => 'Lapte și espresso', 'Tea' => 'Ceai', 'Black' => 'Negru');
+			$items = array();
+			foreach (p3d_status($mcp, 'item') as $row) {
+				list(, $id) = explode('/', $row['where']);
+				$items[$id][$row['field']] = $words[$row['default_value']];
+			}
+			same(2, count($items), json_encode($items));
+			foreach ($items as $id => $fields) {
+				$saved = $mcp->call('update_item', array('collection' => 'zzp3d', 'id' => (int)$id, 'fields' => $fields, 'lang' => 'ro'));
+				check(!isset($saved['error']), json_encode($saved));
+			}
+			// nothing left for items, and the English is as it was
+			same(array(), p3d_status($mcp, 'item'), 'translation_status: 0 missing for items');
+			$item = $mcp->call('get_item', array('collection' => 'zzp3d', 'id' => $flat['id'], 'lang' => 'ro'));
+			same(array('value' => 'Cafea cu lapte', 'default_value' => 'Flat white', 'translated' => true, 'shared' => false), $item['name']);
+			same('cafea-cu-lapte', $item['slug'], 'a Romanian slug, made from the Romanian name');
+			$english = $mcp->call('get_item', array('collection' => 'zzp3d', 'id' => $flat['id']));
+			same(array('Flat white', 'flat-white'), array($english['name'], $english['slug']));
+			same(array(), $mcp->call('list_items', array('collection' => 'zzp3d', 'lang' => 'ro'))['items'][0]['untranslated']);
+			// the slug can be set too, in that language only
+			same('cafea-cu-lapte', $mcp->call('update_item', array('collection' => 'zzp3d', 'id' => $flat['id'], 'fields' => array('slug' => 'cafea-cu-lapte'), 'lang' => 'ro'))['slug']);
+			// /ro/ lists and shows the items in Romanian, at their Romanian address
+			$list = $mcp->call('render_url', array('url' => '/ro/zzp3d'));
+			same(200, $list['status']);
+			check(strpos($list['html'], '<h2>Cafea cu lapte</h2>') !== false && strpos($list['html'], '<h2>Ceai</h2>') !== false, 'the Romanian names');
+			check(strpos($list['html'], '>14<') !== false, 'the shared price');
+			$page = $mcp->call('render_url', array('url' => '/ro/zzp3d/zzp3d_item/cafea-cu-lapte'));
+			same(200, $page['status'], json_encode($page));
+			check(strpos($page['html'], '<h2>Cafea cu lapte</h2>') !== false && strpos($page['html'], 'Lapte și espresso') !== false, 'the item in Romanian');
+			check(strpos($page['html'], '<h2>Ceai</h2>') === false, 'that item only');
+			$en = $mcp->call('render_url', array('url' => '/zzp3d/zzp3d_item/flat-white'));
+			check(strpos($en['html'], '<h2>Flat white</h2>') !== false, 'English stays at its own address');
+		});
+	});
+});
+
+test('P3.D: translation_status lists records whose type declares translate (needs P3.A)', function () {
+	temp_model(APPBASE.'models/zzp3drec', array('zzp3drec.php' => "<?php\nclass zzp3drec\n{\n\tstatic function types() {\n\t\treturn array('zzp3drec' => array('fields' => array('title' => '', 'email' => ''), 'translate' => array('title')));\n\t}\n}\n"));
+	try {
+		p3d_site(function ($db) {
+			p2c_session(array('RASTER_DB' => $db), function ($mcp) {
+				$mcp->call('set_languages', array('languages' => array('en', 'ro')));
+				$made = $mcp->call('create_item', array('collection' => 'zzp3drec', 'fields' => array('title' => 'Opening hours', 'email' => 'ana@example.com')));
+				check(!isset($made['error']), json_encode($made));
+				same(array(array('kind' => 'record', 'where' => "zzp3drec/{$made['id']}", 'field' => 'title', 'default_value' => 'Opening hours', 'length' => 13, 'shared' => false)), p3d_status($mcp, 'record'), 'the title, never the email');
+				same(array('value' => 'ana@example.com', 'default_value' => 'ana@example.com', 'translated' => false, 'shared' => true), $mcp->call('get_item', array('collection' => 'zzp3drec', 'id' => $made['id'], 'lang' => 'ro'))['email']);
+				$saved = $mcp->call('update_item', array('collection' => 'zzp3drec', 'id' => $made['id'], 'fields' => array('title' => 'Program'), 'lang' => 'ro'));
+				check(!isset($saved['error']), json_encode($saved));
+				same(array(), p3d_status($mcp, 'record'));
+			});
+		});
+	} finally {
+		remove_dir(APPBASE.'models/zzp3drec');
+	}
+});
+
+// ## P3.C: the sitemap (#126) and items in every language
+
+// the P3.C fixture views in the starter's theme for the length of $fn, then
+// taken away with the tables they made
+function p3c_views($views, $fn) {
+	global $root;
+	$theme = "$root/application/views/default";
+	foreach ($views as $name => $html) {
+		test_fixture("$theme/$name");
+		file_put_contents("$theme/$name", $html);
+	}
+	try {
+		return $fn($theme);
+	} finally {
+		foreach (array_keys($views) as $name) @unlink("$theme/$name");
+		cms_store::connect();
+		foreach (array('zzp3cfaqdata', 'zzp3cmenudata', 'zzp3cpagepage') as $table) R::getDatabaseAdapter()->exec("DROP TABLE IF EXISTS `$table`");
+		cms_store::forget();
+	}
+}
+// a FAQ that only zzp3cfaq.html shows (no item view), a menu with an item
+// view, and a page with a field
+function p3c_fixtures() {
+	return array(
+		'zzp3cfaq.html' => '<!doctype html><html><head><title>FAQ</title></head><body><!-- render.cms.zzp3cfaq --><h2><!-- print.title -->Is there wifi?<!-- /print.title --></h2><!-- /render.cms.zzp3cfaq --></body></html>',
+		'zzp3cmenu_item.html' => '<!doctype html><html><head><title>Menu</title></head><body><!-- render.cms.zzp3cmenu --><h1><!-- print.title -->Flat white<!-- /print.title --></h1><!-- /render.cms.zzp3cmenu --></body></html>',
+		'zzp3cpage.html' => '<!doctype html><html><head><title>Page</title></head><body><h1><!-- print.cms.zzp3c_headline -->Hello<!-- /print.cms.zzp3c_headline --></h1></body></html>',
+	);
+}
+// the FAQ's table with $rows (slug => columns), all in one transaction
+function p3c_faq($rows, $columns = array()) {
+	cms_store::connect();
+	cms_types::ensure('zzp3cfaqdata', array('title' => 'text', 'slug' => 'text', 'enabled' => 'bool', 'published_at' => 'datetime', 'updated_at' => 'datetime') + $columns);
+	R::begin();
+	try {
+		foreach ($rows as $slug => $values) {
+			$values += array('title' => $slug, 'slug' => $slug, 'enabled' => 1, 'published_at' => null, 'updated_at' => '2026-01-02 10:00:00');
+			R::exec('INSERT INTO zzp3cfaqdata (`'.implode('`, `', array_keys($values)).'`) VALUES ('.implode(', ', array_fill(0, count($values), '?')).')', array_values($values));
+		}
+		R::commit();
+	} catch (Exception $e) {
+		R::rollback();
+		throw $e;
+	}
+	cms_store::forget();
+}
+// the sitemap's rows, and the SQL it sent
+function p3c_pages() {
+	$rows = null;
+	$sql = p2a_sql(function () use (&$rows) { $rows = (new feed())->pages(); });
+	return array($rows, $sql);
+}
+function p3c_row($rows, $url) {
+	foreach ($rows as $row) if ($row['url'] === $url) return $row;
+	return null;
+}
+// a multilingual site at http://cafe.test/, in its default language (P1.C's)
+function p3c_on($settings = array()) {
+	return p1c_on($settings + array('url_language' => '', 'link_uri' => 'http://cafe.test/', 'uri_string' => '/sitemap.xml'));
+}
+
+test('P3.C: the sitemap lists every published item of a collection with no item view, all of them, in one query (#126)', function () {
+	p3c_views(p3c_fixtures(), function () {
+		$rows = array();
+		for ($i = 1; $i <= 1201; $i++) $rows["question-$i"] = array();
+		$rows['a-draft'] = array('enabled' => 0);
+		$rows['coming-later'] = array('published_at' => date('Y-m-d H:i:s', time() + 86400));
+		$rows['published-after-its-save'] = array('published_at' => '2026-03-04 09:00:00');
+		$rows['saved-after-publishing'] = array('published_at' => '2025-12-01 09:00:00', 'updated_at' => '2026-02-03 11:00:00');
+		p3c_faq($rows);
+		list($pages, $sql) = p3c_pages();
+		$urls = array_column($pages, 'url');
+		$link = rtrim(config::get('link_uri'), '/');
+		same(1203, count(preg_grep('#/zzp3cfaq/zzp3cfaq_item/#', $urls)), 'every published item, past 1,000');
+		check(in_array("$link/zzp3cfaq/zzp3cfaq_item/question-1", $urls) && in_array("$link/zzp3cfaq/zzp3cfaq_item/question-1201", $urls), 'the oldest and the newest');
+		same(array(), array_values(preg_grep('#a-draft|coming-later#', $urls)), 'no draft, nothing scheduled');
+		check(in_array("$link/zzp3cfaq", $urls), 'the FAQ page itself');
+		same(array(), array_values(preg_grep('#zzp3cmenu_item$#', $urls)), 'an item view is no page');
+		// the date: the later of its last save and its publishing
+		same('2026-01-02', p3c_row($pages, "$link/zzp3cfaq/zzp3cfaq_item/question-7")['updated']);
+		same('2026-03-04', p3c_row($pages, "$link/zzp3cfaq/zzp3cfaq_item/published-after-its-save")['updated']);
+		same('2026-02-03', p3c_row($pages, "$link/zzp3cfaq/zzp3cfaq_item/saved-after-publishing")['updated']);
+		// one query reads the items: id, slug and the dates, no item loaded whole
+		$reads = array_values(preg_grep('/^SELECT\b.*`zzp3cfaqdata`/i', $sql));
+		same(1, count($reads), json_encode($reads));
+		check(strpos($reads[0], 'SELECT `id`, `slug`, `published_at`, `updated_at` FROM `zzp3cfaqdata` WHERE') === 0, $reads[0]);
+	});
+});
+
+test('P3.C: a page\'s lastmod is its last save in the CMS, else its view\'s date (#126)', function () {
+	p3c_views(p3c_fixtures(), function ($theme) {
+		$link = rtrim(config::get('link_uri'), '/');
+		touch("$theme/zzp3cpage.html", strtotime('2025-01-02 12:00:00'));
+		clearstatcache();
+		same('2025-01-02', p3c_row((new feed())->pages(), "$link/zzp3cpage")['updated'], 'never saved: the file\'s date');
+		cms_store::connect();
+		cms_store::update_page(cms::page_type('/zzp3cpage'), '/zzp3cpage', array('zzp3c_headline' => 'Moved'), array('zzp3c_headline'));
+		same(date('Y-m-d'), p3c_row((new feed())->pages(), "$link/zzp3cpage")['updated'], 'saved: its revision\'s date');
+		// a deploy that touches the file doesn't move it
+		touch("$theme/zzp3cpage.html", strtotime('2030-01-02 12:00:00'));
+		clearstatcache();
+		same(date('Y-m-d'), p3c_row((new feed())->pages(), "$link/zzp3cpage")['updated'], 'the file\'s date no longer counts');
+	});
+});
+
+test('P3.C: off, the rows are url and updated, no slug column is read and the sitemap prints what 2.2.45\'s did', function () use ($base) {
+	$old = '<?xml version="1.0" encoding="UTF-8"?>'."\n".'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'."\n"
+		."  <!-- render.feed.pages -->\n  <url><loc><!-- print.url /--></loc><lastmod><!-- print.updated /--></lastmod></url>\n  <!-- /render.feed.pages -->\n</urlset>\n";
+	p3c_views(p3c_fixtures() + array('zzp3cold.xml' => $old), function () use ($base) {
+		p3c_faq(array('flat-white' => array('slug__ro' => 'cafea-cu-lapte')), array('slug__ro' => 'text'));
+		foreach (array(array('multilingual' => false, 'languages' => array()), array('multilingual' => false, 'languages' => array('en', 'ro')), array('multilingual' => true, 'languages' => array('en'))) as $settings) {
+			with_settings($settings, function () use ($settings) {
+				list($rows, $sql) = p3c_pages();
+				$keys = array_unique(array_map(function ($row) { ksort($row); return implode(',', array_keys($row)); }, $rows));
+				same(array('updated,url'), array_values($keys), json_encode($settings));
+				same(array(), array_values(preg_grep('/slug__ro/', $sql)), 'no slug column read: '.json_encode($settings));
+				check(in_array(rtrim(config::get('link_uri'), '/').'/zzp3cfaq/zzp3cfaq_item/flat-white', array_column($rows, 'url')), 'at its own slug');
+			});
+		}
+		// the bundled view prints, byte for byte, what the 2.2.45 view prints
+		list($status, $now) = http('GET', "$base/sitemap.xml");
+		same(200, $status);
+		list(, $then) = http('GET', "$base/zzp3cold.xml");
+		same($then, $now);
+		check(strpos($now, 'zzp3cfaq/zzp3cfaq_item/flat-white') !== false, $now);
+		check(strpos($now, 'xhtml') === false, 'no alternates off');
+	});
+});
+
+test('P3.C: multilingual, every language\'s address is a row with alternates and x-default, and the sitemap prints them as hreflang', function () use ($base) {
+	p3c_views(p3c_fixtures(), function () use ($base) {
+		p3c_faq(array('is-there-wifi' => array()));
+		with_settings(p3c_on(), function () {
+			list($rows, $sql) = p3c_pages();
+			$alternates = array(
+				array('lang' => 'en', 'url' => 'http://cafe.test/zzp3cpage'),
+				array('lang' => 'ro', 'url' => 'http://cafe.test/ro/zzp3cpage'),
+				array('lang' => 'x-default', 'url' => 'http://cafe.test/zzp3cpage'),
+			);
+			foreach (array('http://cafe.test/zzp3cpage', 'http://cafe.test/ro/zzp3cpage') as $url) {
+				$row = p3c_row($rows, $url);
+				check($row !== null, "$url is listed");
+				same($alternates, $row['alternates'], $url);
+			}
+			// the home page is /ro/ in Romanian
+			check(p3c_row($rows, 'http://cafe.test/ro/') !== null, 'the Romanian home page');
+			// an item with no Romanian slug is there at its own
+			$row = p3c_row($rows, 'http://cafe.test/ro/zzp3cfaq/zzp3cfaq_item/is-there-wifi');
+			check($row !== null, json_encode(array_column($rows, 'url')));
+			same(array('en', 'ro', 'x-default'), array_column($row['alternates'], 'lang'));
+			same(null, p3c_row($rows, 'x-default'), 'x-default is no row of its own');
+			same(count(array_unique(array_column($rows, 'url'))), count($rows), 'each address once');
+		});
+		p1b_site("config::set('languages')->to(array('en', 'ro'));\nconfig::set('multilingual')->to(true);", function () use ($base) {
+			list($status, $body) = http('GET', "$base/sitemap.xml");
+			same(200, $status);
+			$doc = new DOMDocument();
+			check(@$doc->loadXML($body), 'well-formed: '.$body);
+			check(strpos($body, "<loc>$base/ro/zzp3cpage</loc>") !== false, $body);
+			check(strpos($body, '<xhtml:link xmlns:xhtml="http://www.w3.org/1999/xhtml" rel="alternate" hreflang="ro" href="'.$base.'/ro/zzp3cfaq/zzp3cfaq_item/is-there-wifi"/>') !== false, $body);
+			check(strpos($body, 'hreflang="x-default" href="'.$base.'/zzp3cpage"') !== false, $body);
+			// read as a sitemap reader would: one url per language, three links each
+			$xpath = new DOMXPath($doc);
+			$xpath->registerNamespace('s', 'http://www.sitemaps.org/schemas/sitemap/0.9');
+			$xpath->registerNamespace('x', 'http://www.w3.org/1999/xhtml');
+			same(3, $xpath->query("//s:url[s:loc='$base/ro/zzp3cpage']/x:link")->length);
+		});
+	});
+});
+
+test('P3.C: multilingual, an item is listed at its slug in every language (needs P3.B\'s item_alternates)', function () {
+	p3c_views(p3c_fixtures(), function () {
+		p3c_faq(array('flat-white' => array('slug__ro' => 'cafea-cu-lapte'), 'is-there-wifi' => array()), array('slug__ro' => 'text'));
+		with_settings(p3c_on(), function () {
+			list($rows, $sql) = p3c_pages();
+			check((bool)preg_grep('/^SELECT `id`, `slug`, `published_at`, `updated_at`, `slug__ro` FROM `zzp3cfaqdata`/', $sql), 'the Romanian slug is read in the same query: '.json_encode($sql));
+			$row = p3c_row($rows, 'http://cafe.test/ro/zzp3cfaq/zzp3cfaq_item/cafea-cu-lapte');
+			check($row !== null, json_encode(array_column($rows, 'url')));
+			same(array(
+				array('lang' => 'en', 'url' => 'http://cafe.test/zzp3cfaq/zzp3cfaq_item/flat-white'),
+				array('lang' => 'ro', 'url' => 'http://cafe.test/ro/zzp3cfaq/zzp3cfaq_item/cafea-cu-lapte'),
+				array('lang' => 'x-default', 'url' => 'http://cafe.test/zzp3cfaq/zzp3cfaq_item/flat-white'),
+			), $row['alternates']);
+			same(null, p3c_row($rows, 'http://cafe.test/ro/zzp3cfaq/zzp3cfaq_item/flat-white'), 'not at the English slug in Romanian');
+			check(p3c_row($rows, 'http://cafe.test/ro/zzp3cfaq/zzp3cfaq_item/is-there-wifi') !== null, 'an item with no Romanian slug at its own');
+		});
+	});
+});
+
+test('P3.C: on an item page the switcher and hreflang give the item\'s slug in each language (needs P3.B\'s path_in)', function () {
+	p3c_views(p3c_fixtures(), function () {
+		p3c_faq(array('flat-white' => array('slug__ro' => 'cafea-cu-lapte')), array('slug__ro' => 'text'));
+		$english = p3c_on(array('uri_string' => '/zzp3cfaq/zzp3cfaq_item/flat-white'));
+		$romanian = p1c_on(array('uri_string' => '/zzp3cfaq/zzp3cfaq_item/cafea-cu-lapte'));
+		$want = array('en' => 'http://cafe.test/zzp3cfaq/zzp3cfaq_item/flat-white', 'ro' => 'http://cafe.test/ro/zzp3cfaq/zzp3cfaq_item/cafea-cu-lapte');
+		foreach (array('en' => $english, 'ro' => $romanian) as $page => $settings) {
+			with_settings($settings, function () use ($page, $want) {
+				same($want, array_column(i18n::alternates(), 'url', 'lang'), "alternates on the $page page");
+				same($want, array_column((new i18n())->languages(), 'url', 'code'), "the switcher on the $page page");
+				$links = template::language_links('', 200);
+				foreach ($want as $lang => $url) check(strpos($links, "hreflang=\"$lang\" href=\"$url\"") !== false, "hreflang $lang on the $page page: $links");
+				check(strpos($links, "hreflang=\"x-default\" href=\"{$want['en']}\"") !== false, $links);
+				check(strpos($links, "<link rel=\"canonical\" href=\"{$want[$page]}\">") !== false, $links);
+			});
+		}
+	});
+});
+
+
+// ## P3 integration: copies, undo and slugs keep every language apart
+
+test('P3 integration: on /ro/ Duplicate copies the stored item in every language, undo brings back its translations, and a missing slug is made from the default language', function () {
+	$type = 'zzp3imenudata';
+	try {
+		p2b_site(function ($dir) use ($type) {
+			file_put_contents("$dir/application/views/default/zzp3imenu.html", '<!doctype html><html><head><title>Menu</title></head><body><ul>'
+				.'<!-- render.cms.zzp3i_menu --><li><b><!-- print.name -->Zz seed<!-- /print.name --></b></li><!-- /render.cms.zzp3i_menu --></ul></body></html>');
+			p2b_server($dir, function ($base) use ($type) {
+				same(200, http('GET', "$base/zzp3imenu")[0]);
+				cms_store::connect();
+				cms_store::forget();
+				check(isset(cms_store::columns($type)['name__ro']), 'the Romanian column');
+				R::exec("DELETE FROM $type");
+				$id = with_settings(p2a_on(), function () use ($type) {
+					$item = cms_store::save_item($type, 0, array('name' => 'Apple'), array('name'));
+					cms_store::save_item($type, $item['id'], array('name' => 'Măr'), array('name'), 'editor', null, 'ro');
+					return $item['id'];
+				});
+				$editor = p2b_login($base);
+				list($config) = p2b_config("$base/ro/zzp3imenu", $editor);
+				$post = function ($endpoint, $fields) use ($base, $editor, $config) {
+					list($status, $body) = form_post("$base/ro/api/cms/$endpoint", $fields + array('csrf' => $config['csrf']), array("Cookie: $editor"));
+					return array($status, json_decode($body, true), $body);
+				};
+				$stored = function ($id) use ($type) { cms_store::forget(); return R::getRow("SELECT name, name__ro, slug FROM $type WHERE id = ?", array($id)); };
+				// Duplicate: the copy's English is the English, its Romanian the Romanian
+				list($status, $copy, $body) = $post('editor_save_item', array('collection' => 'zzp3i_menu', 'id' => 0, 'copy' => $id, 'lang' => 'ro'));
+				same(200, $status, $body);
+				same('Măr', $copy['name'], 'answered as /ro/ shows it');
+				same(array('name' => 'Apple', 'name__ro' => 'Măr'), array_slice($stored($copy['id']), 0, 2));
+				same('apple-2', $stored($copy['id'])['slug'], 'its slug from the English');
+				list($status) = $post('editor_save_item', array('collection' => 'zzp3i_menu', 'id' => 0, 'copy' => 999999, 'lang' => 'ro'));
+				same(404, $status, 'a copy of no item');
+				// Delete, then undo: the item as delete_item gave it, every language
+				list($status, $deleted, $body) = $post('editor_delete_item', array('collection' => 'zzp3i_menu', 'id' => $copy['id']));
+				same(200, $status, $body);
+				$fields = $deleted['item'];
+				foreach (array('id', 'updated_at', 'created_at', 'owner') as $k) unset($fields[$k]);
+				check(array_key_exists('name__ro', $fields) && array_key_exists('saved_lang', $fields), json_encode($fields));
+				list($status, $back, $body) = $post('editor_save_item', array('collection' => 'zzp3i_menu', 'id' => 0, 'fields' => $fields, 'lang' => 'ro'));
+				same(200, $status, $body);
+				same(array('name' => 'Apple', 'name__ro' => 'Măr'), array_slice($stored($back['id']), 0, 2), 'undo keeps both languages');
+				// an existing item still takes no language's column as a field
+				list($status) = $post('editor_save_item', array('collection' => 'zzp3i_menu', 'id' => $back['id'], 'fields' => array('name__ro' => 'Wrong'), 'lang' => 'ro'));
+				same(400, $status);
+				// an item without a slug, shown on /ro/, gets the English one
+				R::exec("UPDATE $type SET slug = NULL WHERE id = ?", array($id));
+				check(strpos(http('GET', "$base/ro/zzp3imenu")[1], '<b>Măr</b>') !== false, 'shown in Romanian');
+				same('apple', $stored($id)['slug']);
+			});
+		});
+	} finally {
+		cms_store::connect();
+		R::getDatabaseAdapter()->exec("DROP TABLE IF EXISTS $type");
+		cms_store::forget();
+	}
 });
 
 // ## P4 kickoff: the contracts the P4 packages code against

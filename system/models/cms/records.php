@@ -34,7 +34,9 @@ class cms_records {
 	// that took the name: booking => array('type' => 'booking', 'by' => 'salon')
 	static $left_out = array();
 	// names a type declaration understands
-	static $keys = array('fields', 'types', 'public', 'owner', 'create', 'staff_add', 'readonly', 'hidden', 'actions', 'html', 'spam');
+	// (translate and shared: which fields have a column per language on a
+	// multilingual site, see translated_fields)
+	static $keys = array('fields', 'types', 'public', 'owner', 'create', 'staff_add', 'readonly', 'hidden', 'actions', 'html', 'spam', 'translate', 'shared');
 	// the model methods with a meaning of their own, never actions
 	static $hooks = array('types', 'check', 'fill', 'schema', 'listens', 'api', 'requires');
 	// who is writing while fill() and check() run: visitor (a form), editor
@@ -155,6 +157,12 @@ class cms_records {
 			// visitor forms are checked for spam before anything is stored; a
 			// type that runs its own checks says 'spam' => false
 			'spam' => !isset($d['spam']) || !empty($d['spam']),
+			// the fields with a column per language when multilingual is on
+			// (D7): 'translate' names them, 'shared' names the others (then
+			// every text field that is neither a list nor hidden but those
+			// is translated), and with neither nothing is: a booking's
+			// fields are what the visitor typed. Text fields only.
+			'translate' => self::translate_keys($d, $types, $lists, $fields),
 			'unknown' => array_values(array_diff(array_keys($d), self::$keys)),
 		);
 	}
@@ -179,6 +187,27 @@ class cms_records {
 		return $info && !$info['public'];
 	}
 
+	// The fields of a declared type that have a column per language when
+	// multilingual is on (D7): those 'translate' => array(...) names, or with
+	// 'shared' => array(...) every text field but those, and none when the
+	// type says neither (a booking's fields are what the visitor typed).
+	// Read from the declaration whether multilingual is on or not; callers
+	// ask i18n::enabled().
+	static function translated_fields($info) {
+		return isset($info['translate']) ? $info['translate'] : array();
+	}
+
+	protected static function translate_keys($d, $types, $lists, $fields) {
+		$text = array();
+		foreach ($types as $field => $type) {
+			if ($type === 'text' && !in_array($field, $lists, true)) $text[] = $field;
+		}
+		if (isset($d['translate'])) return array_values(array_intersect($text, (array)$d['translate']));
+		if (!isset($d['shared'])) return array();
+		$hidden = array_intersect((array)(isset($d['hidden']) ? $d['hidden'] : array()), array_keys($fields));
+		return array_values(array_diff($text, (array)$d['shared'], $hidden));
+	}
+
 	// the fields a person may write through the editor, MCP or a form:
 	// declared fields minus readonly and hidden
 	static function writable($info) {
@@ -196,11 +225,17 @@ class cms_records {
 
 	// a fluid database gets the table and every column on first use, the way
 	// schema --apply does in production
+	// (multilingual: and each translated field's column per language)
 	static function ensure($info, $even_frozen = false) {
 		if (database::$frozen && !$even_frozen) return;
 		$want = self::columns($info);
-		if (!array_diff_key($want, cms_store::columns($info['type']))) return;
-		cms_types::ensure($info['type'], $want);
+		$translated = i18n::enabled() ? self::translated_fields($info) : array();
+		$need = $want;
+		foreach ($translated as $field) {
+			foreach (i18n::available() as $lang) $need[cms_types::column($field, $lang)] = $want[$field];
+		}
+		if (!array_diff_key($need, cms_store::columns($info['type']))) return;
+		cms_types::ensure($info['type'], $want, $translated);
 	}
 
 	// ##Reading
@@ -331,7 +366,7 @@ class cms_records {
 				$list['conditions'][$i][2] = self::owner_me($info);
 				if ($list['conditions'][$i][2] === null) return array();
 			}
-			list($more, $bindings) = cms_store::conditions_sql($list['conditions'], $columns);
+			list($more, $bindings) = cms_store::conditions_sql($list['conditions'], $columns, 'c', i18n::current());
 			$sql .= $more;
 			if (isset($list['options']['order'])) $order = $list['options']['order'];
 			if (isset($list['options']['limit'])) $limit = $list['options']['limit'];
@@ -344,10 +379,13 @@ class cms_records {
 				if ($value === null) return array();
 			}
 			$value = cms_types::clean(cms_types::of_column($columns[$field]), $value, $field);
-			$sql .= $value === null ? " AND `$field` IS NULL " : " AND `$field` = :f_$field ";
+			// in the language the page is in, as a list's filters are
+			// (cms_store::field_sql); off, `name` as it always was
+			$column = cms_store::field_sql($field, $columns, i18n::current());
+			$sql .= $value === null ? " AND $column IS NULL " : " AND $column = :f_$field ";
 			if ($value !== null) $bindings[":f_$field"] = $value;
 		}
-		$sql .= ' ORDER BY '.cms_store::order_sql($order, $columns).((int)$limit > 0 ? ' LIMIT '.(int)$limit : '');
+		$sql .= ' ORDER BY '.cms_store::order_sql($order, $columns, i18n::current()).((int)$limit > 0 ? ' LIMIT '.(int)$limit : '');
 		$rows = array();
 		foreach (R::find($info['type'], $sql, $bindings) as $bean) $rows[] = self::decode($info, cms_store::export_item($bean));
 		return $rows;
