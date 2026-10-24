@@ -5041,6 +5041,7 @@ function p1d_fake_export($root, $out, $multilingual, $url = 'https://cafe.exampl
 		.'   $site = array("/" => array("menu", "ro/"), "/menu" => array("", "menu/menu_item/coffee", "ro/menu"), "/menu/menu_item/coffee" => array("menu", "ro/menu/menu_item/cafea"),'
 		.'    "/ro/" => array("ro/", "ro/menu", ""), "/ro/menu" => array("ro/", "ro/menu/menu_item/cafea", "menu", "about?lang=en", "login"), "/ro/menu/menu_item/cafea" => array("ro/menu", "ro/login"));'
 		.'   if ($path === "/ro") return array(301, "", "text/html");'
+		.'   if ($path === "/ro/" && !$headers && ($d = config::get("domain_language"))) return array(301, "", "text/html", "https://".key($d)."/");'
 		.'   if (!isset($site[$path])) return array(404, "<!doctype html><p>".(strpos($path, "/ro/") === 0 ? "Negasit" : "Not found")."</p>", "text/html");'
 		.'   if (!i18n::enabled()) $site[$path] = preg_grep("#^ro/#", $site[$path], PREG_GREP_INVERT);'
 		.'   $html = "<!doctype html><html><body>"; foreach ($site[$path] as $link) $html .= "<a href=\"".$this->base.$link."\">x</a>";'
@@ -5118,7 +5119,7 @@ test('N9', 'P1.D export: a multilingual export warns about root-relative languag
 	lacks($warnings, 'root-relative');
 	lacks(implode("\n", p1d_fake_export($root, "$tmp/p1d-warn3", false, '/')['warnings']), 'root-relative', 'multilingual off: no language links');
 });
-test('N9', 'P1.D export: a language on its own domain is asked for there, written in its folder, and linked at its domain', function () use ($root, $tmp) {
+test('N9', 'P1.D export: a language on its own domain is asked for there (when the server is the site\'s address), written in its folder, and linked at its domain', function () use ($root, $tmp) {
 	$config = "$root/demo/config/the_app.php";
 	$out = "$tmp/p1d-domain";
 	with_file($config, file_get_contents($config)."\nconfig::set('multilingual')->to(true);\n", function () use ($out) {
@@ -5131,6 +5132,15 @@ test('N9', 'P1.D export: a language on its own domain is asked for there, writte
 		has($ro, 'href="https://ro.localhost/about"');
 		lacks($ro, '127.0.0.1', 'no address of the export\'s own server');
 		has(file_get_contents("$out/menu/index.html"), 'hreflang="ro" href="https://ro.localhost/menu"');
+		// with site_url set, the export's server isn't the site's own address,
+		// so it serves ro under /ro/ (i18n::address()), and so does the export
+		list($code, $output) = raster(array('export', "$out-site", '--url=https://cafe.example/'), array('CAFE_SITE_URL' => 'https://cafe.example/'));
+		same(0, $code, $output);
+		lacks($output, 'own domain');
+		$ro = file_get_contents("$out-site/ro/menu/index.html");
+		has($ro, '<html lang="ro"');
+		has($ro, 'href="https://cafe.example/ro/about"');
+		lacks($ro, 'ro.localhost');
 	});
 });
 test('N9', 'P1.D export: the site\'s address comes from site_url when --url and RASTER_URL are not set (#137)', function () use ($tmp) {

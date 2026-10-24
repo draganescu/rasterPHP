@@ -100,11 +100,16 @@ class raster_export {
 					$prefix = i18n::prefix($language);
 					$this->prefixes[$language] = ($prefix === '' && !i18n::is_default($language)) ? strtolower($language).'/' : $prefix;
 				}
-				// a language with its own domain answers only there: its pages
-				// are asked for on that host, and still written in ro/
+				// a language with its own domain may answer only there (when the
+				// export's server is the site's own address, i18n::address()):
+				// its home page says so with a redirect to the domain. Then its
+				// pages are asked for on that host, and still written in ro/
 				foreach ((array)config::get('domain_language', array()) as $domain => $language) {
 					foreach ($this->languages as $code) {
-						if (strtolower($code) === strtolower($language) && !i18n::is_default($code) && !isset($this->domains[$code])) $this->domains[$code] = strtolower($domain);
+						if (strtolower($code) !== strtolower($language) || i18n::is_default($code) || isset($this->domains[$code])) continue;
+						$answer = $this->fetch('/'.$this->prefixes[$code]);
+						$to = isset($answer[3]) ? strtolower((string)parse_url($answer[3], PHP_URL_HOST)) : '';
+						if ($answer[0] >= 300 && $answer[0] < 400 && $to === strtolower($domain)) $this->domains[$code] = $to;
 					}
 				}
 				foreach ($this->prefixes as $prefix) foreach ($this->seeds() as $path) $this->enqueue('/'.$prefix.ltrim($path, '/'));
@@ -462,11 +467,12 @@ class raster_export {
 		$body = $stream ? stream_get_contents($stream) : '';
 		$meta = $stream ? stream_get_meta_data($stream) : array();
 		if ($stream) fclose($stream);
-		$status = 0; $type = '';
+		$status = 0; $type = ''; $location = '';
 		foreach (isset($meta['wrapper_data']) ? $meta['wrapper_data'] : array() as $line) {
 			if (preg_match('#^HTTP/\S+\s+(\d{3})#', $line, $m)) $status = (int)$m[1];
 			if (stripos($line, 'Content-Type:') === 0) $type = strtolower(trim(substr($line, 13)));
+			if (stripos($line, 'Location:') === 0) $location = trim(substr($line, 9));
 		}
-		return array($status, (string)$body, $type);
+		return array($status, (string)$body, $type, $location);
 	}
 }

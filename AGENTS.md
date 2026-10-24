@@ -2266,9 +2266,12 @@ of lists and filter pages come along; drafts and the editor don't.
   its pages carry are followed from there. Each language gets its own
   `404.html` (`ro/404.html`). It warns when the links are root-relative (no
   `--url` or site address: search engines want absolute `hreflang` and
-  canonical links) and when a language has its own `domain_language` host:
-  its pages are asked for on that host and written in its folder (`ro/`),
-  and links to them point at the domain, so publish that folder there. With languages but `multilingual` off, each page is
+  canonical links). A language with its own `domain_language` host is
+  exported as the site serves it: when the site has no `site_url`, the
+  export's server is the site's own address and sends that language to its
+  domain, so its pages are asked for on that host, written in its folder
+  (`ro/`), and linked at the domain (publish that folder there; the export
+  warns). With `site_url` set it is under `/ro/` like any other language. With languages but `multilingual` off, each page is
   fetched again in every other language, and the export rewrites its links
   and the language switcher's `?lang=` links to `/<lang>/`.
 - **Forms need PHP**, so a page that still shows one stops the export and
