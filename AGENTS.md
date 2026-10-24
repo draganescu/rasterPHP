@@ -706,8 +706,10 @@ mock-up is stored only when the collection's table is made.
 
 - **Names:** lowercase letters, digits and `_`, starting with a letter.
   Reserved: CMS method names (`style`, `login`, …), `slug`, `id`,
-  `updated_at`, `enabled` and `published_at` for fields; `users` and `raster`
-  for collections. `lint` reports these. A collection's table drops the
+  `updated_at`, `enabled`, `published_at` and `saved_lang` for fields;
+  `users` and `raster` for collections; and any name with `__` in it, which
+  joins a field and a language in a translation's column (`lint` error
+  `double_underscore`, always, multilingual or not). `lint` reports these. A collection's table drops the
   `_`s (`team_members` is stored in `teammembersdata`), so `team_members`
   and `teammembers` would share one table and show each other's items:
   `lint` reports that as an error. Words SQL keeps for itself
@@ -795,6 +797,30 @@ mock-up is stored only when the collection's table is made.
   clock in its time zone (setting `timezone`, else PHP's, UTC on most
   servers); the editor's Schedule box and its live/scheduled badge use the
   site's clock too, whatever zone the editor's browser is in.
+- **Translations** (multilingual on, see **i18n**). A translated field
+  keeps the default language in its own column and each other language in
+  `<field>__<code>`: `headline__ro`, `name__pt_br` (`-` becomes `_`),
+  `name__id`, of the field's type. `cms_types::column($field, $lang)` is the
+  one place that name is made. Which fields are translated is read from
+  how the markup prints them (`cms_types::translates($type, $attribute)`):
+  a text field printed as content, or into `@alt`, `@title`,
+  `@placeholder`, `@aria-label` or `@content`. Every other attribute
+  (`@src`, `@href`, `@data-*`, …) and every int, number, bool, date and
+  time is one value for every language, and so is a field printed in
+  several places unless every one of them is a place for words (a URL
+  shown as a link's text and in its `href` stays one value). The content
+  model (`raster_inspector::content_model()`) gives each field
+  `'translate' => true|false` by this rule; a record type's fields are
+  shared for now. `cms_types::translated($table)` names the fields that
+  have translation columns, as the database has them (empty when off).
+  `cms_types::ensure($table, $types, $translated)` makes the columns, in
+  development and with `schema --apply`; with multilingual off it adds none.
+  Page tables and `sitepage` get them, and a `saved_lang` column (the
+  language a revision was saved in, managed by Raster); collections' items
+  come later. Raster makes a translation column before anything is stored
+  in it, which is what keeps `name__id` a plain text column: RedBean reads
+  `x_id` as a link and, on MySQL, would make a column it created itself an
+  int.
 - **Relationships are by value.** `print.@href.raster_filter@author` links to
   the items with the same `author`. For real references, write a model.
 - **Page edits are versioned:** every save is a new revision. Values can be
@@ -811,6 +837,17 @@ mock-up is stored only when the collection's table is made.
   unused. `--dry-run` says what `--rename`, `--drop` and `--apply` would
   change and changes nothing. `--check` exits 1 when the templates and the
   database differ (for CI).
+  - With multilingual on, a translated page field lacking its column in a
+    language, or a page table lacking `saved_lang`, is drift (marked `+`,
+    `missing_translations` in `--json`, with the table's `translated`
+    fields): `--apply` adds them, empty, so each language shows the default
+    text until it is translated. A translation column of a field no
+    template has any more is an orphan with it.
+  - Translation columns no language uses now (multilingual off, a language
+    taken out of `languages`) are **kept translations**: listed per table
+    (`translations` in `--json`, there when multilingual is on or some are
+    kept), never orphans, never drift, never suggested for `--drop` or
+    `--rename`. Turning multilingual on again brings them back.
 
 ## Records: types a model declares
 
@@ -2066,6 +2103,16 @@ use `'model.method'`: `method(true)` returns
   `hreflang="x-default"` (the default language's address). A page that
   writes its own canonical or hreflang links keeps them instead. Off,
   nothing is added.
+- **Lint, multilingual on.** Three more warnings: `untranslatable_text`,
+  words in a view that no annotation prints, so every language shows them
+  as written (make them `print.cms.<name>` for words editors change, or
+  `print.i18n.<file>('key')` for fixed words; what a print replaces,
+  comments, `remove`, scripts, styles, numbers, punctuation and lone
+  symbols are left out, and so are emails; one per line, at most ten per
+  view and a count of the rest); `missing_translation_key`, a
+  `print.i18n.<file>('key')` some language's dictionary has no entry for;
+  `html_lang_fixed`, an `<html>` whose `lang` no
+  `print.@lang.i18n.language` prints. Off, none of them.
 - **The language API.** Every model, a site's own too, reads language
   state through these static calls, never `config::get('languages')`.
   With multilingual off they give the one-language answer, so callers

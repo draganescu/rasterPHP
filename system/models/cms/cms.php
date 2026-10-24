@@ -51,10 +51,12 @@ class cms
 
 	// names that can't be used for page fields or collections. A collection
 	// is reserved by its table: users_ and u_sers are usersdata too, the
-	// accounts of the first versions, which no editor may read
+	// accounts of the first versions, which no editor may read. A name
+	// with __ is a translation's column (headline__ro), never a field
 	static function reserved($name, $kind) {
+		if (strpos((string)$name, '__') !== false) return true;
 		if ($kind === 'collection') return in_array(self::collection_type($name), array('usersdata', 'rasterdata'));
-		return method_exists('cms', $name) || in_array($name, array('slug', 'id', 'updated_at', 'enabled', 'published_at'));
+		return method_exists('cms', $name) || in_array($name, array('slug', 'id', 'updated_at', 'enabled', 'published_at', 'saved_lang'));
 	}
 
 	// the table holding the items of a collection

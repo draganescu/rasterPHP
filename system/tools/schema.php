@@ -9,6 +9,12 @@
 //   went from 14 to 14 lei); --apply converts it when every value fits
 // - narrow: a MySQL text column too small for what SQLite would hold
 //   (varchar(191), TEXT); --apply makes it LONGTEXT
+// - translations (#200, D3): a column <field>__<lang> holds a field's
+//   translation. Multilingual on, a page's translated field without one
+//   for every language is drift that --apply adds (missing_translations).
+//   Off, and for a language or field no longer used, they are kept
+//   translations: never orphans, never renamed, never drift, so turning
+//   multilingual on again brings them back.
 //
 // In development missing columns appear on the next request that renders
 // them. In production the database is frozen: run `raster schema --apply`.
@@ -58,9 +64,13 @@ class raster_schema {
 		}
 
 		$drift = !empty($unused);
-		foreach ($tables as $table) {
+		$kept = array();
+		foreach ($tables as $i => $table) {
 			if ((!$table['exists'] && $table['fields']) || $table['missing'] || $table['orphans'] || $table['retyped']) $drift = true;
 			if ($table['narrow'] && database::$frozen) $drift = true;
+			if (!empty($table['missing_translations'])) $drift = true;
+			if ($table['kept']) $kept[$table['table']] = $table['kept'];
+			unset($tables[$i]['kept']);
 		}
 
 		// tables the bundled models use (accounts, subscribers). A fluid
@@ -74,7 +84,7 @@ class raster_schema {
 			if (($missing || $narrow) && database::$frozen) $drift = true;
 		}
 
-		return array(
+		$status = array(
 			'environment' => config::get('environment'),
 			'frozen' => database::$frozen,
 			'drift' => $drift,
@@ -83,6 +93,11 @@ class raster_schema {
 			'unused_tables' => $unused,
 			'site_url' => (bool)config::get('trusted_url'),
 		);
+		// table => the translation columns kept (see the top); only when
+		// there are some or multilingual is on, so a site that never had
+		// languages reads as it always did
+		if ($kept || i18n::enabled()) $status['translations'] = $kept;
+		return $status;
 	}
 
 	function system_tables() {
@@ -114,17 +129,53 @@ class raster_schema {
 			}
 		}
 		$orphans = array();
+		$kept = array();
+		$suffixes = array();
+		foreach (i18n::available() as $lang) {
+			if (i18n::suffix($lang) !== '') $suffixes[] = i18n::suffix($lang);
+		}
 		foreach (array_keys($columns) as $column) {
 			if (in_array($column, cms_store::$system_fields)) continue;
 			if ($kind === 'record' && in_array($column, array('created_at', 'owner'))) continue;
-			if (!array_key_exists($column, $fields)) $orphans[] = $column;
+			if (array_key_exists($column, $fields)) continue;
+			$base = self::translation_of($column);
+			if ($base === null) {
+				$orphans[] = $column;
+				continue;
+			}
+			// on, a field's own translation belongs to it, and one of a
+			// field no template has any more goes with that field's orphan
+			$known = in_array(substr($column, strlen($base)), $suffixes, true);
+			if ($known && array_key_exists($base, $fields)) continue;
+			if ($known && !array_key_exists($base, $fields) && array_key_exists($base, $columns) && i18n::enabled()) {
+				$orphans[] = $column;
+				continue;
+			}
+			$kept[] = $column;
+		}
+		// what multilingual needs here: a column per language for each
+		// translated field (D7), and the language each revision is in. P2
+		// translates page fields; items are P3's.
+		$missing_translations = array();
+		if (i18n::enabled() && $kind === 'page' && $fields) {
+			foreach ($fields as $name => $field) {
+				if (empty($field['translate'])) continue;
+				foreach (i18n::available() as $lang) {
+					$column = cms_types::column($name, $lang);
+					if ($column !== $name && !array_key_exists($column, $columns)) $missing_translations[] = $column;
+				}
+			}
+			if (!array_key_exists('saved_lang', $columns)) $missing_translations[] = 'saved_lang';
 		}
 
 		// An orphan next to a new field is most likely a renamed annotation.
 		// In development the new column may already exist (created by the
 		// first request after the rename) still holding its template default.
 		$renames = array();
-		if ($orphans) {
+		$plain = array_values(array_filter($orphans, function ($column) { return raster_schema::translation_of($column) === null; }));
+		if ($plain) {
+			$orphans_all = $orphans;
+			$orphans = $plain;
 			$latest = cms_store::latest($type);
 			$fresh = $missing;
 			foreach ($fields as $name => $field) {
@@ -152,13 +203,14 @@ class raster_schema {
 					}
 				}
 			}
+			$orphans = $orphans_all;
 		}
 
 		// the slug stays as it is: it is indexed whole when it's a varchar,
 		// and never longer than 80 characters
 		$narrow = $exists ? cms_types::narrow($type, array_diff_key(array_map(function ($f) { return $f['type']; }, $fields), array('slug' => 1))) : array();
 
-		return $meta + array(
+		$table = $meta + array(
 			'kind' => $kind,
 			'table' => $type,
 			'exists' => $exists,
@@ -170,6 +222,18 @@ class raster_schema {
 			'orphans' => $orphans,
 			'rename_candidates' => $renames,
 		);
+		if (i18n::enabled() && $kind === 'page') {
+			$table['translated'] = array_keys(array_filter($fields, function ($f) { return !empty($f['translate']); }));
+			$table['missing_translations'] = $missing_translations;
+		}
+		return $table + array('kept' => $kept);
+	}
+
+	// the field a translation column is of (headline for headline__ro,
+	// name for name__pt_br), or null for any other column. __ is in no
+	// field's name (D3), so the shape alone says it.
+	static function translation_of($column) {
+		return preg_match('/^([a-z0-9]+(?:_[a-z0-9]+)*_?)__([a-z]{2,3}(?:_[a-z0-9]{2,8})?)$/', $column, $m) ? $m[1] : null;
 	}
 
 	// Creates missing tables and columns, each of its field's type, with the
@@ -203,12 +267,26 @@ class raster_schema {
 					$changes[] = $table['exists'] ? "added {$table['table']}.".implode(", {$table['table']}.", $table['missing']) : "created table {$table['table']}";
 					continue;
 				}
+				// multilingual: each translated field's column per language,
+				// and saved_lang; empty, so each language shows the default
+				// until it is translated
+				$translated = isset($table['translated']) ? $table['translated'] : array();
+				if ($table['exists'] && !$table['missing'] && !empty($table['missing_translations'])) {
+					$system = in_array('saved_lang', $table['missing_translations'], true) ? array('saved_lang' => 'text') : array();
+					cms_types::ensure($table['table'], $system, $translated);
+					foreach ($table['missing_translations'] as $column) $changes[] = "added {$table['table']}.$column";
+					continue;
+				}
 				if ($table['exists'] && !$table['missing']) continue;
 				if (!$table['exists'] && !$table['fields']) continue; // a page with collections only
 				$system = $table['kind'] === 'page' ? array('slug', 'updated_at') : array('slug', 'enabled', 'published_at', 'updated_at');
+				if (isset($table['translated'])) $system[] = 'saved_lang';
 				$types = array_intersect_key(cms_types::$system, array_flip($system));
 				foreach ($table['fields'] as $name => $field) $types[$name] = $field['type'];
-				cms_types::ensure($table['table'], $types);
+				cms_types::ensure($table['table'], $types, $translated);
+				if ($table['exists']) {
+					foreach ((array)(isset($table['missing_translations']) ? $table['missing_translations'] : array()) as $column) $changes[] = "added {$table['table']}.$column";
+				}
 				$bean = $table['exists'] ? cms_store::latest($table['table']) : null;
 				if (!$bean) {
 					$bean = R::dispense($table['table']);
