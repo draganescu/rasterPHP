@@ -146,10 +146,11 @@ Not everything belongs in the CMS. The coming week's opening hours can be worked
 ```php
 <?php
 class office {
-    // used as <!-- print.office.today -->: when we close today
+    // used as <!-- render.office.today -->: one row with when we close
+    // today, or none on Sundays, when we are closed
     function today() {
-        // on Saturdays we close early; on other days keep the template's time
-        return date('N') == 6 ? '14:00' : false;
+        if (date('N') == 7) return array();
+        return array(array('closes' => date('N') == 6 ? '14:00' : '17:00'));
     }
 
     // used as <!-- render.office.hours -->: the next seven days we are open
@@ -173,10 +174,10 @@ The rules for models:
 - A method used by `render` returns a list of rows, each row an array with named keys.
 - A model returns data (times, dates, flags), not words. The words stay in the template, where an editor or a translation can reach them.
 
-Add this under the list in `team.html`:
+Add this under the list in `team.html`. On a Sunday `today()` returns no rows, so the sentence isn't shown at all:
 
 ```html
-<p>Today we close at <!-- print.office.today -->17:00<!-- /print.office.today -->.</p>
+<!-- render.office.today --><p>Today we close at <!-- print.closes -->17:00<!-- /print.closes -->.</p><!-- /render.office.today -->
 <h2>Opening hours</h2>
 <table>
   <!-- render.office.hours -->
@@ -254,10 +255,10 @@ php bin/raster schema   # shows the new fields: title, heading, the team collect
 
 `contactmessage` is where the contact form's messages are kept. `lint` shows a warning about it until there is a staff page that lists the messages: nobody can read them otherwise. [Contact forms](Contact-Forms#the-staff-page) shows how to make one.
 
-Try breaking something on purpose. Change `print.office.today` to `print.office.todya` in both tags and run `lint`:
+Try breaking something on purpose. Change `render.office.today` to `render.office.todya` in both tags and run `lint`:
 
 ```
-application/views/default/team.html:11:26: error: Model 'office' has no public method 'todya' (application/models/office/office.php); did you mean 'today'?
+application/views/default/team.html:11:1: error: Model 'office' has no public method 'todya' (application/models/office/office.php); did you mean 'today'?
 ```
 
 In development, loading the page shows the same list instead of the page. Change it back.
@@ -266,7 +267,7 @@ In development, loading the page shows the same list instead of the page. Change
 
 - One HTML file per URL, with shared fragments (`res` and `dry`)
 - CMS page fields (`print.cms.x`) and a collection (`render.cms.x`) with detail pages
-- Your own model returning a string and a list
+- Your own model returning lists of rows, data the template words
 - A form whose rules and messages live in the HTML
 - An email written as a template
 

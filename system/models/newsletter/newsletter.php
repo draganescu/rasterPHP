@@ -254,9 +254,10 @@ class newsletter
 	public static $sent = 0;
 	public static $failures = array();
 
+	// the confirmed subscribers, as rows (sql/confirmed_subscribers.sql)
 	static function subscribers() {
 		self::connect();
-		return self::table_ready() ? R::find('subscriber', " status = 'confirmed' ORDER BY id ") : array();
+		return self::table_ready() ? database::instance('newsletter')->confirmed_subscribers() : array();
 	}
 
 	// the latest issue sent from this URL, or null
@@ -266,11 +267,12 @@ class newsletter
 		return R::findOne('newsletterissue', ' url = ? ORDER BY id DESC ', array((string)$url));
 	}
 
-	// the confirmed subscribers an issue has not reached yet (all of them for null)
+	// the confirmed subscribers an issue has not reached yet (all of them for
+	// null), as rows (sql/unreached_subscribers.sql)
 	static function recipients($issue) {
 		if (!$issue || !$issue->id || !cms_store::table_exists('newsletterdelivery')) return self::subscribers();
 		if (!self::table_ready()) return array();
-		return R::find('subscriber', " status = 'confirmed' AND email NOT IN (SELECT email FROM newsletterdelivery WHERE issue = ?) ORDER BY id ", array((int)$issue->id));
+		return database::instance('newsletter')->unreached_subscribers((int)$issue->id);
 	}
 
 	// Sends a prepared issue (see prepare_issue) to the confirmed subscribers
@@ -309,13 +311,13 @@ class newsletter
 		$mail::keep_open();
 		try {
 			foreach (self::recipients($issue) as $subscriber) {
-				if (!self::deliver($html, $subject, $subscriber->email, $subscriber->token)) {
-					self::$failures[$subscriber->email] = $mail::$last_error;
+				if (!self::deliver($html, $subject, $subscriber['email'], $subscriber['token'])) {
+					self::$failures[$subscriber['email']] = $mail::$last_error;
 					continue;
 				}
 				$delivery = R::dispense('newsletterdelivery');
 				$delivery->issue = (int)$issue->id;
-				$delivery->email = $subscriber->email;
+				$delivery->email = $subscriber['email'];
 				$delivery->sent_at = R::isoDateTime();
 				R::store($delivery);
 				self::$sent++;

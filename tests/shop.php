@@ -29,7 +29,9 @@ require_once BASE.'tools/inspector.php';
 $passed = 0; $failed = array(); $skipped = array();
 function test($name, $fn) {
 	global $passed, $failed, $skipped;
-	// RASTER_TEST_ONLY=<words> runs only the tests whose name has them
+	// RASTER_TEST_ONLY=<words> runs only the tests whose name has them. Some
+	// tests build on what earlier ones made (orders, the studio's login), so
+	// a filtered run can fail where the whole suite passes
 	if (getenv('RASTER_TEST_ONLY') && stripos($name, getenv('RASTER_TEST_ONLY')) === false) return;
 	try { $fn(); $passed++; echo '.'; }
 	catch (test_skipped $e) { $skipped[] = "$name: ".$e->getMessage(); echo 's'; }

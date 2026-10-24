@@ -11025,6 +11025,15 @@ test('P2.D: the starter\'s nav: site::nav() gives each link its address and stat
 	});
 });
 
+test('P2.D: newsletter\'s fixed queries are sql/ files and show in vocabulary (#127)', function () use ($root) {
+	$vocabulary = (new raster_inspector())->vocabulary();
+	foreach (array('confirmed_count', 'confirmed_subscribers', 'unreached_subscribers') as $query) {
+		check(database::query_file('newsletter', $query) !== null, "no $query.sql");
+		check(in_array($query, $vocabulary['models']['newsletter']['queries'], true), 'vocabulary: '.json_encode($vocabulary['models']['newsletter']['queries']));
+	}
+	check(strpos(file_get_contents("$root/system/models/newsletter/newsletter.php"), "R::find('subscriber'") === false, 'no confirmed-subscriber SQL left in newsletter.php');
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";
 foreach ($skipped as $skip) echo "  - $skip\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";

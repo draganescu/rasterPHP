@@ -2204,78 +2204,39 @@ URL alone says the content's language, so one URL is always one language.
 
 ## Multilingual sites
 
-With `multilingual` on and two or more `languages` (`i18n::enabled()`; the
-settings and the language API are under **i18n**), every language has its
-own addresses (**Multilingual URLs**) and page fields hold a value per
-language. Off, none of this happens: no columns, no prefixes, the same
-output as a one-language site.
+With `multilingual` on and two or more `languages` (`i18n::enabled()`),
+every language has its own addresses and page fields hold a value per
+language. Off, none of it happens: no columns, no prefixes, the same output
+as a one-language site. Each part is described where it lives:
+
+| What | Where |
+|---|---|
+| the settings and the language API (`i18n::current()`, `suffix()`, `with()`, …) | **i18n** |
+| addresses (`/ro/menu`), links, redirects, headers, cache | **Multilingual URLs** |
+| which fields are translated, columns (`headline__ro`), fallback, `update_page($…, $lang)` | **The CMS**: Translations, Page fields in a language |
+| translation columns in `schema`, kept translations | **The CMS**: Changing fields |
+| `untranslatable_text`, `missing_translation_key`, `html_lang_fixed` | **i18n**: Lint, multilingual on |
+| the editor on `/ro/…` and the editor's own language | **Editors and agents**: the in-page editor |
+| `set_languages`, `translation_status`, `read_strings`, `write_strings`, `lang` on the page tools | **Editors and agents**: Tools for languages |
 
 - **Words have one home each.** Words editors change are CMS fields
   (`print.cms.x`), with a value per language. Fixed words (a button, a
-  heading the site never changes) are dictionary keys,
+  label the site never changes) are dictionary keys,
   `print.i18n.common('menu')`. Words a model returns can't be translated,
   so a model returns data (addresses, states, flags) and the view words
   it: the starter's `site::nav()` gives each link its `url` and `state`
   and `_layout.html` says "Home"; the shop's order mail gets the flags
   `by_card` and `on_delivery` and words them with `print.if`; the demo's
-  opening hours are a `render.cms.hours` list.
-- **Which fields are translated** is read from where the markup prints
-  them. A `text` field printed as element content, or into `@alt`,
-  `@title`, `@placeholder`, `@aria-label` or `@content`, is translated.
-  Any other attribute (`@src`, `@href`, `@class`, `@data-*`) and every
-  other type (`int`, `number`, `date`, …) is shared: one value for every
-  language, so photos, links, prices and dates are set once. A field
-  printed in several places is translated only when every place is. The
-  content model marks each field `translate: true|false` (`check_view`
-  and `write_view` report it for new fields). This covers page fields and
-  `site_` fields; collection items and records keep one value for every
-  language for now.
-- **Columns.** A translated field `headline` keeps the default language
-  in `headline` and each other language in `headline__ro`: the code in
-  lowercase with `-` as `_` (`name__pt_br`, `name__id`). Code gets the name
-  from `cms_types::column('headline', 'ro')` and never builds it, and `__`
-  is reserved: a field or collection name with it is a `lint` error
-  (`double_underscore`). In development a field's first print adds its
-  columns; in production `schema --apply` does (`--check` counts a missing
-  one). Turning multilingual off keeps them: `schema` lists them as kept
-  translations, never as unused, and never drops them.
-- **Fallback.** An empty translation shows the default language's value
-  when the page is shown (`cms_store::localized($row, $type, $lang)`, for
-  display only); nothing is copied. A new language starts as the default
-  language's words and fills in as it is translated.
-- **Writing from code.** `cms_store::update_page($type, $slug, $values,
-  $allowed, $lang)` takes the base names (`headline`) and writes `$lang`'s
-  columns; without `$lang`, or with the default, it is as before. A shared
-  field written in another language is refused (`field_shared`): set it in
-  the default language. Every revision records `saved_lang`, and
-  `cms.page_saved` carries `lang`.
-- **The editor** edits the page's language: on `/ro/about` it changes the
-  Romanian, and a shared field changed there is refused (`field_shared`).
-  Its own words follow the person, not the page: the dock's language
-  picker stores `user.editor_lang`; without one, the browser's language,
-  then the default.
-- **Lint**, when on, also warns about words in markup outside any
-  annotation (`untranslatable_text`), a `print.i18n` key missing in some
-  language (`missing_translation_key`), and an `<html>` whose `lang` isn't
-  `print.i18n.language` (`html_lang_fixed`).
-- **Agents (MCP)**, making a site multilingual:
-  1. `set_languages` with `["en", "ro"]`, the default first, writes the two
-     settings to `config/the_app.php` and, in development, adds the
-     columns. One code sets `languages` with multilingual off; `[]` takes
-     both settings out. Nothing is dropped.
-  2. Words editors change become CMS fields, fixed words dictionary keys.
-  3. `translation_status` (`lang: "ro"`) lists what that language lacks:
-     page and `site` fields, and dictionary keys.
-  4. `update_page` with `lang` writes a page's translation; `write_strings`
-     a dictionary's (`read_strings` reads one, with the keys the views use
-     and the ones it lacks).
+  opening hours are a `render.cms.hours` list, content rather than code
+  (translated once collection items are, in a later release).
+- **Making a site multilingual, as an agent** (MCP):
+  1. `set_languages` with `["en", "ro"]`, the default first.
+  2. Words editors change become CMS fields, fixed words dictionary keys
+     (`check_view` and `write_view` say which new fields get a translation).
+  3. `translation_status` with `lang: "ro"` lists what Romanian lacks.
+  4. `update_page` with `lang` writes a page's translation, `write_strings`
+     a dictionary's.
   5. `render_url` with `/ro/…` shows the result.
-
-  `get_page` with `lang` gives each field as `{ value, default_value,
-  translated, shared }`, and `page_history` with `lang` the revisions saved
-  in it. `describe` and `site_overview` have a `languages` block
-  (`enabled`, `default`, `list`, `urls`, `missing`). `set_languages` and
-  `write_strings` refuse in production.
 
 ## Environments and cache
 
