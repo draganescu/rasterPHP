@@ -123,6 +123,8 @@ class mcp
 		clearstatcache();
 		$changed = false;
 		foreach (get_included_files() as $file) {
+			// a dictionary holds words, no class: read_strings reads it again
+			if (strpos($file, APPBASE.'i18n/') === 0) continue;
 			$stamp = @filemtime($file).' '.@filesize($file);
 			if (!isset($this->loaded[$file])) $this->loaded[$file] = $stamp;
 			elseif ($this->loaded[$file] !== $stamp) $changed = true;
@@ -206,7 +208,7 @@ class mcp
 					'protocolVersion' => in_array($requested, self::$protocol_versions) ? $requested : self::$protocol_versions[0],
 					'capabilities' => array('tools' => array('listChanged' => false)),
 					'serverInfo' => array('name' => 'raster', 'version' => trim((string)@file_get_contents(BASE.'VERSION'))),
-					'instructions' => 'This is a Raster site: views are plain HTML and the dynamic parts are HTML comments. Call describe first — it returns how URLs reach views, the content model the markup declares, and whether the templates lint clean. Before writing an annotation, check vocabulary (the models and their signatures) and annotations (the grammar); both are read from the code, so neither can be out of date. To change a template use check_view then write_view, which refuses markup that does not lint, and render_url to see the result. Content edits go through get_page/update_page and the item tools: page edits keep revisions, and fields that are not in the templates cannot be written — to add a field, edit the template. In production pages are cached for visitors who are not logged in: Raster\'s own tools clear that cache, but views, theme files, models, config or the database changed any other way do not, so call clear_cache after such a change. render_url never reads the cache, so a fresh render_url does not mean visitors see the change. The in-page editor only marks what the CMS prints: keep lists staff edit on render.cms.<name>, using its options for filters from the URL (field=?param), dates (date>=today) and sorting (order=date,time); for what those cannot say (totals, grouping by day, several types), the render method of a model returns its records through cms_records::listed($type, $rows), which keeps them editable; after changing such a page, call render_url with as="editor" to see that editing still works.',
+					'instructions' => 'This is a Raster site: views are plain HTML and the dynamic parts are HTML comments. Call describe first — it returns how URLs reach views, the content model the markup declares, and whether the templates lint clean. Before writing an annotation, check vocabulary (the models and their signatures) and annotations (the grammar); both are read from the code, so neither can be out of date. To change a template use check_view then write_view, which refuses markup that does not lint, and render_url to see the result. Content edits go through get_page/update_page and the item tools: page edits keep revisions, and fields that are not in the templates cannot be written — to add a field, edit the template. In production pages are cached for visitors who are not logged in: Raster\'s own tools clear that cache, but views, theme files, models, config or the database changed any other way do not, so call clear_cache after such a change. render_url never reads the cache, so a fresh render_url does not mean visitors see the change. The in-page editor only marks what the CMS prints: keep lists staff edit on render.cms.<name>, using its options for filters from the URL (field=?param), dates (date>=today) and sorting (order=date,time); for what those cannot say (totals, grouping by day, several types), the render method of a model returns its records through cms_records::listed($type, $rows), which keeps them editable; after changing such a page, call render_url with as="editor" to see that editing still works. read_asset and write_asset read and write the theme\'s CSS, JS and SVG files. Making a site multilingual: 1. set_languages, the default language first (["en", "ro"]). 2. Words editors change are CMS fields (print.cms.<name>); fixed interface words, such as a button\'s, are dictionary keys (print.i18n.<file>(\'key\')). 3. translation_status lists what a language lacks, with the default text. 4. Translate with update_page with lang, and write_strings. 5. Check with render_url /ro/….',
 				));
 			case 'ping':
 				return $this->result($id, new stdClass());
@@ -236,59 +238,72 @@ class mcp
 	// ##Tools
 
 	protected function tools() {
-		$page = array('type' => 'string', 'description' => 'The page: its URL path (/about), view name (about) or table (aboutpage). See site_overview.');
-		$collection = array('type' => 'string', 'description' => 'Collection name as used in the templates, e.g. news for render.cms.news');
-		$fields = array('type' => 'object', 'description' => 'Field names and their new values, as their types (site_overview lists the fields that aren\'t text): int 4, number 4.5, bool true, date 2026-10-05, datetime 2026-10-05 19:30, time 19:30; text may be HTML. Empty clears a field.', 'additionalProperties' => array('type' => array('string', 'number', 'boolean', 'null')));
+		$page = array('type' => 'string', 'description' => 'The page: /about, about or aboutpage; site for the site_* fields');
+		$collection = array('type' => 'string', 'description' => 'news for render.cms.news');
+		$fields = array('type' => 'object', 'description' => 'Field => value, as its type: 4, 4.5, true, 2026-10-05, 19:30; text may be HTML. Empty clears it.', 'additionalProperties' => array('type' => array('string', 'number', 'boolean', 'null')));
 		$id = array('type' => 'integer', 'description' => 'Item id');
-		$theme = array('type' => 'string', 'description' => 'The name of a folder directly under views/. Defaults to the site\'s theme');
+		$theme = array('type' => 'string', 'description' => 'A folder directly under views/; the site\'s theme by default');
 		$read_only = array('readOnlyHint' => true, 'openWorldHint' => false);
 		$write = array('readOnlyHint' => false, 'destructiveHint' => false, 'openWorldHint' => false);
 		$tool = function ($name, $description, $properties, $required, $annotations) {
 			return array(
 				'name' => $name,
 				'description' => $description,
-				'inputSchema' => array('type' => 'object', 'properties' => $properties ?: new stdClass(), 'required' => $required),
+				'inputSchema' => array('type' => 'object', 'properties' => $properties ?: new stdClass()) + ($required ? array('required' => $required) : array()),
 				'annotations' => $annotations,
 			);
 		};
+		$lang = array('type' => 'string', 'description' => 'A language code from the site\'s languages. Leave out for the default language.');
+		$dictionary = array('type' => 'string', 'pattern' => '^[a-z0-9_]+$', 'description' => 'Dictionary name: home for print.i18n.home(\'key\'). raster_editor is the editor\'s own words.');
+		$asset = array('type' => 'string', 'description' => 'Path inside the theme folder, e.g. css/style.css');
 		$tools = array(
-			$tool('site_overview', 'Lists the pages (URL, view, editable fields) and collections (fields, item count) of the site, and which models listen to which events. A short answer for content work; describe is the full one.', array(), array(), $read_only),
-			$tool('get_page', 'Current values of the editable fields of a page.', array('page' => $page), array('page'), $read_only),
-			$tool('update_page', 'Changes fields of a page. Stores a new revision; nothing is overwritten.', array('page' => $page, 'fields' => $fields), array('page', 'fields'), $write),
-			$tool('page_history', 'Previous revisions of a page, newest first.', array('page' => $page, 'limit' => array('type' => 'integer', 'default' => 10)), array('page'), $read_only),
+			$tool('site_overview', 'Pages (URL, view, fields), collections (fields, item count), languages and event listeners. describe is the full answer.', array(), array(), $read_only),
+			$tool('get_page', 'Current values of the editable fields of a page.', array('page' => $page, 'lang' => $lang), array('page'), $read_only),
+			$tool('update_page', 'Changes fields of a page. Stores a new revision; nothing is overwritten.', array('page' => $page, 'fields' => $fields, 'lang' => $lang), array('page', 'fields'), $write),
+			$tool('page_history', 'Previous revisions of a page, newest first.', array('page' => $page, 'limit' => array('type' => 'integer', 'default' => 10), 'lang' => $lang), array('page'), $read_only),
 			$tool('list_items', 'Items of a collection.', array('collection' => $collection, 'limit' => array('type' => 'integer', 'default' => 50), 'offset' => array('type' => 'integer', 'default' => 0)), array('collection'), $read_only),
 			$tool('get_item', 'One item of a collection.', array('collection' => $collection, 'id' => $id), array('collection', 'id'), $read_only),
 			$tool('create_item', 'Adds an item to a collection.', array('collection' => $collection, 'fields' => $fields), array('collection', 'fields'), $write),
 			$tool('update_item', 'Changes fields of a collection item.', array('collection' => $collection, 'id' => $id, 'fields' => $fields), array('collection', 'id', 'fields'), $write),
-			$tool('run_action', 'Runs an action a record type declares (ship an order, confirm a booking): what editors do to a record beyond changing a field. site_overview lists each type\'s actions. The model may refuse, and says why.',
+			$tool('run_action', 'Runs an action of a record type (confirm a booking); site_overview lists them. The model may refuse, saying why.',
 				array('collection' => $collection, 'id' => $id, 'action' => array('type' => 'string'), 'input' => array('type' => 'object', 'description' => 'Values the action takes, if any', 'additionalProperties' => array('type' => 'string'))), array('collection', 'id', 'action'), $write),
 			$tool('delete_item', 'Deletes a collection item.', array('collection' => $collection, 'id' => $id), array('collection', 'id'), array('readOnlyHint' => false, 'destructiveHint' => true, 'openWorldHint' => false)),
-			$tool('lint_templates', 'Checks every template for annotation errors (unclosed blocks, unknown models, typos) with file:line positions.', array(), array(), $read_only),
-			$tool('schema_status', 'Compares the content model in the templates with the database: missing columns, orphaned columns, likely renames.', array(), array(), $read_only),
+			$tool('lint_templates', 'Lints every template: problems with file:line.', array(), array(), $read_only),
+			$tool('schema_status', 'The content model against the database: missing and orphaned columns, renames.', array(), array(), $read_only),
+			// ##Languages (#200)
+			$tool('set_languages', 'Writes the languages to the site\'s config and adds translation columns. Not in production.',
+				array('languages' => array('type' => 'array', 'items' => array('type' => 'string', 'pattern' => '^[a-z]{2,3}(-[a-z0-9]{2,8})?$'), 'description' => 'Language codes, the default first. [] turns languages off.')), array('languages'), $write),
+			$tool('translation_status', 'What a language lacks: page, site and dictionary words, with the default text.',
+				array('lang' => $lang, 'limit' => array('type' => 'integer', 'default' => 200), 'offset' => array('type' => 'integer', 'default' => 0)), array('lang'), $read_only),
+			$tool('read_strings', 'A dictionary in a language, and the keys the views print.', array('file' => $dictionary, 'lang' => $lang), array('file', 'lang'), $read_only),
+			$tool('write_strings', 'Merges words into a dictionary; Raster writes the file. Not in production.',
+				array('file' => $dictionary, 'lang' => $lang, 'strings' => array('type' => 'object', 'additionalProperties' => array('type' => 'string'), 'description' => 'key => text; keys match ^[A-Za-z0-9_.-]+$')), array('file', 'lang', 'strings'), $write),
 			// ##Working on the site itself, not only its content
-			$tool('describe', 'The whole site in one answer: how URLs reach views, the pages and collections the markup declares, the settings that change behaviour, and whether the templates lint clean. Ask this first when you meet a Raster site. The names a template may call are left out unless you ask for the vocabulary section; the vocabulary tool gives the same.',
-				array('sections' => array('type' => 'array', 'items' => array('type' => 'string', 'enum' => raster_describe::sections()), 'description' => 'Limit the answer to these sections. All but vocabulary by default.')), array(), $read_only),
-			$tool('vocabulary', 'Every name a template is allowed to call: each model with its methods and their signatures, the named SQL queries, the events and who listens, and the names the CMS keeps for itself. Read from the code, never executed. Use it before writing an annotation instead of guessing a method name.',
+			$tool('describe', 'The whole site in one answer: URLs to views, pages and collections, languages, settings, lint. Ask this first. The vocabulary only when a section names it.',
+				array('sections' => array('type' => 'array', 'items' => array('type' => 'string', 'enum' => raster_describe::sections()), 'description' => 'Only these sections. All but vocabulary by default.')), array(), $read_only),
+			$tool('vocabulary', 'Every name a template may call (models, method signatures, SQL queries, events), read from the code. Use it instead of guessing.',
 				array(), array(), $read_only),
-			$tool('annotations', 'The annotation grammar as data: the exact spelling of each directive, what each keyword does, how arguments and attributes work, and how blocks nest. lint checks against this same description.',
+			$tool('annotations', 'The annotation grammar as data, which lint checks against.',
 				array(), array(), $read_only),
-			$tool('list_views', 'The view files of a theme, as paths relative to the theme folder.', array('theme' => $theme), array(), $read_only),
-			$tool('read_view', 'The source of one view.', array('view' => array('type' => 'string', 'description' => 'Path inside the theme folder, e.g. about.html or docs/setup.html'), 'theme' => $theme), array('view'), $read_only),
-			$tool('check_view', 'Lints a view that is not written yet: pass the markup and get back the problems, with line and column. Nothing is written. Use it on a draft before write_view.',
-				array('content' => array('type' => 'string', 'description' => 'The markup to check'), 'view' => array('type' => 'string', 'description' => 'The name it would be saved as, for the messages'), 'theme' => $theme), array('content'), $read_only),
-			$tool('write_view', 'Writes a view, but only if it lints clean: the file is left untouched when there are errors, and the problems come back instead. Warnings do not stop the write. Also reports what the change does to the content model.',
+			$tool('list_views', 'A theme\'s view files, as paths inside it.', array('theme' => $theme), array(), $read_only),
+			$tool('read_view', 'The source of one view.', array('view' => array('type' => 'string', 'description' => 'Path inside the theme folder, e.g. about.html'), 'theme' => $theme), array('view'), $read_only),
+			$tool('check_view', 'Lints markup without writing it: the problems, with line and column. Use it on a draft before write_view.',
+				array('content' => array('type' => 'string', 'description' => 'The markup to check'), 'view' => array('type' => 'string', 'description' => 'Its file name, for the messages'), 'theme' => $theme), array('content'), $read_only),
+			$tool('write_view', 'Writes a view if it lints clean (on errors the file is untouched and the problems come back; warnings don\'t stop it), and says what it does to the content model.',
 				array('view' => array('type' => 'string', 'description' => 'Path inside the theme folder, e.g. about.html'), 'content' => array('type' => 'string'), 'theme' => $theme), array('view', 'content'), $write),
-			$tool('render_url', 'Renders a URL of this site and returns the status and the HTML, without a web server. The fastest way to see whether a change works. Runs in a separate process, so a page that fails cannot take this server down. Pass as="editor" to see the page as staff do: the answer then says what the in-page editor can do there (editable fields, the lists it marks, which lists get a card for a new item). Check it after changing a page staff edit: a list built by a model instead of render.cms.<name> is invisible to the editor.',
+			$tool('read_asset', 'A theme\'s CSS, JS or SVG file.', array('path' => $asset, 'theme' => $theme), array('path'), $read_only),
+			$tool('write_asset', 'Writes a theme\'s CSS, JS or SVG (no scripts in SVG). Clears the page cache.', array('path' => $asset, 'content' => array('type' => 'string'), 'theme' => $theme), array('path', 'content'), $write),
+			$tool('render_url', 'Renders a URL (/ro/menu for a language) in a separate process: status and HTML. With as="editor" it says what the in-page editor can edit there; check that after changing a page staff edit.',
 				array(
-					'url' => array('type' => 'string', 'description' => 'A path on the site, with a query string if the page reads one, e.g. / or /menu/menu_item/flat-white or /bookings?stylist=ana'),
-					'as' => array('type' => 'string', 'description' => 'Render as this person: an account\'s email or username, or a role (editor, admin, member) for someone with that role. Leave out to render as a visitor. Not in production.'),
-					'limit' => array('type' => 'integer', 'description' => 'Characters of HTML to return, 20000 by default'),
+					'url' => array('type' => 'string', 'description' => 'A path, with its query, e.g. /menu or /bookings?stylist=ana'),
+					'as' => array('type' => 'string', 'description' => 'An account\'s email or username, or a role (editor, admin, member). Leave out for a visitor. Not in production.'),
+					'limit' => array('type' => 'integer', 'description' => 'HTML characters, 20000 by default'),
 				), array('url'), $read_only),
-			$tool('clear_cache', 'Throws the page cache away. In production, visitors who are not logged in get cached pages until it is cleared. Raster\'s own tools (write_view, update_page, create_item, update_item, delete_item, run_action) already clear it; call this after changing views, theme files, models or config with anything else, or after changing the database directly. render_url never reads the cache.',
+			$tool('clear_cache', 'Throws the page cache away. Raster\'s tools clear it; call this after changing files or the database any other way.',
 				array(), array(), array('readOnlyHint' => false, 'destructiveHint' => false, 'idempotentHint' => true, 'openWorldHint' => false)),
 		);
 		if (!self::may_write_views()) {
-			$tools = array_values(array_filter($tools, function ($t) { return $t['name'] !== 'write_view'; }));
+			$tools = array_values(array_filter($tools, function ($t) { return !in_array($t['name'], array('write_view', 'write_asset'), true); }));
 		}
 		return $tools;
 	}
@@ -400,7 +415,237 @@ class mcp
 	protected function fields_argument($arguments) {
 		$fields = $this->arg($arguments, 'fields');
 		if (!is_array($fields) || empty($fields)) throw new InvalidArgumentException("'fields' must be an object with at least one field");
+		// a translation is written by its field's name and a lang, never as its column
+		foreach (array_keys($fields) as $name) {
+			if (strpos((string)$name, '__') !== false) throw new InvalidArgumentException("'$name' is not a field: write '".substr((string)$name, 0, strpos((string)$name, '__'))."' by its own name, with lang for a translation");
+		}
 		return $fields;
+	}
+
+	// ##Languages (#200)
+
+	// the language a content tool is asked for, as the site lists it, or null
+	// when it is left out; refused when it isn't one of the site's languages
+	protected function lang_argument($arguments) {
+		$lang = $this->arg($arguments, 'lang', null);
+		if ($lang === null || $lang === '') return null;
+		if (!is_string($lang)) throw new InvalidArgumentException("'lang' is a language code, such as ".(i18n::default_language() ?: 'en'));
+		foreach (i18n::available() as $code) {
+			if (strtolower($code) !== strtolower((string)$lang)) continue;
+			if (i18n::is_default($code) || i18n::enabled()) return $code;
+		}
+		$shown = is_string($lang) ? $lang : json_encode($lang);
+		if (!i18n::enabled()) throw new InvalidArgumentException("'$shown': the content of this site is in one language (".(i18n::default_language() ?: 'none set').'). set_languages adds languages.');
+		throw new InvalidArgumentException("'$shown' is not a language of this site: ".implode(', ', i18n::available()));
+	}
+
+	// a translation language, refusing the default one
+	protected function translation_lang($arguments) {
+		$lang = $this->lang_argument($arguments);
+		if ($lang === null || i18n::is_default($lang)) {
+			throw new InvalidArgumentException("'lang' is a translation language (".implode(', ', array_slice(i18n::available(), 1)).'); '.(i18n::default_language() ?: 'the default').' is what the templates and the fields already hold');
+		}
+		return $lang;
+	}
+
+	// the fields of a page that have a translation per language: as the
+	// templates say (the content model's translate) or the database has them
+	protected function translated_fields($page) {
+		$fields = array();
+		foreach ($page['fields'] as $name => $field) {
+			if (!empty($field['translate'])) $fields[] = $name;
+		}
+		return array_values(array_unique(array_merge($fields, array_intersect(cms_types::translated($page['type']), array_keys($page['fields'])))));
+	}
+
+	protected function dev_only($tool) {
+		if (config::get('environment') === 'production') throw new InvalidArgumentException("$tool only works outside production: change a development copy of the site and deploy it");
+	}
+
+	protected function tool_set_languages($arguments) {
+		$this->dev_only('set_languages');
+		$codes = $this->arg($arguments, 'languages');
+		if (!is_array($codes) || ($codes && array_keys($codes) !== range(0, count($codes) - 1))) throw new InvalidArgumentException("'languages' is a list of language codes, the default first: [\"en\", \"ro\"]");
+		$languages = array();
+		foreach ($codes as $code) {
+			$code = is_string($code) ? strtolower(trim($code)) : '';
+			if (!preg_match('/^[a-z]{2,3}(-[a-z0-9]{2,8})?$/', $code)) throw new InvalidArgumentException('A language code is two or three letters, with a region if needed: en, ro, pt-br ('.json_encode($codes).')');
+			if (in_array($code, $languages, true)) throw new InvalidArgumentException("'$code' is listed twice");
+			$languages[] = $code;
+		}
+		$file = APPBASE.'config/the_app.php';
+		$source = is_file($file) ? file_get_contents($file) : "<?php\n";
+		$lines = $languages ? array(
+			'multilingual' => "config::set('multilingual')->to(".(count($languages) > 1 ? 'true' : 'false').');',
+			'languages' => "config::set('languages')->to(array('".implode("', '", $languages)."'));",
+		) : array('multilingual' => null, 'languages' => null);
+		$written = self::config_lines($source, $lines);
+		if ($written !== $source && file_put_contents($file, $written) === false) throw new RuntimeException('Could not write '.raster_inspector::short($file));
+		if (function_exists('opcache_invalidate')) @opcache_invalidate($file, true);
+		// this process goes on with them; the next call reads the file again
+		config::set('multilingual')->to(count($languages) > 1);
+		config::set('languages')->to($languages ?: null);
+		$added = 0;
+		if (i18n::enabled() && !database::$frozen) {
+			cms_store::connect();
+			foreach ($this->model()['pages'] as $page) {
+				if (!cms_store::table_exists($page['type'])) continue;
+				$before = count(cms_store::columns($page['type']));
+				$this->ensure_columns($page['type'], $page['fields'], array('slug', 'updated_at'));
+				$added += count(cms_store::columns($page['type'])) - $before;
+			}
+		}
+		$described = raster_describe::languages();
+		return array('enabled' => $described['enabled'], 'default' => $described['default'], 'languages' => $described['list'], 'urls' => $described['urls'], 'columns_added' => $added, 'missing' => $described['missing']);
+	}
+
+	// $source with each setting of $lines (name => its line, or null to
+	// remove it) written once: the first statement that sets it replaced,
+	// later ones removed, a missing one added at the end. Only statements
+	// of PHP count, so a commented-out example stays as it is.
+	static function config_lines($source, $lines) {
+		$tokens = token_get_all($source);
+		$found = array();
+		$offset = 0;
+		$spans = array();
+		foreach ($tokens as $i => $token) {
+			$text = is_array($token) ? $token[1] : $token;
+			if (is_array($token) && $token[0] === T_STRING && strtolower($text) === 'config') {
+				// config :: set ( 'name'
+				$next = array();
+				for ($j = $i + 1; $j < count($tokens) && count($next) < 4; $j++) {
+					if (is_array($tokens[$j]) && $tokens[$j][0] === T_WHITESPACE) continue;
+					$next[] = $tokens[$j];
+				}
+				$name = count($next) === 4 && is_array($next[0]) && $next[0][0] === T_DOUBLE_COLON && is_array($next[1]) && strtolower($next[1][1]) === 'set' && $next[2] === '(' && is_array($next[3]) && $next[3][0] === T_CONSTANT_ENCAPSED_STRING ? substr($next[3][1], 1, -1) : null;
+				if ($name !== null && array_key_exists($name, $lines)) {
+					// the statement ends at the ; outside every bracket
+					$depth = 0;
+					$end = $offset;
+					for ($j = $i; $j < count($tokens); $j++) {
+						$t = is_array($tokens[$j]) ? $tokens[$j][1] : $tokens[$j];
+						$end += strlen($t);
+						if (in_array($t, array('(', '[', '{'), true)) $depth++;
+						if (in_array($t, array(')', ']', '}'), true)) $depth--;
+						if ($t === ';' && $depth === 0) break;
+					}
+					$spans[] = array($name, $offset, $end);
+				}
+			}
+			$offset += strlen($text);
+		}
+		// from the last to the first, so the offsets stay right
+		$first = array();
+		foreach ($spans as $span) if (!isset($first[$span[0]])) $first[$span[0]] = $span[1];
+		foreach (array_reverse($spans) as $span) {
+			list($name, $start, $end) = $span;
+			$line = $first[$name] === $start ? $lines[$name] : null;
+			if ($line === null) {
+				// the whole line goes when nothing else is on it
+				$before = strrpos(substr($source, 0, $start), "\n");
+				$before = $before === false ? 0 : $before + 1;
+				$after = strpos($source, "\n", $end);
+				$after = $after === false ? strlen($source) : $after + 1;
+				if (trim(substr($source, $before, $start - $before)) === '' && trim(substr($source, $end, $after - $end)) === '') {
+					$start = $before;
+					$end = $after;
+				}
+				$source = substr($source, 0, $start).substr($source, $end);
+			} else {
+				$source = substr($source, 0, $start).$line.substr($source, $end);
+			}
+			$found[$name] = true;
+		}
+		$add = '';
+		foreach ($lines as $name => $line) {
+			if ($line !== null && !isset($found[$name])) $add .= $line."\n";
+		}
+		if ($add === '') return $source;
+		// before a closing tag the file ends with
+		if (preg_match('/\?>\s*$/', $source, $m, PREG_OFFSET_CAPTURE)) {
+			return rtrim(substr($source, 0, $m[0][1]))."\n".$add.substr($source, $m[0][1]);
+		}
+		return rtrim($source)."\n".$add;
+	}
+
+	protected function tool_translation_status($arguments) {
+		$lang = $this->translation_lang($arguments);
+		$limit = max(1, (int)$this->arg($arguments, 'limit', 200));
+		$offset = max(0, (int)$this->arg($arguments, 'offset', 0));
+		$rows = raster_describe::translations($lang);
+		$missing = array();
+		$done = 0;
+		foreach ($rows as $row) {
+			if ($row['done']) { $done++; continue; }
+			$missing[] = array('kind' => $row['kind'], 'where' => $row['where'], 'field' => $row['field'], 'default_value' => mb_substr($row['default_value'], 0, 300), 'length' => mb_strlen($row['default_value']), 'shared' => false);
+		}
+		return array('lang' => $lang, 'missing' => array_slice($missing, $offset, $limit), 'total' => count($missing), 'done' => $done);
+	}
+
+	// a dictionary's name and language: raster_editor's may be any language
+	// the editor has words in, the others one of the site's
+	protected function dictionary_argument($arguments) {
+		$file = $this->arg($arguments, 'file');
+		if (!is_string($file) || !preg_match('/^[a-z0-9_]+$/', $file)) throw new InvalidArgumentException("'file' is a dictionary name: lowercase letters, digits and _ (home for print.i18n.home('key'))");
+		$lang = $this->arg($arguments, 'lang');
+		foreach (i18n::available() as $code) {
+			if (is_string($lang) && strtolower($code) === strtolower($lang)) return array($file, $code);
+		}
+		if ($file === 'raster_editor' && is_string($lang) && in_array(strtolower($lang), self::editor_languages(), true)) return array($file, strtolower($lang));
+		throw new InvalidArgumentException("'lang' is one of the site's languages: ".(implode(', ', i18n::available()) ?: 'none yet; set_languages adds them'));
+	}
+
+	static function editor_languages() {
+		$languages = array('en');
+		foreach (glob(BASE.'models/cms/editor/lang/*.php') ?: array() as $file) $languages[] = basename($file, '.php');
+		return $languages;
+	}
+
+	// the keys a dictionary is for: what the views print, or for
+	// raster_editor the editor's own words
+	protected function used_keys($file) {
+		if ($file === 'raster_editor') {
+			$keys = array();
+			foreach (glob(BASE.'models/cms/editor/lang/*.php') ?: array() as $words) $keys = array_merge($keys, array_keys((array)raster_describe::dictionary_file($words)));
+			return array_values(array_unique($keys));
+		}
+		$used = raster_describe::strings_used(new raster_inspector());
+		return isset($used[$file]) ? array_map('strval', array_keys($used[$file])) : array();
+	}
+
+	protected function tool_read_strings($arguments) {
+		list($file, $lang) = $this->dictionary_argument($arguments);
+		$strings = raster_describe::dictionary($file, $lang);
+		$used = $this->used_keys($file);
+		// the default language is the templates' own text; the editor has its words
+		$missing = $file === 'raster_editor' || i18n::is_default($lang) ? array() : array_values(array_filter($used, function ($key) use ($strings) { return !isset($strings[$key]) || trim((string)$strings[$key]) === ''; }));
+		return array('file' => $file, 'lang' => $lang, 'strings' => (object)$strings, 'used_keys' => $used, 'missing_keys' => $missing);
+	}
+
+	protected function tool_write_strings($arguments) {
+		$this->dev_only('write_strings');
+		list($file, $lang) = $this->dictionary_argument($arguments);
+		$strings = $this->arg($arguments, 'strings');
+		if (!is_array($strings) || !$strings || array_keys($strings) === range(0, count($strings) - 1)) throw new InvalidArgumentException("'strings' is an object of key => text, with at least one key");
+		foreach ($strings as $key => $value) {
+			if (!preg_match('/^[A-Za-z0-9_.-]+$/', (string)$key)) throw new InvalidArgumentException("'$key' is not a key: letters, digits, _, . and -");
+			if (!is_string($value)) throw new InvalidArgumentException("The text of '$key' is a string");
+		}
+		$dir = APPBASE.'i18n/'.$lang;
+		$path = "$dir/$file.php";
+		if (!is_dir($dir) && !@mkdir($dir, 0775, true)) throw new RuntimeException('Could not make '.raster_inspector::short($dir));
+		$merged = array_merge(raster_describe::dictionary($file, $lang), array_map('strval', $strings));
+		// Raster writes the PHP: the agent's words are values, never code
+		if (file_put_contents($path, '<?php'."\n".'return '.var_export($merged, true).";\n", LOCK_EX) === false) throw new RuntimeException('Could not write '.raster_inspector::short($path));
+		if (function_exists('opcache_invalidate')) @opcache_invalidate($path, true);
+		util::content_changed();
+		$used = $this->used_keys($file);
+		$unused = array_values(array_filter(array_map('strval', array_keys($strings)), function ($key) use ($used, $file) {
+			// an action's or a problem's words are the site's own
+			if ($file === 'raster_editor' && preg_match('/^(action|problem)_/', $key)) return false;
+			return !in_array($key, $used, true);
+		}));
+		return array('written' => count($strings), 'unused_keys' => $unused);
 	}
 
 	protected function tool_site_overview($arguments) {
@@ -434,21 +679,31 @@ class mcp
 			$listeners = array_values(array_filter($listeners, function ($l) { return !preg_match('/^(controller|log)\./', $l); }));
 			if ($listeners) $events[$event] = $listeners;
 		}
-		return array('base_url' => config::get('base_uri'), 'environment' => config::get('environment'), 'pages' => $pages, 'collections' => $collections, 'events' => $events);
+		return array('base_url' => config::get('base_uri'), 'environment' => config::get('environment'), 'languages' => raster_describe::languages(), 'pages' => $pages, 'collections' => $collections, 'events' => $events);
 	}
 
 	protected function tool_get_page($arguments) {
 		cms_store::connect();
 		$page = $this->find_page($this->arg($arguments, 'page'));
+		$lang = $this->lang_argument($arguments);
+		if ($lang !== null && i18n::is_default($lang)) $lang = null;
 		$stored = cms_store::page_values($page['type']);
+		$translated = $lang === null ? array() : $this->translated_fields($page);
 		$fields = array();
 		foreach ($page['fields'] as $name => $field) {
 			$has = $stored && array_key_exists($name, $stored['fields']) && $stored['fields'][$name] !== null;
 			$fields[$name] = $has ? $stored['fields'][$name] : $field['default'];
+			if ($lang === null) continue;
+			// in a language: its own value next to the default one's
+			$shared = !in_array($name, $translated, true);
+			$column = cms_types::column($name, $lang);
+			$value = $shared ? $fields[$name] : ($stored && isset($stored['fields'][$column]) ? (string)$stored['fields'][$column] : '');
+			$fields[$name] = array('value' => $value, 'default_value' => $fields[$name], 'translated' => !$shared && trim($value) !== '', 'shared' => $shared);
 		}
 		return array(
 			'url' => $page['url'],
 			'view' => $page['view'],
+		) + ($lang === null ? array() : array('lang' => $lang)) + array(
 			'revision' => $stored ? $stored['revision'] : null,
 			'updated_at' => $stored ? $stored['updated_at'] : null,
 			'fields' => $fields,
@@ -459,21 +714,47 @@ class mcp
 		cms_store::connect();
 		$page = $this->find_page($this->arg($arguments, 'page'));
 		$fields = $this->fields_argument($arguments);
-		// a page that was never rendered starts from the template defaults
+		$lang = $this->lang_argument($arguments);
+		if ($lang !== null && i18n::is_default($lang)) $lang = null;
+		if ($lang !== null) {
+			$translated = $this->translated_fields($page);
+			foreach (array_keys($fields) as $name) {
+				if (isset($page['fields'][$name]) && !in_array($name, $translated, true)) throw new InvalidArgumentException("'$name' is shared by every language; update it without lang");
+			}
+		}
+		$this->ensure_columns($page['type'], $page['fields'], array('slug', 'updated_at'));
+		// a page that was never rendered starts from the template defaults,
+		// which are the default language's
 		if (!cms_store::latest($page['type'])) {
 			$defaults = array();
 			foreach ($page['fields'] as $name => $field) $defaults[$name] = trim($field['default']);
-			$fields = $fields + $defaults;
+			if ($lang === null) $fields = $fields + $defaults;
+			else cms_store::update_page($page['type'], $page['slug'], $defaults, array_keys($page['fields']));
 		}
-		$this->ensure_columns($page['type'], $page['fields'], array('slug', 'updated_at'));
-		cms_store::update_page($page['type'], $page['slug'], $fields, array_keys($page['fields']));
-		return $this->tool_get_page(array('page' => $page['type']));
+		try {
+			cms_store::update_page($page['type'], $page['slug'], $fields, array_keys($page['fields']), $lang);
+		} catch (cms_refused $e) {
+			if (!in_array('field_shared', $e->problems, true)) throw $e;
+			// the templates translate it, but a frozen database has no column for it yet
+			$missing = array_values(array_diff(array_keys($fields), cms_types::translated($page['type'])));
+			throw new InvalidArgumentException("The database has no translation column for '".($missing ? $missing[0] : '')."' yet: run `php bin/raster schema --apply` on the server");
+		}
+		return $this->tool_get_page(array('page' => $page['type']) + ($lang === null ? array() : array('lang' => $lang)));
 	}
 
 	protected function tool_page_history($arguments) {
 		cms_store::connect();
 		$page = $this->find_page($this->arg($arguments, 'page'));
-		return array('url' => $page['url'], 'revisions' => cms_store::page_history($page['type'], (int)$this->arg($arguments, 'limit', 10)));
+		$lang = $this->lang_argument($arguments);
+		$limit = (int)$this->arg($arguments, 'limit', 10);
+		if ($lang === null) return array('url' => $page['url'], 'revisions' => cms_store::page_history($page['type'], $limit));
+		// the revisions saved in that language; older ones, saved before
+		// languages, count as the default language's
+		$revisions = array_values(array_filter(cms_store::page_history($page['type'], max(200, $limit)), function ($revision) use ($lang) {
+			$saved = isset($revision['saved_lang']) ? (string)$revision['saved_lang'] : '';
+			return strtolower($saved) === strtolower($lang) || ($saved === '' && i18n::is_default($lang));
+		}));
+		return array('url' => $page['url'], 'lang' => $lang, 'revisions' => array_slice($revisions, 0, max(1, $limit)));
 	}
 
 	protected function tool_list_items($arguments) {
@@ -499,8 +780,13 @@ class mcp
 	protected function ensure_columns($table, $fields, $system) {
 		if (database::$frozen) return;
 		$types = array_intersect_key(cms_types::$system, array_flip($system));
-		foreach ($fields as $name => $field) $types[$name] = $field['type'];
-		cms_types::ensure($table, $types);
+		$translated = array();
+		foreach ($fields as $name => $field) {
+			$types[$name] = $field['type'];
+			// and a column per language for the fields the templates translate
+			if (!empty($field['translate'])) $translated[] = $name;
+		}
+		cms_types::ensure($table, $types, $translated);
 	}
 
 	protected function tool_create_item($arguments) {
@@ -657,7 +943,33 @@ class mcp
 		}
 		$problems = $inspector->lint_source($content, $name, $inspector->theme);
 		$errors = count(array_filter($problems, function ($p) { return $p['severity'] === 'error'; }));
-		return array('view' => $name, 'errors' => $errors, 'warnings' => count($problems) - $errors, 'problems' => $problems);
+		return array('view' => $name, 'errors' => $errors, 'warnings' => count($problems) - $errors, 'problems' => $problems) + $this->new_fields($inspector, $content, $name);
+	}
+
+	// On a multilingual site, the fields markup declares that the content
+	// model doesn't have yet, each with whether it gets a translation per
+	// language (translate) or is shared by all of them, so an agent sees
+	// before writing that a phone number is shared and a heading translated.
+	protected function new_fields($inspector, $content, $view) {
+		if (!i18n::enabled() || strpos($view, "\0") !== false) return array();
+		$view = ltrim(str_replace('\\', '/', $view), '/');
+		$model = $inspector->content_model();
+		$known = array();
+		foreach ($model['pages'] as $page) {
+			if ($page['view'] === '*' || ($page['view'] === $view && !isset($page['theme']))) $known = array_merge($known, array_keys($page['fields']));
+		}
+		$draft = $inspector->fields_in($content, $view);
+		$new = array();
+		foreach ($draft['fields'] as $name => $field) {
+			if (!in_array($name, $known, true)) $new[] = array('field' => $name, 'translate' => !empty($field['translate']));
+		}
+		foreach ($draft['collections'] as $name => $collection) {
+			$have = isset($model['collections'][$name]) ? $model['collections'][$name]['fields'] : array();
+			foreach ($collection['fields'] as $field => $info) {
+				if (!isset($have[$field])) $new[] = array('field' => $field, 'collection' => $name, 'translate' => !empty($info['translate']));
+			}
+		}
+		return array('new_fields' => $new);
 	}
 
 	protected function tool_write_view($arguments) {
@@ -680,6 +992,8 @@ class mcp
 			);
 		}
 		$existed = is_file($path);
+		// what it adds to the content model, read before the file changes it
+		$new = $this->new_fields($inspector, $content, $view);
 		if (file_put_contents($path, $content) === false) {
 			throw new RuntimeException('Could not write '.raster_inspector::short($path));
 		}
@@ -687,7 +1001,7 @@ class mcp
 		$result = array(
 			'written' => true, 'view' => $view, 'created' => !$existed,
 			'bytes' => strlen($content), 'warnings' => count($problems), 'problems' => $problems,
-		);
+		) + $new;
 		// a new print.cms or render.cms annotation declares a field: say so
 		try {
 			$status = (new raster_schema())->status();
@@ -699,6 +1013,74 @@ class mcp
 			$result['schema'] = array('error' => $e->getMessage());
 		}
 		return $result;
+	}
+
+	// ##Theme files that aren't views (#159)
+	//
+	// A stylesheet, a script or an SVG picture, with the same checks as a
+	// view: inside the theme, no link out. Like write_view, write_asset is
+	// offered over HTTP only with mcp_write_views: a script runs in every
+	// visitor's browser, as a template runs on the server.
+
+	static $asset_extensions = array('css', 'js', 'svg');
+
+	protected function asset_file($inspector, $path) {
+		$path = ltrim(str_replace('\\', '/', (string)$path), '/');
+		if ($path === '' || strpos($path, "\0") !== false) throw new InvalidArgumentException("'$path' is not a name inside the theme folder");
+		if (!preg_match('/\.([a-z0-9]+)$/', $path, $m) || !in_array($m[1], self::$asset_extensions, true)) throw new InvalidArgumentException('An asset ends in .'.implode(', .', self::$asset_extensions).'; views go through read_view and write_view');
+		$file = $inspector->theme_dir().'/'.$path;
+		if (!is_dir(dirname($file))) throw new InvalidArgumentException('There is no folder '.raster_inspector::short(dirname($file)).' to put it in');
+		if (!$this->in_theme($inspector, $file)) throw new InvalidArgumentException("'$path' is outside the theme folder, or links out of it");
+		return array($path, $file);
+	}
+
+	protected function tool_read_asset($arguments) {
+		$inspector = $this->inspector_for($arguments);
+		list($path, $file) = $this->asset_file($inspector, $this->arg($arguments, 'path'));
+		if (!is_file($file)) throw new InvalidArgumentException("There is no '$path' in theme '{$inspector->theme}'");
+		$content = file_get_contents($file);
+		return array('path' => $path, 'theme' => $inspector->theme, 'bytes' => strlen($content), 'content' => $content);
+	}
+
+	protected function tool_write_asset($arguments) {
+		if (!self::may_write_views()) {
+			throw new RuntimeException('Writing theme files is off over HTTP: a script runs in every visitor\'s browser. Set config mcp_write_views to true to allow it, or use MCP over stdio on the machine with the files.');
+		}
+		$inspector = $this->inspector_for($arguments);
+		list($path, $file) = $this->asset_file($inspector, $this->arg($arguments, 'path'));
+		$content = $this->arg($arguments, 'content');
+		if (!is_string($content)) throw new InvalidArgumentException("'content' is the file's text");
+		if (substr($path, -4) === '.svg') {
+			$problem = self::svg_problem($content);
+			if ($problem !== null) throw new InvalidArgumentException("The SVG was not written: $problem");
+		}
+		$existed = is_file($file);
+		if (file_put_contents($file, $content) === false) throw new RuntimeException('Could not write '.raster_inspector::short($file));
+		util::content_changed();
+		return array('written' => true, 'path' => $path, 'created' => !$existed, 'bytes' => strlen($content));
+	}
+
+	// why an SVG may not be a theme's picture, or null: it must be XML,
+	// and run nothing when it is opened on its own (no script element, no
+	// on* attribute, no javascript: link)
+	static function svg_problem($svg) {
+		if (!function_exists('xml_parser_create')) return 'checking it needs PHP\'s xml extension';
+		if (stripos($svg, '<!ENTITY') !== false) return 'it declares entities';
+		$problem = null;
+		$parser = xml_parser_create('UTF-8');
+		xml_parser_set_option($parser, XML_OPTION_CASE_FOLDING, 0);
+		xml_set_element_handler($parser, function ($parser, $name, $attributes) use (&$problem) {
+			$local = strtolower(substr((string)strrchr(':'.$name, ':'), 1));
+			if ($local === 'script') $problem = $problem ?: 'it has a <script> element';
+			foreach ($attributes as $attribute => $value) {
+				$attribute = strtolower(substr((string)strrchr(':'.$attribute, ':'), 1));
+				if (strpos($attribute, 'on') === 0) $problem = $problem ?: "it has an event attribute ($attribute)";
+				if (preg_match('/^\s*javascript:/i', preg_replace('/[\x00-\x20]+/', '', (string)$value))) $problem = $problem ?: "it links to javascript: ($attribute)";
+			}
+		}, function ($parser, $name) {});
+		$parsed = xml_parse($parser, $svg, true);
+		if (!$parsed) $problem = 'it is not well-formed XML ('.xml_error_string(xml_get_error_code($parser)).' on line '.xml_get_current_line_number($parser).')';
+		return $problem;
 	}
 
 	protected function tool_clear_cache($arguments) {
@@ -750,6 +1132,11 @@ class mcp
 			// the summary line is ours, not an error
 			$errors = trim(preg_replace('/^In-page editor.*?(?=^\S|\z)/ms', '', $errors));
 			$answer['editor'] = cms_editor::summary($html);
+			// the language the editor saves in: the page's own (/ro/menu is ro)
+			if (i18n::enabled() && preg_match('#<script id="raster-editor-config" type="application/json">(.*?)</script>#s', $html, $m)) {
+				$config = json_decode($m[1], true);
+				$answer['editing_lang'] = isset($config['lang']) ? $config['lang'] : null;
+			}
 		}
 		return $answer + array(
 			'bytes' => strlen($html),
