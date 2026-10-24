@@ -326,12 +326,14 @@ class cms_types {
 	// in the order $lang's people write dates (i18n::date_order, #135 D14),
 	// so 5/10/2026 is 5 October on a site in Romanian. $lang null means
 	// i18n::current(). Without languages, read as timestamp() reads it,
-	// as always. Y-m-d is read in every language. Only d/m/Y with slashes
-	// needs turning round: PHP reads 5.10.2026 and 5-10-2026 day first.
+	// as always. Y-m-d is read in every language. Only d/m/Y (or d/m/y)
+	// with slashes needs turning round: PHP reads 5.10.2026 day first.
 	static function parse_date($value, $lang = null) {
-		if (is_string($value) && i18n::date_order($lang) === 'dmy' && preg_match('#^\s*(\d{1,2})/(\d{1,2})/(\d{4})(\s.*)?$#s', $value, $m)) {
-			if (!checkdate((int)$m[2], (int)$m[1], (int)$m[3])) return null;
-			return self::timestamp(sprintf('%04d-%02d-%02d', $m[3], $m[2], $m[1]).(isset($m[4]) ? $m[4] : ''));
+		if (is_string($value) && i18n::date_order($lang) === 'dmy' && preg_match('#^\s*(\d{1,2})/(\d{1,2})/(\d{4}|\d{2})(\s.*)?$#s', $value, $m)) {
+			// a two-digit year as PHP reads one: 00-69 is 2000-2069, 70-99 1970-1999
+			$year = strlen($m[3]) === 2 ? (int)$m[3] + ((int)$m[3] < 70 ? 2000 : 1900) : (int)$m[3];
+			if (!checkdate((int)$m[2], (int)$m[1], $year)) return null;
+			return self::timestamp(sprintf('%04d-%02d-%02d', $year, $m[2], $m[1]).(isset($m[4]) ? $m[4] : ''));
 		}
 		return self::timestamp($value);
 	}

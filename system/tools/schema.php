@@ -144,9 +144,9 @@ class raster_schema {
 			if (in_array($column, cms_store::$system_fields)) continue;
 			if ($kind === 'record' && in_array($column, array('created_at', 'owner'))) continue;
 			if (array_key_exists($column, $fields)) continue;
-			// a record's stored language (#200 D13), declared only on: kept
-			// when multilingual is off again, like a translation
-			if ($kind === 'record' && $column === 'lang') {
+			// a bundled record's stored language (#200 D13), declared only
+			// on: kept when multilingual is off again, like a translation
+			if ($kind === 'record' && $column === 'lang' && !i18n::enabled() && in_array($type, array('bookingdata', 'rsvpdata', 'contactmessagedata', 'orderdata'), true)) {
 				$kept[] = $column;
 				continue;
 			}

@@ -285,12 +285,11 @@ class raster_describe
 	// in the site's theme and the themes its routes serve views from
 	static function strings_used($inspector) {
 		$used = array();
-		$themes = array_unique(array_merge(array($inspector->theme), array_column($inspector->routes(), 'theme')));
-		foreach ($themes as $theme) {
-			if (!is_dir($inspector->theme_dir($theme))) continue;
-			foreach ($inspector->views($theme) as $view) {
-				list($blocks) = raster_inspector::blocks(file_get_contents($inspector->theme_dir($theme).'/'.$view));
-				self::collect_strings($blocks, $used);
+		foreach (self::strings_by_view($inspector) as $found) {
+			foreach ($found[1] as $file => $keys) {
+				foreach ($keys as $key => $default) {
+					if (!isset($used[$file][$key]) || $used[$file][$key] === '') $used[$file][$key] = $default;
+				}
 			}
 		}
 		ksort($used);
@@ -303,19 +302,13 @@ class raster_describe
 	static function strings_in_emails($inspector) {
 		$emails = array();
 		$elsewhere = array();
-		$themes = array_unique(array_merge(array($inspector->theme), array_column($inspector->routes(), 'theme')));
-		foreach ($themes as $theme) {
-			if (!is_dir($inspector->theme_dir($theme))) continue;
-			foreach ($inspector->views($theme) as $view) {
-				$used = array();
-				list($blocks) = raster_inspector::blocks(file_get_contents($inspector->theme_dir($theme).'/'.$view));
-				self::collect_strings($blocks, $used);
-				$email = preg_match('#(^|/)_email/#', $view) ? preg_replace('/\.[a-z]+$/', '', $view) : null;
-				foreach ($used as $file => $keys) {
-					foreach (array_keys($keys) as $key) {
-						if ($email === null) $elsewhere[$file][$key] = true;
-						elseif (!isset($emails[$file][$key]) || strcmp($email, $emails[$file][$key]) < 0) $emails[$file][$key] = $email;
-					}
+		foreach (self::strings_by_view($inspector) as $found) {
+			list($view, $used) = $found;
+			$email = preg_match('#(^|/)_email/#', $view) ? preg_replace('/\.[a-z]+$/', '', $view) : null;
+			foreach ($used as $file => $keys) {
+				foreach (array_keys($keys) as $key) {
+					if ($email === null) $elsewhere[$file][$key] = true;
+					elseif (!isset($emails[$file][$key]) || strcmp($email, $emails[$file][$key]) < 0) $emails[$file][$key] = $email;
 				}
 			}
 		}
@@ -323,6 +316,23 @@ class raster_describe
 			$emails[$file] = isset($elsewhere[$file]) ? array_diff_key($keys, $elsewhere[$file]) : $keys;
 		}
 		return $emails;
+	}
+
+	// each view of the site's theme and its routes' themes, with what it
+	// prints of the dictionaries: array(view, file => key => mock-up text)
+	static protected function strings_by_view($inspector) {
+		$views = array();
+		$themes = array_unique(array_merge(array($inspector->theme), array_column($inspector->routes(), 'theme')));
+		foreach ($themes as $theme) {
+			if (!is_dir($inspector->theme_dir($theme))) continue;
+			foreach ($inspector->views($theme) as $view) {
+				$used = array();
+				list($blocks) = raster_inspector::blocks(file_get_contents($inspector->theme_dir($theme).'/'.$view));
+				self::collect_strings($blocks, $used);
+				$views[] = array($view, $used);
+			}
+		}
+		return $views;
 	}
 
 	static protected function collect_strings($blocks, &$used) {

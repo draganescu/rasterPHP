@@ -776,7 +776,8 @@ mock-up is stored only when the collection's table is made.
   - A date typed with slashes follows the language once `languages` is set
     (#135, D14), whether or not `multilingual` is on: day first for every
     language but `en-us`, so `5/10/2026` is 5 October on an `en`+`ro` site
-    and `31/02/2026` is refused. `en-us` reads it month first. `2026-10-05`,
+    and `31/02/2026` is refused; `5/10/26` too, its century as PHP reads
+    one. `en-us` reads it month first. `2026-10-05`,
     `5.10.2026` and words (`10 May 2026`, `today`) read the same in every
     language. With `languages` unset nothing changed: `5/10/2026` is 10 May.
     `cms_types::parse_date($value, $lang)` does it (null `$lang`: the
@@ -1337,7 +1338,11 @@ bundled model declares none of its types, and `lint` warns.
     `--lang` names another; `--subject` is every language's; `--dry-run`
     prints a line per language. A language whose page doesn't render or has
     no `<title>` is an error for it alone: the others still go, and the exit
-    status is 1. In code, `newsletter::recipients($issue, $lang)` and the
+    status is 1. A language that already reached everyone is skipped, so
+    running it again after one failed sends only what is left (exit 1 only
+    when every language was sent before). `RASTER_URL` must be the site's
+    own address: on a language's domain two languages share one address,
+    and send refuses. In code, `newsletter::recipients($issue, $lang)` and the
     `$lang` of `send_issue()`; a null `$lang`, or off, means everyone.
   - From code: `newsletter::send_issue($url, $html, $subject, $again)`
     sends a page rendered with `RASTER_SENDING=1` and passed through
@@ -2185,8 +2190,9 @@ field every page shares, `print.cms.site_name`), else its host.
   `shop_staff_email`) in the default language, with the guest's as
   `print.self.lang` in `booking_new`, `rsvp_new` and `contact_received`.
   A frozen database without the column skips it until `schema --apply`
-  (accounts and subscribers; a record type's column is needed, as for any
-  new field). Off again, a record table's `lang` is kept, not an orphan.
+  (accounts, subscribers, bookings, replies, contact messages and orders
+  all still go in; their mail is then in the default language). Off again,
+  a record table's `lang` is kept, not an orphan.
 - Many mails at once: `mail::keep_open()` keeps the SMTP connection for the
   mails that follow (`RSET` between them, a new connection if the server
   dropped it) until `mail::close()`. `mail::destination()` is the transport

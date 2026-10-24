@@ -866,6 +866,10 @@ class cms_store {
 				cms_records::$writer = $writer;
 			}
 		}
+		// a record's stored language (#200 D13) on a frozen database whose
+		// column schema --apply hasn't made yet: left out, so the booking,
+		// reply or order still goes in (its mail is then in the default)
+		if ($info && database::$frozen && isset($bean->lang) && !array_key_exists('lang', self::columns($type))) unset($bean->lang);
 		// the language the save changed: the default's code for a save
 		// without one. Only while multilingual and once the table has the
 		// column, so off a save stores what it always did

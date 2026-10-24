@@ -5253,6 +5253,36 @@ $only = getenv('RASTER_TEST_ONLY');
 $missing = array_diff($ids[1], array_keys($covered));
 $unknown = array_diff(array_keys($covered), $ids[1]);
 if ($unknown) $failed[] = 'tests name features that demo/README.md does not list: '.implode(', ', $unknown);
+// ## P4 review: the café's welcome off
+
+test('C41', 'P4 review: off, the café\'s welcome email is what it was, byte for byte (D13)', function () {
+	$shape = function () {
+		$raw = preg_replace('/^(Date|Message-ID): .*$/m', '$1: x', last_mail()['raw']);
+		return preg_replace('/raster-[0-9a-f]{16}/', 'raster-x', $raw);
+	};
+	controller::model('cafe');
+	mail::send_view('_email/welcome', 'eve@example.com', array('name' => 'Eve'));
+	$then = $shape();
+	$off = array(
+		'none' => array('multilingual' => false, 'languages' => array()),
+		'languages, switch off' => array('multilingual' => false, 'languages' => array('en', 'ro')),
+		'one language' => array('multilingual' => true, 'languages' => array('en')),
+	);
+	foreach ($off as $what => $setting) {
+		$kept = array();
+		foreach ($setting as $name => $value) {
+			$kept[$name] = config::get($name);
+			config::set($name)->to($value);
+		}
+		try {
+			(new cafe())->welcome(array('email' => 'eve@example.com', 'name' => 'Eve', 'lang' => 'ro'));
+			same($then, $shape(), $what);
+		} finally {
+			foreach ($kept as $name => $value) config::set($name)->to($value);
+		}
+	}
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."; ".(count($ids[1]) - count($missing))."/".count($ids[1])." features covered\n";
 foreach ($skipped as $skip) echo "  - $skip\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";
