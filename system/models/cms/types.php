@@ -39,6 +39,7 @@ class cms_types {
 	static $system = array(
 		'slug' => 'text', 'enabled' => 'bool', 'published_at' => 'datetime',
 		'updated_at' => 'datetime', 'created_at' => 'datetime', 'owner' => 'int',
+		'saved_lang' => 'text',
 	);
 
 	// table => field => type, read once per request (see forget)
@@ -92,11 +93,57 @@ class cms_types {
 		self::$tables = array();
 	}
 
+	// ##Languages (#200, D3, D7)
+
+	// the column that holds $field in $lang (null: i18n::current()):
+	// headline in the default language and with multilingual off,
+	// headline__ro, name__pt_br otherwise
+	static function column($field, $lang = null) {
+		return $field.i18n::suffix($lang);
+	}
+
+	// whether a field of $type (text, int, ...) printed as element content
+	// ($attribute null) or into the attribute $attribute (alt, src, ...) has
+	// a translation per language (D7): text, as content or in an attribute
+	// that holds words. A photo's src, a link's href and every number, date
+	// and bool are shared by every language. Cheap, so page_field can ask it
+	// on a page request; the content model asks it too.
+	static function translates($type, $attribute = null) {
+		if ($type !== 'text') return false;
+		if ($attribute === null || $attribute === '') return true;
+		return in_array(strtolower(ltrim((string)$attribute, '@')), array('alt', 'title', 'placeholder', 'aria-label', 'content'), true);
+	}
+
+	// the fields of $table that have a translation per language (D7), as
+	// its columns say: headline when headline__ro is there. The others are
+	// shared by every language. Empty when multilingual is off.
+	static function translated($table) {
+		if (!i18n::enabled()) return array();
+		$columns = self::of_table($table);
+		$fields = array();
+		foreach (i18n::available() as $lang) {
+			$suffix = i18n::suffix($lang);
+			if ($suffix === '') continue;
+			foreach ($columns as $column => $type) {
+				$field = substr($column, 0, -strlen($suffix));
+				if (substr($column, -strlen($suffix)) === $suffix && isset($columns[$field]) && !in_array($field, $fields, true)) $fields[] = $field;
+			}
+		}
+		return $fields;
+	}
+
 	// ##Columns
 
 	// Creates the table and the columns it lacks, each declared as its type.
 	// Columns that exist are left as they are; schema --apply retypes them.
-	static function ensure($table, $types) {
+	// $translated names the fields (of $types, or already in the table) that
+	// also get a column per translation language when multilingual is on
+	// (headline__ro), of the field's type. Off it is ignored, so the SQL is
+	// what it always was. Raster declares a translation column before any
+	// value is stored in it: a column RedBean makes itself takes its type
+	// from the value, and name__id would also get an index and an attempt
+	// at a foreign key to a table name_ (and, in MySQL, an int column).
+	static function ensure($table, $types, $translated = array()) {
 		if (!preg_match('/^[a-z0-9_]+$/', $table)) throw new InvalidArgumentException("Invalid table '$table'");
 		if (!cms_store::table_exists($table)) {
 			R::getWriter()->createTable($table);
@@ -108,6 +155,22 @@ class cms_types {
 			if (!preg_match('/^[a-z0-9_]+$/', $field)) throw new InvalidArgumentException("Invalid field '$field'");
 			// the adapter, not R::exec: a fluid RedBean ignores some failed SQL
 			R::getDatabaseAdapter()->exec("ALTER TABLE `$table` ADD `$field` ".self::sql($type));
+		}
+		if ($translated && i18n::enabled()) {
+			cms_store::forget();
+			$now = cms_store::columns($table);
+			foreach ((array)$translated as $field) {
+				if (!preg_match('/^[a-z0-9_]+$/', $field) || strpos($field, '__') !== false) throw new InvalidArgumentException("Invalid field '$field'");
+				$type = isset($types[$field]) ? $types[$field] : (isset($now[$field]) ? self::of_column($now[$field]) : 'text');
+				foreach (i18n::available() as $lang) {
+					$column = self::column($field, $lang);
+					if ($column === $field || array_key_exists($column, $now)) continue;
+					R::getDatabaseAdapter()->exec("ALTER TABLE `$table` ADD `$column` ".self::sql($type));
+					$now[$column] = $type;
+					// each language's slug is looked up as the slug is
+					if ($field === 'slug') self::index_slug($table, $column);
+				}
+			}
 		}
 		cms_store::forget();
 		if (isset($types['slug']) && !array_key_exists('slug', $have)) self::index_slug($table);
@@ -145,19 +208,22 @@ class cms_types {
 	// An index on the slug, so opening an item and picking a free slug don't
 	// read the whole table. Made with a new table, and by schema --apply for
 	// tables made before 2.1.10. True when it was missing and is made now.
-	static function index_slug($table) {
+	// $column is the slug column (slug__ro has one of its own, named
+	// <table>_slug__ro).
+	static function index_slug($table, $column = 'slug') {
 		if (!preg_match('/^[a-z0-9_]+$/', $table)) throw new InvalidArgumentException("Invalid table '$table'");
+		if (!preg_match('/^slug(__[a-z0-9_]+)?$/', $column)) throw new InvalidArgumentException("Invalid slug column '$column'");
 		$adapter = R::getDatabaseAdapter();
 		if ($adapter->getDatabase()->getDatabaseType() !== 'mysql') {
-			if ($adapter->getCell("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?", array("{$table}_slug"))) return false;
-			$adapter->exec("CREATE INDEX IF NOT EXISTS `{$table}_slug` ON `$table` (slug)");
+			if ($adapter->getCell("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?", array("{$table}_{$column}"))) return false;
+			$adapter->exec("CREATE INDEX IF NOT EXISTS `{$table}_{$column}` ON `$table` ($column)");
 			return true;
 		}
 		$where = 'table_schema = DATABASE() AND table_name = ? AND column_name = ?';
-		if ($adapter->getCell("SELECT COUNT(*) FROM information_schema.statistics WHERE $where", array($table, 'slug'))) return false;
+		if ($adapter->getCell("SELECT COUNT(*) FROM information_schema.statistics WHERE $where", array($table, $column))) return false;
 		// MySQL indexes a TEXT column by its start; a slug is at most 80 characters
-		$kind = strtolower((string)$adapter->getCell("SELECT data_type FROM information_schema.columns WHERE $where", array($table, 'slug')));
-		$adapter->exec("CREATE INDEX `{$table}_slug` ON `$table` (slug".(strpos($kind, 'text') !== false ? '(191)' : '').')');
+		$kind = strtolower((string)$adapter->getCell("SELECT data_type FROM information_schema.columns WHERE $where", array($table, $column)));
+		$adapter->exec("CREATE INDEX `{$table}_{$column}` ON `$table` ($column".(strpos($kind, 'text') !== false ? '(191)' : '').')');
 		return true;
 	}
 
@@ -243,7 +309,7 @@ class cms_types {
 				break;
 			case 'date':
 			case 'datetime':
-				$time = self::timestamp($value);
+				$time = self::parse_date($value);
 				if ($time !== null) return date($type === 'date' ? 'Y-m-d' : 'Y-m-d H:i:s', $time);
 				break;
 			case 'time':
@@ -254,6 +320,22 @@ class cms_types {
 				break;
 		}
 		throw new cms_type_error($field, $type);
+	}
+
+	// What a typed date (or date and time) means, as a Unix time, or null:
+	// in the order $lang's people write dates (i18n::date_order, #135 D14),
+	// so 5/10/2026 is 5 October on a site in Romanian. $lang null means
+	// i18n::current(). Without languages, read as timestamp() reads it,
+	// as always. Y-m-d is read in every language. Only d/m/Y (or d/m/y)
+	// with slashes needs turning round: PHP reads 5.10.2026 day first.
+	static function parse_date($value, $lang = null) {
+		if (is_string($value) && i18n::date_order($lang) === 'dmy' && preg_match('#^\s*(\d{1,2})/(\d{1,2})/(\d{4}|\d{2})(\s.*)?$#s', $value, $m)) {
+			// a two-digit year as PHP reads one: 00-69 is 2000-2069, 70-99 1970-1999
+			$year = strlen($m[3]) === 2 ? (int)$m[3] + ((int)$m[3] < 70 ? 2000 : 1900) : (int)$m[3];
+			if (!checkdate((int)$m[2], (int)$m[1], $year)) return null;
+			return self::timestamp(sprintf('%04d-%02d-%02d', $year, $m[2], $m[1]).(isset($m[4]) ? $m[4] : ''));
+		}
+		return self::timestamp($value);
 	}
 
 	// What strtotime makes of a date or time, when there is one in it. PHP

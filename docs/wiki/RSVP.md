@@ -40,6 +40,8 @@ The model reads four fields of an event by name. Write them in the collection's 
 | `places` | number | the most people with a yes; empty or 0 is no limit, and no waitlist |
 | `rsvp_until` | date and time | when replies close; empty is when it starts (or `rsvp_closes` minutes before) |
 
+On a [multilingual site](Translations) the event's title translates like any item's, and the reply pages and emails in a language show the event's title and link in that language.
+
 A field's type comes from the collection's own view (`events.html`, else `events_item.html`), so put `places` with its mock-up (`40`) in the list's view too. A draft or a scheduled event takes no replies from guests.
 
 ## The form

@@ -2,7 +2,7 @@
 <!-- print.@lang.i18n.language --><!-- print.@dir.i18n.dir --><html lang="en" dir="ltr"><!-- /print.@dir.i18n.dir --><!-- /print.@lang.i18n.language -->
 <head>
   <!-- dry._layout.head /-->
-  <title>Unsubscribe</title>
+  <title><!-- print.i18n.letters_stop('unsubscribe') -->Unsubscribe<!-- /print.i18n.letters_stop('unsubscribe') --></title>
 </head>
 <body>
   <!-- dry._layout.header /-->
@@ -10,8 +10,8 @@
     <!-- print.validation.alert('unsubscribed') --><h1>You are unsubscribed</h1><!-- /print.validation.alert('unsubscribed') -->
     <!-- print.validation.alert('unsubscribe_invalid') --><h1>This link is not valid</h1><!-- /print.validation.alert('unsubscribe_invalid') -->
     <!-- render.newsletter.unsubscribe -->
-    <h1>Unsubscribe</h1>
-    <form method="post"><p>Stop the letters to <strong class="spa_email">you@example.com</strong>?</p><button>Unsubscribe</button></form>
+    <h1><!-- print.i18n.letters_stop('unsubscribe') -->Unsubscribe<!-- /print.i18n.letters_stop('unsubscribe') --></h1>
+    <form method="post"><p><!-- print.i18n.letters_stop('stop_the_letters_to') -->Stop the letters to<!-- /print.i18n.letters_stop('stop_the_letters_to') --> <strong class="spa_email">you@example.com</strong>?</p><button><!-- print.i18n.letters_stop('unsubscribe') -->Unsubscribe<!-- /print.i18n.letters_stop('unsubscribe') --></button></form>
     <!-- /render.newsletter.unsubscribe -->
   </main>
   <!-- dry._layout.footer /-->

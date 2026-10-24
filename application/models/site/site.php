@@ -15,19 +15,17 @@ class site {
 		return date('Y');
 	}
 
-	// used as <!-- render.site.nav --> in _layout.html
+	// used as <!-- render.site.nav --> in _layout.html: one row, a list per
+	// link (print.home, print.news, print.about) of one row with its url and
+	// state (active on its page). The words are the view's.
 	function nav() {
 		$current = '/'.trim((string)config::get('uri_string'), '/');
-		$links = array(
-			array('label' => 'Home', 'url' => '/'),
-			array('label' => 'News', 'url' => '/news'),
-			array('label' => 'About', 'url' => '/about'),
-		);
-		foreach ($links as $i => $link) {
-			$active = $link['url'] === '/' ? $current === '/' : strpos($current, $link['url']) === 0;
-			$links[$i]['url'] = rtrim(config::get('link_uri'), '/').$link['url'];
-			$links[$i]['state'] = $active ? 'active' : '';
+		$links = array('home' => '/', 'news' => '/news', 'about' => '/about');
+		$row = array();
+		foreach ($links as $name => $url) {
+			$active = $url === '/' ? $current === '/' : strpos($current, $url) === 0;
+			$row[$name] = array(array('url' => rtrim(config::get('link_uri'), '/').$url, 'state' => $active ? 'active' : ''));
 		}
-		return $links;
+		return array($row);
 	}
 }

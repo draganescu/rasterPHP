@@ -395,7 +395,7 @@ alike:
 
 | Event | Payload |
 |---|---|
-| `authentication.registered`, `logged_in`, `logged_out`, `password_changed`, `account_saved` | `id`, `email`, `name`, `role` |
+| `authentication.registered`, `logged_in`, `logged_out`, `password_changed`, `account_saved` | `id`, `email`, `name`, `role` (and `lang`, the account's language, on a multilingual site) |
 | `authentication.login_failed` | `login` |
 | `newsletter.subscribed` | `email`, `name`, `status` (`pending` or `confirmed`), `source` (after the commit; the framework's listener `newsletter.confirmation_mail` emails a pending address) |
 | `newsletter.confirmed`, `newsletter.unsubscribed` | `email`, `name` (after the commit) |
@@ -407,9 +407,9 @@ alike:
 | `rsvp.replied` | a reply to an event was made (by a guest on the form, or by staff in the page, over MCP or in model code): its fields but `token_hashes` and `link_sent_at`, `who` (`guest`, `staff` or `waitlist`), `event_title`, `event_date`, `event_starts`. After the commit, as are the two below |
 | `rsvp.changed` | the same, after its `answer`, `people` or `event` changed, with `was` and `was_people` (the status and party before) |
 | `rsvp.promoted` | the same, after a waiting reply was moved in (`who` `waitlist`; `staff` by the `promote` action) |
-| `cms.item_saved` | `collection` (its own name, `team_members`), `created` (true for new items), `item` |
+| `cms.item_saved` | `collection` (its own name, `team_members`), `created` (true for new items), `item`; multilingual, also `lang` (the language the save changed) |
 | `cms.item_deleted` | `collection`, `item` |
-| `cms.page_saved` | `type`, `slug`, `changed` (field names), `fields` |
+| `cms.page_saved` | `type`, `slug`, `changed` (field names), `fields`; multilingual, also `lang` (the language the revision changed) |
 | `content_changed` | none (sent by `util::content_changed()`; inside a transaction, once after the commit) |
 | `mail.sent` / `mail.failed` | `to`, `subject` / and `error` (in a web request, after the answer) |
 
@@ -706,8 +706,10 @@ mock-up is stored only when the collection's table is made.
 
 - **Names:** lowercase letters, digits and `_`, starting with a letter.
   Reserved: CMS method names (`style`, `login`, …), `slug`, `id`,
-  `updated_at`, `enabled` and `published_at` for fields; `users` and `raster`
-  for collections. `lint` reports these. A collection's table drops the
+  `updated_at`, `enabled`, `published_at` and `saved_lang` for fields;
+  `users` and `raster` for collections; and any name with `__` in it, which
+  joins a field and a language in a translation's column (`lint` error
+  `double_underscore`, always, multilingual or not). `lint` reports these. A collection's table drops the
   `_`s (`team_members` is stored in `teammembersdata`), so `team_members`
   and `teammembers` would share one table and show each other's items:
   `lint` reports that as an error. Words SQL keeps for itself
@@ -722,6 +724,9 @@ mock-up is stored only when the collection's table is made.
     there's no such item, the response is a 404. A
     number is a slug first: an item titled `1984` opens at
     `/news/news_item/1984`, and a number no item has as its slug is an id.
+    Multilingual, an item also has a slug per language (`slug__ro`, see
+    **Multilingual sites**), and an item URL with another language's slug
+    or an old one answers 301 to the right one.
   - `/news/news_page/2` is page 2. The page size comes from `news_page_size` or
     `raster_page_size` (10).
   - `/news/news_items/tag/php` lists the items where `tag` is `php`.
@@ -768,6 +773,15 @@ mock-up is stored only when the collection's table is made.
     for `8pm`, `1` for `yes`. One that can't be (`many` for an int,
     `2026-02-30`, `x` for a date) is refused with the field and an
     example. An empty value is `null` (`false` for a bool, `''` for text).
+  - A date typed with slashes follows the language once `languages` is set
+    (#135, D14), whether or not `multilingual` is on: day first for every
+    language but `en-us`, so `5/10/2026` is 5 October on an `en`+`ro` site
+    and `31/02/2026` is refused; `5/10/26` too, its century as PHP reads
+    one. `en-us` reads it month first. `2026-10-05`,
+    `5.10.2026` and words (`10 May 2026`, `today`) read the same in every
+    language. With `languages` unset nothing changed: `5/10/2026` is 10 May.
+    `cms_types::parse_date($value, $lang)` does it (null `$lang`: the
+    current language, `i18n::date_order()`).
     A form's ticked checkbox is yes, whatever its `value`.
   - Lists filter and sort by type: `order=-price` puts 100 above 18 above
     9.50.
@@ -795,10 +809,117 @@ mock-up is stored only when the collection's table is made.
   clock in its time zone (setting `timezone`, else PHP's, UTC on most
   servers); the editor's Schedule box and its live/scheduled badge use the
   site's clock too, whatever zone the editor's browser is in.
+- **Translations** (multilingual on, see **i18n**). A translated field
+  keeps the default language in its own column and each other language in
+  `<field>__<code>`: `headline__ro`, `name__pt_br` (`-` becomes `_`),
+  `name__id`, of the field's type. `cms_types::column($field, $lang)` is the
+  one place that name is made. Which fields are translated is read from
+  how the markup prints them (`cms_types::translates($type, $attribute)`):
+  a text field printed as content, or into `@alt`, `@title`,
+  `@placeholder`, `@aria-label` or `@content`. Every other attribute
+  (`@src`, `@href`, `@data-*`, …) and every int, number, bool, date and
+  time is one value for every language, and so is a field printed in
+  several places unless every one of them is a place for words (a URL
+  shown as a link's text and in its `href` stays one value). The content
+  model (`raster_inspector::content_model()`) gives each field
+  `'translate' => true|false` by this rule; a record type's fields are
+  what its `types()` says (`translate`/`shared`, see **Records**).
+  `cms_types::translated($table)` names the fields that
+  have translation columns, as the database has them (empty when off).
+  `cms_types::ensure($table, $types, $translated)` makes the columns, in
+  development and with `schema --apply`; with multilingual off it adds none.
+  Page tables, `sitepage` and collection and record tables get them, and
+  a `saved_lang` column (the language a revision or an item was last saved
+  in, managed by Raster). Raster makes a translation column before anything is stored
+  in it (every write path declares it first), which is what keeps
+  `name__id` a plain text column. A column RedBean creates itself takes its
+  type from the first value stored, and one ending in `_id` also gets an
+  index and an attempt at a foreign key to a table `name_`, and on MySQL
+  is made an integer column, which refuses text.
 - **Relationships are by value.** `print.@href.raster_filter@author` links to
   the items with the same `author`. For real references, write a model.
 - **Page edits are versioned:** every save is a new revision. Values can be
   HTML. An empty value shows the template default.
+- **Page fields in a language** (`multilingual` on, see **i18n**): a
+  translated field (`text` printed as content, or in `@alt`, `@title`,
+  `@placeholder`, `@aria-label`, `@content`) keeps each translation in a
+  column of its own (`headline__ro`); the others (photos, links, numbers)
+  are shared, one value for every language. On `/ro/…` a page or site
+  field shows its Romanian, and the default language's value while that
+  is empty (`cms_store::localized($row, $type, $lang)`, for showing only,
+  never for a write). In development a field's first print makes its
+  translation columns, when every place the page (and the layouts dried
+  into it) prints it is a place for words, as `schema` reads it. `cms_store::update_page($type, $slug, $values,
+  $allowed, $lang)` writes `$values` (named by the fields themselves,
+  `headline`) in `$lang`: a translated field into its column, and a shared
+  one is refused with `field_shared`, nothing stored; without `$lang` it
+  writes the default language, as always. Each revision keeps the
+  language it changed in `saved_lang` (`page_history` lists it), and
+  restoring one brings back the whole row, every language's translations
+  included. Off, none of this happens: no column, no `saved_lang`, the
+  event as it was.
+- **Items in a language** (`multilingual` on): a collection's items
+  (`render.cms.menu`) follow the same rule, and a record type says which
+  of its fields are translated in `types()` (**Records**: Languages). On
+  `/ro/…` a list, its item pages and `feed::items` show each item through
+  `localized()`: its Romanian, else its default language's text, so an
+  untranslated item is listed in English. Sorting and filtering go by the
+  same words, in SQL: `order=name`, `name=?q`, `/menu/menu_items/name/…`
+  and `cms_records::find()` compare `COALESCE(NULLIF(name__ro, ''), name)`
+  (`cms_store::field_sql`); in the default language, and off, the SQL is
+  what it always was. In development the first print of a translated item
+  field adds its columns. `cms_store::save_item($type, $id, $values,
+  $allowed, $who, $name, $lang)` writes `$lang` as `update_page` does (base
+  names, `field_shared` for a shared field), keeps `saved_lang`, and
+  `cms.item_saved` carries `lang`. In the editor on `/ro/menu` an item's
+  translated fields are saved in Romanian and its shared ones (a photo, a
+  price) for every language, and its address there is its Romanian slug
+  (`slug__ro`, made by that save), never the English one; an item added
+  there is made in the default language. Duplicate copies the stored item, every language of it, and
+  undoing a Delete brings its translations back; an item's default slug
+  is always made from its default language's words.
+- **Item addresses.** An item's slug in a translation language is in
+  `slug__ro` (a text column per language, made with the slug's other
+  translation columns, each with its own index; `schema --apply` adds a
+  missing one). Raster makes it from the translated `title`, `headline`
+  or `name` (`title__ro`) on the first save that has one, or, for an
+  item with none of the three (an FAQ), from its first field with a
+  translation (`question__ro`), never a hidden one
+  (`cms_store::slug_source($values, $skip, $lang)`); an item with no
+  translated title, or the same words in both, has none, and its
+  Romanian address is its default slug: `/ro/menu/menu_item/flat-white`
+  until it is `/ro/menu/menu_item/cafea-cu-lapte`. Like the default slug,
+  it stays when the title changes; a new one is written as `slug` with
+  `lang`. A Romanian slug is unique among the Romanian addresses
+  (`cms_store::unique_slug($type, $text, $id, $lang)`): other items'
+  `slug__ro`, or their `slug` where they have none. The default slug is
+  unique among the default slugs, as always; when it equals another
+  item's Romanian slug (an English "Latte" after a "Milk coffee" whose
+  Romanian is "Latte"), the item gets a Romanian slug of its own
+  (`latte-2`) on that save, so one Romanian address is one item. The
+  slugs in `slughistory` are looked up by type and slug (an index
+  `slughistory_type_slug`). Every slug an item gets, in every language, is kept in the table
+  `slughistory` (`type`, `item`, `lang`, `slug`, `created_at`;
+  `cms_store::record_slug()`), with the one it had before when it
+  changes, and is never deleted. An item URL whose slug is another
+  language's (`/ro/menu/menu_item/flat-white` once there is a Romanian
+  one) or one the item had (a renamed slug) answers **301** to the
+  item's address in the URL's language, query kept, with no body and not
+  cached (`cms_store::resolve_slug()`, answered in `cms::route()` before
+  anything prints); a slug an item has now wins over one another item
+  had (of the items that had it, the newest one still there, a published
+  one before a draft), a number no item has as its slug is still an id,
+  drafts and private records redirect only for whoever may see them, and
+  under a `protected` address nothing redirects for a visitor without
+  the role (they get the login or 403 first). GET and HEAD
+  only. `i18n::alternates()` (the switcher, `hreflang`) spells an item
+  page with each language's slug (`cms::path_in($path, $lang)`; a draft's
+  only for whoever may see it), and
+  `cms::item_alternates($name, $row)` gives an item's addresses from its
+  row with no query. The table is made on the first save in development
+  and by `schema --apply` (listed with the system tables) only while
+  multilingual is on. Off, there is no `slug__ro`, no history and no 301:
+  a renamed item's old address is a 404, as it always was.
 - **Changing fields.** A new annotation adds a column: on the next request in
   development, or with `php bin/raster schema --apply` in production.
   `schema` shows orphaned columns and suggests
@@ -811,6 +932,21 @@ mock-up is stored only when the collection's table is made.
   unused. `--dry-run` says what `--rename`, `--drop` and `--apply` would
   change and changes nothing. `--check` exits 1 when the templates and the
   database differ (for CI).
+  - With multilingual on, a translated page, item or record field lacking
+    its column in a language, or a table lacking `saved_lang`, is drift (marked `+`,
+    `missing_translations` in `--json`, with the table's `translated`
+    fields): `--apply` adds them, empty, so each language shows the default
+    text until it is translated. In development a list or a record type
+    gets them, a slug per language and `saved_lang` included, the first time
+    a page shows it, so browsing a multilingual site leaves no drift. A translation column of a field no
+    template has any more is an orphan with it.
+  - Translation columns no language uses now (multilingual off, a language
+    taken out of `languages`) are **kept translations**: listed per table
+    (`translations` in `--json`, there when multilingual is on or some are
+    kept), never orphans, never drift, never suggested for `--drop` or
+    `--rename`. Turning multilingual on again brings them back.
+  - `--rename=table.old:new` moves the field's translation columns with it
+    (`old__ro` to `new__ro`, kept ones too), and `--dry-run` lists them.
 
 ## Records: types a model declares
 
@@ -916,6 +1052,20 @@ own: the bundled booking model has the type, its rules and its emails (see
   `submit()` first asks `suspect(array())` (see **Forms**): a post that
   looks like spam (`holds()`) gets the form again with `try_again` or `slow_down`, so
   word both. A type that runs its own checks says `'spam' => false`.
+- **Languages** (multilingual on, see **Multilingual sites**): a record's
+  fields are one value for every language unless its type says otherwise:
+  `'translate' => array('name', 'description')` gives those text fields a
+  column per language, `'shared' => array('email', 'phone')` gives one to
+  every text field but those (lists and hidden fields never get one).
+  `cms_records::translated_fields($info)` names them. The bundled booking
+  translates `bookingresource` and `bookingservice` `name`: `/ro/` pages
+  (`render.booking.resources`, `render.booking.services`) and the
+  `resource_name`/`service_name` of the guest's page, the staff page and the
+  emails show the name in the current language, or the default's while it
+  has none. A booking's own fields, like every record a visitor sends, are
+  what was typed. An rsvp event is an item of the events collection, so its
+  title translates there: `event_title` and `event_url` are the current
+  language's (`rsvp::item()` reads each language once).
 - **Editors and agents** change records like items, except that readonly
   fields are shown and not editable, hidden fields never reach them, and the
   item's handle has the type's actions instead of Duplicate and Schedule.
@@ -1181,6 +1331,23 @@ bundled model declares none of its types, and `lint` warns.
   as the process was killed isn't noted yet, so that one reader may get it
   twice. One SMTP connection serves the whole run, and the transport is
   printed without its user, password or options.
+  - **On a multilingual site** (see **i18n**) the page is rendered once per
+    language (`/news/x`, `/ro/news/x`), and each rendering goes to the
+    subscribers who read that language (`subscriber.lang`; none, or one the
+    site dropped, reads the default), with its own `<title>` as the subject
+    and that language's unsubscribe page. Each language is an issue of its
+    own, keyed by its address, so "sent once" and "goes on after a stop"
+    hold per language. `--lang=ro` sends only that one (refused on a site
+    that isn't multilingual); `--to` sends the default's rendering unless
+    `--lang` names another; `--subject` is every language's; `--dry-run`
+    prints a line per language. A language whose page doesn't render or has
+    no `<title>` is an error for it alone: the others still go, and the exit
+    status is 1. A language that already reached everyone is skipped, so
+    running it again after one failed sends only what is left (exit 1 only
+    when every language was sent before). `RASTER_URL` must be the site's
+    own address: on a language's domain two languages share one address,
+    and send refuses. In code, `newsletter::recipients($issue, $lang)` and the
+    `$lang` of `send_issue()`; a null `$lang`, or off, means everyone.
   - From code: `newsletter::send_issue($url, $html, $subject, $again)`
     sends a page rendered with `RASTER_SENDING=1` and passed through
     `newsletter::prepare_issue()`. It returns false when the issue already
@@ -2007,6 +2174,29 @@ field every page shares, `print.cms.site_name`), else its host.
   the mail was handed over.
 - Links in emails: `util::url('letters/confirm', array('token' => $t))` is
   the absolute address of a page of the site, with its query.
+- **The language an email goes out in** (multilingual on, #200 D13):
+  `send_view($view, $to, $vars, $headers, $lang)` renders the view in
+  `$lang` (`i18n::with`): its dictionary words, CMS fields, `<title>` (so
+  the subject), the `site_name` fallback and its links (`/ro/…`). A root
+  link (`href="/menu"`) is the page in that language, and a root file
+  (`/media/x.jpg`) the site's. Build the vars in the same language, so
+  `util::url()` links are `/ro/` too:
+  `mail::in_language($lang, function () use (…) { …util::url(…)…; mail::send_view(…, $lang); })`.
+  `$lang` null, or multilingual off, is the request's language, as before:
+  off, every email is byte-identical. Rows that email later store the
+  language they were made in, `lang` (`user`, `subscriber`, `booking`,
+  `rsvp`, `contactmessage`, the shop's `order`; declared only when on, set
+  once from `i18n::current()`, readonly), read with `i18n::of($row)` (the
+  default language for a row from before the column). So the bundled
+  senders mail each guest in theirs whoever acts (staff confirming on an
+  English `/staff`, the `promote` action, MCP `run_action`, a webhook), and
+  staff (`booking_staff_email`, `rsvp_staff_email`, `contact_staff_email`,
+  `shop_staff_email`) in the default language, with the guest's as
+  `print.self.lang` in `booking_new`, `rsvp_new` and `contact_received`.
+  A frozen database without the column skips it until `schema --apply`
+  (accounts, subscribers, bookings, replies, contact messages and orders
+  all still go in; their mail is then in the default language). Off again,
+  a record table's `lang` is kept, not an orphan.
 - Many mails at once: `mail::keep_open()` keeps the SMTP connection for the
   mails that follow (`RSET` between them, a new connection if the server
   dropped it) until `mail::close()`. `mail::destination()` is the transport
@@ -2015,8 +2205,27 @@ field every page shares, `print.cms.site_name`), else its host.
 **feed**:
 - `render.feed.items('news')`: the newest published items, with every field
   plus `url`, `date_rfc822` and `date_iso`.
-- `render.feed.pages`: every page and item, with `url` and `updated`, for
-  `sitemap.xml`.
+- `render.feed.pages`: every page and item, with `url` and `updated`
+  (`YYYY-MM-DD`), for `sitemap.xml`:
+  - pages: every view that is a page, but those that need an account, the
+    pages the models in use name in `requires()` and `sitemap_skip`;
+    `updated` is the page's last save in the CMS (its newest revision),
+    else the view file's date.
+  - items: every published item (no drafts, nothing scheduled) of every
+    collection whose items have pages, as `cms` routes them: `news_item.html`,
+    or else `news.html`, renders `render.cms.news` (so a FAQ shown only by
+    `faq.html` is listed too). All of them, each collection in one query
+    of `id`, the slugs and the dates; `updated` is the later of the item's
+    last save and its `published_at`. Not listed: a private record type's,
+    those of a collection whose item page needs an account, and those
+    whose page is in `sitemap_skip`.
+  - Multilingual, every language's address is a row of its own (`/about`
+    and `/ro/about`; an item at its slug in that language), and each row
+    has `alternates`: rows of `lang` and `url`, every language's address
+    and `x-default` (the default language's). The starter's and the
+    demo's `sitemap.xml` print them as `<xhtml:link rel="alternate"
+    hreflang>` inside `print.if.multilingual`; off, the sitemap is as it
+    always was.
 - `print.feed.site_url`.
 
 **pagination**: `render.pagination.links('cms.news')` (add the list's filters
@@ -2027,7 +2236,8 @@ row per page with `number`, `url` and `state` (`current`). For your own model,
 use `'model.method'`: `method(true)` returns
 `array('total' => …, 'perpage' => …)`, and the pages are `?page=N`.
 
-**i18n**: the template's text is the default language.
+**i18n**: the template's text is the default language (page content in
+every language is **Multilingual sites**, below).
 - Translations: `print.i18n.home('welcome')` looks up `application/i18n/<lang>/home.php`,
   which returns an array of key => text. A dictionary that sets `$lang`
   instead of returning it still works until 3.0.0 (`doctor` warns, and
@@ -2050,16 +2260,24 @@ use `'model.method'`: `method(true)` returns
   has no `languages`, so the mock-up's value stays), and `print.i18n.dir`
   `rtl` for a language written right to left (Arabic, Hebrew, Persian,
   Urdu, …), else `ltr`. Every page in the starter, the demo and the shop
-  starts with them, so the mock-up reads `lang="en"` (emails say
-  `lang="en"` as written for now):
+  starts with them, so the mock-up reads `lang="en"`; so do the demo's
+  emails, which a multilingual site renders in the recipient's language
+  (see **mail**), while the starter's emails keep `lang="en"` as written,
+  so a template-only site's mail never takes the visitor's language:
   `<!-- print.@lang.i18n.language --><!-- print.@dir.i18n.dir --><html lang="en" dir="ltr"><!-- /print.@dir.i18n.dir --><!-- /print.@lang.i18n.language -->`.
+- **Dates print as they are stored** (`2026-10-05`, a time `19:30`) in
+  every language: no month or day name is printed in a language
+  anywhere, in pages or emails. A page that wants "5 octombrie"
+  words it itself (a model returning the parts, or a dictionary key per
+  month). Printing dates in the page's language is issue #238.
 - `render.i18n.languages` gives a switcher with `code`, `url` (this page in
   that language), `state` (`active` for the current one) and `current`
   (true for it). Multilingual, `url` is the language's own address
   (`/ro/menu`, from `i18n::alternates()`); otherwise it is the page with
   `?lang=xx`. The flag `if.languages` is true when the site has more than
   one language: the starter's `_layout.html` shows its switcher inside
-  `print.if.languages`.
+  `print.if.languages`. The flag `if.multilingual` is true when
+  `i18n::enabled()` is.
 - Multilingual, Raster also puts into `<head>`, after the `<base>`:
   `<link rel="canonical">` (the page in its own language), one
   `<link rel="alternate" hreflang="xx">` per language, and
@@ -2068,6 +2286,17 @@ use `'model.method'`: `method(true)` returns
   added on a page that isn't a 200 (the 404 page) or on a URL with a query
   (`?page=2`); tracking parameters (`utm_*`, `fbclid`, …) don't count. Off,
   nothing is added.
+- **Lint, multilingual on.** Three more warnings: `untranslatable_text`,
+  words in a view that no annotation prints, so every language shows them
+  as written (make them `print.cms.<name>` for words editors change, or
+  `print.i18n.<file>('key')` for fixed words; what a print replaces,
+  comments, `remove`, scripts, styles, numbers, punctuation and lone
+  symbols are left out; `_email/` views are read too, since each email
+  goes out in its recipient's language; one per line, at most ten per
+  view and a count of the rest); `missing_translation_key`, a
+  `print.i18n.<file>('key')` some language's dictionary has no entry for;
+  `html_lang_fixed`, an `<html>` whose `lang` no
+  `print.@lang.i18n.language` prints. Off, none of them.
 - **The language API.** Every model, a site's own too, reads language
   state through these static calls, never `config::get('languages')`.
   With multilingual off they give the one-language answer, so callers
@@ -2134,6 +2363,61 @@ URL alone says the content's language, so one URL is always one language.
 - With multilingual off none of this happens: `/ro/menu` is a 404, `?lang=`
   picks the template's language and sets the cookie, links are as before and
   there is no `Content-Language`.
+
+## Multilingual sites
+
+With `multilingual` on and two or more `languages` (`i18n::enabled()`),
+every language has its own addresses and page fields hold a value per
+language. Off, none of it happens: no columns, no prefixes, the same output
+as a one-language site. Each part is described where it lives:
+
+| What | Where |
+|---|---|
+| the settings and the language API (`i18n::current()`, `suffix()`, `with()`, …) | **i18n** |
+| `<html lang dir>`, the switcher (`render.i18n.languages`), canonical and `hreflang` links in `<head>`, dates as printed | **i18n** |
+| addresses (`/ro/menu`), links, redirects, headers, cache | **Multilingual URLs** |
+| which fields are translated, columns (`headline__ro`), fallback, `update_page($…, $lang)` | **The CMS**: Translations, Page fields in a language |
+| items in a language: display, sort and filter, `save_item($…, $lang)`; a record type's `translate`/`shared` | **The CMS**: Items in a language; **Records**: Languages |
+| item slugs per language (`slug__ro`), `slughistory`, 301s from old and other languages' slugs | **The CMS**: Item addresses |
+| translation columns in `schema`, kept translations | **The CMS**: Changing fields |
+| `untranslatable_text`, `missing_translation_key`, `html_lang_fixed` | **i18n**: Lint, multilingual on |
+| the language emails go out in, the stored `lang` of rows that email | **mail** |
+| `raster send`: each language's rendering to its readers, `--lang` | **Bundled models**: newsletter, Sending an issue |
+| dates as typed: `5/10/2026` day first unless `en-us` | **The CMS**: Types |
+| the sitemap: every language's address, with `hreflang` alternates | **Bundled models**: feed |
+| a static export, a folder per language (`ro/`) | **Static export** |
+| `doctor`: fewer than two languages, a code it can't read, missing language columns (`headline__ro`, `saved_lang`) | **Keeping Raster up to date** |
+| the editor on `/ro/…` and the editor's own language | **Editors and agents**: the in-page editor |
+| `set_languages`, `translation_status`, `read_strings`, `write_strings`, `lang` on the page and item tools | **Editors and agents**: Tools for languages |
+
+- **Words have one home each.** Words editors change are CMS fields
+  (`print.cms.x`), with a value per language. Fixed words (a button, a
+  label the site never changes) are dictionary keys,
+  `print.i18n.common('menu')`, an email's too (the starter's and the
+  demo's emails use `print.i18n.emails('key')`). The starter is written
+  that way: every fixed word of its views is a key of a dictionary named
+  after the view (`_layout.html` uses `common`), with the English as the
+  template's text, so it lints clean multilingual and `translation_status`
+  lists the words to translate. Words a model returns can't be translated,
+  so a model returns data (addresses, states, flags) and the view words
+  it: the starter's `site::nav()` gives each link its `url` and `state`
+  and `_layout.html` says "Home"; the shop's order mail gets the flags
+  `by_card` and `on_delivery` and words them with `print.if`; the demo's
+  opening hours are a `render.cms.hours` list, content rather than code,
+  translated as any collection's items are.
+- **Making a site multilingual, as an agent** (MCP):
+  1. `set_languages` with `["en", "ro"]`, the default first.
+  2. Words editors change become CMS fields, fixed words dictionary keys
+     (`check_view` and `write_view` say which new fields get a translation).
+  3. `translation_status` with `lang: "ro"` lists what Romanian lacks:
+     page and `site` fields, items' and records' fields, dictionary keys
+     (`email` for the ones only `_email/` views print).
+  4. `update_page` with `lang` writes a page's translation, `update_item`
+     with `lang` an item's or a record's (`where` `menu/3` is collection
+     `menu`, id 3; `bookingservice/2` a service's name), `write_strings` a
+     dictionary's, an email's words included.
+  5. `render_url` with `/ro/…` shows the result (`/ro/menu`, and an item
+     at its Romanian address).
 
 ## Environments and cache
 
@@ -2235,8 +2519,8 @@ URL alone says the content's language, so one URL is always one language.
     the page was stored). `describe` says
     whether the cache is on (`site.page_cache`).
   - **Changes Raster doesn't make itself don't clear it.** Raster's own
-    writes do (`write_view`, `update_page`, the item tools, the editor,
-    forms). A view, theme file, model or config edited with ordinary file
+    writes do (`write_view`, `write_asset`, `write_strings`, `update_page`,
+    the item tools, the editor, forms). A view, theme file, model or config edited with ordinary file
     tools, or the database changed directly, is not seen by visitors who
     aren't logged in until the cache is cleared or `page_cache_ttl` runs
     out: run `php bin/raster cache clear`, or MCP `clear_cache`. When it
@@ -2265,7 +2549,8 @@ of lists and filter pages come along; drafts and the editor don't.
   `ro/index.html` and `/ro/menu` `ro/menu/index.html`. A multilingual site
   (`multilingual` on) is crawled at each language's own addresses: every
   view is started in every language (`/menu` and `/ro/menu`), and the links
-  its pages carry are followed from there. Each language gets its own
+  its pages carry are followed from there, so an item is written at its
+  slug in each language (`ro/menu/menu_item/cafea-cu-lapte/index.html`). Each language gets its own
   `404.html` (`ro/404.html`). It warns when the links are root-relative (no
   `--url` or site address: search engines want absolute `hreflang` and
   canonical links). A language with its own `domain_language` host is
@@ -2337,9 +2622,27 @@ of lists and filter pages come along; drafts and the editor don't.
     prints (`<!--raster:s 3-->…<!--raster:e 3-->`, details in
     `#raster-editor-config`), and `system/models/cms/editor/editor.js` saves
     through `POST /api/cms/editor_save_field`, `editor_save_item`,
-    `editor_delete_item`, `editor_history`, `editor_restore` and
-    `editor_upload`, with the session token. They use the same store as MCP,
-    so revisions, field checks and events are the same.
+    `editor_delete_item`, `editor_history`, `editor_restore`,
+    `editor_upload` and `editor_set_lang`, with the session token. They use the same store as MCP,
+    so revisions, field checks and events are the same. A field name with
+    `__` (a language's column) is refused.
+  - **On a multilingual site** the editor edits the page's language, the
+    one its address names: on `/ro/about` it saves the Romanian (through
+    `/ro/api/cms/…`, posting `lang`, which must be the page's), and
+    `/about` keeps its English. The dock says so ("editing: RO (falls back
+    to EN)"); a field with no Romanian yet shows the English and is
+    marked, and the Page panel says which fields are not translated yet
+    and which are the same in every language (a photo saved on `/ro/` is
+    the photo everywhere). An untranslated field holds nothing in that
+    language, so an undo there empties it again. The history says which
+    language each revision changed, and its Restore brings back every
+    language of that version, as it says. In production before
+    `schema --apply` has made a language's columns, a text field saved in
+    that language is refused (`translation_columns_missing`, worded "run
+    php bin/raster schema --apply") instead of landing in the default
+    language's column. The config's `lang` is the page's language, and it adds
+    `editor_lang`, `languages` and `editor_languages`; off it is as it
+    always was.
   - Its colours and fonts come from the page (body text, background, the
     first button's colour as the accent). To choose them, set
     `--raster-accent`, `--raster-on-accent`, `--raster-font`,
@@ -2348,6 +2651,14 @@ of lists and filter pages come along; drafts and the editor don't.
   - Its words are in English; `system/models/cms/editor/lang/<lang>.php`
     translates them (Romanian is included), and
     `application/i18n/<lang>/raster_editor.php` overrides any of them.
+    Which language: without `multilingual`, the page's (`?lang=`, as
+    detected). Multilingual, the editor's own, apart from the page's: the
+    one the person chose with the dock's picker (kept on the account,
+    `user.editor_lang`, which `schema --apply` adds on a multilingual
+    site), else the first of
+    the browser's languages it has words for, else the site's default
+    language, else English. So an English owner fixing `/ro/` gets English
+    words.
   - What the server refuses comes back as names, `problems` in the
     answer, and the editor words each as `problem_<name>` (a record's
     `check()` included): a value that isn't of its field's type is
@@ -2385,8 +2696,8 @@ of lists and filter pages come along; drafts and the editor don't.
     request gets `-32603` with PHP's message, until the file is fixed.
 - **Tools for the site itself:**
   - `describe` — how URLs reach views, the pages and collections the markup
-    declares, the admin pages, the settings that change behaviour, and whether
-    the templates lint clean. Ask this first. `sections` narrows it. The
+    declares, the admin pages, the site's languages, the settings that change
+    behaviour, and whether the templates lint clean. Ask this first. `sections` narrows it. The
     vocabulary is left out unless `sections` names it; it is most of a full
     answer and has its own tool. (`php bin/raster describe` still prints
     everything.)
@@ -2399,13 +2710,32 @@ of lists and filter pages come along; drafts and the editor don't.
   - `check_view` — lint markup that isn't written yet; nothing is saved.
   - `write_view` — write a view, but only if it lints: on an error the file is
     left alone and the problems come back. The answer says what the change
-    does to the content model.
-  - The four view tools take an optional `theme`: the name of a folder
+    does to the content model. On a multilingual site both answers have
+    `new_fields`: each field the markup adds, `{ field, translate }` (with
+    `collection` for an item's), so an agent sees before writing that a
+    heading gets a translation per language and a price or a link is shared.
+    The view's name says which page it is compared with (`check_view`
+    without one compares with every page); a view of a theme no route
+    serves is no page, so it has none.
+  - `read_asset`, `write_asset` — the theme's files that aren't views:
+    `.css`, `.js` and `.svg`, by their path inside the theme
+    (`css/style.css`), with the view tools' checks (inside the theme, no link
+    out, the folder must exist), and no `.php` anywhere in the name
+    (`x.php.css`). An SVG is written only when it is well-formed XML that
+    runs nothing opened on its own: no DOCTYPE, no processing instruction
+    but the XML declaration, no `<script>` or `<foreignObject>`, no `on…` or
+    `srcdoc` attribute, no `<animate>` or `<set>` of a link, no
+    `javascript:` in any value and no `data:` link; otherwise nothing is
+    written and the answer says why. A file is at most 2 MB, and is
+    written whole (a temporary file renamed over it). `write_asset` clears
+    the page cache.
+  - The six view and asset tools take an optional `theme`: the name of a folder
     directly under `views/` (letters, digits, `_` and `-`), the site's theme
     when left out. A path, or a folder that links out of `views/`, is
     refused, and so is a view file that links out of the theme
     (`list_views` leaves it out); a link inside the theme works.
-  - `render_url` — the page's status and HTML, no web server. With `as`
+  - `render_url` — the page's status and HTML, no web server; `/ro/menu` is
+    the page in a language. With `as`
     (`editor`, `admin`, `member`, or an account's email) it renders the page
     as that person, outside production only, and for staff also says what the in-page editor marks:
     editable fields, items, and each list with whether it gets a card for a
@@ -2413,13 +2743,100 @@ of lists and filter pages come along; drafts and the editor don't.
     server down: the command line PHP (next to PHP-FPM's, over HTTP), with
     the server's whole environment, and what the page logs read after the
     page, so a page that logs a lot still answers. It never reads the page
-    cache.
+    cache. On a multilingual site, with `as` it also reports `editing_lang`,
+    the language the in-page editor saves in there (the page's own).
   - `clear_cache` — throws the page cache away. Call it after changing
-    views, theme files, models or config any way but `write_view`, or the
-    database directly; Raster's own tools already clear it.
+    views, theme files, models or config any way but `write_view`,
+    `write_asset` and `write_strings`, or the database directly; Raster's
+    own tools already clear it.
 - **Tools for content:** `site_overview`, `get_page`, `update_page`,
   `page_history`, `list_items`, `get_item`, `create_item`, `update_item`,
   `delete_item`, `run_action` (records), `lint_templates`, `schema_status`.
+- **Tools for languages** (#200; see **Multilingual sites** for the rest):
+  - `set_languages(languages)` writes `multilingual` and `languages` to
+    `<app>/config/the_app.php` as `config::set('multilingual')->to(true);`
+    and `config::set('languages')->to(array('en', 'ro'));`, replacing the
+    statements that set them (a commented-out example stays; a statement a
+    closing tag `?>` ends counts, and so does `\config::set`) or adding them
+    after the file's last top-level `config::set` (before a top-level
+    `return`; with none, after the open tag and any `declare` or
+    `namespace` line), and nothing else; an empty file becomes one. It
+    checks the result changes no other `config::set` statement and that
+    PHP compiles it (`php -l`) before it writes the file (whole, by
+    renaming a temporary one), and refuses, writing nothing, when it
+    would not, or when a setting is set inside a block (a function, an
+    `if`, a closure) or is the body of an `if` or `else` without braces. Line endings stay as they were. The default language is first; codes are
+    lowercased, and one that isn't a code (`en_US`) or is listed twice is
+    refused. One code writes `languages` with `multilingual` false; `[]`
+    takes both lines out. Nothing is dropped. In development it then adds the
+    translation columns of every page and collection table that exists. It answers
+    `{ enabled, default, languages, urls, columns_added, missing }`. Refused
+    in production. Since `the_app.php` changed, the stdio server answers
+    every later call from a fresh process (see above); restart it to make
+    it fast again.
+  - `translation_status(lang)`: what a language other than the default
+    lacks, `{ lang, missing: [{ kind, where, field, default_value, length,
+    shared }], total, done }`. `kind` is `page` (`where` its URL), `site`
+    (the `site_*` fields), `item` (a markup collection's item, `where`
+    `<collection>/<id>`, `menu/3`), `record` (the same, for a record type
+    whose `types()` declares `translate` or `shared`; the bundled
+    `bookingresource` and `bookingservice` names on a site that uses
+    booking, never what people typed into a booking, rsvp, message or
+    order), `email` (a dictionary key only `_email/` views print; `where`
+    the dictionary, `view` the first email that prints it,
+    `_email/booking_confirmed`) or `strings` (a dictionary key other views
+    print; `where` the dictionary). `email` and `strings` keys are both
+    translated with `write_strings`; each key is one row, and a CMS field
+    an email prints counts once, where it is stored. An item's slug
+    is never listed: it is made from its translated title. A field counts
+    when the templates (or the record type) translate it and its
+    default-language value isn't empty; `default_value` is cut at
+    300 characters, `length` is its whole length. `limit` (200) and `offset`
+    page through it; `total` counts every missing one, `done` the ones
+    translated.
+  - `read_strings(file, lang)` and `write_strings(file, lang, strings)`:
+    the dictionary `<app>/i18n/<lang>/<file>.php` as key/value JSON. Reading
+    gives `strings`, `used_keys` (what the views print through
+    `print.i18n.<file>('key')`) and `missing_keys`. Writing merges, and
+    Raster writes the file (`<?php return var_export(...)`): what the agent
+    sends is only ever words. Keys are letters, digits, `_`, `.` and `-`,
+    values strings, and a dictionary is at most 1 MB. The file stays in the
+    app's `i18n/<lang>/` (a folder or file linking out of it is refused) and
+    is written whole. A key with no text in the template
+    (`<!-- print.i18n.home('x') /-->`) is in `used_keys` but never missing,
+    here or in `translation_status`. A key no view prints comes back in `unused_keys`, a
+    warning. It clears the page cache, and is refused in production.
+    `raster_editor` is the in-page editor's own words, in any language the
+    editor has (`action_<name>` and `problem_<name>` keys are the site's
+    own, never unused).
+  - `get_page`, `update_page` and `page_history` take `lang`, one of the
+    site's languages (left out, or the default: as without it). `get_page`
+    then gives each field as `{ value, default_value, translated, shared }`;
+    `update_page` writes the translations, and refuses a shared field
+    ("'price' is shared by every language; update it without lang");
+    `page_history` keeps the revisions saved in that language. A field name
+    with `__` (a translation's column, `headline__ro`) is refused by every
+    write tool: name the field, and pass `lang`.
+  - `list_items`, `get_item`, `create_item` and `update_item` take `lang`
+    the same way. `get_item` gives each of the item's fields as `{ value,
+    default_value, translated, shared }`; `id`, `slug` (its slug in that
+    language, else the default one), `enabled` and the dates stay plain,
+    and the translation columns are left out. `list_items` gives each item
+    as that language shows it (the translation, else the default text) with
+    `untranslated`, its translated fields that have words in the default
+    language and none in this one. `update_item` writes the translated
+    fields, and `slug` as the item's slug in that language; a shared field
+    (a price, `enabled`, `published_at`) is refused as for `update_page`.
+    `create_item` refuses a translation language: create the item in the
+    default language, then translate it with `update_item`. In
+    development they, and `set_languages`, add a markup collection's
+    translation columns, a slug per language (`slug__ro`) among them.
+  - `describe` (section `languages`, there by default), `site_overview` and
+    `raster describe --json` have the block `{ enabled,
+    multilingual_setting, default, list, urls, missing }`: `urls` is where
+    each language's pages start (`/`, `/ro/`, or its `domain_language`
+    host) and `missing` each translation language's `translation_status`
+    total, both `{}` while multilingual is off.
 - **Addressing pages:** by URL (`/about`), by view (`about`), or `site` for the
   `site_*` fields.
 - **Writes** are limited to fields in the templates, plus `slug`, `enabled`
@@ -2427,8 +2844,10 @@ of lists and filter pages come along; drafts and the editor don't.
   `4.5`, `true`, `"2026-10-05"`); text is fine too and is converted the
   same way.
 - **`write_view` edits code, not content**, since a template can call any
-  model. Over stdio the agent is already on the machine with the files, so it
-  is available. Over HTTP it is not offered until the site sets
+  model, and so does `write_asset`: a script runs in every visitor's
+  browser. `set_languages` and `write_strings` change the site's files too.
+  Over stdio the agent is already on the machine with the files, so
+  they are available. Over HTTP they are not offered until the site sets
   `config::set('mcp_write_views')->to(true)`.
 - Results come back as compact JSON, in `structuredContent` and as text.
 - `describe` leaves out anything that could be a secret: the MCP token and the
@@ -2523,6 +2942,7 @@ Set in `config/the_app.php` with `config::set('name')->to(value)`.
 | `raster_media_folder` | `media` | where uploads go |
 | `feed_limit` | 20 | items in `feed.items` |
 | `sitemap_skip` | none | views left out of `feed.pages`, besides private pages and the pages the models in use name in `requires()` (login, account, the newsletter's answers, …) |
+| `export_skip` | none | paths (a prefix, or a `#regex#`) `raster export` leaves out, besides pages that need an account and the pages the models in use name in `requires()` (see **Static export**) |
 | `protected` | none | `array('path' => 'role')` |
 | `registration` | true | false turns sign-up off |
 | `login_page`, `after_login`, `reset_page` | `login`, none, `reset` | account pages |
@@ -2552,8 +2972,9 @@ Set in `config/the_app.php` with `config::set('name')->to(value)`.
 | `page_cache`, `page_cache_ttl`, `page_cache_skip` | on in production, 3600, none | |
 | `asset_versions` | true | false leaves theme asset URLs as they are written |
 | `mcp_token` | none | same as `RASTER_MCP_TOKEN` |
-| `mcp_write_views` | false | lets MCP over HTTP write templates (`write_view`); over stdio it always can |
+| `mcp_write_views` | false | lets MCP over HTTP write templates, theme files, dictionaries and the languages setting (`write_view`, `write_asset`, `write_strings`, `set_languages`); over stdio it always can |
 | `api_system_models` | `cms` | system models reachable at `/api`, for what their `api()` lists |
+| `api_blocked` | `mcp`, `api` | models never reachable at `/api`; setting it replaces the list, so keep those two in it |
 | `spam_min_seconds` | 3 | a post sooner than this after its form was shown is `too_fast`; false turns the stamp checks off |
 | `spam_max_age` | 86400 | a stamp older than this many seconds is `stamp_old`; false allows any age |
 | `spam_per_ip`, `spam_per_email` | 5, 3 | posts of one form in an hour from one IP, with one address; false turns that limit off |
@@ -2637,8 +3058,12 @@ stamp check, so people with a page open send it again.
   says are on purpose), a `data/secret` the user running it can't read or
   that isn't a key, a language code it can't read, `multilingual` with
   fewer than two languages and, multilingual, a `domain_language` without
-  a site address (`RASTER_URL`, `site_url`) on a host of no language,
-  and, in production, one address that sent one form many different
+  a site address (`RASTER_URL`, `site_url`) on a host of no language and
+  the language columns the database lacks ("N language column(s)
+  missing": each table with the columns `schema` lists in
+  `missing_translations`, translations such as `headline__ro` and
+  `saved_lang`: a warning in development, a failure in production, fixed
+  by `schema --apply`), and, in production, one address that sent one form many different
   emails today (many people share it), the site address, mail, tokens,
   whether PHP shows errors (`display_errors`) and whether PHP takes the
   editor's pictures: it warns when `upload_max_filesize` is below 12M or

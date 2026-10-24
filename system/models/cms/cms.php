@@ -33,6 +33,11 @@ class cms
 
 	// page rows by type, read once per request and shared by their fields
 	private $pages = array();
+	// fields whose translation columns were looked for (development)
+	private $translations = array();
+	// field => where the page prints it (null for words, '@href' …), read
+	// from the page once (development, multilingual)
+	private $print_places = null;
 
 	// ##Naming
 	// Bean types must be lowercase letters and digits only.
@@ -51,10 +56,12 @@ class cms
 
 	// names that can't be used for page fields or collections. A collection
 	// is reserved by its table: users_ and u_sers are usersdata too, the
-	// accounts of the first versions, which no editor may read
+	// accounts of the first versions, which no editor may read. A name
+	// with __ is a translation's column (headline__ro), never a field
 	static function reserved($name, $kind) {
+		if (strpos((string)$name, '__') !== false) return true;
 		if ($kind === 'collection') return in_array(self::collection_type($name), array('usersdata', 'rasterdata'));
-		return method_exists('cms', $name) || in_array($name, array('slug', 'id', 'updated_at', 'enabled', 'published_at'));
+		return method_exists('cms', $name) || in_array($name, array('slug', 'id', 'updated_at', 'enabled', 'published_at', 'saved_lang'));
 	}
 
 	// the table holding the items of a collection
@@ -185,6 +192,61 @@ class cms
 		return util::url(cms::item_path($name, !empty($item['slug']) ? rawurlencode($item['slug']) : $item['id']));
 	}
 
+	// $path (as it reads, no language prefix, not encoded) spelled the way
+	// the language $lang spells it: an item URL's slug becomes the item's
+	// slug in $lang (/menu/menu_item/flat-white is menu/menu_item/cafea-cu-lapte
+	// in ro), or its default slug while it has none there; any other path
+	// is as it is, and costs no query. $from is the language $path is in
+	// (null: the current one). i18n::alternates() asks it for every
+	// language when multilingual is on.
+	static function path_in($path, $lang, $from = null) {
+		if (!i18n::enabled()) return $path;
+		$url = cms::collection_uri($path);
+		if (!$url || $url['kind'] !== 'item' || count($url['rest']) !== 1 || $url['rest'][0] === '' || ltrim($url['path'], '/') !== $url['name']) return $path;
+		$from = $from === null ? i18n::current() : (string)$from;
+		if (strtolower((string)$lang) === strtolower($from)) return $path;
+		$key = $url['rest'][0];
+		try {
+			$row = cms_store::slug_item(cms::collection_type($url['name']), $key, $from);
+		} catch (Exception $e) {
+			return $path;
+		}
+		// a draft, or a private record, has no other address for whoever
+		// may not see it
+		if ($row && !cms::item_visible($url['name'], (int)$row['id'])) $row = null;
+		$slug = $row ? cms_store::slug_in($row, $lang) : '';
+		return $slug === '' ? $path : substr($path, 0, -strlen($key)).$slug;
+	}
+
+	// whether the person asking may see item $id of collection $name, as
+	// its list would show it (drafts for editors, a private type's records
+	// for whoever may read them); asked once a request per item, until an
+	// item is saved (kept with slug_item's answers)
+	static function item_visible($name, $id) {
+		$key = "visible\n".$name."\n".$id."\n".(cms::loggedin() ? 1 : 0);
+		if (array_key_exists($key, cms_store::$slug_items)) return cms_store::$slug_items[$key];
+		$where = cms_store::list_where($name, array(), array('id' => (int)$id), array());
+		return cms_store::$slug_items[$key] = $where !== null && (bool)R::count(cms::collection_type($name), $where[0], $where[1]);
+	}
+
+	// an item's address in every language, as i18n::alternates() gives a
+	// page's: rows of lang and url. $item is a row as read, with its slug
+	// columns (slug, slug__ro), before cms_store::localized(), so a list of
+	// items needs no query per item: each language's slug, else the
+	// default slug, else the id.
+	static function item_alternates($name, $item) {
+		if (!i18n::enabled()) return i18n::alternates(ltrim(cms::item_path($name, !empty($item['slug']) ? $item['slug'] : $item['id']), '/'));
+		$rows = array();
+		foreach (i18n::available() as $code) {
+			$address = i18n::address($code);
+			if ($address === null) continue;
+			$slug = cms_store::slug_in($item, $code);
+			$path = ltrim(cms::item_path($name, $slug !== '' ? $slug : $item['id']), '/');
+			$rows[] = array('lang' => $code, 'url' => $address.implode('/', array_map('rawurlencode', explode('/', $path))));
+		}
+		return $rows;
+	}
+
 	// The address of a view that is a page (about.html is /about, the
 	// default view /), or null for one that is never a page: partials and
 	// folders starting with _ (_layout, _email/), and feeds (news.rss).
@@ -279,10 +341,55 @@ class cms
 				// only views that actually render this collection
 				if (cms::renders_collection($view, $url['name'])) {
 					controller::route(preg_quote($in.'/'.$url['name'].'_'.$url['kind'], '%').'(/|$)')->to($view);
+					if ($url['kind'] === 'item') cms::moved_item($url, $view);
 					break;
 				}
 			}
 		}
+	}
+
+	// An item URL with another language's slug (/ro/menu/menu_item/flat-white),
+	// or with a slug the item had before, answers 301 to the item's slug in
+	// the URL's language (#138, #200), before anything is printed, and is
+	// never cached. Only an item the visitor may see, only for GET and HEAD,
+	// and only multilingual: off, an old slug is a 404 as it always was.
+	// $url is collection_uri()'s.
+	static function moved_item($url, $view = null) {
+		if (!i18n::enabled() || count($url['rest']) !== 1 || $url['rest'][0] === '') return;
+		// a page that needs a role the visitor lacks says nothing of its
+		// items, not even their slug in another language: authentication
+		// answers it (login or 403) as for any other address
+		if (class_exists('authentication')) {
+			$uri = '/'.ltrim((string)config::get('uri_string'), '/');
+			foreach (authentication::protection($uri) + ($view === null ? array() : authentication::protection('/'.$view)) as $role) {
+				if (!authentication::can($role)) return;
+			}
+		}
+		if (!in_array(isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : 'GET', array('GET', 'HEAD'), true)) return;
+		// on the command line only `raster render` follows it
+		if (PHP_SAPI === 'cli' && !defined('RASTER_RENDER')) return;
+		if (config::get('cms_enabled') == false) return;
+		database::instance();
+		if (!database::configured()) return;
+		$name = $url['name'];
+		$lang = i18n::current();
+		try {
+			$found = cms_store::resolve_slug(cms::collection_type($name), $url['rest'][0], $lang);
+			if (!$found) return;
+			// drafts for editors, a private type's records for whoever may read them
+			cms::session();
+			$where = cms_store::list_where($name, array(), array('id' => $found['id']), array());
+			if ($where === null || !R::count(cms::collection_type($name), $where[0], $where[1])) return;
+		} catch (Exception $e) {
+			log::warning('CMS: '.$e->getMessage());
+			return;
+		}
+		$location = i18n::with($lang, function () use ($name, $found) { return cms::item_url($name, $found); });
+		if (isset($_SERVER['QUERY_STRING']) && $_SERVER['QUERY_STRING'] !== '') $location .= '?'.$_SERVER['QUERY_STRING'];
+		raster_cache::skip();
+		header('Location: '.$location, true, 301);
+		if (PHP_SAPI === 'cli') fwrite(STDERR, "Location: $location\n");
+		exit;
 	}
 
 	// Setup routes for the admin section
@@ -383,19 +490,78 @@ class cms
 		// a stored row carries every column of its table; a new one is of the
 		// mock-up's type and starts as the mock-up
 		$example = trim(template::get('current_block'));
+		$multilingual = i18n::enabled();
+		// D7: does the field have a translation per language? Only when every
+		// place the page prints it (its view and the layouts dried into it)
+		// is a place for words, as the content model says: a URL printed as a
+		// link's text and in its href stays one value
+		if ($multilingual && !database::$frozen && $this->print_places === null) {
+			// read before the first cms print runs, while every one is still there
+			$this->print_places = array();
+			preg_match_all('/<!-- print\.(?:([@+])([a-zA-Z0-9_:-]+)\.)?cms\.([a-z0-9_]+)\b[^>]*?-->/', (string)template::instance()->output, $prints, PREG_SET_ORDER);
+			foreach ($prints as $print) $this->print_places[$print[3]][] = $print[1] === '' ? null : $print[1].$print[2];
+		}
+		$attr = $multilingual ? template::get('current_attr') : null;
+		$places = $this->print_places;
+		$translates = function ($field_type) use ($name, $attr, $places) {
+			$where = isset($places[$name]) ? $places[$name] : array();
+			$where[] = $attr;
+			foreach (array_unique($where) as $at) {
+				// an attribute a print adds to (+class) is never words
+				if ($at !== null && $at[0] === '+') return array();
+				if (!cms_types::translates($field_type, $at === null ? null : substr($at, 1))) return array();
+			}
+			return array($name);
+		};
 		if (!array_key_exists($name, $page->getProperties())) {
 			if (database::$frozen) return false;
 			$field_type = cms_types::of_example($example);
-			cms_types::ensure($type, array($name => $field_type));
+			cms_types::ensure($type, array($name => $field_type), $multilingual ? $translates($field_type) : array());
 			$page->$name = cms_types::clean($field_type, $example, $name);
 			R::store($page);
+		} elseif ($multilingual && !database::$frozen && !isset($this->translations[$type.'.'.$name])) {
+			// a field made before the site had languages gets its
+			// translation columns the first time it prints (development)
+			$this->translations[$type.'.'.$name] = true;
+			foreach (i18n::available() as $lang) {
+				if (i18n::is_default($lang) || array_key_exists(cms_types::column($name, $lang), $page->getProperties())) continue;
+				$types = cms_types::of_table($type);
+				$wanted = $translates(isset($types[$name]) ? $types[$name] : 'text');
+				if ($wanted) cms_types::ensure($type, array(), $wanted);
+				break;
+			}
 		}
 		// read as its type, as a collection's are, so 14.5 prints as its mock-up 14.50
 		$types = cms_types::of_table($type);
-		$value = cms_types::show(isset($types[$name]) ? cms_types::read($types[$name], $page->$name) : $page->$name, $example);
+		$stored = $page->$name;
+		$mark = null;
+		if ($multilingual) {
+			// the field in the page's language, or the default language's
+			// value while it has no translation (D8); the editor's mark
+			// says which language it edits, and whether the field has a
+			// translation (shared fields are one for every language)
+			$lang = i18n::current();
+			$row = $page->getProperties();
+			$shown = cms_store::localized($row, $type, $lang);
+			$stored = $shown[$name];
+			$mark = array('lang' => $lang);
+			if (!i18n::is_default($lang)) {
+				$translated = in_array($name, cms_types::translated($type), true);
+				$column = cms_types::column($name, $lang);
+				$mark['shared'] = !$translated;
+				if ($translated) {
+					$mark['untranslated'] = !isset($row[$column]) || (string)$row[$column] === '';
+					$mark['fallback'] = (string)cms_types::show($row[$name]);
+					// what is stored in this language: an undo puts back
+					// nothing, never the default language's words shown
+					if ($mark['untranslated']) $mark['value'] = '';
+				}
+			}
+		}
+		$value = cms_types::show(isset($types[$name]) ? cms_types::read($types[$name], $stored) : $stored, $example);
 		$value = $value === '' ? false : $value;
 		if (cms_editor::editing()) {
-			return cms_editor::field($type, $type === 'sitepage' ? 'site' : $this->slug, $name, $value, template::get('current_block'));
+			return cms_editor::field($type, $type === 'sitepage' ? 'site' : $this->slug, $name, $value, template::get('current_block'), $mark);
 		}
 		return $value;
 	}
@@ -507,6 +673,11 @@ class cms
 			}
 		}
 
+		// multilingual, in development: the collection's translated fields
+		// get their columns per language where its fields are first seen
+		// (a new table, a new field, one made before the site had languages)
+		if (!$record && !database::$frozen && i18n::enabled()) $this->item_translations($name, $datastarts[1]);
+
 		// only real columns can be filtered on
 		$fields = cms_store::columns($this->data_name);
 		// /menu/menu_items/price/14.500 and /events/events_items/date/10 Oct 2026
@@ -524,12 +695,33 @@ class cms
 				$filters['slug'] = $wanted;
 			}
 		}
+		// multilingual, on /ro/: the item whose Romanian slug this is, or
+		// that is at its default slug while it has no Romanian one (a number
+		// is a slug first here too). Another language's slug or an old one
+		// never gets here: route() answers 301 (moved_item)
+		if ($asked['item'] !== null && !i18n::is_default() && ($found = cms_store::slug_item($this->data_name, $asked['item'])) !== null) {
+			unset($filters['slug']);
+			$filters['id'] = (int)$found['id'];
+		}
 		// what the list shows, as the pager counts it
-		$where = cms_store::list_where($name, $list['conditions'], $filters, $uri_filters);
+		// filtered and sorted in the page's language: a translation, else the
+		// default language's value (D8)
+		$lang = i18n::current();
+		$where = cms_store::list_where($name, $list['conditions'], $filters, $uri_filters, $lang);
 		if ($where === null) return array();
 		list($sql, $bindings) = $where;
-		$sql .= ' ORDER BY '.cms_store::order_sql(isset($options['order']) ? $options['order'] : '', $fields).' LIMIT '.(int)$page_size.' OFFSET '.(int)$roffset;
+		$sql .= ' ORDER BY '.cms_store::order_sql(isset($options['order']) ? $options['order'] : '', $fields, $lang).' LIMIT '.(int)$page_size.' OFFSET '.(int)$roffset;
 		$data = array_values(array_map(array('cms_store', 'export_item'), R::find($this->data_name, $sql, $bindings)));
+		// and shown in it: each translated field's translation, or the
+		// default language's text while it has none
+		// (the stored rows kept for the slugs made below, from each
+		// language's own words)
+		$stored = array();
+		foreach ($data as $key => $row) {
+			$shown = cms_store::localized($row, $this->data_name, $lang);
+			if ($shown !== $row) $stored[$key] = $row;
+			$data[$key] = $shown;
+		}
 		// a filter nothing matches and a page past the last one answer, empty;
 		// they are not kept, so made-up URLs don't fill the page cache
 		if (!$data && ($page > 1 || $uri_filters)) raster_cache::skip();
@@ -539,14 +731,29 @@ class cms
 			foreach ($data as $key => $row) $data[$key] = cms_records::for_template($record, cms_records::decode($record, $row));
 		}
 
-		// items made before slugs existed get one (development only)
+		// items made before slugs existed get one (development only), and
+		// multilingual, the slug of this page's language they lack while they
+		// have a translated title (made before slug__ro was)
 		if (!database::$frozen && array_key_exists('slug', $fields)) {
+			$skip = $record ? array_merge($record['hidden'], array('owner', 'created_at')) : array();
+			$column = cms_store::slug_column();
 			foreach ($data as $key => $item) {
-				if (!empty($item['slug'])) continue;
+				// the slugs come from the stored words, never the row as shown
+				$source = isset($stored[$key]) ? $stored[$key] : $item;
+				$lacks = $column !== 'slug' && empty($item[$column]) && cms_store::slug_source($source, $skip, i18n::current()) !== cms_store::slug_source($source, $skip);
+				if (!empty($source['slug']) && !$lacks) continue;
 				$bean = R::load($this->data_name, $item['id']);
-				$bean->slug = cms_store::unique_slug($this->data_name, cms_store::slug_source($item, $record ? array_merge($record['hidden'], array('owner', 'created_at')) : array()), $item['id']);
+				$made = empty($source['slug']);
+				if ($made) $bean->slug = cms_store::unique_slug($this->data_name, cms_store::slug_source($source, $skip), $item['id']);
+				// a new default slug that is another item's address in a
+				// language gets one of its own there
+				if ($lacks || $made) cms_store::translate_slugs($this->data_name, $bean, $skip);
 				R::store($bean);
-				$data[$key]['slug'] = $bean->slug;
+				cms_store::$slug_items = array();
+				cms_store::record_slugs($this->data_name, $bean, $source);
+				// shown as the row shows it: this language's slug, else the default's
+				$data[$key]['slug'] = $column !== 'slug' && !empty($bean->$column) ? $bean->$column : $bean->slug;
+				if ($column !== 'slug' && $bean->$column !== null) $data[$key][$column] = $bean->$column;
 			}
 		}
 		if (empty($data) && (isset($filters['id']) || isset($filters['slug'])) && !headers_sent()) {
@@ -587,7 +794,7 @@ class cms
 	// override of it, answers there.
 	static function api() {
 		return array_fill_keys(array('editor_save_field', 'editor_save_item', 'editor_delete_item', 'editor_history', 'editor_restore',
-			'editor_upload', 'editor_action', 'editor_script', 'style', 'logout'), 'visitor');
+			'editor_upload', 'editor_action', 'editor_script', 'editor_set_lang', 'style', 'logout'), 'visitor');
 	}
 
 	// ##The in-page editor (see editor.php): POST /api/cms/editor_… with csrf
@@ -599,6 +806,7 @@ class cms
 	public function editor_upload() { return cms_editor::upload(); }
 	public function editor_action() { return cms_editor::action(); }
 	public function editor_script() { return cms_editor::script(); }
+	public function editor_set_lang() { return cms_editor::set_lang(); }
 
 	function style() {
 		if (!util::param('output', false)) {
@@ -647,6 +855,51 @@ class cms
 		if (!cms::loggedin() || !$this->page_name) return false;
 		cms_editor::inject($this->page_name, $this->slug);
 		return true;
+	}
+
+	// Multilingual, in development: the columns per language of the
+	// collection's translated fields (the content model's translate, D7),
+	// looked for once a request. $prints are the list's print references
+	// (name, @src.photo): only a field one of them prints as words that
+	// lacks its column in a language sends for the content model, which
+	// reads every view, so a list whose columns are there costs nothing.
+	private function item_translations($name, $prints) {
+		$type = $this->data_name;
+		if (isset($this->translations['collection.'.$type])) return;
+		$this->translations['collection.'.$type] = true;
+		$columns = cms_store::columns($type);
+		// what schema asks of every multilingual list: a slug per language
+		// and the language of the last save
+		$slugs = false;
+		foreach (i18n::available() as $lang) {
+			if (array_key_exists('slug', $columns) && !array_key_exists(cms_types::column('slug', $lang), $columns)) $slugs = true;
+		}
+		if ($slugs) cms_types::ensure($type, array(), array('slug'));
+		if (!array_key_exists('saved_lang', $columns)) cms_types::ensure($type, array('saved_lang' => 'text'));
+		if ($slugs || !array_key_exists('saved_lang', $columns)) $columns = cms_store::columns($type);
+		$types = cms_types::of_table($type);
+		$candidates = array();
+		foreach ($prints as $value) {
+			if (strpos($value, 'if.') !== false || strpos($value, 'raster_filter') !== false) continue;
+			$parts = explode('.', $value);
+			$field = $parts[count($parts) - 1];
+			$attribute = in_array(substr($parts[0], 0, 1), array('@', '+'), true) ? substr($parts[0], 1) : null;
+			if (!isset($types[$field]) || in_array($field, cms_store::$system_fields, true) || !cms_types::translates($types[$field], $attribute)) continue;
+			foreach (i18n::available() as $lang) {
+				$column = cms_types::column($field, $lang);
+				if ($column !== $field && !array_key_exists($column, $columns)) $candidates[$field] = true;
+			}
+		}
+		if (!$candidates) return;
+		require_once BASE.'tools/inspector.php';
+		$inspector = new raster_inspector();
+		$model = $inspector->content_model();
+		$known = isset($model['collections'][$name]) ? $model['collections'][$name]['fields'] : array();
+		$wanted = array();
+		foreach (array_keys($candidates) as $field) {
+			if (!empty($known[$field]['translate'])) $wanted[] = $field;
+		}
+		if ($wanted) cms_types::ensure($type, array(), $wanted);
 	}
 
 	private function detect_data($key, $value) {

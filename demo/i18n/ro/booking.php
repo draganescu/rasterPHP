@@ -1,0 +1,21 @@
+<?php
+return array (
+  'your_booking' => 'Rezervarea ta',
+  'to_change_or_cancel_a' => 'Ca să schimbi sau să anulezi o rezervare, sună-ne la',
+  'name' => 'Nume',
+  'when' => 'Când',
+  'at' => 'la',
+  'to' => 'până la',
+  'where' => 'Unde',
+  'people' => 'Persoane',
+  'status' => 'Stare',
+  'cancel_the_booking' => 'Anulează rezervarea',
+  'change_the_time' => 'Schimbă ora',
+  'day' => 'Ziua',
+  'show_times' => 'Arată orele',
+  'new_time' => 'Ora nouă',
+  'pick_a_day_above_to' => 'Alege o zi mai sus ca să vezi orele.',
+  'move_my_booking' => 'Mută rezervarea',
+  'book_a_table' => 'Rezervă o masă',
+  'book_the_salon' => 'Rezervă la salon',
+);

@@ -68,7 +68,19 @@ Tell browsers and feed readers about the feed in your `<head>`:
 </urlset>
 ```
 
-`render.feed.pages` lists every page of the theme and every published item of every collection that has an item view (`<name>_item.html`), each with `url` and `updated` (a date).
+`render.feed.pages` lists every page of the theme and every published item of every collection whose items have pages: those shown by `<name>_item.html`, or by `<name>.html` when there is no item view (a FAQ listed and opened on `faq.html`). Each row has `url` and `updated` (a date). All the items are listed, however many there are.
+
+`updated` is when the content last changed: for a page, its last save in the editor (or over MCP), and the view file's date for a page nobody has saved yet; for an item, its last save, or its publishing date when that is later.
+
+On a multilingual site every language's address is listed (`/about` and `/ro/about`), each with its `alternates`: the address in every language and `x-default`. The starter's sitemap prints them for search engines:
+
+```xml
+<url><loc><!-- print.url /--></loc><lastmod><!-- print.updated /--></lastmod><!-- print.if.multilingual --><!-- print.alternates -->
+    <!-- print.@hreflang.lang --><!-- print.@href.url --><xhtml:link xmlns:xhtml="http://www.w3.org/1999/xhtml" rel="alternate" hreflang="en" href="https://example.com/"/><!-- /print.@href.url --><!-- /print.@hreflang.lang --><!-- /print.alternates -->
+  <!-- /print.if.multilingual --></url>
+```
+
+`print.if.multilingual` keeps the links out when the site has one language, so its sitemap stays as it was.
 
 Left out automatically: partials and emails (`_…`), protected pages, and the account and newsletter pages, wherever their settings put them (`login_page`, `reset_page`, `newsletter_confirm_page`…). Each model names those pages itself, in its `requires()` (see [Models](Models)). Leave out more with:
 

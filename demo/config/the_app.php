@@ -2,10 +2,19 @@
 // Raster Café: the demo that uses every feature. See demo/README.md.
 config::set('theme')->to('cafe');
 
-// two languages; the templates are written in English. ro.localhost is Romanian.
+// a multilingual site in two languages: English, the templates' and the
+// default, at /menu, and Romanian at /ro/menu (demo/seed.php adds the
+// Romanian content; i18n/ro/ holds the fixed words)
+config::set('multilingual')->to(true);
 config::set('languages')->to(array('en', 'ro'));
-config::set('domain_language')->to(array('ro.localhost' => 'ro'));
+// what the off switch keeps (template-only translation, with ?lang= and a
+// cookie, deprecated until 3.0.0) is tested with CAFE_MULTILINGUAL=off, see below
 config::set('language_cookie')->to('cafe_lang');
+// No domain_language here: seen from the site's own address (RASTER_URL,
+// site_url) a language with its own domain lives only there
+// (i18n::address()), so a ro.localhost entry would send the live café's
+// /ro/ pages to a host nobody can reach. Tests turn it on with
+// CAFE_DOMAIN_LANGUAGE=ro.localhost, below.
 
 // accounts: members see /members, staff (editors) see /staff and the pages
 // under it (/staff/setup, /staff/bookings, /staff/events) and a booking's,
@@ -66,11 +75,8 @@ config::set('rsvp_staff_email')->to('staff@cafe.test');
 
 // the contact form on /visit and the reset form keep the older validation regions on purpose, so
 // the suite still covers them (D14). doctor counts them apart instead of warning.
-// The café still shows template-only translation (languages without
-// multilingual) until it becomes a multilingual site.
 config::set('allow_deprecated')->to(array(
 	'legacy-validation-regions' => '#^views/cafe/(visit|password/new)\.html$#',
-	'template-only-languages' => true,
 ));
 
 // text replaced in pages under /lab only (template::replace)
@@ -95,4 +101,8 @@ if ($knob('CAFE_STRICT') === 'off') config::set('strict_templates')->to(false);
 if ($knob('CAFE_REWRITE') === 'off') config::set('rewrite')->to(false);
 if ($knob('CAFE_API_FEED') === 'on') config::set('api_system_models')->to(array('cms', 'feed'));
 if ($knob('CAFE_LOG') === 'on') log::enable();
+// template-only translation, deprecated, kept on purpose while this switch is off
+if ($knob('CAFE_MULTILINGUAL') === 'off') config::set('multilingual')->to(false);
+if ($knob('CAFE_MULTILINGUAL') === 'off') config::set('allow_deprecated')->to(config::get('allow_deprecated') + array('template-only-languages' => true));
+if ($knob('CAFE_DOMAIN_LANGUAGE')) config::set('domain_language')->to(array($knob('CAFE_DOMAIN_LANGUAGE') => 'ro'));
 if ($knob('CAFE_ADMIN_PAGE')) config::set('protected')->to(config::get('protected') + array($knob('CAFE_ADMIN_PAGE') => 'admin'));

@@ -23,7 +23,32 @@ Replies to the events come from the bundled rsvp model
 (`system/models/rsvp/`); the café writes only its pages, its emails and the
 words. The seed also adds two evenings: a Jazz night with 40 places in two
 weeks, and a Poetry evening with 4 places in ten days, whose replies close the
-day before, so the waitlist is easy to see.
+day before, so the waitlist is easy to see. It also adds the opening hours
+on `/about`, a `render.cms.hours` list editors change; `hours.txt` and
+`/api/cafe/hours` read the same items through the café model.
+
+The café is multilingual (`multilingual` on, `languages` `en` and `ro`):
+English at `/menu`, Romanian at `/ro/menu`. The words the templates fix
+(labels, buttons, the emails) are dictionary keys, `print.i18n.<view>('key')`,
+whose Romanian is in `i18n/ro/<view>.php` (the files MCP `write_strings`
+writes); the words editors change are CMS fields, with a value per language.
+`demo/seed.php` adds the Romanian of the pages, the site fields and the lists'
+items (the menu, events, journal, FAQ, the opening hours): only for a field
+whose English is the one it knows and whose Romanian is still empty, so
+running it on a live café adds the Romanian and leaves what editors wrote.
+Items get their Romanian addresses from their Romanian titles. Lint, with
+multilingual on, finds no untranslatable words in the public views (the staff
+pages and the lab stay English). The café has no `domain_language`: seen from
+the site's own address a language with its own domain lives only there, so
+`ro.localhost` would move the live café's Romanian to a host nobody reaches;
+the tests turn it on with `CAFE_DOMAIN_LANGUAGE=ro.localhost`, and show
+template-only translation (the deprecated `?lang=` and cookie) with
+`CAFE_MULTILINGUAL=off`. On a live café, after updating:
+
+```sh
+RASTER_APP=demo RASTER_ENV=production php bin/raster schema --apply   # the Romanian columns
+RASTER_ENV=production php demo/seed.php                              # the Romanian content
+```
 
 | Where | What it shows |
 |---|---|
@@ -40,7 +65,7 @@ day before, so the waitlist is easy to see.
 | `/members`, `/account`, `/login`, `/register`, `/forgot`, `/password/new` | accounts, roles and protected pages; members see their bookings and replies on /account |
 | `/lab` | the engine's edge cases, one section each |
 | `/journal.rss`, `/journal.atom`, `/feed.json`, `/sitemap.xml`, `/hours.txt` | formats |
-| `?lang=ro` | the Romanian translation |
+| `/ro/…` | the café in Romanian: every page at its Romanian address (`/ro/menu/menu_item/cafea-cu-lapte`), its words from `i18n/ro/` and its content from the CMS |
 
 ## Feature matrix
 
@@ -247,14 +272,21 @@ day before, so the waitlist is easy to see.
 | I9 | the sender from config `mail_from` |
 | I10 | a form that sends mail answers at once; the mail goes out after, and a silent mail server can't hold the visitor or their session |
 | I11 | mail headers are encoded: names in From and To, long subjects in words of 75 characters; `mail://` gives sendmail the sender with `-f` |
-| J1 | the template's language is the default |
-| J2 | ?lang= translates and sets a cookie |
-| J3 | the cookie remembers |
-| J4 | Accept-Language |
-| J5 | the language switcher |
-| J6 | one cached copy per language |
-| J7 | `domain_language` |
-| J8 | `language_cookie` |
+| J1 | the template's language is the default (`/menu` is English) |
+| J2 | template-only translation (`CAFE_MULTILINGUAL=off`; deprecated, removed in 3.0.0): `?lang=` translates and sets a cookie |
+| J3 | template-only: the cookie remembers |
+| J4 | template-only: Accept-Language |
+| J5 | the language switcher: each language's own address (`/ro/menu`); `?lang=` links with multilingual off |
+| J6 | one cached copy per language (`/about` and `/ro/about`) |
+| J7 | `domain_language` (`CAFE_DOMAIN_LANGUAGE=ro.localhost`): a host that is one language |
+| J8 | `language_cookie` (template-only) |
+| J9 | the switch: `multilingual` with `en` and `ro` puts Romanian at `/ro/…` (`/ro` and `?lang=ro` answer 301, `Content-Language`, hreflang, no cookie); the fixed words come from `i18n/ro/`, and lint finds no untranslatable words in the public views |
+| J10 | page translation: page and site fields in Romanian from `demo/seed.php`; a field with no Romanian shows the English |
+| J11 | item translation and slugs: the menu, events, journal, FAQ and opening hours in Romanian at Romanian addresses (`/ro/menu/menu_item/cafea-cu-lapte`; the English slug answers 301 there), `/ro/hours.txt` and `/ro/api/cafe/hours` in Romanian; `demo/seed.php` adds the Romanian to an existing database and leaves what editors changed |
+| J12 | the in-page editor on `/ro/…` saves the Romanian, and the English page keeps its words |
+| J13 | emails in the guest's language: a booking, a reply or a sign-up made on `/ro/` is mailed in Romanian, with `/ro/` links; staff get theirs in English |
+| J14 | the sitemap lists every language's address with its hreflang alternates |
+| J15 | MCP translation: `translation_status`, `update_page` and `update_item` with `lang`, `write_strings`, `render_url /ro/…` |
 | K1 | a model that paginates itself (?page=) |
 | L1 | servers.php: whole names, loopback only from this machine |
 | L2 | RASTER_ENV |

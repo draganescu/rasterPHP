@@ -145,6 +145,7 @@ Set with `config::set('name')->to(value)` in `config/the_app.php`.
 | `newsletter_unsubscribe_page` | `newsletter-unsubscribe` | |
 | `mail` | see `RASTER_MAIL` | how email is sent |
 | `mail_from` | see `RASTER_MAIL_FROM` | the sender |
+| `multilingual` | `false` | one address per language (`/ro/menu`) and CMS fields in every language, for the `languages`, which need to be two or more (see [Translations](Translations)) |
 | `languages` | none | e.g. `array('en', 'ro')`, default first |
 | `domain_language` | none | e.g. `array('example.ro' => 'ro')` |
 | `language_cookie` | `lang` | the cookie that remembers a language choice |
@@ -153,7 +154,7 @@ Set with `config::set('name')->to(value)` in `config/the_app.php`.
 | `page_cache_skip` | none | path patterns |
 | `export_skip` | none | paths or `#regex#` patterns left out of `raster export` |
 | `mcp_token` | none | turns on MCP over HTTP (same as `RASTER_MCP_TOKEN`) |
-| `mcp_write_views` | `false` | lets MCP over HTTP rewrite templates |
+| `mcp_write_views` | `false` | lets MCP over HTTP rewrite templates, theme files, dictionaries and the languages setting (`write_view`, `write_asset`, `write_strings`, `set_languages`) |
 | `api_system_models` | `cms` | bundled models reachable at `/api`, for what their `api()` lists |
 | `api_blocked` | `mcp`, `api` | models never reachable at `/api`. Setting it replaces the list, so keep `mcp` and `api` in it: `array('mcp', 'api', 'billing')` |
 | `allow_deprecated` | none | deprecated features this site keeps on purpose, so `doctor` doesn't warn |

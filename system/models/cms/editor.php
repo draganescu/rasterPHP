@@ -24,16 +24,22 @@ class cms_editor {
 		return template::instance()->marks !== null;
 	}
 
-	// what page_field returns for a page field while an editor is looking
-	static function field($type, $slug, $name, $value, $default) {
+	// what page_field returns for a page field while an editor is looking.
+	// $language (multilingual only) adds what the mark says about the
+	// content language: lang, and in a translation shared (one value for
+	// every language), untranslated and fallback (the default language's
+	// value, shown while there is no translation)
+	static function field($type, $slug, $name, $value, $default, $language = null) {
 		$template = template::instance();
 		$shown = ($value === false || $value === null) ? $default : $value;
-		$id = $template->mark(array(
+		$mark = array(
 			'kind' => 'field', 'type' => $type, 'slug' => $slug, 'field' => $name,
 			'value' => (string)$shown, 'default' => trim((string)$default),
 			'rich' => (bool)preg_match('/<[a-z][^>]*>/i', $shown.$default),
 			'attr' => $template->current_attr !== null ? substr($template->current_attr, 1) : null,
-		));
+		);
+		// the language's own value (value '' for an untranslated field) wins
+		$id = $template->mark($language ? array_merge($mark, $language) : $mark);
 		if ($template->current_attr !== null) {
 			$template->pending_mark = $id;
 			return $value;
@@ -89,6 +95,14 @@ class cms_editor {
 			// the site's clock, in its time zone: scheduled items go live by it
 			'now' => date('Y-m-d H:i:s'),
 		);
+		// multilingual: lang is the page's language, the one the editor
+		// writes; its own words are in editor_lang (D9), and the dock
+		// offers editor_languages to choose from
+		if (class_exists('i18n') && i18n::enabled()) {
+			$config['editor_lang'] = self::editor_lang();
+			$config['languages'] = i18n::available();
+			$config['editor_languages'] = self::editor_languages();
+		}
 		$script = '<script id="raster-editor-config" type="application/json">'
 			.json_encode($config, JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR)
 			.'</script><script src="'.config::get('link_uri').'api/cms/editor_script?v='.urlencode(self::version()).'" defer></script>';
@@ -135,9 +149,10 @@ class cms_editor {
 
 	// the editor's own words: English in editor.js, other languages in
 	// system/models/cms/editor/lang/<lang>.php, and your own in
-	// <app>/i18n/<lang>/raster_editor.php
+	// <app>/i18n/<lang>/raster_editor.php. Multilingual, in the editor's
+	// own language (editor_lang()), whatever the page's is
 	static function strings() {
-		$lang = class_exists('i18n') ? i18n::detect() : '';
+		$lang = class_exists('i18n') ? (i18n::enabled() ? self::editor_lang() : i18n::detect()) : '';
 		if (!preg_match('/^[a-z]{2}(-[a-z]{2})?$/i', (string)$lang)) return array();
 		$strings = array();
 		foreach (array(BASE.'models/cms/editor/lang/'.$lang.'.php', APPBASE.'i18n/'.$lang.'/raster_editor.php') as $file) {
@@ -147,6 +162,77 @@ class cms_editor {
 			}
 		}
 		return (object)$strings;
+	}
+
+	// ##The editor's own language (D9)
+
+	// the languages the editor has words for: English, the ones in
+	// editor/lang/, and the site's own raster_editor.php dictionaries
+	static function editor_languages() {
+		$codes = array('en');
+		foreach (glob(BASE.'models/cms/editor/lang/*.php') ?: array() as $file) $codes[] = basename($file, '.php');
+		foreach (glob(APPBASE.'i18n/*/raster_editor.php') ?: array() as $file) $codes[] = basename(dirname($file));
+		$codes = array_map('strtolower', $codes);
+		return array_values(array_unique(array_filter($codes, function ($code) { return (bool)preg_match('/^[a-z]{2}(-[a-z]{2})?$/', $code); })));
+	}
+
+	// The language of the editor's words, separate from the page's: the
+	// one the person chose (user.editor_lang), else the first of the
+	// browser's (Accept-Language) the editor has words for, else the
+	// site's default language when it has, else English. Asked once per
+	// request (the config and the words both need it)
+	static function editor_lang() {
+		static $known = null;
+		if ($known !== null) return $known;
+		return $known = self::pick_editor_lang();
+	}
+
+	protected static function pick_editor_lang() {
+		$have = self::editor_languages();
+		$user = authentication::user();
+		if ($user && !empty($user['id'])) {
+			try {
+				$chosen = strtolower((string)R::load('user', (int)$user['id'])->editor_lang);
+				if (in_array($chosen, $have, true)) return $chosen;
+			} catch (Exception $e) {
+				log::warning('editor: '.$e->getMessage());
+			}
+		}
+		if (!empty($_SERVER['HTTP_ACCEPT_LANGUAGE'])) {
+			foreach (i18n::parse_header($_SERVER['HTTP_ACCEPT_LANGUAGE']) as $candidate) {
+				$candidate = strtolower($candidate);
+				if (in_array($candidate, $have, true)) return $candidate;
+				if (in_array(substr($candidate, 0, 2), $have, true)) return substr($candidate, 0, 2);
+			}
+		}
+		$default = strtolower(i18n::default_language());
+		return in_array($default, $have, true) ? $default : 'en';
+	}
+
+	// lang: the editor's own language from now on, for this account ('' to
+	// follow the browser again)
+	static function set_lang() {
+		cms::require_admin(true);
+		// a multilingual site's choice only: off the account has no such column
+		if (!i18n::enabled()) return self::refused(new cms_refused(array('not_multilingual')));
+		$lang = util::post('lang');
+		if (is_array($lang)) return self::fail("'lang' takes one value");
+		$lang = strtolower((string)$lang);
+		if ($lang !== '' && !in_array($lang, self::editor_languages(), true)) return self::fail("The editor has no words in '$lang'");
+		$user = authentication::user();
+		if (!$user || empty($user['id'])) return self::fail('Unknown account');
+		try {
+			cms_records::transaction(function () use ($user, $lang) {
+				$bean = R::load('user', (int)$user['id']);
+				$bean->editor_lang = $lang;
+				R::store($bean);
+			});
+		} catch (Exception $e) {
+			return self::fail($e->getMessage());
+		} catch (Throwable $e) {
+			return self::broken($e);
+		}
+		return array('editor_lang' => $lang);
 	}
 
 	// ##Saving
@@ -207,19 +293,55 @@ class cms_editor {
 		return $type;
 	}
 
-	// type, slug, field, value
+	// The content language of a save or a history call (multilingual): the
+	// page's own, its URL's (/ro/api/cms/…, the address the editor's
+	// config gives it). The editor posts it too, and a page open in
+	// another language than the address says is refused (false). null
+	// when the site isn't multilingual.
+	protected static function language() {
+		if (!i18n::enabled()) return null;
+		$lang = i18n::current();
+		$posted = util::post('lang');
+		return !is_array($posted) && strtolower((string)$posted) === strtolower($lang) ? $lang : false;
+	}
+
+	// whether a page's table has a column for $lang yet (headline__ro): on a
+	// frozen database, schema --apply makes them
+	protected static function has_language($type, $lang) {
+		$suffix = i18n::suffix($lang);
+		foreach (array_keys(cms_store::columns($type)) as $column) {
+			if (substr($column, -strlen($suffix)) === $suffix) return true;
+		}
+		return false;
+	}
+
+	// type, slug, field, value, and lang when multilingual. A field with a
+	// translation is saved in the page's language; a shared one (a photo,
+	// a link) is one value for every language
 	static function save_field() {
 		cms::require_admin(true);
 		if ($bad = self::one_value()) return $bad;
 		$type = self::page_type();
 		$field = (string)util::post('field');
 		if (!$type) return self::fail('Unknown page');
-		if (!preg_match('/^[a-z][a-z0-9_]*$/', $field) || cms::reserved($field, 'field') || !array_key_exists($field, cms_store::columns($type))) {
+		// headline__ro is a language's column, never a field of its own
+		if (!preg_match('/^[a-z][a-z0-9_]*$/', $field) || strpos($field, '__') !== false || cms::reserved($field, 'field') || !array_key_exists($field, cms_store::columns($type))) {
 			return self::fail("Unknown field '$field'");
+		}
+		$lang = self::language();
+		if ($lang === false) return self::fail('This page is in '.i18n::current().': reload it');
+		$write = $lang !== null && !i18n::is_default($lang) && in_array($field, cms_types::translated($type), true) ? $lang : null;
+		// production before schema --apply made the language's columns: a
+		// text field would land in the default language's column
+		if ($lang !== null && $write === null && !i18n::is_default($lang) && database::$frozen && !self::has_language($type, $lang)) {
+			$types = cms_types::of_table($type);
+			if (!isset($types[$field]) || $types[$field] === 'text') return self::refused(new cms_refused(array('translation_columns_missing')));
 		}
 		$slug = $type === 'sitepage' ? 'site' : (string)util::post('slug');
 		try {
-			$saved = cms_store::update_page($type, $slug, array($field => (string)util::post('value')), array($field));
+			$saved = cms_store::update_page($type, $slug, array($field => (string)util::post('value')), array($field), $write);
+		} catch (cms_refused $e) {
+			return self::refused($e);
 		} catch (cms_type_error $e) {
 			return self::mistyped($e);
 		} catch (Exception $e) {
@@ -229,7 +351,8 @@ class cms_editor {
 		}
 		// printed the way the page prints it (4.50 for a 14.50 mock-up), so the
 		// editor shows what was stored, not what was typed
-		return array('value' => cms_types::show($saved['fields'][$field], (string)util::post('example')), 'revision' => $saved['revision']);
+		$column = $write === null ? $field : cms_types::column($field, $write);
+		return array('value' => cms_types::show($saved['fields'][$column], (string)util::post('example')), 'revision' => $saved['revision']);
 	}
 
 	// field => mock-up, from the item's mark: the decimals a number prints with
@@ -238,7 +361,13 @@ class cms_editor {
 		return is_array($examples) ? array_filter($examples, 'is_string') : array();
 	}
 
-	// collection, id (0 for a new item), fields[name]=value
+	// collection, id (0 for a new item), fields[name]=value, and lang when
+	// multilingual. In a translation, a field with a translation is saved
+	// in the page's language and a shared one (a photo, a price) as the one
+	// value of every language, as save_field does; a new item is made in
+	// the default language, the only text it has until it is translated.
+	// copy (a stored item's id) makes the new item a copy of that one, in
+	// every language
 	static function save_item() {
 		cms::require_admin(true);
 		if ($bad = self::one_value()) return $bad;
@@ -252,10 +381,70 @@ class cms_editor {
 		$fields = util::post('fields');
 		if (!is_array($fields)) $fields = array();
 		unset($fields['id'], $fields['updated_at']);
-		$allowed = $record ? cms_records::writable($record) : array_diff(array_keys($columns), array('id', 'updated_at'));
+		// name__ro is a language's column, and saved_lang Raster's, never fields
+		$allowed = $record ? cms_records::writable($record) : array_values(array_filter(array_diff(array_keys($columns), array('id', 'updated_at', 'saved_lang')), function ($column) { return strpos($column, '__') === false; }));
+		$lang = self::language();
+		if ($lang === false) return self::fail('This page is in '.i18n::current().': reload it');
+		$id = (int)util::post('id');
+		$write = $lang !== null && !i18n::is_default($lang) && $id ? $lang : null;
+		$every = $record ? cms_records::translated_fields($record) : cms_types::translated($type);
+		// the address is per language too, before the table has slug__ro:
+		// the save makes it, so /ro/ never changes the default slug
+		if (i18n::enabled() && array_key_exists('slug', $columns) && !in_array('slug', $every, true)) $every[] = 'slug';
+		$translated = $write === null ? array() : $every;
+		// a new item: a copy of a stored one (Duplicate), or one brought back
+		// (undo after Delete), comes with every language's text as stored,
+		// never as the page showed it
+		$translations = array();
+		if (!$id) {
+			$copy = (int)util::post('copy');
+			if ($copy) {
+				$from = cms_store::get_item($type, $copy);
+				if (!$from) return self::fail('No such item', 404);
+				foreach (array('id', 'updated_at', 'slug', 'created_at', 'owner', 'saved_lang') as $own) unset($from[$own]);
+				$fields = $from + $fields;
+			}
+			unset($fields['saved_lang']);
+			foreach ($fields as $key => $value) {
+				if (strpos($key, '__') === false) continue;
+				unset($fields[$key]);
+				foreach (i18n::enabled() ? i18n::available() : array() as $code) {
+					$suffix = i18n::suffix($code);
+					$base = substr($key, 0, -strlen($suffix));
+					if ($suffix !== '' && $base.$suffix === $key && in_array($base, $every, true) && in_array($base, $allowed, true)) $translations[$code][$base] = $value;
+				}
+			}
+			if ($copy) $fields = array_intersect_key($fields, array_flip($allowed));
+		}
+		// production before schema --apply made the language's columns: a
+		// text field would land in the default language's column
+		// text field would land in the default language's column, and a
+		// translated one (a record's, the slug) has no column to go to
+		if ($write !== null && database::$frozen) {
+			$types = cms_types::of_table($type);
+			$none = !self::has_language($type, $write);
+			foreach (array_keys($fields) as $field) {
+				$missing = in_array($field, $every, true)
+					? !array_key_exists(cms_types::column($field, $write), $columns)
+					: $none && (!isset($types[$field]) || $types[$field] === 'text') && !in_array($field, array('enabled', 'published_at'), true);
+				if ($missing) return self::refused(new cms_refused(array('translation_columns_missing')));
+			}
+		}
+		$own = array_intersect_key($fields, array_flip($translated));
+		$shared = array_diff_key($fields, $own);
 		try {
-			// the page prints text, so the editor gets the item as text too
-			return cms_types::show_row(cms_store::save_item($type, (int)util::post('id'), $fields, $allowed, 'editor', $collection), self::examples());
+			// every part or none
+			$saved = !$own && !$translations ? cms_store::save_item($type, $id, $shared, $allowed, 'editor', $collection) : cms_records::transaction(function () use ($type, $id, $own, $shared, $allowed, $collection, $write, $translations) {
+				$saved = $shared || !$own ? cms_store::save_item($type, $id, $shared, $allowed, 'editor', $collection) : null;
+				if ($own) $saved = cms_store::save_item($type, $id, $own, $allowed, 'editor', $collection, $write);
+				foreach ($translations as $code => $values) {
+					if (implode('', array_map('strval', $values)) !== '') cms_store::save_item($type, (int)$saved['id'], $values, $allowed, 'editor', $collection, $code);
+				}
+				return $translations ? cms_store::get_item($type, (int)$saved['id']) : $saved;
+			});
+			// the page prints text, so the editor gets the item as text too,
+			// in the page's language
+			return cms_types::show_row($lang === null ? $saved : cms_store::localized($saved, $type, $lang), self::examples());
 		} catch (cms_refused $e) {
 			return self::refused($e);
 		} catch (cms_type_error $e) {
@@ -311,12 +500,14 @@ class cms_editor {
 		}
 	}
 
-	// type: the page's revisions, newest first
+	// type, and lang when multilingual: the page's revisions, newest
+	// first, each with the language it changed (saved_lang)
 	static function history() {
 		cms::require_admin(true);
 		if ($bad = self::one_value()) return $bad;
 		$type = self::page_type();
 		if (!$type) return self::fail('Unknown page');
+		if (self::language() === false) return self::fail('This page is in '.i18n::current().': reload it');
 		$revisions = cms_store::page_history($type, 30);
 		// times with their offset, so the browser can say "5 minutes ago"
 		foreach ($revisions as $key => $revision) {
@@ -327,7 +518,8 @@ class cms_editor {
 		return array('revisions' => $revisions);
 	}
 
-	// type, slug, revision: a new revision with the old one's values
+	// type, slug, revision: a new revision with the old one's values, the
+	// whole row, every language's translations included
 	static function restore() {
 		cms::require_admin(true);
 		if ($bad = self::one_value()) return $bad;

@@ -2,14 +2,14 @@
 <!-- print.@lang.i18n.language --><!-- print.@dir.i18n.dir --><html lang="en" dir="ltr"><!-- /print.@dir.i18n.dir --><!-- /print.@lang.i18n.language -->
 <head>
   <!-- dry._layout.head /-->
-  <title>The salon</title>
+  <title><!-- print.i18n.salon('the_salon') -->The salon<!-- /print.i18n.salon('the_salon') --></title>
 </head>
 <body>
   <!-- dry._layout.header /-->
   <main class="narrow">
-    <h1>The salon upstairs</h1>
-    <p>Ana and Mihai cut hair upstairs, one guest at a time. A cut takes 30 minutes, a colour 90 (Ana only). Pick who, what and a day, then a time.</p>
-    <!-- print.if.static --><p>Call us on <a href="tel:+40721000000">+40 721 000 000</a> to book.</p><!-- /print.if.static -->
+    <h1><!-- print.i18n.salon('the_salon_upstairs') -->The salon upstairs<!-- /print.i18n.salon('the_salon_upstairs') --></h1>
+    <!-- print.cms.intro --><p>Ana and Mihai cut hair upstairs, one guest at a time. A cut takes 30 minutes, a colour 90 (Ana only). Pick who, what and a day, then a time.</p><!-- /print.cms.intro -->
+    <!-- print.if.static --><p><!-- print.i18n.salon('call_us_on') -->Call us on<!-- /print.i18n.salon('call_us_on') --> <a href="tel:+40721000000">+40 721 000 000</a> <!-- print.i18n.salon('to_book') -->to book.<!-- /print.i18n.salon('to_book') --></p><!-- /print.if.static -->
     <!-- print.if.live -->
     <!-- print.validation.alert('booked') --><p class="notice">Thank you, we have your request. We emailed you a link to change or cancel it.</p><!-- /print.validation.alert('booked') -->
     <!-- print.validation.alert('fully_booked') --><p class="error">That time was just taken. Pick another.</p><!-- /print.validation.alert('fully_booked') -->
@@ -24,38 +24,38 @@
     <!-- print.validation.alert('name_invalid') --><p class="error">Tell us your name.</p><!-- /print.validation.alert('name_invalid') -->
     <!-- print.validation.alert('email_invalid') --><p class="error">We need a valid email to confirm.</p><!-- /print.validation.alert('email_invalid') -->
     <form method="get" class="filters">
-      <label>With
-        <select name="resource"><option value="">Pick a stylist</option><!-- render.booking.resources('service=?service') --><!-- print.@value.slug --><option value="ana"><!-- print.name -->Ana<!-- /print.name --></option><!-- /print.@value.slug --><!-- /render.booking.resources('service=?service') --></select>
+      <label><!-- print.i18n.salon('with') -->With<!-- /print.i18n.salon('with') -->
+        <select name="resource"><option value=""><!-- print.i18n.salon('pick_a_stylist') -->Pick a stylist<!-- /print.i18n.salon('pick_a_stylist') --></option><!-- render.booking.resources('service=?service') --><!-- print.@value.slug --><option value="ana"><!-- print.name -->Ana<!-- /print.name --></option><!-- /print.@value.slug --><!-- /render.booking.resources('service=?service') --></select>
       </label>
-      <label>For
-        <select name="service"><option value="">Pick a service</option><!-- render.booking.services('resource=?resource') --><!-- print.@value.slug --><option value="cut"><!-- print.name -->Cut<!-- /print.name --> (<!-- print.minutes -->30<!-- /print.minutes --> minutes)</option><!-- /print.@value.slug --><!-- /render.booking.services('resource=?resource') --></select>
+      <label><!-- print.i18n.salon('for') -->For<!-- /print.i18n.salon('for') -->
+        <select name="service"><option value=""><!-- print.i18n.salon('pick_a_service') -->Pick a service<!-- /print.i18n.salon('pick_a_service') --></option><!-- render.booking.services('resource=?resource') --><!-- print.@value.slug --><option value="cut"><!-- print.name -->Cut<!-- /print.name --> (<!-- print.minutes -->30<!-- /print.minutes --> <!-- print.i18n.salon('minutes') -->minutes)<!-- /print.i18n.salon('minutes') --></option><!-- /print.@value.slug --><!-- /render.booking.services('resource=?resource') --></select>
       </label>
-      <label>Day <input type="date" name="date"></label>
-      <button>Show times</button>
+      <label><!-- print.i18n.salon('day') -->Day<!-- /print.i18n.salon('day') --> <input type="date" name="date"></label>
+      <button><!-- print.i18n.salon('show_times') -->Show times<!-- /print.i18n.salon('show_times') --></button>
     </form>
     <form method="get" class="days">
-      <p>Days with a free time:</p>
+      <p><!-- print.i18n.salon('days_with_a_free_time') -->Days with a free time:<!-- /print.i18n.salon('days_with_a_free_time') --></p>
       <input type="hidden" name="resource">
       <input type="hidden" name="service">
       <!-- render.booking.days('resource=?resource&service=?service&limit=7') -->
-      <!-- print.@value.date --><button class="day" name="date" value="2026-10-20"><!-- print.date -->2026-10-20<!-- /print.date -->, <!-- print.slots_free -->12<!-- /print.slots_free --> times</button><!-- /print.@value.date -->
+      <!-- print.@value.date --><button class="day" name="date" value="2026-10-20"><!-- print.date -->2026-10-20<!-- /print.date -->, <!-- print.slots_free -->12<!-- /print.slots_free --> <!-- print.i18n.salon('times') -->times<!-- /print.i18n.salon('times') --></button><!-- /print.@value.date -->
       <!-- /render.booking.days('resource=?resource&service=?service&limit=7') -->
     </form>
     <!-- render.booking.form -->
     <form method="post" class="stack">
-      <fieldset class="times"><legend>Time</legend>
+      <fieldset class="times"><legend><!-- print.i18n.salon('time') -->Time<!-- /print.i18n.salon('time') --></legend>
         <!-- render.booking.slots('date=?date&resource=?resource&service=?service') -->
-        <!-- print.+class.state --><label class="slot "><!-- print.@value.time --><input type="radio" name="time" value="10:00"><!-- /print.@value.time --> <!-- print.time -->10:00<!-- /print.time --> to <!-- print.ends -->10:30<!-- /print.ends --></label><!-- /print.+class.state -->
+        <!-- print.+class.state --><label class="slot "><!-- print.@value.time --><input type="radio" name="time" value="10:00"><!-- /print.@value.time --> <!-- print.time -->10:00<!-- /print.time --> <!-- print.i18n.salon('to') -->to<!-- /print.i18n.salon('to') --> <!-- print.ends -->10:30<!-- /print.ends --></label><!-- /print.+class.state -->
         <!-- /render.booking.slots('date=?date&resource=?resource&service=?service') -->
-        <p class="hint">No times here? Pick a stylist, a service and a day above.</p>
+        <p class="hint"><!-- print.i18n.salon('no_times_here_pick_a') -->No times here? Pick a stylist, a service and a day above.<!-- /print.i18n.salon('no_times_here_pick_a') --></p>
       </fieldset>
-      <label>Name <input type="text" name="name" required maxlength="80"></label>
-      <!-- render.validation.field('name') --><p class="error">Tell us your name.</p><!-- /render.validation.field('name') -->
-      <label>Email <input type="email" name="email" required></label>
-      <!-- render.validation.field('email') --><p class="error">We need a valid email to confirm.</p><!-- /render.validation.field('email') -->
-      <label>Phone <input type="tel" name="phone"></label>
-      <label>Notes <textarea name="notes" maxlength="300"></textarea></label>
-      <button>Book</button>
+      <label><!-- print.i18n.salon('name') -->Name<!-- /print.i18n.salon('name') --> <input type="text" name="name" required maxlength="80"></label>
+      <!-- render.validation.field('name') --><p class="error"><!-- print.i18n.salon('tell_us_your_name') -->Tell us your name.<!-- /print.i18n.salon('tell_us_your_name') --></p><!-- /render.validation.field('name') -->
+      <label><!-- print.i18n.salon('email') -->Email<!-- /print.i18n.salon('email') --> <input type="email" name="email" required></label>
+      <!-- render.validation.field('email') --><p class="error"><!-- print.i18n.salon('we_need_a_valid_email') -->We need a valid email to confirm.<!-- /print.i18n.salon('we_need_a_valid_email') --></p><!-- /render.validation.field('email') -->
+      <label><!-- print.i18n.salon('phone') -->Phone<!-- /print.i18n.salon('phone') --> <input type="tel" name="phone"></label>
+      <label><!-- print.i18n.salon('notes') -->Notes<!-- /print.i18n.salon('notes') --> <textarea name="notes" maxlength="300"></textarea></label>
+      <button><!-- print.i18n.salon('book') -->Book<!-- /print.i18n.salon('book') --></button>
     </form>
     <!-- /render.booking.form -->
     <!-- /print.if.live -->

@@ -65,7 +65,7 @@ Compares the content model your templates declare with the database, and changes
 php bin/raster doctor [--json]
 ```
 
-A health check: PHP version and extensions, whether the app needs upgrade steps, whether framework files were edited, whether `.htaccess` has every protection rule, whether `data/` and `media/` are writable, template errors, database drift, deprecated features in use, and in production the site address, mail transport, MCP token, `RASTER_ENV`, `display_errors` and whether PHP takes uploads as large as the editor's (12 MB: `upload_max_filesize` and `post_max_size`). Exit code 1 when something must be fixed. Run it on the server after every deploy.
+A health check: PHP version and extensions, whether the app needs upgrade steps, whether framework files were edited, whether `.htaccess` has every protection rule, whether `data/` and `media/` are writable, template errors, database drift, deprecated features in use, language settings (a code it can't read, `multilingual` with fewer than two languages, and on a multilingual site the language columns the database still lacks (translations and `saved_lang`)), and in production the site address, mail transport, MCP token, `RASTER_ENV`, `display_errors` and whether PHP takes uploads as large as the editor's (12 MB: `upload_max_filesize` and `post_max_size`). Exit code 1 when something must be fixed. Run it on the server after every deploy.
 
 ## Accounts
 
@@ -79,10 +79,10 @@ php bin/raster users
 ## Newsletter
 
 ```sh
-php bin/raster send <url> [--to=email] [--subject="…"] [--dry-run] [--again]
+php bin/raster send <url> [--to=email] [--subject="…"] [--dry-run] [--again] [--lang=code]
 ```
 
-Sends a page of the site as a newsletter issue. Run it again after a stop or a failure and it mails only the subscribers who don't have it yet. Needs `RASTER_URL` (or the `site_url` setting). See [Newsletter](Newsletter#sending-an-issue).
+Sends a page of the site as a newsletter issue. Run it again after a stop or a failure and it mails only the subscribers who don't have it yet. Needs `RASTER_URL` (or the `site_url` setting). On a multilingual site it sends each language's version of the page to the subscribers who read it (`--lang` for just one). See [Newsletter](Newsletter#sending-an-issue).
 
 ## Publishing
 

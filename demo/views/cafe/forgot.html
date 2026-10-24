@@ -2,17 +2,17 @@
 <!-- print.@lang.i18n.language --><!-- print.@dir.i18n.dir --><html lang="en" dir="ltr"><!-- /print.@dir.i18n.dir --><!-- /print.@lang.i18n.language -->
 <head>
   <!-- dry._layout.head /-->
-  <title>Forgot your password</title>
+  <title><!-- print.i18n.forgot('forgot_your_password') -->Forgot your password<!-- /print.i18n.forgot('forgot_your_password') --></title>
 </head>
 <body>
   <!-- dry._layout.header /-->
   <main class="narrow">
-    <h1>Forgot your password?</h1>
+    <h1><!-- print.i18n.forgot('forgot_your_password_2') -->Forgot your password?<!-- /print.i18n.forgot('forgot_your_password_2') --></h1>
     <!-- print.validation.alert('reset_sent') --><p class="notice">If there is an account with that email, a reset link is on its way.</p><!-- /print.validation.alert('reset_sent') -->
     <!-- render.authentication.forgot -->
     <form method="post" class="stack">
-      <label>Email <input type="email" name="email" required></label>
-      <button>Send me a link</button>
+      <label><!-- print.i18n.forgot('email') -->Email<!-- /print.i18n.forgot('email') --> <input type="email" name="email" required></label>
+      <button><!-- print.i18n.forgot('send_me_a_link') -->Send me a link<!-- /print.i18n.forgot('send_me_a_link') --></button>
     </form>
     <!-- /render.authentication.forgot -->
   </main>

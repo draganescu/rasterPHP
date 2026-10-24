@@ -11,13 +11,23 @@ class cafe
 
 	// ##Pages
 
-	// opening hours: day, time, state (open or closed)
+	// opening hours: day, time, state (open or closed), from the about
+	// page's render.cms.hours list, which editors change; hours.txt, the lab
+	// and /api/cafe/hours read it here (models/cafe/sql/hours.sql), without
+	// drafts and scheduled items, as the list shows them, and in the page's
+	// language (/ro/hours.txt: the Romanian day and time, else the English)
 	function hours() {
-		return array(
-			array('day' => 'Monday', 'time' => 'closed', 'state' => 'closed'),
-			array('day' => 'Tuesday to Friday', 'time' => '8:00 to 18:00', 'state' => 'open'),
-			array('day' => 'Weekend', 'time' => '9:00 to 16:00', 'state' => 'open'),
-		);
+		try {
+			$rows = database::instance('cafe')->hours(array(':now' => date('Y-m-d H:i:s')));
+		} catch (Exception $e) {
+			return array();
+		}
+		$hours = array();
+		foreach ($rows as $row) {
+			$row = cms_store::localized($row, 'hoursdata');
+			$hours[] = array('day' => $row['day'], 'time' => $row['time'], 'state' => $row['state']);
+		}
+		return $hours;
 	}
 
 	// dishes in a category, counted with an SQL file (models/cafe/sql/count_category.sql)
@@ -90,7 +100,7 @@ class cafe
 	}
 
 	function welcome($user) {
-		mail::send_view('_email/welcome', $user['email'], array('name' => $user['name'] ?: 'there'));
+		mail::send_view('_email/welcome', $user['email'], array('name' => $user['name'] ?: 'there'), array(), i18n::of($user));
 	}
 
 	// a change log in data/changes.log, whether the change came from the

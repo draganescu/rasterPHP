@@ -13,7 +13,7 @@
 //   php bin/raster users
 //   php bin/raster login-link <email|name> [--next=/path]
 //   php bin/raster make model <name> --from=<view> [--form=<method>] [--dry-run] [--force]
-//   php bin/raster send <url> [--to=email] [--subject=…] [--dry-run] [--again]
+//   php bin/raster send <url> [--to=email] [--subject=…] [--dry-run] [--again] [--lang=<code>]
 //   php bin/raster mcp
 //   php bin/raster render <url> [--as=<email|username|role>]
 //   php bin/raster cache clear
@@ -350,6 +350,12 @@ switch ($command) {
 				foreach ($table['rename_candidates'] as $rename) {
 					echo '    '.$paint("renamed? php bin/raster schema --rename={$table['table']}.{$rename['from']}:{$rename['to']}", '36')."\n";
 				}
+				foreach (isset($table['missing_translations']) ? $table['missing_translations'] : array() as $column) {
+					echo '  '.$paint('+', '33')." $column ".$paint('(multilingual'.($status['frozen'] ? '; run --apply' : '; --apply adds it').')', '2')."\n";
+				}
+				if (!empty($status['translations'][$table['table']])) {
+					echo '  '.$paint('kept translations: '.implode(', ', $status['translations'][$table['table']]).' (no language uses them now; kept for when one does)', '2')."\n";
+				}
 			}
 			foreach ($status['system_tables'] as $table) {
 				if ($table['missing']) {
@@ -464,7 +470,7 @@ switch ($command) {
 		// sends a page of the site as a newsletter issue
 		$url = isset($positional[0]) ? $positional[0] : null;
 		if (!$url) {
-			fwrite(STDERR, "Usage: php bin/raster send <url> [--to=email] [--subject=...] [--dry-run] [--again]\n");
+			fwrite(STDERR, "Usage: php bin/raster send <url> [--to=email] [--subject=...] [--dry-run] [--again] [--lang=<code>]\n");
 			exit(2);
 		}
 		if (!getenv('RASTER_URL') && !config::get('site_url')) {
@@ -473,6 +479,12 @@ switch ($command) {
 		}
 		$env = getenv();
 		$env['RASTER_SENDING'] = '1';
+		// a multilingual site: one issue per language (#200)
+		if (i18n::enabled()) exit(raster_send_languages($url, $options, $env, $root, $paint));
+		if (isset($options['lang'])) {
+			fwrite(STDERR, $paint('error', '31').": --lang is for a multilingual site (multilingual on, two or more languages)\n");
+			exit(2);
+		}
 		$process = proc_open(array(PHP_BINARY, __FILE__, 'render', $url), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, $env);
 		$html = stream_get_contents($pipes[1]);
 		$errors = stream_get_contents($pipes[2]);
@@ -715,6 +727,99 @@ switch ($command) {
 		exit($command === 'help' ? 0 : 2);
 }
 
+// `raster send` on a multilingual site: the page rendered in each language
+// (the default at $url, the others under their prefix, ro/news), each sent
+// to the subscribers who read that language as an issue of its own, keyed
+// by that address. A language that fails is reported and the others still
+// go; the exit status is then 1.
+function raster_send_languages($url, $options, $env, $root, $paint) {
+	$languages = i18n::available();
+	if (isset($options['lang'])) {
+		$known = is_string($options['lang']) ? array_values(array_filter($languages, function ($code) use ($options) { return strtolower($code) === strtolower($options['lang']); })) : array();
+		if (!$known) {
+			fwrite(STDERR, $paint('error', '31').": --lang names none of the site's languages (".implode(', ', $languages).")\n");
+			return 2;
+		}
+		$languages = $known;
+	} elseif (isset($options['to'])) {
+		$languages = array(i18n::default_language());
+	}
+	// each language's address of the page, which also keys its issue. On a
+	// language's own domain (RASTER_URL is a domain_language host) two
+	// languages would have one address and one rendering: refused
+	$addresses = array();
+	foreach (i18n::available() as $lang) {
+		$address = (strpos($url, '/') === 0 ? '/' : '').i18n::prefix($lang).ltrim($url, '/');
+		if (in_array($address, $addresses, true)) {
+			fwrite(STDERR, $paint('error', '31').": $address is the page in more than one language on this host; set RASTER_URL to the site's own address (site_url), not a language's domain\n");
+			return 2;
+		}
+		$addresses[$lang] = $address;
+	}
+	$status = 0;
+	// languages that went out (or would), and those sent already
+	$sent = 0;
+	$skipped = 0;
+	foreach ($languages as $lang) {
+		$address = $addresses[$lang];
+		$process = proc_open(array(PHP_BINARY, __FILE__, 'render', $address), array(1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, $root, $env);
+		$html = stream_get_contents($pipes[1]);
+		$errors = stream_get_contents($pipes[2]);
+		if (proc_close($process) !== 0) {
+			fwrite(STDERR, $paint('error', '31').": $address did not render: ".trim($errors)."\n");
+			$status = 1;
+			continue;
+		}
+		$html = newsletter::prepare_issue($html);
+		$subject = isset($options['subject']) && is_string($options['subject']) ? $options['subject'] : newsletter::subject_of($html);
+		if ($subject === '') {
+			fwrite(STDERR, $paint('error', '31').": $address has no <title>; pass --subject=\"...\"\n");
+			$status = 1;
+			continue;
+		}
+		if (strpos($html, newsletter::MARKER) === false) {
+			fwrite(STDERR, $paint('warning', '33').": $address has no unsubscribe link (<!-- print.newsletter.unsubscribe_url /-->); readers can only use their mail app's unsubscribe button\n");
+		}
+		if (isset($options['to'])) {
+			$ok = newsletter::deliver($html, $subject, (string)$options['to'], '', $lang);
+			echo $ok ? "Sent \"$subject\" ($lang) to {$options['to']} (".mail::destination().")\n" : $paint('error', '31').': '.mail::$last_error."\n";
+			if (!$ok) $status = 1;
+			continue;
+		}
+		$sent_before = newsletter::issue($address);
+		$again = isset($options['again']);
+		// a language that reached everyone is skipped, so a run again after
+		// another language failed sends only what is left
+		if ($sent_before && !$sent_before->incomplete && !$again) {
+			echo "Skipped ($lang): $address was already sent on {$sent_before->sent_at} to {$sent_before->recipients} subscribers. Use --again to send it again.\n";
+			$skipped++;
+			continue;
+		}
+		$sent++;
+		$resume = $sent_before && !$again;
+		if (isset($options['dry-run'])) {
+			echo "Would send \"$subject\" ($lang) to ".count(newsletter::recipients($resume ? $sent_before : null, $lang))." subscriber(s)".($resume ? " who don't have it yet" : '')." via ".mail::destination()."\n";
+			continue;
+		}
+		$issue = newsletter::send_issue($address, $html, $subject, $again, $lang);
+		if (!$issue) {
+			fwrite(STDERR, "$address was already sent. Use --again to send it again.\n");
+			$status = 1;
+			continue;
+		}
+		foreach (newsletter::$failures as $email => $error) fwrite(STDERR, "  $email: $error\n");
+		$failed = count(newsletter::$failures);
+		echo "Sent \"$subject\" ($lang) to ".newsletter::$sent.($resume ? " more subscriber(s), {$issue->recipients} in all" : ' subscriber(s)').($failed ? ", $failed failed (run send again to retry them)" : '')." via ".mail::destination()."\n";
+		if ($failed) $status = 1;
+	}
+	// every language already sent: nothing to do, as off
+	if ($skipped && !$sent && !$status) {
+		fwrite(STDERR, "$url was already sent in every language. Use --again to send it again.\n");
+		return 1;
+	}
+	return $status;
+}
+
 // the help, or the lines of it for one command (null when it has none);
 // they are also the list of options each command takes
 function raster_usage($command = null) {
@@ -757,6 +862,8 @@ Raster command line
                                          email a page to newsletter subscribers; run it
                                          again after a stop or a failure and it mails only
                                          those who don't have it yet (--again: everyone)
+        --lang=<code>                    a multilingual site sends the page in each
+                                         language to the readers of it; only this one
   php bin/raster mcp                     MCP server over stdio for local agents
   php bin/raster render <url>            print the HTML of a URL (never from the page cache);
                                          exit 1 on a redirect (a protected page) or an error

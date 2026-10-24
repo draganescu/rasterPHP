@@ -29,6 +29,10 @@ require_once BASE.'tools/inspector.php';
 $passed = 0; $failed = array(); $skipped = array();
 function test($name, $fn) {
 	global $passed, $failed, $skipped;
+	// RASTER_TEST_ONLY=<words> runs only the tests whose name has them. Some
+	// tests build on what earlier ones made (orders, the studio's login), so
+	// a filtered run can fail where the whole suite passes
+	if (getenv('RASTER_TEST_ONLY') && stripos($name, getenv('RASTER_TEST_ONLY')) === false) return;
 	try { $fn(); $passed++; echo '.'; }
 	catch (test_skipped $e) { $skipped[] = "$name: ".$e->getMessage(); echo 's'; }
 	catch (Throwable $e) { $failed[] = "$name: ".$e->getMessage().' (line '.$e->getLine().')'; echo 'F'; }
@@ -253,6 +257,7 @@ test('the pretend provider: paying marks the order paid, and emails the buyer an
 	same(array('bea@example.com', 'studio@bluehour.test'), array_map(function ($m) { return $m['to']; }, $sent));
 	has($sent[0]['text'], "payment for order $number");
 	has($sent[0]['text'], '1 × Soup bowl (€32.00)');
+	has($sent[1]['text'], "$number is in, paid by card: 1 × Soup bowl (€32.00), €32.00.");
 	has($v->go('GET', '/thanks')[1], 'Paid, thank you.');
 	lacks(http('GET', "$base/pay/test?order=$number")[1], 'Pay €', 'a paid order has nothing to pay');
 	$v->go('POST', "/pay/test?order=$number", array('raster_form' => 'order.test_payment'));
@@ -502,7 +507,7 @@ test('pay on delivery, the default: no provider, no pretending the order is paid
 	$sent = array_slice(mails(), $before);
 	same(array('mihai@example.com', 'studio@bluehour.test'), array_map(function ($m) { return $m['to']; }, $sent));
 	has($sent[0]['text'], 'You\'ll pay €32.00 to the courier');
-	has($sent[1]['text'], 'to be paid on delivery');
+	has($sent[1]['text'], 'is in, to be paid on delivery: 1 × ');
 	// the studio ships it unpaid, and marks it paid when the courier brings the money
 	$studio = new visitor($plain);
 	$studio->login('studio@bluehour.test', $GLOBALS['studio_password']);
@@ -644,6 +649,113 @@ test('the webhook during a database outage answers 503, so the provider sends it
 
 // ## 2.1.8 batch H: row loop
 // (batch H adds its tests here)
+
+// ## P2.D: models carry no page words (#127)
+
+test('P2.D: the studio\'s order mail words how it is paid; the order model gives only flags (#127)', function () use ($root) {
+	$order = array('number' => 'BH-9', 'name' => 'Ana', 'lines' => array(array('qty' => 2, 'piece' => 'Mug', 'subtotal' => '€48.00')),
+		'total' => '48.00', 'address' => 'Strada 1', 'postcode' => '010101', 'city' => 'București', 'country' => 'Romania');
+	controller::model('order');
+	$card = order::mail_vars($order + array('payment' => 'card'));
+	$delivery = order::mail_vars($order + array('payment' => 'delivery'));
+	same(array(true, false), array($card['by_card'], $card['on_delivery']));
+	same(array(false, true), array($delivery['by_card'], $delivery['on_delivery']));
+	foreach (array($card, $delivery) as $vars) check(!array_key_exists('payment', $vars), 'no payment words from the model');
+	lacks(file_get_contents("$root/shop/models/order/order.php"), "'paid by card'");
+	has(controller::render_view('_email/new_order', $card), '<strong>BH-9</strong> is in, paid by card: 2 × Mug (€48.00), €48.00.</p>');
+	has(controller::render_view('_email/new_order', $delivery), '<strong>BH-9</strong> is in, to be paid on delivery: 2 × Mug (€48.00), €48.00.</p>');
+});
+
+// ## P4 review: order mails off and in the buyer's language (#200 D13)
+
+function p4r_settings($settings, $fn) {
+	$kept = array();
+	foreach ($settings as $name => $value) {
+		$kept[$name] = config::get($name);
+		config::set($name)->to($value);
+	}
+	try {
+		return $fn();
+	} finally {
+		foreach ($kept as $name => $value) config::set($name)->to($value);
+	}
+}
+// the raw mails $fn sent, with what changes every time (date, id, boundary) taken out
+function p4r_sent($fn) {
+	global $maildir;
+	$before = glob("$maildir/*.eml") ?: array();
+	$fn();
+	$files = array_values(array_diff(glob("$maildir/*.eml") ?: array(), $before));
+	sort($files);
+	return array_map(function ($file) {
+		$raw = file_get_contents($file);
+		$raw = preg_replace('/^(Date|Message-ID): .*$/m', '$1: x', $raw);
+		return preg_replace('/raster-[0-9a-f]{16}/', 'raster-x', $raw);
+	}, $files);
+}
+function p4r_order($more = array()) {
+	return $more + array('number' => 'BH-77', 'email' => 'ana@example.test', 'name' => 'Ana', 'lines' => array(array('qty' => 2, 'piece' => 'Mug', 'subtotal' => '€48.00')),
+		'total' => '48.00', 'address' => 'Strada 1', 'postcode' => '010101', 'city' => 'București', 'country' => 'Romania', 'payment' => 'card', 'tracking' => 'RO123');
+}
+
+test('P4 review: off, the order emails are what they were, byte for byte (D13)', function () {
+	controller::model('order');
+	p4r_settings(array('shop_staff_email' => 'studio@bluehour.test'), function () {
+		$order = p4r_order(array('lang' => 'ro'));
+		$vars = order::mail_vars($order);
+		// what 2.2.50 sent: each view with the order's words, the buyer's and the studio's
+		$then = p4r_sent(function () use ($vars) {
+			mail::send_view('_email/order_placed', 'ana@example.test', $vars);
+			mail::send_view('_email/new_order', 'studio@bluehour.test', $vars);
+			mail::send_view('_email/order_confirmation', 'ana@example.test', $vars);
+			mail::send_view('_email/new_order', 'studio@bluehour.test', $vars);
+			mail::send_view('_email/order_shipped', 'ana@example.test', $vars + array('tracking' => 'RO123'));
+			mail::send_view('_email/late_payment', 'studio@bluehour.test', $vars);
+		});
+		same(6, count($then));
+		$off = array(
+			'none' => array('multilingual' => false, 'languages' => array()),
+			'languages, switch off' => array('multilingual' => false, 'languages' => array('en', 'ro')),
+			'one language' => array('multilingual' => true, 'languages' => array('en')),
+		);
+		foreach ($off as $what => $setting) {
+			p4r_settings($setting, function () use ($what, $order, $then) {
+				same($then, p4r_sent(function () use ($order) {
+					(new order())->placed_mail($order);
+					(new order())->paid_mail($order);
+					(new order())->shipped_mail($order);
+					(new order())->late_mail($order);
+				}), $what);
+			});
+		}
+	});
+});
+
+test('P4 review: multilingual, the buyer is mailed in the language they ordered in, the studio in the default (D13)', function () use ($root) {
+	controller::model('order');
+	$view = "$root/shop/views/kiln/_email/zzp4r_order.html";
+	$dictionary = "$root/shop/i18n/ro/zzp4r.php";
+	$made = !is_dir("$root/shop/i18n");
+	@mkdir(dirname($dictionary), 0775, true);
+	file_put_contents($dictionary, "<?php\nreturn array('thanks' => 'Mulțumim');\n");
+	file_put_contents($view, '<!doctype html><html><head><title>Order <!-- print.self.number -->BH-1<!-- /print.self.number --></title></head><body>'
+		.'<p><!-- print.i18n.zzp4r(\'thanks\') -->Thanks<!-- /print.i18n.zzp4r(\'thanks\') -->, <!-- print.self.name -->Ana<!-- /print.self.name --></p></body></html>');
+	try {
+		p4r_settings(array('multilingual' => true, 'languages' => array('en', 'ro'), 'shop_staff_email' => 'studio@bluehour.test'), function () {
+			$texts = function ($raws) {
+				return array_map(function ($raw) { return preg_match('/Content-Type: text\/plain; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n(.*?)\r\n--/s', $raw, $m) ? trim(base64_decode($m[1])) : ''; }, $raws);
+			};
+			same(array('Mulțumim, Ana'), $texts(p4r_sent(function () { order::mail_buyer('_email/zzp4r_order', p4r_order(array('lang' => 'ro'))); })), 'the buyer who ordered on /ro/');
+			same(array('Thanks, Ana'), $texts(p4r_sent(function () { order::mail_staff('_email/zzp4r_order', p4r_order(array('lang' => 'ro'))); })), 'the studio');
+			same(array('Thanks, Ana'), $texts(p4r_sent(function () { order::mail_buyer('_email/zzp4r_order', p4r_order()); })), 'an order from before the column');
+		});
+	} finally {
+		@unlink($view);
+		@unlink($dictionary);
+		@rmdir(dirname($dictionary));
+		if ($made) @rmdir("$root/shop/i18n");
+	}
+});
 
 test('lint is clean and there were no PHP warnings', function () use ($root, $tmp) {
 	$out = shell_exec('RASTER_APP=shop '.php_cmd().' '.escapeshellarg("$root/bin/raster").' lint 2>&1');

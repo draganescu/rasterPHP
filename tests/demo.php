@@ -789,7 +789,7 @@ test(array('E2', 'E14', 'E15', 'M4'), 'site-wide fields, revisions, empty values
 });
 test('E16', 'a new annotation becomes a new column in development', function () use ($base, $views) {
 	$original = file_get_contents("$views/about.html");
-	with_file("$views/about.html", str_replace('<h2>Opening hours</h2>', '<p class="motto"><!-- print.cms.motto -->Slow is fine.<!-- /print.cms.motto --></p><h2>Opening hours</h2>', $original), function () use ($base) {
+	with_file("$views/about.html", str_replace('<h2><!-- print.i18n.about(\'opening_hours\') -->', '<p class="motto"><!-- print.cms.motto -->Slow is fine.<!-- /print.cms.motto --></p><h2><!-- print.i18n.about(\'opening_hours\') -->', $original), function () use ($base) {
 		has(http('GET', "$base/about")[1], '<p class="motto">Slow is fine.</p>');
 		database::instance('cms');
 		check(array_key_exists('motto', R::inspect('aboutpage')), 'column not created');
@@ -1036,7 +1036,7 @@ test(array('E18', 'E19', 'E28'), 'the editor saves pages and items, keeps revisi
 	$token = token_in(http('GET', "$base/about", null, $h)[1]);
 	same(403, http('POST', "$base/api/cms/editor_save_field", array('type' => 'aboutpage', 'field' => 'heading', 'value' => 'No token'), $h)[0], 'the session token is needed');
 	$save = function ($method, $fields) use ($base, $h, $token) {
-		list($status, $body) = http('POST', "$base/api/cms/$method", array_merge($fields, array('csrf' => $token)), $h);
+		list($status, $body) = http('POST', "$base/api/cms/$method", array_merge($fields, array('csrf' => $token, 'lang' => 'en')), $h);
 		return array($status, json_decode($body, true));
 	};
 	list($status, $saved) = $save('editor_save_field', array('type' => 'aboutpage', 'slug' => '/about', 'field' => 'heading', 'value' => 'Edited in the page'));
@@ -1110,21 +1110,21 @@ test(array('E21', 'E29', 'C44'), 'pictures: upload, page and item photos, empty 
 	same(400, $status);
 	same(array('upload_not_a_picture'), json_decode($response, true)['problems'], 'a named refusal the editor words');
 	// a page field in an attribute: <!-- print.@src.cms.photo -->
-	http('POST', "$base/api/cms/editor_save_field", array('csrf' => $token, 'type' => 'aboutpage', 'slug' => '/about', 'field' => 'photo', 'value' => $upload['url']), $h);
+	http('POST', "$base/api/cms/editor_save_field", array('lang' => 'en', 'csrf' => $token, 'type' => 'aboutpage', 'slug' => '/about', 'field' => 'photo', 'value' => $upload['url']), $h);
 	has(http('GET', "$base/about")[1], '<img class="photo wide" src="'.$upload['url'].'" alt="The café from across the street">');
 	same($upload['url'], mcp($base, 'get_page', array('page' => '/about'))['fields']['photo'], 'MCP knows the field');
 	// saved while the site ran under another folder (a builder's preview), then moved
 	$file = '/media/'.basename($upload['url']);
-	http('POST', "$base/api/cms/editor_save_field", array('csrf' => $token, 'type' => 'aboutpage', 'slug' => '/about', 'field' => 'photo', 'value' => '/preview/abc'.$file), $h);
+	http('POST', "$base/api/cms/editor_save_field", array('lang' => 'en', 'csrf' => $token, 'type' => 'aboutpage', 'slug' => '/about', 'field' => 'photo', 'value' => '/preview/abc'.$file), $h);
 	has(http('GET', "$base/about")[1], '<img class="photo wide" src="'.$file.'"', 'a picture saved under another folder shows under this one');
-	http('POST', "$base/api/cms/editor_save_field", array('csrf' => $token, 'type' => 'aboutpage', 'slug' => '/about', 'field' => 'photo', 'value' => ''), $h);
+	http('POST', "$base/api/cms/editor_save_field", array('lang' => 'en', 'csrf' => $token, 'type' => 'aboutpage', 'slug' => '/about', 'field' => 'photo', 'value' => ''), $h);
 	has(http('GET', "$base/about")[1], '<img class="photo wide" src="img/about.jpg?v=', 'empty shows the template\'s picture');
 	// an item photo
 	$item = null;
 	foreach (mcp($base, 'list_items', array('collection' => 'menu', 'limit' => 100))['items'] as $row) if ($row['name'] === 'Americano') $item = $row;
-	http('POST', "$base/api/cms/editor_save_item", array('csrf' => $token, 'collection' => 'menu', 'id' => $item['id'], 'fields' => array('photo' => $upload['url'])), $h);
+	http('POST', "$base/api/cms/editor_save_item", array('lang' => 'en', 'csrf' => $token, 'collection' => 'menu', 'id' => $item['id'], 'fields' => array('photo' => $upload['url'])), $h);
 	has(http('GET', "$base/menu/menu_item/americano")[1], '<img class="photo wide" src="'.$upload['url'].'"');
-	http('POST', "$base/api/cms/editor_save_item", array('csrf' => $token, 'collection' => 'menu', 'id' => $item['id'], 'fields' => array('photo' => '')), $h);
+	http('POST', "$base/api/cms/editor_save_item", array('lang' => 'en', 'csrf' => $token, 'collection' => 'menu', 'id' => $item['id'], 'fields' => array('photo' => '')), $h);
 	has(http('GET', "$base/menu/menu_item/americano")[1], '<img class="photo wide" src="img/menu/flat-white.jpg?v=', 'empty keeps the mock-up');
 });
 
@@ -1157,14 +1157,14 @@ test(array('H6', 'H9'), 'sending an issue', function () use ($base) {
 	has($out, "send doesn't take --dryrun");
 	same($before, count(mails()), 'a mistyped --dry-run sent the issue');
 	list($code, $out) = raster(array('send', '/journal/journal_item/opening-day', '--dry-run'), array('RASTER_URL' => "$base/"));
-	has($out, 'Would send "Journal" to 2 subscriber(s)');
+	has($out, 'Would send "Journal" (en) to 2 subscriber(s)');
 	list($code, $out) = raster(array('send', '/journal/journal_item/opening-day', '--to=test@example.com'), array('RASTER_URL' => "$base/"));
 	same(0, $code, $out);
 	same('test@example.com', last_mail()['to']);
 	$before = count(mails());
 	list($code, $out) = raster(array('send', '/journal/journal_item/opening-day', '--subject=Our first letter'), array('RASTER_URL' => "$base/"));
 	same(0, $code, $out);
-	has($out, 'Sent "Our first letter" to 2 subscriber(s)');
+	has($out, 'Sent "Our first letter" (en) to 2 subscriber(s)');
 	$sent = array_slice(mails(), $before);
 	same(2, count($sent));
 	$issue = $sent[0];
@@ -1178,7 +1178,7 @@ test(array('H6', 'H9'), 'sending an issue', function () use ($base) {
 	list($code, $out) = raster(array('send', '/journal/journal_item/opening-day', '--again'), array('RASTER_URL' => "$base/"));
 	same(0, $code, $out);
 	same($before + 2, count(mails()), '--again sends again');
-	has(raster(array('send', '/about', '--dry-run'), array('RASTER_URL' => "$base/"))[1], 'the page has no unsubscribe link');
+	has(raster(array('send', '/about', '--dry-run'), array('RASTER_URL' => "$base/"))[1], '/about has no unsubscribe link');
 });
 test(array('H7', 'H8'), 'unsubscribing', function () use ($base) {
 	$issue = last_mail();
@@ -1269,7 +1269,8 @@ test(array('I3', 'I4', 'I8', 'I9'), 'SMTP: plain on localhost, STARTTLS and smtp
 
 // ## J. Languages
 
-test(array('J1', 'J2', 'J3', 'J4', 'J5'), 'languages', function () use ($base) {
+test(array('J1', 'J2', 'J3', 'J4', 'J5'), 'languages: template-only translation, with multilingual off', function () use ($db, $maildir) {
+	$base = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'CAFE_MULTILINGUAL' => 'off'));
 	$en = http('GET', "$base/lab")[1];
 	has(between($en, 'language'), '<p class="language">en</p>');
 	has($en, '<a class="lang active" href="'.$base.'/lab?lang=en">en</a>');
@@ -1319,7 +1320,7 @@ test('M4', 'every MCP tool', function () use ($base) {
 	$urls = array_map(function ($p) { return $p['url']; }, $overview['pages']);
 	foreach (array('site', '/', '/about', '/menu', '/docs/setup') as $url) check(in_array($url, $urls), "overview lacks $url");
 	$collections = array_map(function ($c) { return $c['name']; }, $overview['collections']);
-	same(array('booking', 'bookingclosed', 'bookinghours', 'bookingresource', 'bookingservice', 'contactmessage', 'events', 'faq', 'journal', 'menu', 'rsvp'), $collections);
+	same(array('booking', 'bookingclosed', 'bookinghours', 'bookingresource', 'bookingservice', 'contactmessage', 'events', 'faq', 'hours', 'journal', 'menu', 'rsvp'), $collections);
 	same('About us', mcp($base, 'get_page', array('page' => '/about'))['fields']['heading']);
 	$item = mcp($base, 'create_item', array('collection' => 'journal', 'fields' => array('title' => 'MCP post', 'author' => 'Agent')));
 	same('Agent', mcp($base, 'get_item', array('collection' => 'journal', 'id' => $item['id']))['author']);
@@ -1351,12 +1352,12 @@ test('M6', 'MCP over stdio', function () use ($root) {
 test('M10', 'describe: the site in one call', function () use ($base) {
 	$all = mcp($base, 'describe');
 	// all but the vocabulary, which is most of a full answer and has its own tool
-	same(array('site', 'routing', 'pages', 'admin_pages', 'collections', 'settings', 'lint', 'schema', 'views'), array_keys($all));
+	same(array('site', 'languages', 'routing', 'pages', 'admin_pages', 'collections', 'settings', 'lint', 'schema', 'views'), array_keys($all));
 	same('demo', $all['site']['app']);
 	same('cafe', $all['site']['theme']);
 	check(in_array('/menu', array_map(function ($p) { return $p['url']; }, $all['pages'])), 'the pages are there');
 	$names = array_map(function ($c) { return $c['name']; }, $all['collections']);
-	same(array('booking', 'bookingclosed', 'bookinghours', 'bookingresource', 'bookingservice', 'contactmessage', 'events', 'faq', 'journal', 'menu', 'rsvp'), $names);
+	same(array('booking', 'bookingclosed', 'bookinghours', 'bookingresource', 'bookingservice', 'contactmessage', 'events', 'faq', 'hours', 'journal', 'menu', 'rsvp'), $names);
 	same(4, $all['collections'][array_search('menu', $names)]['page_size'], 'menu_page_size');
 	same(50, $all['collections'][array_search('booking', $names)]['page_size'], 'booking_page_size');
 	same(0, $all['lint']['errors']);
@@ -1630,7 +1631,8 @@ test('N6', 'lint --fix repairs what is mechanical', function () use ($views) {
 		same(1, $code);
 		has($out, 'never closed');
 		has($out, "did you mean 'print'");
-		lacks($out, 'fixed');
+		lacks($out, ': fixed:');
+		lacks($out, ' fixed, ');
 		has(file_get_contents("$views/zz-fix.html"), 'prnit', 'the typo is left as written');
 	});
 });
@@ -1650,7 +1652,7 @@ test('N13', 'describe on the command line', function () {
 	same(0, $code, $out);
 	$described = json_decode($out, true);
 	same('demo', $described['site']['app']);
-	same(10, count($described));
+	same(11, count($described));
 	list($code, $out) = raster(array('describe', '--sections=site,vocabulary'));
 	same(0, $code, $out);
 	has($out, '## site');
@@ -1701,7 +1703,7 @@ test(array('N9', 'O1'), 'raster export: the site as static files', function () u
 	foreach (array('index.html', 'about/index.html', 'menu/index.html', 'menu/menu_page/2/index.html', 'menu/menu_item/americano/index.html', 'menu/menu_items/category/cakes/index.html', 'journal.rss', 'feed.json', 'sitemap.xml', 'hours.txt', '404.html', 'demo/views/cafe/style.css', 'demo/views/cafe/img/menu/flat-white.jpg', 'print/menu/index.html', 'ro/index.html', 'ro/menu/index.html', '.raster-export.json') as $file) {
 		check(is_file("$out/$file"), "missing $file");
 	}
-	foreach (array('login/index.html', 'members/index.html', 'register/index.html', 'account/index.html', 'forgot/index.html', 'password/new/index.html', 'letters/confirm/index.html', 'letters/stop/index.html', 'ro/journal.rss') as $file) check(!file_exists("$out/$file"), "should not export $file");
+	foreach (array('login/index.html', 'members/index.html', 'register/index.html', 'account/index.html', 'forgot/index.html', 'password/new/index.html', 'letters/confirm/index.html', 'letters/stop/index.html') as $file) check(!file_exists("$out/$file"), "should not export $file");
 	$home = file_get_contents("$out/index.html");
 	has($home, "<base href='https://cafe.example/demo/views/cafe/' />");
 	has($home, 'href="https://cafe.example/menu"');
@@ -1711,7 +1713,8 @@ test(array('N9', 'O1'), 'raster export: the site as static files', function () u
 	$ro = file_get_contents("$out/ro/menu/index.html");
 	has($ro, '>Meniu</a>');
 	has($ro, 'href="https://cafe.example/ro/about"', 'links stay in the language');
-	has($ro, 'href="https://cafe.example/journal.rss"', 'feeds are shared');
+	has($ro, 'href="https://cafe.example/ro/journal.rss"', 'each language has its feed');
+	check(is_file("$out/ro/journal.rss"), 'the Romanian feed');
 	has($ro, '<a class="lang" href="https://cafe.example/menu">en</a>');
 	lacks(file_get_contents("$out/events/index.html"), 'Secret tasting', 'no drafts');
 	has(file_get_contents("$out/journal.rss"), '<link>https://cafe.example/journal/journal_item/');
@@ -1737,7 +1740,7 @@ test('N10', 'print.if.live and print.if.static: forms stay out of a static expor
 	with_file("$views/export-probe.html", '<!doctype html><html><body><!-- render.contact.form --><form method="post"><input name="email"><button>Send</button></form><!-- /render.contact.form --></body></html>', function () use ($tmp) {
 		list($code, $output) = raster(array('export', "$tmp/probe"));
 		same(1, $code, $output);
-		has($output, 'The contact.form form (/export-probe) needs PHP. Wrap it in <!-- print.if.live -->');
+		has($output, 'The contact.form form (/export-probe, /ro/export-probe) needs PHP. Wrap it in <!-- print.if.live -->', $output);
 		has($output, 'Nothing was written');
 		check(!file_exists("$tmp/probe/index.html"));
 	});
@@ -1821,7 +1824,7 @@ test('N16', 'a page that answers an error stops the export, and the last export 
 	$boom = '<!-- print.zzthrows.boom -->x<!-- /print.zzthrows.boom -->';
 	with_file("$root/demo/models/zzthrows/zzthrows.php", "<?php\nclass zzthrows\n{\n\tfunction boom() { throw new RuntimeException('boom'); }\n}\n", function () use ($out, $views, $original, $boom) {
 		// a model that throws, on About
-		with_file("$views/about.html", str_replace('<h2>Opening hours</h2>', $boom.'<h2>Opening hours</h2>', $original), function () use ($out) {
+		with_file("$views/about.html", str_replace('<h2><!-- print.i18n.about(\'opening_hours\') -->', $boom.'<h2><!-- print.i18n.about(\'opening_hours\') -->', $original), function () use ($out) {
 			list($code, $output) = raster(array('export', $out, '--url=https://cafe.example/'));
 			same(1, $code, $output);
 			has($output, '/about answered 500');
@@ -1924,7 +1927,7 @@ test('A15', 'rewrite off: links go through index.php', function () use ($db, $ma
 	same(200, $status);
 	has($body, '<h1>Menu</h1>');
 	has($body, 'href="'.$plain.'/index.php/about"');
-	has($body, 'href="'.$plain.'/index.php/menu?lang=ro"', 'the language switcher');
+	has($body, 'href="'.$plain.'/index.php/ro/menu"', 'the language switcher');
 	has($body, 'href="'.$plain.'/index.php/menu/menu_page/2"', 'the collection pager');
 	has(http('GET', "$plain/index.php/lab")[1], 'href="'.$plain.'/index.php/lab?page=2"', 'a model\'s pager');
 	lacks($body, 'href="'.$plain.'/about"');
@@ -2059,7 +2062,8 @@ test(array('I6', 'I7'), 'mail: the default log folder and PHP mail()', function 
 	has($message, 'From: =?UTF-8?B?'.base64_encode('Raster Café').'?= <hello@cafe.test>');
 	has($message, 'Subject: ');
 });
-test(array('J7', 'J8'), 'a language per domain, the cookie name', function () use ($base) {
+test(array('J7', 'J8'), 'a language per domain, the cookie name (template-only)', function () use ($db, $maildir) {
+	$base = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'CAFE_MULTILINGUAL' => 'off', 'CAFE_DOMAIN_LANGUAGE' => 'ro.localhost'));
 	has(http('GET', "$base/lab", null, array('Host: ro.localhost'))[1], '>Meniu</a>');
 	has(http('GET', "$base/lab", null, array('Host: localhost'))[1], '>Menu</a>');
 	$headers = http('GET', "$base/lab?lang=ro")[2];
@@ -2068,7 +2072,7 @@ test(array('J7', 'J8'), 'a language per domain, the cookie name', function () us
 });
 test('J7', 'a language per domain with the site address set (#96)', function () use ($db, $maildir) {
 	$port = free_port();
-	$k = server($port, array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'RASTER_URL' => "http://localhost:$port/"));
+	$k = server($port, array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'RASTER_URL' => "http://localhost:$port/", 'CAFE_DOMAIN_LANGUAGE' => 'ro.localhost'));
 	// the site's own domain_language domain keeps its language and its links
 	$body = http('GET', "$k/lab", null, array("Host: ro.localhost:$port"))[1];
 	has($body, '>Meniu</a>');
@@ -2110,9 +2114,11 @@ test(array('F7', 'H12'), 'schema --drop --force, send without a title', function
 	same(1, raster(array('schema', '--check'))[0], 'the templates still want it');
 	http('GET', "$base/faq");
 	same(0, raster(array('schema', '--check'))[0], 'development adds it back');
+	// multilingual, each language's page is checked: an error for each, exit 1
 	list($code, $out) = raster(array('send', '/hours.txt', '--dry-run'), array('RASTER_URL' => "$base/"));
-	same(2, $code, $out);
-	has($out, 'The page has no <title>');
+	same(1, $code, $out);
+	has($out, '/hours.txt has no <title>');
+	has($out, '/ro/hours.txt has no <title>');
 });
 
 
@@ -2266,8 +2272,10 @@ test(array('F3', 'F6', 'I5', 'L3', 'L4', 'L5', 'E13', 'J6'), 'production: frozen
 	same('miss', header_value(http('GET', "$prod/docs/setup")[2], 'X-Raster-Cache'));
 	same('hit', header_value(http('GET', "$prod/docs/setup")[2], 'X-Raster-Cache'));
 	same(null, header_value(http('GET', "$prod/about?x=1")[2], 'X-Raster-Cache'), 'query strings are not cached');
-	same('miss', header_value(http('GET', "$prod/about", null, array('Cookie: cafe_lang=ro'))[2], 'X-Raster-Cache'), 'one copy per language');
-	has(http('GET', "$prod/about", null, array('Cookie: cafe_lang=ro'))[1], '>Meniu</a>');
+	same('miss', header_value(http('GET', "$prod/ro/about")[2], 'X-Raster-Cache'), 'one copy per language');
+	list(, $body, $headers) = http('GET', "$prod/ro/about");
+	same('hit', header_value($headers, 'X-Raster-Cache'));
+	has($body, '>Meniu</a>');
 	$boss = login($prod, 'boss@cafe.example', 'boss password');
 	same(null, header_value(http('GET', "$prod/about", null, array("Cookie: $boss"))[2], 'X-Raster-Cache'), 'logged in pages are not cached');
 	$code = 'require "'.$root.'/system/boot.php"; boot::$appname = "demo"; boot::cli(); cms_store::connect(); cms_store::update_page("aboutpage", "/about", array("heading" => "Cached no more"), array("heading"));';
@@ -2284,7 +2292,7 @@ test(array('F3', 'F6', 'I5', 'L3', 'L4', 'L5', 'E13', 'J6'), 'production: frozen
 	has(http('GET', "$prod/events")[1], 'Soon', 'published on time');
 	// frozen: templates ahead of the database show their defaults
 	$views = "$root/demo/views/cafe";
-	with_file("$views/about.html", str_replace('<h2>Opening hours</h2>', '<p class="motto"><!-- print.cms.motto -->Slow is fine.<!-- /print.cms.motto --></p><h2>Opening hours</h2>', file_get_contents("$views/about.html")), function () use ($prod) {
+	with_file("$views/about.html", str_replace('<h2><!-- print.i18n.about(\'opening_hours\') -->', '<p class="motto"><!-- print.cms.motto -->Slow is fine.<!-- /print.cms.motto --></p><h2><!-- print.i18n.about(\'opening_hours\') -->', file_get_contents("$views/about.html")), function () use ($prod) {
 		has(http('GET', "$prod/about?fresh=1")[1], '<p class="motto">Slow is fine.</p>');
 	});
 	// emails with links need the site address
@@ -2360,7 +2368,8 @@ test('R1', 'a model declares a type: a collection with its fields, no mock-up ro
 	same(array('staff.html', 'account.html'), array_values(array_intersect(array('staff.html', 'account.html'), $types[0]['used_in'])), 'where views show it');
 	$described = array_values(array_filter(mcp($base, 'describe', array('sections' => array('collections')))['collections'], function ($c) { return $c['name'] === 'booking'; }));
 	same('visitor', $described[0]['create']);
-	same(array('ends', 'status', 'changed_at'), $described[0]['readonly']);
+	// lang: the language the booking was made in (the café is multilingual)
+	same(array('ends', 'status', 'changed_at', 'lang'), $described[0]['readonly']);
 	database::instance('cms');
 	foreach (R::find('bookingdata') as $row) check($row->name !== 'Ana' || $row->notes !== 'Window seat', 'the mock-up is never stored as a record');
 	list($code, $out) = raster(array('schema'));
@@ -2413,9 +2422,9 @@ test('R3', 'check() runs on every write: the form, the editor, MCP and the model
 	$staff = login($base, 'staff@cafe.test', 'staff password');
 	$h = array("Cookie: $staff");
 	$token = token_in(http('GET', "$base/staff", null, $h)[1]);
-	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'booking', 'id' => $group->id, 'fields' => array('people' => '8', 'name' => 'Group 0 (8)'), 'csrf' => $token), $h);
+	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'booking', 'id' => $group->id, 'fields' => array('people' => '8', 'name' => 'Group 0 (8)'), 'lang' => 'en', 'csrf' => $token), $h);
 	same(200, $status, 'the booking itself is not counted twice');
-	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'booking', 'id' => 0, 'fields' => array('name' => 'Phone booking', 'date' => $day, 'time' => '19:00', 'resource' => 'dining-room', 'people' => '6'), 'csrf' => $token), $h);
+	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'booking', 'id' => 0, 'fields' => array('name' => 'Phone booking', 'date' => $day, 'time' => '19:00', 'resource' => 'dining-room', 'people' => '6'), 'lang' => 'en', 'csrf' => $token), $h);
 	same(422, $status);
 	same(array('fully_booked'), json_decode($body, true)['problems']);
 	$refused = json_decode(http('POST', "$base/mcp", json_encode(array('jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => array('name' => 'create_item', 'arguments' => array('collection' => 'booking', 'fields' => array('name' => 'Agent', 'date' => $day, 'time' => '19:00', 'resource' => 'dining-room', 'people' => '6'))))), array('Authorization: Bearer demo-token', 'Content-Type: application/json'))[1], true)['result'];
@@ -2465,19 +2474,19 @@ test(array('R6', 'R8'), 'readonly fields and actions: buttons for the roles allo
 	list(, $field) = mark_of($config, 'item_field', function ($m) use ($id) { return $m['item'] === (int)$id && $m['field'] === 'status'; });
 	same(true, $field['readonly'], 'the status is marked readonly: shown, updated by actions, never editable');
 	$token = token_in($page);
-	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'booking', 'id' => $booking->id, 'fields' => array('status' => 'confirmed'), 'csrf' => $token), $h);
+	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'booking', 'id' => $booking->id, 'fields' => array('status' => 'confirmed'), 'lang' => 'en', 'csrf' => $token), $h);
 	same(400, $status);
 	has(json_decode($body, true)['error'], "'status' can't be changed here");
 	$before = count(mails());
-	list($status, $body) = http('POST', "$base/api/cms/editor_action", array('collection' => 'booking', 'id' => $booking->id, 'action' => 'confirm', 'csrf' => $token), $h);
+	list($status, $body) = http('POST', "$base/api/cms/editor_action", array('collection' => 'booking', 'id' => $booking->id, 'action' => 'confirm', 'lang' => 'en', 'csrf' => $token), $h);
 	same(200, $status);
 	same('confirmed', json_decode($body, true)['status']);
 	same(array('Your booking is confirmed'), array_column(array_slice(mails(), $before), 'subject'), 'the guest is told, with a new link');
-	list($status, $body) = http('POST', "$base/api/cms/editor_action", array('collection' => 'booking', 'id' => $booking->id, 'action' => 'refund', 'csrf' => $token), $h);
+	list($status, $body) = http('POST', "$base/api/cms/editor_action", array('collection' => 'booking', 'id' => $booking->id, 'action' => 'refund', 'lang' => 'en', 'csrf' => $token), $h);
 	same(400, $status);
 	has(json_decode($body, true)['error'], 'no action');
 	same('cancelled', mcp($base, 'run_action', array('collection' => 'booking', 'id' => (int)$booking->id, 'action' => 'cancel'))['status']);
-	list($status, $body) = http('POST', "$base/api/cms/editor_action", array('collection' => 'booking', 'id' => $booking->id, 'action' => 'confirm', 'csrf' => $token), $h);
+	list($status, $body) = http('POST', "$base/api/cms/editor_action", array('collection' => 'booking', 'id' => $booking->id, 'action' => 'confirm', 'lang' => 'en', 'csrf' => $token), $h);
 	same(422, $status);
 	same(array('already_cancelled'), json_decode($body, true)['problems']);
 	$member = login($base, 'maria@example.com', 'reset password');
@@ -3124,17 +3133,17 @@ test('T2', 'values are stored as their type, whoever writes them, or refused nam
 	$staff = login($base, 'staff@cafe.test', 'staff password');
 	$h = array("Cookie: $staff");
 	$token = token_in(http('GET', "$base/menu", null, $h)[1]);
-	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'menu', 'id' => 0, 'fields' => array('name' => 'Typed tart', 'price' => ' 9.5 ', 'category' => 'cakes'), 'csrf' => $token), $h);
+	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'menu', 'id' => 0, 'fields' => array('name' => 'Typed tart', 'price' => ' 9.5 ', 'category' => 'cakes'), 'lang' => 'en', 'csrf' => $token), $h);
 	same(200, $status);
 	$tart = json_decode($body, true);
 	same(array('9.5', '1'), array($tart['price'], $tart['enabled']));
 	same(9.5, cms_store::get_item('menudata', $tart['id'])['price'], 'stored as a number');
-	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'menu', 'id' => $tart['id'], 'fields' => array('price' => 'nine'), 'csrf' => $token), $h);
+	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'menu', 'id' => $tart['id'], 'fields' => array('price' => 'nine'), 'lang' => 'en', 'csrf' => $token), $h);
 	same(400, $status);
 	same(array('type_number'), json_decode($body, true)['problems'], 'a name the editor words: '.$body);
 	same('price', json_decode($body, true)['field']);
 	// with the mock-ups from the item's mark, it comes back as the page prints it
-	list(, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'menu', 'id' => $tart['id'], 'fields' => array('price' => '9.5'), 'examples' => array('price' => '14.50'), 'csrf' => $token), $h);
+	list(, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'menu', 'id' => $tart['id'], 'fields' => array('price' => '9.5'), 'examples' => array('price' => '14.50'), 'lang' => 'en', 'csrf' => $token), $h);
 	same('9.50', json_decode($body, true)['price']);
 	has(http('GET', "$base/menu", null, $h)[1], '"examples":{', 'item marks carry their mock-ups');
 	mcp($base, 'delete_item', array('collection' => 'events', 'id' => $gig['id']));
@@ -3966,6 +3975,8 @@ test('H13', 'signing up twice: one subscriber, one mail within 5 minutes, the sa
 	same("$base/members?done=password_changed", header_value(http('POST', "$base/password/new?token={$t[1]}", array('raster_form' => 'authentication.reset', 'token' => $t[1], 'password' => 'second password', 'password_again' => 'second password'))[2], 'Location'), 'the first link works:');
 });
 
+// the café is multilingual: each language is an issue of its own; a plain
+// rerun skips the ones already sent (Romanian, read by nobody here)
 test('H14', 'an interrupted send goes on where it stopped (#86)', function () use ($base) {
 	database::instance('cms');
 	$readers = R::getCol("SELECT email FROM subscriber WHERE status = 'confirmed' ORDER BY id");
@@ -3987,10 +3998,10 @@ test('H14', 'an interrupted send goes on where it stopped (#86)', function () us
 	} finally { @rmdir($dir); }
 	same(2, array_sum($got($before)), 'mailed before the stop');
 	list($code, $out) = raster(array('send', '/journal', '--dry-run'), array('RASTER_URL' => "$base/"));
-	has($out, 'Would send "Journal" to '.(count($readers) - 1).' subscriber(s) who don\'t have it yet');
+	has($out, 'Would send "Journal" (en) to '.(count($readers) - 1).' subscriber(s) who don\'t have it yet');
 	list($code, $out) = raster(array('send', '/journal'), array('RASTER_URL' => "$base/"));
 	same(0, $code, $out);
-	has($out, 'Sent "Journal" to '.(count($readers) - 1).' more subscriber(s), '.count($readers).' in all');
+	has($out, 'Sent "Journal" (en) to '.(count($readers) - 1).' more subscriber(s), '.count($readers).' in all');
 	$counts = $got($before);
 	same(1, $counts[$readers[0]], 'the first reader got it once:');
 	// the second was handed over as the run was stopped, before it was noted
@@ -4025,7 +4036,7 @@ test('H15', 'readers a send failed get it on a plain rerun, over one SMTP connec
 	list($code, $out) = raster(array('send', '/about'), $env);
 	same(1, $code, $out);
 	has($out, $readers[1].': ');
-	has($out, 'Sent "About" to '.(count($readers) - 1).' subscriber(s), 1 failed', $out);
+	has($out, 'Sent "About" (en) to '.(count($readers) - 1).' subscriber(s), 1 failed', $out);
 	lacks($out, 'pass@');
 	list($counts, $connections) = $accepted();
 	same(1, $connections, 'one connection for the whole run:');
@@ -4034,13 +4045,13 @@ test('H15', 'readers a send failed get it on a plain rerun, over one SMTP connec
 	unlink("$log.refuse");
 	list($code, $out) = raster(array('send', '/about'), $env);
 	same(0, $code, $out);
-	has($out, 'Sent "About" to 1 more subscriber(s), '.count($readers).' in all');
+	has($out, 'Sent "About" (en) to 1 more subscriber(s), '.count($readers).' in all');
 	list($counts) = $accepted();
 	foreach ($readers as $email) same(1, isset($counts[$email]) ? $counts[$email] : 0, "$email:");
 	same(1, raster(array('send', '/about'), $env)[0], 'sent to everyone: once only');
 	list($code, $out) = raster(array('send', '/about', '--again'), $env);
 	same(0, $code, $out);
-	has($out, 'Sent "About" to '.count($readers).' subscriber(s)');
+	has($out, 'Sent "About" (en) to '.count($readers).' subscriber(s)');
 	list($counts) = $accepted();
 	foreach ($readers as $email) same(2, $counts[$email], "--again mails $email again:");
 	list($code, $out) = raster(array('send', '/about', '--to=test@example.com'), $env);
@@ -4337,19 +4348,19 @@ test(array('P4', 'R8'), 'the staff page from the recipe: counts, requests, an ag
 	$token = token_in($page);
 	$day = next_open('sun', 2);
 	$before = count(mails());
-	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'booking', 'id' => 0, 'fields' => array('name' => 'Phoned in', 'email' => 'phoned@example.com', 'date' => $day, 'time' => '21:00', 'resource' => 'dining-room', 'people' => '4'), 'csrf' => $token), $h);
+	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'booking', 'id' => 0, 'fields' => array('name' => 'Phoned in', 'email' => 'phoned@example.com', 'date' => $day, 'time' => '21:00', 'resource' => 'dining-room', 'people' => '4'), 'lang' => 'en', 'csrf' => $token), $h);
 	same(200, $status, $body);
 	$phoned = json_decode($body, true);
 	same(array('requested', '23:00'), array($phoned['status'], $phoned['ends']));
 	same(array('phoned@example.com'), array_column(array_slice(mails(), $before), 'to'), 'the guest gets their request and link; staff aren\'t emailed about their own');
 	check(link_token(mail_to('phoned@example.com')) !== null, 'with the link');
 	// an action in place
-	list($status, $body) = http('POST', "$base/api/cms/editor_action", array('collection' => 'booking', 'id' => $phoned['id'], 'action' => 'confirm', 'csrf' => $token), $h);
+	list($status, $body) = http('POST', "$base/api/cms/editor_action", array('collection' => 'booking', 'id' => $phoned['id'], 'action' => 'confirm', 'lang' => 'en', 'csrf' => $token), $h);
 	same(200, $status);
 	same('confirmed', json_decode($body, true)['status']);
 	same('Your booking is confirmed', mail_to('phoned@example.com')['subject']);
 	// moving it in the page keeps it confirmed and tells the guest
-	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'booking', 'id' => $phoned['id'], 'fields' => array('time' => '19:00'), 'csrf' => $token), $h);
+	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'booking', 'id' => $phoned['id'], 'fields' => array('time' => '19:00'), 'lang' => 'en', 'csrf' => $token), $h);
 	same(200, $status, $body);
 	same(array('confirmed', '21:00'), array(json_decode($body, true)['status'], json_decode($body, true)['ends']));
 	same('Your booking has moved', mail_to('phoned@example.com')['subject']);
@@ -4721,7 +4732,7 @@ test('Q4', 'a link-stuffed message is kept aside as spam, and staff can say it w
 	$page = http('GET', "$base/staff", null, $h)[1];
 	has(staff_section($page, 'Spam'), 'cheap watches', 'in the Spam list');
 	lacks(staff_section($page, 'New'), 'cheap watches');
-	list($status, $body) = http('POST', "$base/api/cms/editor_action", array('collection' => 'contactmessage', 'id' => $id, 'action' => 'not_spam', 'csrf' => token_in($page)), $h);
+	list($status, $body) = http('POST', "$base/api/cms/editor_action", array('collection' => 'contactmessage', 'id' => $id, 'action' => 'not_spam', 'lang' => 'en', 'csrf' => token_in($page)), $h);
 	same(200, $status, $body);
 	same('new', json_decode($body, true)['status']);
 	same($before, count(mails()), 'marking it not spam mails nobody');
@@ -4953,17 +4964,17 @@ test('S6', 'the staff page: counts, waitlist, attention, a phone reply', functio
 	// a phone reply from the card: full, so it waits, and promote can't make room
 	$token = token_in($page);
 	$before = count(mails());
-	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'rsvp', 'id' => 0, 'fields' => array('name' => 'Phoned in', 'event' => (string)$poetry['id'], 'answer' => 'yes', 'people' => '1'), 'csrf' => $token), $h);
+	list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'rsvp', 'id' => 0, 'fields' => array('name' => 'Phoned in', 'event' => (string)$poetry['id'], 'answer' => 'yes', 'people' => '1'), 'lang' => 'en', 'csrf' => $token), $h);
 	same(200, $status, $body);
 	$phoned = json_decode($body, true);
 	same('waiting', $phoned['status'], 'staff never go over places');
-	list($status, $body) = http('POST', "$base/api/cms/editor_action", array('collection' => 'rsvp', 'id' => $phoned['id'], 'action' => 'promote', 'csrf' => $token), $h);
+	list($status, $body) = http('POST', "$base/api/cms/editor_action", array('collection' => 'rsvp', 'id' => $phoned['id'], 'action' => 'promote', 'lang' => 'en', 'csrf' => $token), $h);
 	same(422, $status, $body);
 	same(array('not_enough_places'), json_decode($body, true)['problems']);
 	has(file_get_contents(dirname(__DIR__).'/demo/i18n/en/raster_editor.php'), "'problem_not_enough_places'", 'in the café\'s words');
 	$until = $poetry['rsvp_until'];
 	$save = function ($fields) use ($base, $h, $token, $poetry) {
-		list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'events', 'id' => $poetry['id'], 'fields' => $fields, 'csrf' => $token), $h);
+		list($status, $body) = http('POST', "$base/api/cms/editor_save_item", array('collection' => 'events', 'id' => $poetry['id'], 'fields' => $fields, 'lang' => 'en', 'csrf' => $token), $h);
 		same(200, $status, $body);
 	};
 	try {
@@ -4971,7 +4982,7 @@ test('S6', 'the staff page: counts, waitlist, attention, a phone reply', functio
 		$save(array('rsvp_until' => date('Y-m-d H:i', time() - 3600)));
 		$save(array('places' => '5'));
 		same('waiting', reply_row_by_id($phoned['id'])['status']);
-		list($status, $body) = http('POST', "$base/api/cms/editor_action", array('collection' => 'rsvp', 'id' => $phoned['id'], 'action' => 'promote', 'csrf' => $token), $h);
+		list($status, $body) = http('POST', "$base/api/cms/editor_action", array('collection' => 'rsvp', 'id' => $phoned['id'], 'action' => 'promote', 'lang' => 'en', 'csrf' => $token), $h);
 		same(200, $status, $body);
 		same('going', json_decode($body, true)['status'], 'promoted out of turn');
 		// places lowered under the people going: nobody moved, nobody emailed, all flagged
@@ -5015,11 +5026,13 @@ test('S7', 'a member sees their replies on /account and changes one without a to
 
 // ## P1.C: head tags, html lang and dir, the switcher (#117 #138)
 
-test(array('J1', 'J2', 'J3'), 'the café\'s Romanian pages say lang="ro" (#138)', function () use ($base) {
+test(array('J1', 'J2', 'J3'), 'the café\'s Romanian pages say lang="ro" (#138)', function () use ($base, $db, $maildir) {
 	has(http('GET', "$base/about")[1], "<!doctype html>\n<html lang=\"en\" dir=\"ltr\">");
-	has(http('GET', "$base/about?lang=ro")[1], '<html lang="ro" dir="ltr">');
-	has(http('GET', "$base/menu", null, array('Cookie: cafe_lang=ro'))[1], '<html lang="ro" dir="ltr">');
-	lacks(http('GET', "$base/menu?lang=ro")[1], 'hreflang', 'template-only languages: no language links in <head>');
+	has(http('GET', "$base/ro/about")[1], '<html lang="ro" dir="ltr">');
+	$off = server(free_port(), array('RASTER_DB' => $db, 'RASTER_MAIL' => "log://$maildir", 'CAFE_MULTILINGUAL' => 'off'));
+	has(http('GET', "$off/about?lang=ro")[1], '<html lang="ro" dir="ltr">');
+	has(http('GET', "$off/menu", null, array('Cookie: cafe_lang=ro'))[1], '<html lang="ro" dir="ltr">');
+	lacks(http('GET', "$off/menu?lang=ro")[1], 'hreflang', 'template-only languages: no language links in <head>');
 });
 
 // ## P1.D: export through the live prefixes (#137)
@@ -5122,7 +5135,7 @@ test('N9', 'P1.D export: a multilingual export warns about root-relative languag
 test('N9', 'P1.D export: a language on its own domain is asked for there (when the server is the site\'s address), written in its folder, and linked at its domain', function () use ($root, $tmp) {
 	$config = "$root/demo/config/the_app.php";
 	$out = "$tmp/p1d-domain";
-	with_file($config, file_get_contents($config)."\nconfig::set('multilingual')->to(true);\n", function () use ($out) {
+	with_file($config, file_get_contents($config)."\nconfig::set('domain_language')->to(array('ro.localhost' => 'ro'));\n", function () use ($out) {
 		list($code, $output) = raster(array('export', $out, '--url=https://cafe.example/'));
 		same(0, $code, $output);
 		has($output, 'Languages with their own domain: ro (ro.localhost)');
@@ -5153,6 +5166,316 @@ test('N9', 'P1.D export: the site\'s address comes from site_url when --url and 
 	has($output, 'linked to https://other.example/', '--url wins');
 });
 
+// ## P2.D: models carry no page words (#127)
+
+test(array('A2', 'E3'), 'P2.D: the opening hours are the about page\'s hours list; the café model only reads them (#127)', function () use ($base, $root) {
+	$about = http('GET', "$base/about")[1];
+	has($about, '<tr class="day closed"><td>Monday</td><td>closed</td></tr>');
+	has($about, '<tr class="day open"><td>Tuesday to Friday</td><td>8:00 to 18:00</td></tr>');
+	has($about, '<tr class="day open"><td>Weekend</td><td>9:00 to 16:00</td></tr>');
+	$model = file_get_contents("$root/demo/models/cafe/cafe.php");
+	foreach (array('Monday', 'Tuesday', 'Weekend', "'closed'", '8:00') as $word) lacks($model, $word, 'the words are the content\'s');
+	// an editor's change shows on the page, in hours.txt and at /api/cafe/hours
+	$monday = null;
+	foreach (mcp($base, 'list_items', array('collection' => 'hours'))['items'] as $row) if ($row['day'] === 'Monday') $monday = $row;
+	check($monday !== null, 'Monday is an item of the hours list');
+	try {
+		mcp($base, 'update_item', array('collection' => 'hours', 'id' => $monday['id'], 'fields' => array('time' => '10:00 to 14:00', 'state' => 'open')));
+		has(http('GET', "$base/about")[1], '<tr class="day open"><td>Monday</td><td>10:00 to 14:00</td></tr>');
+		has(http('GET', "$base/hours.txt")[1], "Monday: 10:00 to 14:00\nTuesday to Friday: 8:00 to 18:00");
+		same(array('day' => 'Monday', 'time' => '10:00 to 14:00', 'state' => 'open'), json_decode(http('GET', "$base/api/cafe/hours")[1], true)[0]);
+		// a scheduled day is hidden from the text and the API too, as from the page
+		mcp($base, 'update_item', array('collection' => 'hours', 'id' => $monday['id'], 'fields' => array('published_at' => date('Y-m-d H:i:s', strtotime('+1 day')))));
+		lacks(http('GET', "$base/about")[1], '<td>Monday</td>');
+		lacks(http('GET', "$base/hours.txt")[1], 'Monday');
+		same('Tuesday to Friday', json_decode(http('GET', "$base/api/cafe/hours")[1], true)[0]['day']);
+	} finally {
+		mcp($base, 'update_item', array('collection' => 'hours', 'id' => $monday['id'], 'fields' => array('time' => 'closed', 'state' => 'closed', 'published_at' => '')));
+	}
+	has(http('GET', "$base/hours.txt")[1], "Monday: closed\n");
+});
+
+// ## P3.C: the sitemap (#126) and items in every language
+
+test(array('B4', 'O1'), 'P3.C: the sitemap lists the FAQ, which has no item view, and dates a page by its last save (#126)', function () use ($base) {
+	foreach (array('/faq', '/menu') as $page) same(200, http('GET', $base.$page)[0]);
+	$body = http('GET', "$base/sitemap.xml")[1];
+	has($body, "<loc>$base/faq/faq_item/is-there-wifi</loc>");
+	has($body, "<loc>$base/menu/menu_item/flat-white</loc>");
+	// the café is multilingual: each address with its alternates (J14)
+	has($body, 'hreflang="ro" href="'.$base.'/ro/faq"');
+	// the page's date is its newest revision's
+	same(200, http('GET', "$base/about")[0]);
+	cms_store::connect();
+	$type = cms::page_type('/about');
+	R::exec("UPDATE $type SET updated_at = '2025-01-02 10:00:00'");
+	util::content_changed();
+	has(http('GET', "$base/sitemap.xml")[1], "<url><loc>$base/about</loc><lastmod>2025-01-02</lastmod>");
+	cms_store::update_page($type, '/about', array(), array());
+	has(http('GET', "$base/sitemap.xml")[1], "<url><loc>$base/about</loc><lastmod>".date('Y-m-d').'</lastmod>');
+});
+test('N9', 'P3.C export: a multilingual site is written at its Romanian item slugs (needs P3.A and P3.B)', function () use ($root, $tmp, $base) {
+	$config = "$root/demo/config/the_app.php";
+	$out = "$tmp/p3c-export";
+	same(200, http('GET', "$base/menu/menu_item/flat-white")[0]);
+	// the café is multilingual, so /menu made the column
+	cms_store::connect();
+	$was = R::getCell("SELECT slug__ro FROM menudata WHERE slug = 'flat-white'");
+	R::exec("UPDATE menudata SET slug__ro = 'cafea-cu-lapte' WHERE slug = 'flat-white'");
+	cms_store::forget();
+	try {
+		with_file($config, file_get_contents($config)."\nconfig::set('multilingual')->to(true);\nconfig::set('domain_language')->to(array());\n", function () use ($out) {
+			list($code, $output) = raster(array('export', $out, '--url=https://cafe.example/'));
+			same(0, $code, $output);
+			check(is_file("$out/menu/menu_item/flat-white/index.html"), 'the English item at its slug');
+			check(is_file("$out/ro/menu/menu_item/cafea-cu-lapte/index.html"), 'the Romanian item at its Romanian slug');
+			check(!file_exists("$out/ro/menu/menu_item/flat-white/index.html"), 'not at the English slug in ro/');
+			// the list links it at its Romanian slug, on whichever of its
+			// pages it is (earlier tests add items to the menu)
+			$lists = file_get_contents("$out/ro/menu/index.html");
+			foreach (glob("$out/ro/menu/menu_page/*/index.html") ?: array() as $page) $lists .= file_get_contents($page);
+			has($lists, 'href="https://cafe.example/ro/menu/menu_item/cafea-cu-lapte"');
+			has(file_get_contents("$out/menu/menu_item/flat-white/index.html"), 'hreflang="ro" href="https://cafe.example/ro/menu/menu_item/cafea-cu-lapte"');
+			$sitemap = file_get_contents("$out/sitemap.xml");
+			has($sitemap, '<loc>https://cafe.example/ro/menu/menu_item/cafea-cu-lapte</loc>');
+			has($sitemap, 'hreflang="en" href="https://cafe.example/menu/menu_item/flat-white"');
+		});
+	} finally {
+		cms_store::connect();
+		R::exec("UPDATE menudata SET slug__ro = ? WHERE slug = 'flat-white'", array($was));
+		cms_store::forget();
+	}
+});
+
+// ## P5.A: the demo is a real bilingual site (#200)
+
+// the café's pages opened once (so their lists have tables, as on a café
+// that has run for a while), then demo/seed.php, which adds the Romanian
+function p5a_seeded($base) {
+	global $root;
+	foreach (array('/', '/menu', '/events', '/journal', '/faq', '/about', '/visit', '/salon') as $page) same(200, http('GET', $base.$page)[0], $page);
+	list($code, $out) = raster_php("$root/demo/seed.php");
+	same(0, $code, $out);
+	cms_store::forget();
+	return $out;
+}
+// the views a visitor can open, whose words lint checks: not the staff
+// pages, the lab, the emails or the feeds
+function p5a_public_view($file) {
+	return !preg_match('#/(staff|staff/.*|booking_item|rsvp_item|contactmessage_item|lab)\.html$|/_email/|\.(rss|atom|xml|json|txt)$#', $file);
+}
+test('J9', 'P5.A: the café is multilingual: Romanian at /ro/, words from i18n/ro, nothing lint calls untranslatable', function () use ($base) {
+	list($status, $body, $headers) = http('GET', "$base/ro/");
+	same(200, $status);
+	has($body, '<html lang="ro" dir="ltr">');
+	same('ro', header_value($headers, 'Content-Language'));
+	same(null, header_value($headers, 'Set-Cookie'), 'no language cookie');
+	has($body, '<a href="'.$base.'/ro/menu">Meniu</a>');
+	has($body, '<a class="button" href="'.$base.'/ro/visit">Rezervă o masă</a>');
+	has($body, '<link rel="alternate" hreflang="en" href="'.$base.'/">');
+	has($body, '<link rel="alternate" hreflang="ro" href="'.$base.'/ro/">');
+	list($status, , $headers) = http('GET', "$base/ro");
+	same(301, $status);
+	same("$base/ro/", header_value($headers, 'Location'));
+	list($status, , $headers) = http('GET', "$base/menu?lang=ro");
+	same(301, $status);
+	same("$base/ro/menu", header_value($headers, 'Location'));
+	same(404, http('GET', "$base/de/menu")[0], 'a language the café lacks');
+	// English is the templates' own words, unchanged
+	list(, $en, $headers) = http('GET', "$base/visit");
+	same('en', header_value($headers, 'Content-Language'));
+	has($en, '<h1>Book a table</h1>');
+	$ro = http('GET', "$base/ro/visit")[1];
+	has($ro, '<h1>Rezervă o masă</h1>');
+	has($ro, '<title>Vino la noi</title>');
+	has($ro, '<a href="'.$base.'/ro/salon">Salon</a>');
+	has(http('GET', "$base/ro/login")[1], '<button>Intră în cont</button>');
+	has(http('GET', "$base/ro/does-not-exist")[1], '<h1>Am căutat peste tot</h1>', 'the 404 page too');
+	// the template-only setting is gone, and doctor has nothing to say about languages
+	list(, $out) = raster(array('doctor'));
+	lacks($out, 'template-only');
+	lacks($out, 'languages without multilingual');
+	// lint: every word of the public views is a dictionary key with its Romanian, or a CMS field
+	list(, $out) = raster(array('lint', '--json'));
+	$lint = json_decode($out, true);
+	check(is_array($lint), $out);
+	$words = array();
+	foreach ($lint['problems'] as $problem) {
+		if (!p5a_public_view($problem['file'])) continue;
+		if (strpos($problem['message'], 'is the same in every language') !== false || strpos($problem['message'], 'more line(s) of this view have words') !== false || strpos($problem['message'], 'has no entry in') !== false) $words[] = $problem['file'].':'.$problem['line'].' '.$problem['message'];
+	}
+	same(array(), $words);
+});
+test('J10', 'P5.A: the pages and the site fields in Romanian, from demo/seed.php; English where there is none', function () use ($base) {
+	p5a_seeded($base);
+	$ro = http('GET', "$base/ro/")[1];
+	has($ro, '<h1>Cafea bună, dimineți fără grabă.</h1>');
+	has($ro, 'Cafea, prăjituri și colțuri liniștite din 2014.');
+	has($ro, '<meta name="description" content="O cafenea mică în București: cafea bună, prăjituri și colțuri liniștite.">');
+	has(http('GET', "$base/")[1], '<h1>Good coffee, slow mornings.</h1>', 'the English page keeps its words');
+	has(http('GET', "$base/ro/salon")[1], '<p>Ana și Mihai tund la etaj');
+	same('Meniu', mcp($base, 'get_page', array('page' => '/menu', 'lang' => 'ro'))['fields']['heading']['value']);
+	// a field with no Romanian shows the English
+	mcp($base, 'update_page', array('page' => '/menu', 'lang' => 'ro', 'fields' => array('heading' => '')));
+	try {
+		has(http('GET', "$base/ro/menu")[1], '<h1>Menu</h1>');
+	} finally {
+		mcp($base, 'update_page', array('page' => '/menu', 'lang' => 'ro', 'fields' => array('heading' => 'Meniu')));
+	}
+	has(http('GET', "$base/ro/menu")[1], '<h1>Meniu</h1>');
+});
+test('J11', 'P5.A: the lists in Romanian at their Romanian addresses; seeding again keeps what editors wrote', function () use ($base, $root) {
+	p5a_seeded($base);
+	$menu = '';
+	for ($page = 1; $page <= 5; $page++) $menu .= http('GET', $page === 1 ? "$base/ro/menu" : "$base/ro/menu/menu_page/$page")[1];
+	has($menu, 'href="'.$base.'/ro/menu/menu_item/cafea-cu-lapte"');
+	has($menu, '<a class="tag" href="'.$base.'/ro/menu/menu_items/category/cafea">cafea</a>');
+	list($status, $item) = http('GET', "$base/ro/menu/menu_item/cafea-cu-lapte");
+	same(200, $status);
+	has($item, '<h1>Cafea cu lapte</h1>');
+	has($item, 'Ristretto dublu, lapte spumat.');
+	has($item, '<link rel="alternate" hreflang="en" href="'.$base.'/menu/menu_item/flat-white">');
+	list($status, , $headers) = http('GET', "$base/ro/menu/menu_item/flat-white");
+	same(301, $status, 'the English slug on /ro/');
+	same("$base/ro/menu/menu_item/cafea-cu-lapte", header_value($headers, 'Location'));
+	has(http('GET', "$base/menu/menu_item/flat-white")[1], '<h1>Flat white</h1>');
+	has(http('GET', "$base/ro/menu/menu_items/category/cafea")[1], 'Cafea cu lapte', 'a filter in Romanian');
+	has(http('GET', "$base/ro/events")[1], 'Seară de jazz');
+	has(http('GET', "$base/ro/journal")[1], 'Ziua deschiderii');
+	// an FAQ has no title: its Romanian address comes from its Romanian question
+	$faq = http('GET', "$base/ro/faq")[1];
+	has($faq, 'Aveți wifi?');
+	has($faq, 'href="'.$base.'/ro/faq/faq_item/aveti-wifi"');
+	same(200, http('GET', "$base/ro/faq/faq_item/aveti-wifi")[0]);
+	list($status, , $headers) = http('GET', "$base/ro/faq/faq_item/is-there-wifi");
+	same(301, $status, 'the English address on /ro/');
+	same("$base/ro/faq/faq_item/aveti-wifi", header_value($headers, 'Location'));
+	// the opening hours' mock-up row is Monday's, at a slug of its own
+	cms_store::connect();
+	same('monday', R::getCell("SELECT slug FROM hoursdata WHERE day = 'Monday'"));
+	// the opening hours: the page, the text and the API, each in its language
+	has(http('GET', "$base/ro/about")[1], '<tr class="day closed"><td>Luni</td><td>închis</td></tr>');
+	has(http('GET', "$base/ro/hours.txt")[1], "Programul Raster Café\n\nLuni: închis\nMarți–vineri: 8:00–18:00");
+	same(array('day' => 'Luni', 'time' => 'închis', 'state' => 'closed'), json_decode(http('GET', "$base/ro/api/cafe/hours")[1], true)[0]);
+	same(array('day' => 'Monday', 'time' => 'closed', 'state' => 'closed'), json_decode(http('GET', "$base/api/cafe/hours")[1], true)[0]);
+	// seeding again adds nothing, and leaves a Romanian an editor wrote, and
+	// an item whose English an editor changed
+	same(array(0, ''), raster_php("$root/demo/seed.php"));
+	$flat = null;
+	foreach (mcp($base, 'list_items', array('collection' => 'menu', 'limit' => 200))['items'] as $row) if ($row['slug'] === 'flat-white') $flat = $row;
+	check($flat !== null, 'flat-white');
+	$item = mcp($base, 'create_item', array('collection' => 'menu', 'fields' => array('name' => 'Cold brew', 'description' => 'Our own words now.', 'price' => '16', 'category' => 'coffee')));
+	try {
+		mcp($base, 'update_item', array('collection' => 'menu', 'id' => $flat['id'], 'lang' => 'ro', 'fields' => array('description' => 'Scris de un editor.')));
+		list($code, $out) = raster_php("$root/demo/seed.php");
+		same(0, $code, $out);
+		lacks($out, 'flat-white');
+		$got = mcp($base, 'get_item', array('collection' => 'menu', 'id' => $item['id'], 'lang' => 'ro'));
+		same('Cafea la rece', $got['name']['value'], 'a name the book knows');
+		same('', $got['description']['value'], 'English the book does not know stays untranslated');
+		same('Scris de un editor.', mcp($base, 'get_item', array('collection' => 'menu', 'id' => $flat['id'], 'lang' => 'ro'))['description']['value']);
+	} finally {
+		mcp($base, 'delete_item', array('collection' => 'menu', 'id' => $item['id']));
+		mcp($base, 'update_item', array('collection' => 'menu', 'id' => $flat['id'], 'lang' => 'ro', 'fields' => array('description' => 'Ristretto dublu, lapte spumat.')));
+	}
+});
+test('J12', 'P5.A: the in-page editor on /ro/ saves the Romanian', function () use ($base) {
+	p5a_seeded($base);
+	raster(array('user', 'staff@cafe.test', '--role=editor', '--password=staff password'));
+	$h = array('Cookie: '.login($base, 'staff@cafe.test', 'staff password'));
+	$page = http('GET', "$base/ro/about", null, $h)[1];
+	$config = editor_config($page);
+	check($config, 'the editor on /ro/about');
+	same('ro', $config['lang']);
+	list($id) = mark_of($config, 'field', function ($m) { return $m['field'] === 'heading'; });
+	has($page, "<h1><!--raster:s $id-->Despre noi<!--raster:e $id--></h1>");
+	$token = token_in($page);
+	list($status, $body) = http('POST', "$base/ro/api/cms/editor_save_field", array('type' => 'aboutpage', 'slug' => '/about', 'field' => 'heading', 'value' => 'Povestea noastră', 'lang' => 'ro', 'csrf' => $token), $h);
+	same(200, $status, $body);
+	try {
+		has(http('GET', "$base/ro/about")[1], '<h1>Povestea noastră</h1>');
+		lacks(http('GET', "$base/about")[1], 'Povestea noastră', 'the English page keeps its words');
+		same(400, http('POST', "$base/ro/api/cms/editor_save_field", array('type' => 'aboutpage', 'slug' => '/about', 'field' => 'heading', 'value' => 'x', 'lang' => 'en', 'csrf' => $token), $h)[0], 'a save for another language than the page\'s');
+		// an item, on the Romanian menu
+		$menu = http('GET', "$base/ro/menu", null, $h)[1];
+		list($item_id, $item) = mark_of(editor_config($menu), 'item', function ($m) { return $m['values']['name'] === 'Cafea cu lapte'; });
+		check($item, 'Cafea cu lapte is an item on /ro/menu');
+	} finally {
+		mcp($base, 'update_page', array('page' => '/about', 'lang' => 'ro', 'fields' => array('heading' => 'Despre noi')));
+	}
+});
+test('J13', 'P5.A: a guest on /ro/ is mailed in Romanian, with /ro/ links', function () use ($base) {
+	$before = count(mails());
+	$fields = array('raster_form' => 'booking.form', 'resource' => 'dining-room', 'name' => 'Ioana', 'email' => 'ioana.ro@example.com', 'time' => '21:00', 'people' => '2', 'terms' => '1', 'date' => next_open('thu', 3));
+	list($status, , $headers) = http('POST', "$base/ro/visit?date=".$fields['date'], $fields);
+	same(303, $status);
+	same("$base/ro/visit?done=booked", header_value($headers, 'Location'));
+	$sent = array_slice(mails(), $before);
+	same('ioana.ro@example.com', $sent[0]['to']);
+	same('Am primit cererea ta de rezervare', $sent[0]['subject']);
+	has($sent[0]['html'], '<p>Bună Ioana,</p>');
+	check((bool)preg_match('#'.preg_quote($base, '#').'/ro/booking\?token=[a-f0-9]{64}#', $sent[0]['html']), 'the link is to the Romanian page: '.$sent[0]['html']);
+	has($sent[0]['html'], '<html lang="ro" dir="ltr">');
+	same(array('staff@cafe.test', 'New booking request'), array($sent[1]['to'], $sent[1]['subject']), 'staff get theirs in English');
+	// staff confirm it in English (MCP, as from /staff): the guest hears in Romanian
+	cms_store::connect();
+	$booking = R::findOne('bookingdata', ' email = ? ', array('ioana.ro@example.com'));
+	same('ro', i18n::of($booking->export()), 'the booking keeps the language it was made in');
+	$before = count(mails());
+	mcp($base, 'run_action', array('collection' => 'booking', 'id' => (int)$booking->id, 'action' => 'confirm'));
+	$sent = array_slice(mails(), $before);
+	same(array('ioana.ro@example.com', 'Rezervarea ta este confirmată'), array($sent[0]['to'], $sent[0]['subject']));
+	has($sent[0]['html'], "$base/ro/booking?token=");
+	has($sent[0]['html'], 'Sala de mese', 'the dining room\'s Romanian name');
+	mcp($base, 'run_action', array('collection' => 'booking', 'id' => (int)$booking->id, 'action' => 'cancel'));
+	// a reader who signs up on a Romanian page
+	$before = count(mails());
+	same(303, http('POST', "$base/ro/journal", array('raster_form' => 'newsletter.signup', 'email' => 'cititor@example.com'))[0]);
+	$sent = array_slice(mails(), $before);
+	same('Confirmă scrisorile Raster Café', $sent[0]['subject']);
+	has($sent[0]['html'], "$base/ro/letters/confirm?token=");
+});
+test('J14', 'P5.A: the sitemap lists both languages with their alternates', function () use ($base) {
+	p5a_seeded($base);
+	$xml = http('GET', "$base/sitemap.xml")[1];
+	check(simplexml_load_string($xml) !== false, 'well formed');
+	has($xml, "<loc>$base/ro/menu</loc>");
+	has($xml, "<loc>$base/ro/menu/menu_item/cafea-cu-lapte</loc>");
+	has($xml, 'hreflang="ro" href="'.$base.'/ro/menu/menu_item/cafea-cu-lapte"');
+	has($xml, 'hreflang="en" href="'.$base.'/menu/menu_item/flat-white"');
+	lacks($xml, '/ro/staff', 'private pages in no language');
+});
+test('J15', 'P5.A: an agent translates the café over MCP', function () use ($base, $root) {
+	p5a_seeded($base);
+	$item = mcp($base, 'create_item', array('collection' => 'menu', 'fields' => array('name' => 'Zz lemonade', 'description' => 'Lemons and water.', 'price' => '9', 'category' => 'tea')));
+	try {
+		$missing = mcp($base, 'translation_status', array('lang' => 'ro', 'limit' => 1000))['missing'];
+		$wanted = array();
+		foreach ($missing as $row) if ($row['kind'] === 'item' && $row['where'] === "menu/{$item['id']}") $wanted[] = $row['field'];
+		sort($wanted);
+		same(array('category', 'description', 'name'), $wanted, 'the new dish lacks its Romanian');
+		$saved = mcp($base, 'update_item', array('collection' => 'menu', 'id' => $item['id'], 'lang' => 'ro', 'fields' => array('name' => 'Zz limonadă', 'description' => 'Lămâi și apă.', 'category' => 'ceai')));
+		$page = http('GET', "$base/ro/menu/menu_item/zz-limonada")[1];
+		has($page, '<h1>Zz limonadă</h1>');
+		foreach (mcp($base, 'translation_status', array('lang' => 'ro', 'limit' => 1000))['missing'] as $row) check($row['where'] !== "menu/{$item['id']}", 'translated now');
+		// a page, and a dictionary
+		$got = mcp($base, 'get_page', array('page' => '/about', 'lang' => 'ro'))['fields']['heading'];
+		same(array('value' => 'Despre noi', 'default_value' => $got['default_value'], 'translated' => true, 'shared' => false), $got);
+		$strings = mcp($base, 'read_strings', array('file' => 'common', 'lang' => 'ro'));
+		same('Meniu', $strings['strings']['menu']);
+		same(array(), $strings['missing_keys']);
+		with_file("$root/demo/i18n/ro/common.php", file_get_contents("$root/demo/i18n/ro/common.php"), function () use ($base) {
+			// write_strings writes a file, so it is offered over stdio (or with mcp_write_views)
+			$answers = mcp_stdio(array(array('write_strings', array('file' => 'common', 'lang' => 'ro', 'strings' => array('menu' => 'Meniul')))));
+			same(1, $answers[0]['written'], json_encode($answers));
+			has(http('GET', "$base/ro/about")[1], '>Meniul</a>');
+		});
+		has(mcp($base, 'render_url', array('url' => '/ro/menu'))['html'], '>Meniu</a>');
+	} finally {
+		mcp($base, 'delete_item', array('collection' => 'menu', 'id' => $item['id']));
+	}
+});
+
 // ## No PHP warnings, notices or deprecations on any request
 
 $log = is_file("$tmp/php-errors.log") ? file_get_contents("$tmp/php-errors.log") : '';
@@ -5169,6 +5492,36 @@ $only = getenv('RASTER_TEST_ONLY');
 $missing = array_diff($ids[1], array_keys($covered));
 $unknown = array_diff(array_keys($covered), $ids[1]);
 if ($unknown) $failed[] = 'tests name features that demo/README.md does not list: '.implode(', ', $unknown);
+// ## P4 review: the café's welcome off
+
+test('C41', 'P4 review: off, the café\'s welcome email is what it was, byte for byte (D13)', function () {
+	$shape = function () {
+		$raw = preg_replace('/^(Date|Message-ID): .*$/m', '$1: x', last_mail()['raw']);
+		return preg_replace('/raster-[0-9a-f]{16}/', 'raster-x', $raw);
+	};
+	controller::model('cafe');
+	mail::send_view('_email/welcome', 'eve@example.com', array('name' => 'Eve'));
+	$then = $shape();
+	$off = array(
+		'none' => array('multilingual' => false, 'languages' => array()),
+		'languages, switch off' => array('multilingual' => false, 'languages' => array('en', 'ro')),
+		'one language' => array('multilingual' => true, 'languages' => array('en')),
+	);
+	foreach ($off as $what => $setting) {
+		$kept = array();
+		foreach ($setting as $name => $value) {
+			$kept[$name] = config::get($name);
+			config::set($name)->to($value);
+		}
+		try {
+			(new cafe())->welcome(array('email' => 'eve@example.com', 'name' => 'Eve', 'lang' => 'ro'));
+			same($then, $shape(), $what);
+		} finally {
+			foreach ($kept as $name => $value) config::set($name)->to($value);
+		}
+	}
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."; ".(count($ids[1]) - count($missing))."/".count($ids[1])." features covered\n";
 foreach ($skipped as $skip) echo "  - $skip\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";

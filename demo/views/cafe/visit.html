@@ -2,16 +2,16 @@
 <!-- print.@lang.i18n.language --><!-- print.@dir.i18n.dir --><html lang="en" dir="ltr"><!-- /print.@dir.i18n.dir --><!-- /print.@lang.i18n.language -->
 <head>
   <!-- dry._layout.head /-->
-  <title>Visit us</title>
+  <title><!-- print.i18n.visit('visit_us') -->Visit us<!-- /print.i18n.visit('visit_us') --></title>
 </head>
 <body>
   <!-- dry._layout.header /-->
   <main class="two-columns">
     <section>
-      <h1>Book a table</h1>
-      <!-- print.if.static --><p>Call us on <a href="tel:+40721000000">+40 721 000 000</a> and we'll keep a table for you.</p><!-- /print.if.static -->
+      <h1><!-- print.i18n.visit('book_a_table') -->Book a table<!-- /print.i18n.visit('book_a_table') --></h1>
+      <!-- print.if.static --><p><!-- print.i18n.visit('call_us_on') -->Call us on<!-- /print.i18n.visit('call_us_on') --> <a href="tel:+40721000000">+40 721 000 000</a> <!-- print.i18n.visit('and_we_ll_keep_a') -->and we'll keep a table for you.<!-- /print.i18n.visit('and_we_ll_keep_a') --></p><!-- /print.if.static -->
       <!-- print.if.live -->
-      <p>Two sittings, at 19:00 and 21:00, Tuesday to Sunday. Pick a day, then a time. A booking is a request until we confirm it, and every email we send has a link to change or cancel it.</p>
+      <!-- print.cms.intro --><p>Two sittings, at 19:00 and 21:00, Tuesday to Sunday. Pick a day, then a time. A booking is a request until we confirm it, and every email we send has a link to change or cancel it.</p><!-- /print.cms.intro -->
       <!-- print.validation.alert('booked') --><p class="notice">Thank you, we have your request. We emailed you a link to change or cancel it, and we'll write again once we confirm it.</p><!-- /print.validation.alert('booked') -->
       <!-- print.validation.alert('fully_booked') --><p class="error">That sitting is full now. Try the other one or another day, or call us.</p><!-- /print.validation.alert('fully_booked') -->
       <!-- print.validation.alert('not_open') --><p class="error">We aren't taking bookings online yet. Call us on +40 721 000 000.</p><!-- /print.validation.alert('not_open') -->
@@ -24,54 +24,54 @@
       <!-- print.validation.alert('name_invalid') --><p class="error">Tell us your name.</p><!-- /print.validation.alert('name_invalid') -->
       <!-- print.validation.alert('email_invalid') --><p class="error">We need a valid email to confirm.</p><!-- /print.validation.alert('email_invalid') -->
       <form method="get" class="filters">
-        <label>Day <input type="date" name="date"></label>
-        <label>People <input type="number" name="people" min="1" max="8"></label>
-        <button>Show times</button>
+        <label><!-- print.i18n.visit('day') -->Day<!-- /print.i18n.visit('day') --> <input type="date" name="date"></label>
+        <label><!-- print.i18n.visit('people') -->People<!-- /print.i18n.visit('people') --> <input type="number" name="people" min="1" max="8"></label>
+        <button><!-- print.i18n.visit('show_times') -->Show times<!-- /print.i18n.visit('show_times') --></button>
       </form>
       <form method="get" class="days">
-        <p>Evenings with a free table:</p>
+        <p><!-- print.i18n.visit('evenings_with_a_free_table') -->Evenings with a free table:<!-- /print.i18n.visit('evenings_with_a_free_table') --></p>
         <input type="hidden" name="people">
         <!-- render.booking.days('resource=dining-room&people=?people&limit=7') -->
-        <!-- print.@value.date --><button class="day" name="date" value="2026-10-20"><!-- print.date -->2026-10-20<!-- /print.date -->, <!-- print.slots_free -->2<!-- /print.slots_free --> sittings</button><!-- /print.@value.date -->
+        <!-- print.@value.date --><button class="day" name="date" value="2026-10-20"><!-- print.date -->2026-10-20<!-- /print.date -->, <!-- print.slots_free -->2<!-- /print.slots_free --> <!-- print.i18n.visit('sittings') -->sittings<!-- /print.i18n.visit('sittings') --></button><!-- /print.@value.date -->
         <!-- /render.booking.days('resource=dining-room&people=?people&limit=7') -->
       </form>
       <!-- render.booking.form -->
       <form method="post" class="stack">
         <input type="hidden" name="resource" value="dining-room">
-        <label>Name <input type="text" name="name" required minlength="2" maxlength="80" value="Your name"></label>
-        <!-- render.validation.field('name') --><p class="error">Tell us your name (2 to 80 letters).</p><!-- /render.validation.field('name') -->
-        <!-- render.validation.cant_be('name', 'Your name') --><p class="error">Please replace the example name with yours.</p><!-- /render.validation.cant_be('name', 'Your name') -->
-        <label>Email <input type="email" name="email" required></label>
-        <!-- render.validation.field('email') --><p class="error">We need a valid email to confirm.</p><!-- /render.validation.field('email') -->
-        <label>Phone <input type="tel" name="phone" pattern="\+?[0-9 ]{6,15}"></label>
-        <!-- render.validation.field('phone') --><p class="error">Digits and spaces only, like +40 721 000 000.</p><!-- /render.validation.field('phone') -->
-        <label>Date <input type="date" name="date" required min="2026-01-01" max="2030-12-31"></label>
-        <!-- render.validation.field('date') --><p class="error">Pick a date between 2026 and 2030.</p><!-- /render.validation.field('date') -->
-        <fieldset class="times"><legend>Time</legend>
+        <label><!-- print.i18n.visit('name') -->Name<!-- /print.i18n.visit('name') --> <input type="text" name="name" required minlength="2" maxlength="80" value="Your name"></label>
+        <!-- render.validation.field('name') --><p class="error"><!-- print.i18n.visit('tell_us_your_name_2') -->Tell us your name (2 to 80 letters).<!-- /print.i18n.visit('tell_us_your_name_2') --></p><!-- /render.validation.field('name') -->
+        <!-- render.validation.cant_be('name', 'Your name') --><p class="error"><!-- print.i18n.visit('please_replace_the_example_name') -->Please replace the example name with yours.<!-- /print.i18n.visit('please_replace_the_example_name') --></p><!-- /render.validation.cant_be('name', 'Your name') -->
+        <label><!-- print.i18n.visit('email') -->Email<!-- /print.i18n.visit('email') --> <input type="email" name="email" required></label>
+        <!-- render.validation.field('email') --><p class="error"><!-- print.i18n.visit('we_need_a_valid_email') -->We need a valid email to confirm.<!-- /print.i18n.visit('we_need_a_valid_email') --></p><!-- /render.validation.field('email') -->
+        <label><!-- print.i18n.visit('phone') -->Phone<!-- /print.i18n.visit('phone') --> <input type="tel" name="phone" pattern="\+?[0-9 ]{6,15}"></label>
+        <!-- render.validation.field('phone') --><p class="error"><!-- print.i18n.visit('digits_and_spaces_only_like') -->Digits and spaces only, like +40 721 000 000.<!-- /print.i18n.visit('digits_and_spaces_only_like') --></p><!-- /render.validation.field('phone') -->
+        <label><!-- print.i18n.visit('date') -->Date<!-- /print.i18n.visit('date') --> <input type="date" name="date" required min="2026-01-01" max="2030-12-31"></label>
+        <!-- render.validation.field('date') --><p class="error"><!-- print.i18n.visit('pick_a_date_between_2026') -->Pick a date between 2026 and 2030.<!-- /print.i18n.visit('pick_a_date_between_2026') --></p><!-- /render.validation.field('date') -->
+        <fieldset class="times"><legend><!-- print.i18n.visit('time') -->Time<!-- /print.i18n.visit('time') --></legend>
           <!-- render.booking.slots('date=?date&resource=dining-room&people=?people') -->
-          <!-- print.+class.state --><label class="slot "><!-- print.@value.time --><input type="radio" name="time" value="19:00"><!-- /print.@value.time --> <!-- print.time -->19:00<!-- /print.time --> to <!-- print.ends -->21:00<!-- /print.ends -->, <!-- print.left_people -->20<!-- /print.left_people --> places left</label><!-- /print.+class.state -->
+          <!-- print.+class.state --><label class="slot "><!-- print.@value.time --><input type="radio" name="time" value="19:00"><!-- /print.@value.time --> <!-- print.time -->19:00<!-- /print.time --> <!-- print.i18n.visit('to') -->to<!-- /print.i18n.visit('to') --> <!-- print.ends -->21:00<!-- /print.ends -->, <!-- print.left_people -->20<!-- /print.left_people --> <!-- print.i18n.visit('places_left') -->places left<!-- /print.i18n.visit('places_left') --></label><!-- /print.+class.state -->
           <!-- /render.booking.slots('date=?date&resource=dining-room&people=?people') -->
-          <p class="hint">No times here? Pick an open day above.</p>
+          <p class="hint"><!-- print.i18n.visit('no_times_here_pick_an') -->No times here? Pick an open day above.<!-- /print.i18n.visit('no_times_here_pick_an') --></p>
         </fieldset>
-        <label>People <input type="number" name="people" required min="1" max="8" value="2"></label>
-        <!-- render.validation.field('people') --><p class="error">Tables are for 1 to 8 people.</p><!-- /render.validation.field('people') -->
-        <!-- render.validation.field('people', 'max') --><p class="error">For groups over 8, please call us.</p><!-- /render.validation.field('people', 'max') -->
-        <label><input type="checkbox" name="newsletter" value="yes"> Also send me the newsletter</label>
-        <label>Notes <textarea name="notes" maxlength="300"></textarea></label>
-        <!-- render.validation.field('notes') --><p class="error">Keep notes under 300 characters.</p><!-- /render.validation.field('notes') -->
-        <label><input type="checkbox" name="terms" value="1"> I agree to the house rules</label>
-        <!-- render.validation.accepted('terms') --><p class="error">Please agree to the house rules.</p><!-- /render.validation.accepted('terms') -->
-        <button>Book</button>
+        <label><!-- print.i18n.visit('people') -->People<!-- /print.i18n.visit('people') --> <input type="number" name="people" required min="1" max="8" value="2"></label>
+        <!-- render.validation.field('people') --><p class="error"><!-- print.i18n.visit('tables_are_for_1_to') -->Tables are for 1 to 8 people.<!-- /print.i18n.visit('tables_are_for_1_to') --></p><!-- /render.validation.field('people') -->
+        <!-- render.validation.field('people', 'max') --><p class="error"><!-- print.i18n.visit('for_groups_over_8_please') -->For groups over 8, please call us.<!-- /print.i18n.visit('for_groups_over_8_please') --></p><!-- /render.validation.field('people', 'max') -->
+        <label><input type="checkbox" name="newsletter" value="yes"> <!-- print.i18n.visit('also_send_me_the_newsletter') -->Also send me the newsletter<!-- /print.i18n.visit('also_send_me_the_newsletter') --></label>
+        <label><!-- print.i18n.visit('notes') -->Notes<!-- /print.i18n.visit('notes') --> <textarea name="notes" maxlength="300"></textarea></label>
+        <!-- render.validation.field('notes') --><p class="error"><!-- print.i18n.visit('keep_notes_under_300_characters') -->Keep notes under 300 characters.<!-- /print.i18n.visit('keep_notes_under_300_characters') --></p><!-- /render.validation.field('notes') -->
+        <label><input type="checkbox" name="terms" value="1"> <!-- print.i18n.visit('i_agree_to_the_house') -->I agree to the house rules<!-- /print.i18n.visit('i_agree_to_the_house') --></label>
+        <!-- render.validation.accepted('terms') --><p class="error"><!-- print.i18n.visit('please_agree_to_the_house') -->Please agree to the house rules.<!-- /print.i18n.visit('please_agree_to_the_house') --></p><!-- /render.validation.accepted('terms') -->
+        <button><!-- print.i18n.visit('book') -->Book<!-- /print.i18n.visit('book') --></button>
       </form>
       <!-- /render.booking.form -->
-      <p>Booked already? Your emails have the link to change or cancel, and <a href="account.html">your account</a> lists what you booked while logged in.</p>
+      <p><!-- print.i18n.visit('booked_already_your_emails_have') -->Booked already? Your emails have the link to change or cancel, and<!-- /print.i18n.visit('booked_already_your_emails_have') --> <a href="account.html"><!-- print.i18n.visit('your_account') -->your account<!-- /print.i18n.visit('your_account') --></a> <!-- print.i18n.visit('lists_what_you_booked_while') -->lists what you booked while logged in.<!-- /print.i18n.visit('lists_what_you_booked_while') --></p>
       <!-- /print.if.live -->
     </section>
     <section>
-      <h2>Write to us</h2>
-      <!-- print.if.static --><p>Write to <a href="mailto:hello@cafe.test">hello@cafe.test</a>.</p><!-- /print.if.static -->
+      <h2><!-- print.i18n.visit('write_to_us') -->Write to us<!-- /print.i18n.visit('write_to_us') --></h2>
+      <!-- print.if.static --><p><!-- print.i18n.visit('write_to') -->Write to<!-- /print.i18n.visit('write_to') --> <a href="mailto:hello@cafe.test">hello@cafe.test</a>.</p><!-- /print.if.static -->
       <!-- print.if.live -->
-      <p class="error-count"><!-- print.cafe.problem_count -->0<!-- /print.cafe.problem_count --> problems</p>
+      <p class="error-count"><!-- print.cafe.problem_count -->0<!-- /print.cafe.problem_count --> <!-- print.i18n.visit('problems') -->problems<!-- /print.i18n.visit('problems') --></p>
       <!-- print.validation.alert('sent') --><p class="notice">Thanks, we will write back soon.</p><!-- /print.validation.alert('sent') -->
       <!-- print.validation.alert('name_invalid') --><p class="error">That name has characters we can't use.</p><!-- /print.validation.alert('name_invalid') -->
       <!-- print.validation.alert('email_invalid') --><p class="error">We need a valid email to write back.</p><!-- /print.validation.alert('email_invalid') -->
@@ -80,19 +80,19 @@
       <!-- print.validation.alert('message_invalid') --><p class="error">Write us a message, but not a novel.</p><!-- /print.validation.alert('message_invalid') -->
       <!-- render.contact.form -->
       <form method="post" class="stack">
-        <label>Name <input type="text" name="name" maxlength="80"></label>
-        <label>Email <input type="email" name="email"></label>
-        <!-- render.validation.not_empty('email') --><p class="error">Your email, please.</p><!-- /render.validation.not_empty('email') -->
-        <!-- render.validation.email_format('email') --><p class="error">That email does not look right.</p><!-- /render.validation.email_format('email') -->
-        <label>About
-          <select name="subject"><option value="A table">A table</option><option value="An event">An event</option><option value="Something else">Something else</option></select>
+        <label><!-- print.i18n.visit('name') -->Name<!-- /print.i18n.visit('name') --> <input type="text" name="name" maxlength="80"></label>
+        <label><!-- print.i18n.visit('email') -->Email<!-- /print.i18n.visit('email') --> <input type="email" name="email"></label>
+        <!-- render.validation.not_empty('email') --><p class="error"><!-- print.i18n.visit('your_email_please') -->Your email, please.<!-- /print.i18n.visit('your_email_please') --></p><!-- /render.validation.not_empty('email') -->
+        <!-- render.validation.email_format('email') --><p class="error"><!-- print.i18n.visit('that_email_does_not_look') -->That email does not look right.<!-- /print.i18n.visit('that_email_does_not_look') --></p><!-- /render.validation.email_format('email') -->
+        <label><!-- print.i18n.visit('about') -->About<!-- /print.i18n.visit('about') -->
+          <select name="subject"><option value="A table"><!-- print.i18n.visit('a_table') -->A table<!-- /print.i18n.visit('a_table') --></option><option value="An event"><!-- print.i18n.visit('an_event') -->An event<!-- /print.i18n.visit('an_event') --></option><option value="Something else"><!-- print.i18n.visit('something_else') -->Something else<!-- /print.i18n.visit('something_else') --></option></select>
         </label>
-        <label>Website <input type="url" name="website"></label>
-        <!-- render.validation.field('website') --><p class="error">A web address starts with https://</p><!-- /render.validation.field('website') -->
-        <label>Message <textarea name="message" required maxlength="2000"></textarea></label>
-        <!-- render.validation.field('message') --><p class="error">Write a message.</p><!-- /render.validation.field('message') -->
-        <!-- render.validation.no_links('message') --><p class="error">Please leave out web links: write the address in words.</p><!-- /render.validation.no_links('message') -->
-        <button>Send</button>
+        <label><!-- print.i18n.visit('website') -->Website<!-- /print.i18n.visit('website') --> <input type="url" name="website"></label>
+        <!-- render.validation.field('website') --><p class="error"><!-- print.i18n.visit('a_web_address_starts_with') -->A web address starts with https://<!-- /print.i18n.visit('a_web_address_starts_with') --></p><!-- /render.validation.field('website') -->
+        <label><!-- print.i18n.visit('message') -->Message<!-- /print.i18n.visit('message') --> <textarea name="message" required maxlength="2000"></textarea></label>
+        <!-- render.validation.field('message') --><p class="error"><!-- print.i18n.visit('write_a_message') -->Write a message.<!-- /print.i18n.visit('write_a_message') --></p><!-- /render.validation.field('message') -->
+        <!-- render.validation.no_links('message') --><p class="error"><!-- print.i18n.visit('please_leave_out_web_links') -->Please leave out web links: write the address in words.<!-- /print.i18n.visit('please_leave_out_web_links') --></p><!-- /render.validation.no_links('message') -->
+        <button><!-- print.i18n.visit('send') -->Send<!-- /print.i18n.visit('send') --></button>
       </form>
       <!-- /render.contact.form -->
       <!-- /print.if.live -->

@@ -7,7 +7,7 @@
   <meta name="description" content="<!-- print.cms.site_description -->A small café in București: good coffee, cake and quiet corners.<!-- /print.cms.site_description -->">
   <link rel="stylesheet" href="style.css">
   <link rel="icon" href="img/logo.svg">
-  <link rel="alternate" type="application/rss+xml" title="Journal" href="journal.rss">
+  <!-- print.@title.i18n.common('journal') --><link rel="alternate" type="application/rss+xml" title="Journal" href="journal.rss"><!-- /print.@title.i18n.common('journal') -->
   <!-- /res.head -->
 </head>
 <body>
@@ -21,13 +21,13 @@
       <a href="journal.html"><!-- print.i18n.common('journal') -->Journal<!-- /print.i18n.common('journal') --></a>
       <a href="visit.html"><!-- print.i18n.common('visit') -->Visit<!-- /print.i18n.common('visit') --></a>
       <a href="about.html"><!-- print.i18n.common('about') -->About<!-- /print.i18n.common('about') --></a>
-      <a href="salon.html">Salon</a>
-      <a href="faq.html">FAQ</a>
+      <a href="salon.html"><!-- print.i18n.common('salon') -->Salon<!-- /print.i18n.common('salon') --></a>
+      <a href="faq.html"><!-- print.i18n.common('faq') -->FAQ<!-- /print.i18n.common('faq') --></a>
     </nav>
     <div class="account-nav">
-      <!-- print.if.logged_out --><a href="login.html">Log in</a><!-- /print.if.logged_out -->
-      <!-- print.if.logged_in --><a href="members.html">Members</a> · <a href="account.html">Account</a><!-- /print.if.logged_in -->
-      <!-- print.if.is_editor --> · <a href="staff.html">Staff</a><!-- /print.if.is_editor -->
+      <!-- print.if.logged_out --><a href="login.html"><!-- print.i18n.common('log_in') -->Log in<!-- /print.i18n.common('log_in') --></a><!-- /print.if.logged_out -->
+      <!-- print.if.logged_in --><a href="members.html"><!-- print.i18n.common('members') -->Members<!-- /print.i18n.common('members') --></a> · <a href="account.html"><!-- print.i18n.common('account') -->Account<!-- /print.i18n.common('account') --></a><!-- /print.if.logged_in -->
+      <!-- print.if.is_editor --> · <a href="staff.html"><!-- print.i18n.common('staff') -->Staff<!-- /print.i18n.common('staff') --></a><!-- /print.if.is_editor -->
       <span class="languages">
         <!-- render.i18n.languages --><!-- print.+class.state --><!-- print.@href.url --><a class="lang" href="#"><!-- print.code -->en<!-- /print.code --></a><!-- /print.@href.url --><!-- /print.+class.state --><!-- /render.i18n.languages -->
       </span>
@@ -45,18 +45,18 @@
       <!-- print.validation.alert('check_email') --><p class="notice">Almost there: check your inbox to confirm.</p><!-- /print.validation.alert('check_email') -->
       <!-- render.newsletter.signup -->
       <form method="post" class="inline-form">
-        <label for="signup-email" class="visually-hidden">Email</label>
+        <label for="signup-email" class="visually-hidden"><!-- print.i18n.common('email') -->Email<!-- /print.i18n.common('email') --></label>
         <input id="signup-email" type="email" name="email" placeholder="you@example.com" required maxlength="200">
         <button><!-- print.i18n.common('subscribe') -->Subscribe<!-- /print.i18n.common('subscribe') --></button>
-        <!-- render.validation.field('email') --><p class="error">Please enter a valid email address.</p><!-- /render.validation.field('email') -->
+        <!-- render.validation.field('email') --><p class="error"><!-- print.i18n.common('please_enter_a_valid_email') -->Please enter a valid email address.<!-- /print.i18n.common('please_enter_a_valid_email') --></p><!-- /render.validation.field('email') -->
       </form>
       <!-- /render.newsletter.signup -->
-      <p class="meta"><!-- print.newsletter.count -->0<!-- /print.newsletter.count --> readers get our letters.</p>
+      <p class="meta"><!-- print.newsletter.count -->0<!-- /print.newsletter.count --> <!-- print.i18n.common('readers_get_our_letters') -->readers get our letters.<!-- /print.i18n.common('readers_get_our_letters') --></p>
       <!-- /print.if.live -->
-      <!-- print.if.static --><p>Follow the <a href="journal.rss">journal by RSS</a>, or ask for the letters at the counter.</p><!-- /print.if.static -->
+      <!-- print.if.static --><p><!-- print.i18n.common('follow_the') -->Follow the<!-- /print.i18n.common('follow_the') --> <a href="journal.rss"><!-- print.i18n.common('journal_by_rss') -->journal by RSS<!-- /print.i18n.common('journal_by_rss') --></a><!-- print.i18n.common('or_ask_for_the_letters') -->, or ask for the letters at the counter.<!-- /print.i18n.common('or_ask_for_the_letters') --></p><!-- /print.if.static -->
     </section>
     <p><!-- print.cms.site_tagline -->Coffee, cake and quiet corners since 2014.<!-- /print.cms.site_tagline --></p>
-    <p class="meta"><!-- print.cms.site_address -->Strada Exemplu 1, București<!-- /print.cms.site_address --> · <a href="journal.rss">RSS</a> · <a href="feed.json">JSON feed</a> · <a href="hours.txt">Hours as text</a></p>
+    <p class="meta"><!-- print.cms.site_address -->Strada Exemplu 1, București<!-- /print.cms.site_address --> · <a href="journal.rss"><!-- print.i18n.common('rss') -->RSS<!-- /print.i18n.common('rss') --></a> · <a href="feed.json"><!-- print.i18n.common('json_feed') -->JSON feed<!-- /print.i18n.common('json_feed') --></a> · <a href="hours.txt"><!-- print.i18n.common('hours_as_text') -->Hours as text<!-- /print.i18n.common('hours_as_text') --></a></p>
   </footer>
   <!-- /res.footer -->
 </body>

@@ -29,4 +29,9 @@ return array(
 	'problem_upload_too_big' => 'Poza e prea mare', 'problem_upload_missing' => 'Poza n-a ajuns; mai încearcă',
 	'problem_upload_not_a_picture' => 'Nu e o poză: folosește JPEG, PNG, GIF sau WebP', 'problem_upload_not_stored' => 'Poza nu a putut fi păstrată',
 	'problem_form_expired' => 'Pagina e veche: reîncarc-o și mai încearcă', 'problem_not_allowed' => 'Nu poți face asta; dacă ai ieșit din cont, intră din nou',
+	'editing_lang' => 'editezi: {lang}', 'falls_back' => '(dacă lipsește: {lang})', 'untranslated' => 'netradus încă: se vede textul în {lang}',
+	'every_language' => 'la fel în toate limbile', 'editor_language' => 'Limba editorului',
+	'problem_not_multilingual' => 'Site-ul are o singură limbă: editorul o urmează pe a browserului',
+	'restore_every' => 'Readu, în toate limbile', 'restored_every' => 'Ai readus toate limbile versiunii de {when}',
+	'problem_translation_columns_missing' => 'Limba asta nu are încă loc pe site: rulează php bin/raster schema --apply pe server',
 );
