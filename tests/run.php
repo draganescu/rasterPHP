@@ -12487,7 +12487,7 @@ test('P3 review: an English slug that is another item\'s Romanian address gets a
 		$b = p3b_save(0, array('name' => 'Latte'));
 		same(array('latte', 'latte-2'), array($b['slug'], $b['slug__ro']), 'one /ro/ address, one item');
 		$c = p3b_save(0, array('name' => 'Espresso'));
-		same(null, $c['slug__ro'], 'a slug no one has in Romanian stays the Romanian address');
+		same(null, isset($c['slug__ro']) ? $c['slug__ro'] : null, 'a slug no one has in Romanian stays the Romanian address');
 		check(p3b_indexed('slughistory', 'slughistory_type_slug'), 'slughistory is indexed by type and slug');
 		with_settings(p2a_on(), function () use ($a, $b) {
 			same((string)$a['id'], (string)cms_store::slug_item('zzp3bmenudata', 'latte', 'ro')['id']);
