@@ -354,9 +354,12 @@ class raster_schema {
 				foreach (cms_types::widen($table['table'], $types) as $field => $type) {
 					$changes[] = "widened {$table['table']}.$field to ".cms_types::sql($type);
 				}
-				if (!$table['missing']) continue;
-				cms_types::ensure($table['table'], $types);
-				$changes[] = $table['exists'] ? "added {$table['table']}.".implode(", {$table['table']}.", $table['missing']) : "created table {$table['table']}";
+				if ($table['missing']) {
+					cms_types::ensure($table['table'], $types);
+					$changes[] = $table['exists'] ? "added {$table['table']}.".implode(", {$table['table']}.", $table['missing']) : "created table {$table['table']}";
+				}
+				// the old slugs are looked up by type and slug
+				if ($table['table'] === 'slughistory' && cms_store::table_exists('slughistory') && cms_store::index_history()) $changes[] = 'indexed slughistory.type, slughistory.slug';
 			}
 		} finally {
 			R::freeze($was_frozen);
