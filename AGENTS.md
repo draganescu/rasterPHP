@@ -2082,7 +2082,8 @@ use `'model.method'`: `method(true)` returns
   | `i18n::with($lang, $fn)` | runs `$fn` with `current()` set to `$lang` (one the site doesn't list runs in the default) and, multilingual, `link_uri` set to that language's address; puts both back, even when `$fn` throws, nests, and returns what `$fn` returned |
   | `i18n::dir($lang = null)` | `rtl` for Arabic, Hebrew, Persian, Urdu and the other right-to-left languages, else `ltr` |
   | `i18n::date_order($lang = null)` | how dates are typed: `''` without languages, `mdy` for `en-us`, `dmy` for the rest (`Y-m-d` is always read) |
-  | `i18n::alternates($path = null)` | the page (or `$path`) in every language: rows of `lang` and `url`, a language with its own `domain_language` host at that host |
+  | `i18n::address($lang)` | where that language's pages start (`link_base` and its prefix, or its own `domain_language` host, or the site's address seen from another language's host), the base `alternates()`, `with()` and the `/ro/` and `?lang=` redirects use; `null` when it has none |
+| `i18n::alternates($path = null)` | the page (or `$path`, as it reads) in every language: rows of `lang` and `url`, each path segment encoded; a language with its own `domain_language` host is at that host, and from such a host the others are on the site's address (`RASTER_URL`, `site_url`), or left out without one (`doctor` fails on that) |
 
   `$lang` left out is `current()`. Raster calls these on the bundled
   class, from the page cache before any model loads too, so a site's
@@ -2096,9 +2097,11 @@ URL alone says the content's language, so one URL is always one language.
   and `/ro` answers 301 to it. `/ro/menu/` answers 301 to `/ro/menu` (the
   one-address rule), `/en/menu` (the default's code) 301 to `/menu`, and
   `?lang=ro` 301 to the same page in that language (`/ro/menu`, the rest of
-  the query kept). A host listed in `domain_language` (exactly, port aside)
-  is that language and takes no prefix; there `?lang=` for another language
-  goes to that language's domain, or to the site's address (`RASTER_URL`).
+  the query kept; `ro-RO` names `ro`). A host listed in `domain_language`
+  (exactly, port aside) is that language and takes no prefix. One language
+  has one address: on the site's address `/ro/menu` answers 301 to
+  `example.ro/menu` when `ro` has its own domain, and `?lang=` goes to a
+  language's domain, or from one to the site's address (`RASTER_URL`).
   The cookie and `Accept-Language` don't choose the content, and no `lang`
   cookie is set.
 - **One place.** `config::initialize()` takes the prefix off, after the
@@ -2112,8 +2115,8 @@ URL alone says the content's language, so one URL is always one language.
   so every link Raster builds, in pages and in emails rendered there, keeps
   the language.
 - **Links.** On a `/ro/` page, links by file name (`href="menu.html"`) and
-  hand-written root links to pages (`href="/menu"`, `action="/contact"`)
-  become `…/ro/menu`. Links to files are left alone: anything with an
+  hand-written root links to pages (`href="/menu"`, `action="/contact"`,
+  `formaction`) become `…/ro/menu`, and `/index.php/menu` the same. Links to files are left alone: anything with an
   extension (`/menu.pdf`, `/news.rss`), under the app's folder (the theme),
   `media/` or `system/`, and any path that is a file. A root link outside
   the site's folder, or that already names a language (`/ro/menu`), keeps
@@ -2619,8 +2622,9 @@ stamp check, so people with a page open send it again.
   `system/private_paths.php`, uses of deprecated features
   (`system/tools/deprecations.php`, minus the ones config `allow_deprecated`
   says are on purpose), a `data/secret` the user running it can't read or
-  that isn't a key, a language code it can't read and `multilingual` with
-  fewer than two languages,
+  that isn't a key, a language code it can't read, `multilingual` with
+  fewer than two languages and, multilingual, a `domain_language` without
+  a site address (`RASTER_URL`, `site_url`) on a host of no language,
   and, in production, one address that sent one form many different
   emails today (many people share it), the site address, mail, tokens,
   whether PHP shows errors (`display_errors`) and whether PHP takes the

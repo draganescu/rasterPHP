@@ -101,15 +101,17 @@ class i18n
 
 	// runs $fn with current() set to $lang (a language the site doesn't
 	// list runs in the default one) and link_uri set to that language's
-	// address, puts both back, even when $fn throws, and returns what $fn
-	// returned. Calls inside it nest.
+	// address (kept as it is when it has none, see address()), puts both
+	// back, even when $fn throws, and returns what $fn returned. Calls
+	// inside it nest.
 	static function with($lang, $fn) {
 		$current = self::$current;
 		$link = config::get('link_uri');
 		$known = self::known($lang);
 		self::$current = $known !== null ? $known : self::default_language();
-		$moved = self::enabled() && config::get('link_base');
-		if ($moved) config::set('link_uri')->to(self::address(self::$current));
+		$address = self::enabled() && config::get('link_base') ? self::address(self::$current) : null;
+		$moved = $address !== null;
+		if ($moved) config::set('link_uri')->to($address);
 		try {
 			return $fn();
 		} finally {
@@ -133,13 +135,17 @@ class i18n
 		return strtolower($lang) === 'en-us' ? 'mdy' : 'dmy';
 	}
 
-	// the current page (or $path) in every language: rows of lang and url,
-	// for the switcher, hreflang and the sitemap
+	// the current page (or $path, as it reads, not encoded) in every
+	// language that has an address: rows of lang and url, each segment
+	// encoded as the one-address redirect writes it, for the switcher,
+	// hreflang and the sitemap
 	static function alternates($path = null) {
 		$path = $path === null ? ltrim(strtok((string)config::get('uri_string'), '?'), '/') : ltrim((string)$path, '/');
+		$path = implode('/', array_map('rawurlencode', explode('/', $path)));
 		$rows = array();
 		foreach (self::available() as $code) {
-			$rows[] = array('lang' => $code, 'url' => self::address($code).$path);
+			$address = self::address($code);
+			if ($address !== null) $rows[] = array('lang' => $code, 'url' => $address.$path);
 		}
 		return $rows;
 	}
@@ -148,8 +154,10 @@ class i18n
 	// host. A language with its own domain_language host is there, and on
 	// such a host the others are on the site's own address (site_url), the
 	// host that takes prefixes; both keep the folder and the index file
-	// (as config::language_of_url sends ?lang= there).
-	protected static function address($lang) {
+	// (config::language_of_url redirects there too). On a language's
+	// domain without a site address to send the others to, they have
+	// none: null (`doctor` fails on that).
+	static function address($lang) {
 		$base = (string)(config::get('link_base') ?: config::get('link_uri'));
 		if (!self::enabled()) return $base;
 		$domains = array_change_key_case((array)config::get('domain_language', array()));
@@ -157,14 +165,13 @@ class i18n
 		$protocol = (string)config::get('protocol');
 		$after_host = substr($base, strlen($protocol.'://'.config::get('host')));
 		foreach ($domains as $domain => $language) {
-			if (strtolower($language) !== strtolower($lang)) continue;
+			if (strtolower($language) !== strtolower($lang) || self::known($language) === null) continue;
 			return $domain === $host ? $base : $protocol.'://'.$domain.$after_host;
 		}
-		if (isset($domains[$host])) {
+		if (isset($domains[$host]) && self::known($domains[$host]) !== null) {
 			$site = parse_url((string)(getenv('RASTER_URL') ?: config::get('site_url')));
-			if (!empty($site['host']) && !isset($domains[strtolower($site['host'])])) {
-				return $protocol.'://'.strtolower($site['host']).(isset($site['port']) ? ':'.$site['port'] : '').$after_host.(self::is_default($lang) ? '' : strtolower($lang).'/');
-			}
+			if (empty($site['host']) || isset($domains[strtolower($site['host'])])) return null;
+			return $protocol.'://'.strtolower($site['host']).(isset($site['port']) ? ':'.$site['port'] : '').$after_host.(self::is_default($lang) ? '' : strtolower($lang).'/');
 		}
 		return $base.self::prefix($lang);
 	}

@@ -3,7 +3,8 @@
 //
 // A dictionary in i18n/<lang>/ returns its array. One from older Raster
 // that sets $lang instead (deprecation i18n-lang-variable, the pattern
-// that finds it) gets `return $lang;` at its end, which keeps every word.
+// that finds it) gets `return $lang;` at its end, which keeps every word
+// (after `<?php` when the file ends in text outside PHP).
 $dictionaries = function ($dir) {
 	$found = array();
 	if (!is_dir($dir)) return $found;
@@ -21,8 +22,15 @@ return array(
 		'apply' => function ($c) use ($dictionaries) {
 			$changed = array();
 			foreach ($dictionaries($c['app'].'/i18n') as $file) {
-				$source = rtrim(preg_replace('/\?>\s*$/', '', file_get_contents($file)));
-				file_put_contents($file, $source."\nreturn \$lang;\n");
+				$source = file_get_contents($file);
+				$tokens = token_get_all($source);
+				$last = end($tokens);
+				if (is_array($last) && $last[0] === T_INLINE_HTML && trim($last[1]) !== '') {
+					// text after the closing tag is printed as before; the return follows it
+					file_put_contents($file, $source."<?php return \$lang;\n");
+				} else {
+					file_put_contents($file, rtrim(preg_replace('/\?>\s*$/', '', $source))."\nreturn \$lang;\n");
+				}
 				$changed[] = substr($file, strlen($c['root']) + 1);
 			}
 			return 'changed '.implode(', ', $changed);

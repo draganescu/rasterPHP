@@ -8867,8 +8867,8 @@ function p1b_site($settings, $fn) {
 		'zzp1b_about' => '<!doctype html><html><head><title>About</title></head><body>'
 			.'<h1><!-- print.i18n.zzp1b(\'hello\') -->Hello<!-- /print.i18n.zzp1b(\'hello\') --></h1>'
 			.'<a href="index.html">Home</a> <a href="zzp1b_menu.html">Menu</a> <a href="/zzp1b_menu">Root</a> <a href="/">Root home</a>'
-			.' <a href="/zzp1b_menu?x=1#top">Query</a> <a href="/ro/zzp1b_menu">Named</a> <a data-href="/zzp1b_menu">Data</a>'
-			.'<form method="post" action="/zzp1b_about"><button>Go</button></form>'
+			.' <a href="/zzp1b_menu?x=1#top">Query</a> <a href="/ro/zzp1b_menu">Named</a> <a data-href="/zzp1b_menu">Data</a> <a href="/index.php/zzp1b_menu">Index</a>'
+			.'<form method="post" action="/zzp1b_about"><button>Go</button><button formaction="/zzp1b_menu">Other</button></form>'
 			.'<a href="/media/x.jpg">Photo</a> <a href="/application/views/default/style.css">CSS</a> <a href="/system/x">Sys</a>'
 			.' <a href="/bin/raster">File</a> <a href="/zzp1b_menu.pdf">PDF</a> <a href="//cdn.example/x">CDN</a> <a href="https://example.com/about">Out</a>'
 			.'</body></html>',
@@ -8877,7 +8877,7 @@ function p1b_site($settings, $fn) {
 			.'<a href="zzp1b_about.html">About</a> <a href="/preview/p1b42/zzp1b_about">In the folder</a> <a href="/zzp1b_about">Outside</a></body></html>',
 		'zzp1b_staff' => '<!doctype html><html><head><title>Rota</title></head><body><p>Rota</p></body></html>',
 		'_email/zzp1b_note' => '<!doctype html><html><head><title>Note</title></head><body>'
-			.'<a href="/zzp1b_menu">Root</a> <a href="zzp1b_menu.html">Menu</a> <a href="/media/x.jpg">Photo</a></body></html>',
+			.'<a href="/zzp1b_menu">Root</a> <a href="zzp1b_menu.html">Menu</a> <a href="/media/x.jpg">Photo</a> <a href="/index.php/zzp1b_menu">Index</a></body></html>',
 	);
 	foreach ($views as $name => $html) {
 		test_fixture("$theme/$name.html");
@@ -8952,6 +8952,10 @@ test('P1.B: /ro/ URLs: the prefix is taken off, /ro → /ro/, /ro/menu/ → /ro/
 		same("301 $base/zzp1b_menu", $redirect('/ro/zzp1b_menu?lang=en'));
 		same("301 $base/ro/", $redirect('/?lang=ro'));
 		same("301 $base/ro/zzp1b_menu", $redirect('/ro/zzp1b_menu/?lang=RO'));
+		same("301 $base/ro/zzp1b_menu", $redirect('/zzp1b_menu?lang=ro-RO'));
+		// an address that looks like another site's stays on this one
+		check(strpos($redirect('//evil.example/x?lang=ro'), "301 $base/ro/") === 0, 'open redirect');
+		check(strpos($redirect('/ro//evil.example?lang=en'), "301 $base/") === 0, 'open redirect');
 		// a language the site doesn't have is no prefix and no redirect
 		same(404, http('GET', "$base/de/zzp1b_menu")[0]);
 		same(200, http('GET', "$base/ro/zzp1b_menu?lang=xx")[0]);
@@ -8976,7 +8980,7 @@ test('P1.B: /ro/about renders the Romanian template text, and every link carries
 		// links to pages, by file name and by root path, get the language's address
 		foreach (array('<a href="'.$base.'/ro/">Home</a>', '<a href="'.$base.'/ro/zzp1b_menu">Menu</a>', '<a href="'.$base.'/ro/zzp1b_menu">Root</a>',
 			'<a href="'.$base.'/ro/">Root home</a>', '<a href="'.$base.'/ro/zzp1b_menu?x=1#top">Query</a>', '<a href="'.$base.'/ro/zzp1b_menu">Named</a>',
-			'action="'.$base.'/ro/zzp1b_about"') as $link) {
+			'action="'.$base.'/ro/zzp1b_about"', '<a href="'.$base.'/ro/zzp1b_menu">Index</a>', 'formaction="'.$base.'/ro/zzp1b_menu"') as $link) {
 			check(strpos($body, $link) !== false, "missing $link");
 		}
 		// links to files keep theirs
@@ -9018,7 +9022,12 @@ test('P1.B: an email rendered in a language: every page link carries its prefix,
 			same($base, config::get('link_uri'), 'with() puts link_uri back');
 			$html = i18n::with('en', function () { return controller::render_view('_email/zzp1b_note'); });
 			check(strpos($html, 'href="'.$base.'zzp1b_menu">Menu') !== false && strpos($html, '/ro/') === false, $html);
+			// without rewrites the index file is in link_uri once, not twice
+			config::set('link_base')->to($base.'index.php/');
+			$html = i18n::with('ro', function () { return controller::render_view('_email/zzp1b_note'); });
+			check(strpos($html, 'href="'.$base.'index.php/ro/zzp1b_menu">Index') !== false, $html);
 		} finally {
+			config::set('link_base')->to($base);
 			config::set('languages')->to($was[0]);
 			config::set('multilingual')->to($was[1]);
 		}
@@ -9032,6 +9041,15 @@ test('P1.B: protected /ro/ pages: /ro/staff goes to /ro/login and back, and stay
 		same("$base/ro/login?next=%2Fzzp1b_staff", location($headers));
 		// in other letter case it is not the prefix, and no page
 		same(404, http('GET', "$base/RO/zzp1b_staff")[0]);
+		// other spellings of the same path stay protected, or are no page
+		foreach (array('/%72o/zzp1b_staff', '/ro%2Fzzp1b_staff', '/ro//zzp1b_staff', '/ro/zzp1b_staff/') as $path) {
+			list($status, , $headers) = http('GET', $base.$path);
+			check(in_array($status, array(301, 303), true) && strpos((string)location($headers), "$base/ro/") === 0, "$path: $status ".location($headers));
+		}
+		foreach (array('/ro/zzp1b_staff%0A', '/ro/zzp1b_staff%00', '/ro/../zzp1b_staff', '/ro/./zzp1b_staff') as $path) {
+			list($status, $body) = http('GET', $base.$path);
+			check($status !== 200 && strpos((string)$body, 'Rota') === false, "$path answers $status");
+		}
 		cms_store::connect();
 		authentication::create_user('zzp1b-editor@example.test', 'a long password', 'editor', 'Ed');
 		authentication::create_user('zzp1b-member@example.test', 'a long password', 'member', 'Mo');
@@ -9126,6 +9144,9 @@ test('P1.B: a domain_language host is its language, with no prefix', function ()
 			check(strpos($body, '<h1>Bună ziua</h1>') !== false, 'Romanian');
 			check(strpos($body, '<a href="http://zzp1b-ro.test:'.$port.'/zzp1b_menu">Menu</a>') !== false && strpos($body, '<a href="/zzp1b_menu">Root</a>') !== false, 'links on its own host, no prefix');
 			same(404, http('GET', "http://127.0.0.1:$port/ro/zzp1b_about", null, $ro)[0], 'no prefix on that host');
+			// one language, one address: /ro/ on the site's address goes to the language's domain
+			list($status, , $headers) = http('GET', "http://127.0.0.1:$port/ro/zzp1b_about?x=1");
+			same("301 http://zzp1b-ro.test/zzp1b_about?x=1", $status.' '.location($headers));
 			list($status, , $headers) = http('GET', "http://127.0.0.1:$port/zzp1b_about?lang=en", null, $ro);
 			same("301 http://127.0.0.1:$port/zzp1b_about", $status.' '.location($headers), 'English is at the site address');
 			list($status, , $headers) = http('GET', "http://127.0.0.1:$port/zzp1b_about?lang=ro", null, $ro);
@@ -9134,7 +9155,7 @@ test('P1.B: a domain_language host is its language, with no prefix', function ()
 			list(, $body, $headers) = http('GET', "http://127.0.0.1:$port/zzp1b_about", null, array("Host: www.zzp1b-ro.test:$port"));
 			same('en', p1b_header($headers, 'Content-Language'));
 			list($status, , $headers) = http('GET', "http://127.0.0.1:$port/zzp1b_about?lang=ro");
-			same("301 http://127.0.0.1:$port/ro/zzp1b_about", $status.' '.location($headers));
+			same("301 http://zzp1b-ro.test/zzp1b_about", $status.' '.location($headers));
 		});
 	});
 });
@@ -9373,6 +9394,10 @@ function p1a_request($settings, $request, $fn) {
 	}
 }
 
+function p1a_with_uri($uri, $fn) {
+	return with_settings(array('uri_string' => $uri), $fn);
+}
+
 test('P1.A: off, the language API gives the one-language answer', function () {
 	p1a_request(array(), array('get' => array('lang' => 'ro')), function () {
 		same(false, i18n::enabled());
@@ -9468,6 +9493,9 @@ test('P1.A: multilingual, the address picks the language and names its column an
 		), i18n::alternates());
 		same('https://example.com/ro/', i18n::alternates('')[1]['url'], 'a home page is /ro/ (D5)');
 		same('https://example.com/ro/news/news_item/x', i18n::alternates('/news/news_item/x')[1]['url']);
+		// each segment encoded, as the one-address redirect writes it
+		same('https://example.com/ro/caf%C3%A9/a%20b%3F', i18n::alternates('/café/a b?')[1]['url']);
+		same('https://example.com/ro/meniu/ciorb%C4%83', p1a_with_uri('/meniu/ciorbă', function () { return i18n::alternates()[1]['url']; }));
 		same('ro', (new i18n())->language());
 	});
 	// no language in the address is the default; an unknown one too
@@ -9510,6 +9538,16 @@ test('P1.A: multilingual, a domain_language host is its language\'s address', fu
 		same('https://example.com/shop/index.php/', i18n::with('en', function () { return config::get('link_uri'); }));
 		same('https://example.ro:8443/shop/index.php/', i18n::with('ro', function () { return config::get('link_uri'); }));
 		same('https://example.ro:8443/shop/index.php/', config::get('link_uri'));
+	});
+	// on the Romanian host with no site address the others have none: left
+	// out, and with() keeps the links where they are
+	p1a_request(array('site_url' => null, 'host' => 'example.ro', 'url_language' => 'ro', 'link_base' => 'https://example.ro/', 'link_uri' => 'https://example.ro/') + $settings, array(), function () {
+		same(array(array('lang' => 'ro', 'url' => 'https://example.ro/menu')), i18n::alternates());
+		same(array('en', 'https://example.ro/'), i18n::with('en', function () { return array(i18n::current(), config::get('link_uri')); }));
+	});
+	// a site address that is itself a language's domain doesn't count
+	p1a_request(array('site_url' => 'https://example.ro/', 'host' => 'example.ro', 'url_language' => 'ro', 'link_base' => 'https://example.ro/', 'link_uri' => 'https://example.ro/') + $settings, array(), function () {
+		same(array('ro'), array_column(i18n::alternates(), 'lang'));
 	});
 	// a language on its own domain from another language's domain
 	p1a_request(array('domain_language' => array('example.ro' => 'ro', 'example.de' => 'de'), 'host' => 'example.de', 'url_language' => 'de', 'link_base' => 'https://example.de/', 'link_uri' => 'https://example.de/') + $settings, array(), function () {
@@ -9644,6 +9682,10 @@ test('P1.A: doctor fails on multilingual without two languages and on a code it 
 	same(array("fail Language code(s) Raster can't read: 'en_US', 'Romanian'", 'fail multilingual is on with fewer than two languages'),
 		$titles(array('multilingual' => true, 'languages' => array('en_US', 'ro'), 'domain_language' => array('example.ro' => 'Romanian'))));
 	same(array(), $titles(array('multilingual' => false, 'languages' => array('en', 'pt-br'), 'domain_language' => array('example.ro' => 'pt-br'))));
+	// a language's own domain needs the site's address to link the others on
+	same(array('ok Multilingual: en, ro', "fail domain_language needs the site's address"), $titles(array('multilingual' => true, 'languages' => array('en', 'ro'), 'domain_language' => array('example.ro' => 'ro'), 'site_url' => null)));
+	same(array('ok Multilingual: en, ro', "fail domain_language needs the site's address"), $titles(array('multilingual' => true, 'languages' => array('en', 'ro'), 'domain_language' => array('example.ro' => 'ro'), 'site_url' => 'https://example.ro/')));
+	same(array('ok Multilingual: en, ro'), $titles(array('multilingual' => true, 'languages' => array('en', 'ro'), 'domain_language' => array('example.ro' => 'ro'), 'site_url' => 'https://example.com/')));
 });
 
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";
