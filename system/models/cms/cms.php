@@ -639,7 +639,11 @@ class cms
 			foreach ($data as $key => $item) {
 				if (!empty($item['slug'])) continue;
 				$bean = R::load($this->data_name, $item['id']);
-				$bean->slug = cms_store::unique_slug($this->data_name, cms_store::slug_source($item, $record ? array_merge($record['hidden'], array('owner', 'created_at')) : array()), $item['id']);
+				// the slug is the default language's: from its words, not the
+				// translation the row shows
+				$source = $item;
+				foreach (cms_types::translated($this->data_name) as $field) $source[$field] = $bean->$field;
+				$bean->slug = cms_store::unique_slug($this->data_name, cms_store::slug_source($source, $record ? array_merge($record['hidden'], array('owner', 'created_at')) : array()), $item['id']);
 				R::store($bean);
 				$data[$key]['slug'] = $bean->slug;
 			}

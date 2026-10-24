@@ -862,7 +862,9 @@ mock-up is stored only when the collection's table is made.
   `cms.item_saved` carries `lang`. In the editor on `/ro/menu` an item's
   translated fields are saved in Romanian and its shared ones (a photo, a
   price) for every language; an item added there is made in the default
-  language.
+  language. Duplicate copies the stored item, every language of it, and
+  undoing a Delete brings its translations back; a slug Raster makes for
+  an item is always from its default language's words.
 - **Changing fields.** A new annotation adds a column: on the next request in
   development, or with `php bin/raster schema --apply` in production.
   `schema` shows orphaned columns and suggests

@@ -1138,11 +1138,11 @@
 			});
 		}, function (e) { working(-1); item.el.classList.remove('raster-leaving'); failed(e); });
 	}
+	// the server copies the stored item, every language of it (the page
+	// shows only its own)
 	function duplicate(item) {
-		var values = Object.assign({}, item.info.values);
-		['id', 'updated_at', 'slug'].forEach(function (k) { delete values[k]; });
 		working(1);
-		call('editor_save_item', withLang({ collection: item.info.collection, id: 0, fields: values, examples: item.info.examples })).then(function (saved) {
+		call('editor_save_item', withLang({ collection: item.info.collection, id: 0, copy: item.info.id, examples: item.info.examples })).then(function (saved) {
 			working(-1);
 			var copy = cloneItem(item, saved);
 			clearFloats();

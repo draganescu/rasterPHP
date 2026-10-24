@@ -12054,6 +12054,65 @@ test('P3.C: on an item page the switcher and hreflang give the item\'s slug in e
 });
 
 
+// ## P3 integration: copies, undo and slugs keep every language apart
+
+test('P3 integration: on /ro/ Duplicate copies the stored item in every language, undo brings back its translations, and a missing slug is made from the default language', function () {
+	$type = 'zzp3imenudata';
+	try {
+		p2b_site(function ($dir) use ($type) {
+			file_put_contents("$dir/application/views/default/zzp3imenu.html", '<!doctype html><html><head><title>Menu</title></head><body><ul>'
+				.'<!-- render.cms.zzp3i_menu --><li><b><!-- print.name -->Zz seed<!-- /print.name --></b></li><!-- /render.cms.zzp3i_menu --></ul></body></html>');
+			p2b_server($dir, function ($base) use ($type) {
+				same(200, http('GET', "$base/zzp3imenu")[0]);
+				cms_store::connect();
+				cms_store::forget();
+				check(isset(cms_store::columns($type)['name__ro']), 'the Romanian column');
+				R::exec("DELETE FROM $type");
+				$id = with_settings(p2a_on(), function () use ($type) {
+					$item = cms_store::save_item($type, 0, array('name' => 'Apple'), array('name'));
+					cms_store::save_item($type, $item['id'], array('name' => 'Măr'), array('name'), 'editor', null, 'ro');
+					return $item['id'];
+				});
+				$editor = p2b_login($base);
+				list($config) = p2b_config("$base/ro/zzp3imenu", $editor);
+				$post = function ($endpoint, $fields) use ($base, $editor, $config) {
+					list($status, $body) = form_post("$base/ro/api/cms/$endpoint", $fields + array('csrf' => $config['csrf']), array("Cookie: $editor"));
+					return array($status, json_decode($body, true), $body);
+				};
+				$stored = function ($id) use ($type) { cms_store::forget(); return R::getRow("SELECT name, name__ro, slug FROM $type WHERE id = ?", array($id)); };
+				// Duplicate: the copy's English is the English, its Romanian the Romanian
+				list($status, $copy, $body) = $post('editor_save_item', array('collection' => 'zzp3i_menu', 'id' => 0, 'copy' => $id, 'lang' => 'ro'));
+				same(200, $status, $body);
+				same('Măr', $copy['name'], 'answered as /ro/ shows it');
+				same(array('name' => 'Apple', 'name__ro' => 'Măr'), array_slice($stored($copy['id']), 0, 2));
+				same('apple-2', $stored($copy['id'])['slug'], 'its slug from the English');
+				list($status) = $post('editor_save_item', array('collection' => 'zzp3i_menu', 'id' => 0, 'copy' => 999999, 'lang' => 'ro'));
+				same(404, $status, 'a copy of no item');
+				// Delete, then undo: the item as delete_item gave it, every language
+				list($status, $deleted, $body) = $post('editor_delete_item', array('collection' => 'zzp3i_menu', 'id' => $copy['id']));
+				same(200, $status, $body);
+				$fields = $deleted['item'];
+				foreach (array('id', 'updated_at', 'created_at', 'owner') as $k) unset($fields[$k]);
+				check(array_key_exists('name__ro', $fields) && array_key_exists('saved_lang', $fields), json_encode($fields));
+				list($status, $back, $body) = $post('editor_save_item', array('collection' => 'zzp3i_menu', 'id' => 0, 'fields' => $fields, 'lang' => 'ro'));
+				same(200, $status, $body);
+				same(array('name' => 'Apple', 'name__ro' => 'Măr'), array_slice($stored($back['id']), 0, 2), 'undo keeps both languages');
+				// an existing item still takes no language's column as a field
+				list($status) = $post('editor_save_item', array('collection' => 'zzp3i_menu', 'id' => $back['id'], 'fields' => array('name__ro' => 'Wrong'), 'lang' => 'ro'));
+				same(400, $status);
+				// an item without a slug, shown on /ro/, gets the English one
+				R::exec("UPDATE $type SET slug = NULL WHERE id = ?", array($id));
+				check(strpos(http('GET', "$base/ro/zzp3imenu")[1], '<b>Măr</b>') !== false, 'shown in Romanian');
+				same('apple', $stored($id)['slug']);
+			});
+		});
+	} finally {
+		cms_store::connect();
+		R::getDatabaseAdapter()->exec("DROP TABLE IF EXISTS $type");
+		cms_store::forget();
+	}
+});
+
 echo "\n\n$passed passed, ".count($failed)." failed".($skipped ? ', '.count($skipped).' skipped' : '')."\n";
 foreach ($skipped as $skip) echo "  - $skip\n";
 foreach ($failed as $failure) echo "  ✗ $failure\n";
