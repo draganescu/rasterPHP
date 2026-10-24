@@ -2,13 +2,13 @@
 <!-- print.@lang.i18n.language --><!-- print.@dir.i18n.dir --><html lang="en" dir="ltr"><!-- /print.@dir.i18n.dir --><!-- /print.@lang.i18n.language -->
 <head>
   <!-- dry._layout.head /-->
-  <title>Your booking</title>
+  <title><!-- print.i18n.booking('your_booking') -->Your booking<!-- /print.i18n.booking('your_booking') --></title>
 </head>
 <body>
   <!-- dry._layout.header /-->
   <main class="narrow">
-    <h1>Your booking</h1>
-    <!-- print.if.static --><p>To change or cancel a booking, call us on <a href="tel:+40721000000">+40 721 000 000</a>.</p><!-- /print.if.static -->
+    <h1><!-- print.i18n.booking('your_booking') -->Your booking<!-- /print.i18n.booking('your_booking') --></h1>
+    <!-- print.if.static --><p><!-- print.i18n.booking('to_change_or_cancel_a') -->To change or cancel a booking, call us on<!-- /print.i18n.booking('to_change_or_cancel_a') --> <a href="tel:+40721000000">+40 721 000 000</a>.</p><!-- /print.if.static -->
     <!-- print.if.live -->
     <!-- print.validation.alert('cancelled') --><p class="notice">Your booking is cancelled. We hope to see you another time.</p><!-- /print.validation.alert('cancelled') -->
     <!-- print.validation.alert('rescheduled') --><p class="notice">Your booking has moved. It is a request again: we'll write once we confirm the new time.</p><!-- /print.validation.alert('rescheduled') -->
@@ -21,35 +21,35 @@
     <!-- print.validation.alert('service_unavailable') --><p class="error">That isn't offered on that day.</p><!-- /print.validation.alert('service_unavailable') -->
     <!-- render.booking.manage -->
     <dl class="booking-details">
-      <dt>Name</dt><dd><!-- print.name -->Ana<!-- /print.name --></dd>
-      <dt>When</dt><dd><!-- print.date -->2026-10-20<!-- /print.date --> at <!-- print.time -->19:00<!-- /print.time --> to <!-- print.ends -->21:00<!-- /print.ends --></dd>
-      <dt>Where</dt><dd><!-- print.resource_name -->Dining room<!-- /print.resource_name --> <!-- print.service_name --><!-- /print.service_name --></dd>
-      <dt>People</dt><dd><!-- print.people -->2<!-- /print.people --></dd>
-      <dt>Status</dt><dd class="status"><!-- print.status -->requested<!-- /print.status --></dd>
+      <dt><!-- print.i18n.booking('name') -->Name<!-- /print.i18n.booking('name') --></dt><dd><!-- print.name -->Ana<!-- /print.name --></dd>
+      <dt><!-- print.i18n.booking('when') -->When<!-- /print.i18n.booking('when') --></dt><dd><!-- print.date -->2026-10-20<!-- /print.date --> <!-- print.i18n.booking('at') -->at<!-- /print.i18n.booking('at') --> <!-- print.time -->19:00<!-- /print.time --> <!-- print.i18n.booking('to') -->to<!-- /print.i18n.booking('to') --> <!-- print.ends -->21:00<!-- /print.ends --></dd>
+      <dt><!-- print.i18n.booking('where') -->Where<!-- /print.i18n.booking('where') --></dt><dd><!-- print.resource_name -->Dining room<!-- /print.resource_name --> <!-- print.service_name --><!-- /print.service_name --></dd>
+      <dt><!-- print.i18n.booking('people') -->People<!-- /print.i18n.booking('people') --></dt><dd><!-- print.people -->2<!-- /print.people --></dd>
+      <dt><!-- print.i18n.booking('status') -->Status<!-- /print.i18n.booking('status') --></dt><dd class="status"><!-- print.status -->requested<!-- /print.status --></dd>
     </dl>
     <form method="post">
       <input type="hidden" name="do" value="cancel">
-      <button class="secondary">Cancel the booking</button>
+      <button class="secondary"><!-- print.i18n.booking('cancel_the_booking') -->Cancel the booking<!-- /print.i18n.booking('cancel_the_booking') --></button>
     </form>
-    <h2>Change the time</h2>
+    <h2><!-- print.i18n.booking('change_the_time') -->Change the time<!-- /print.i18n.booking('change_the_time') --></h2>
     <form method="get" class="filters">
       <input type="hidden" name="token">
       <input type="hidden" name="booking">
-      <label>Day <input type="date" name="date"></label>
-      <button>Show times</button>
+      <label><!-- print.i18n.booking('day') -->Day<!-- /print.i18n.booking('day') --> <input type="date" name="date"></label>
+      <button><!-- print.i18n.booking('show_times') -->Show times<!-- /print.i18n.booking('show_times') --></button>
     </form>
     <form method="post" class="stack">
       <input type="hidden" name="do" value="change">
-      <fieldset class="times"><legend>New time</legend>
+      <fieldset class="times"><legend><!-- print.i18n.booking('new_time') -->New time<!-- /print.i18n.booking('new_time') --></legend>
         <!-- render.booking.slots('date=?date&for=manage') -->
-        <!-- print.+class.state --><label class="slot "><!-- print.@value.time --><input type="radio" name="time" value="19:00"><!-- /print.@value.time --> <!-- print.time -->19:00<!-- /print.time --> to <!-- print.ends -->21:00<!-- /print.ends --></label><!-- /print.+class.state -->
+        <!-- print.+class.state --><label class="slot "><!-- print.@value.time --><input type="radio" name="time" value="19:00"><!-- /print.@value.time --> <!-- print.time -->19:00<!-- /print.time --> <!-- print.i18n.booking('to') -->to<!-- /print.i18n.booking('to') --> <!-- print.ends -->21:00<!-- /print.ends --></label><!-- /print.+class.state -->
         <!-- /render.booking.slots('date=?date&for=manage') -->
-        <p class="hint">Pick a day above to see its times.</p>
+        <p class="hint"><!-- print.i18n.booking('pick_a_day_above_to') -->Pick a day above to see its times.<!-- /print.i18n.booking('pick_a_day_above_to') --></p>
       </fieldset>
-      <button>Move my booking</button>
+      <button><!-- print.i18n.booking('move_my_booking') -->Move my booking<!-- /print.i18n.booking('move_my_booking') --></button>
     </form>
     <!-- /render.booking.manage -->
-    <p><a href="visit.html">Book a table</a> · <a href="salon.html">Book the salon</a></p>
+    <p><a href="visit.html"><!-- print.i18n.booking('book_a_table') -->Book a table<!-- /print.i18n.booking('book_a_table') --></a> · <a href="salon.html"><!-- print.i18n.booking('book_the_salon') -->Book the salon<!-- /print.i18n.booking('book_the_salon') --></a></p>
     <!-- /print.if.live -->
   </main>
   <!-- dry._layout.footer /-->

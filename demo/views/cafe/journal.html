@@ -2,7 +2,7 @@
 <!-- print.@lang.i18n.language --><!-- print.@dir.i18n.dir --><html lang="en" dir="ltr"><!-- /print.@dir.i18n.dir --><!-- /print.@lang.i18n.language -->
 <head>
   <!-- dry._layout.head /-->
-  <title>Journal</title>
+  <title><!-- print.i18n.journal('journal') -->Journal<!-- /print.i18n.journal('journal') --></title>
 </head>
 <body>
   <!-- dry._layout.header /-->
@@ -11,12 +11,12 @@
     <!-- render.cms.journal('order=newest') -->
     <article class="post">
       <h2><!-- print.@href.raster_detail_link --><a href="journal/journal_item/opening-day"><!-- print.title -->Opening day<!-- /print.title --></a><!-- /print.@href.raster_detail_link --></h2>
-      <p class="meta">by <!-- print.@href.raster_filter@author --><a href="journal/journal_items/author/Ana"><!-- print.author -->Ana<!-- /print.author --></a><!-- /print.@href.raster_filter@author --></p>
+      <p class="meta"><!-- print.i18n.journal('by') -->by<!-- /print.i18n.journal('by') --> <!-- print.@href.raster_filter@author --><a href="journal/journal_items/author/Ana"><!-- print.author -->Ana<!-- /print.author --></a><!-- /print.@href.raster_filter@author --></p>
       <div><!-- print.summary --><p>We opened the doors on a rainy Tuesday.</p><!-- /print.summary --></div>
     </article>
     <!-- /render.cms.journal('order=newest') -->
     <!-- render.pagination.links('cms.journal') -->
-    <nav class="pager"><!-- print.+class.prev_state --><!-- print.@href.prev_url --><a class="page" href="#">Newer</a><!-- /print.@href.prev_url --><!-- /print.+class.prev_state --> <!-- print.+class.next_state --><!-- print.@href.next_url --><a class="page" href="#">Older</a><!-- /print.@href.next_url --><!-- /print.+class.next_state --></nav>
+    <nav class="pager"><!-- print.+class.prev_state --><!-- print.@href.prev_url --><a class="page" href="#"><!-- print.i18n.journal('newer') -->Newer<!-- /print.i18n.journal('newer') --></a><!-- /print.@href.prev_url --><!-- /print.+class.prev_state --> <!-- print.+class.next_state --><!-- print.@href.next_url --><a class="page" href="#"><!-- print.i18n.journal('older') -->Older<!-- /print.i18n.journal('older') --></a><!-- /print.@href.next_url --><!-- /print.+class.next_state --></nav>
     <!-- /render.pagination.links('cms.journal') -->
   </main>
   <!-- dry._layout.footer /-->

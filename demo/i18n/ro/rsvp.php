@@ -1,0 +1,20 @@
+<?php
+return array (
+  'your_reply' => 'Răspunsul tău',
+  'to_change_your_reply_to' => 'Ca să schimbi răspunsul la una din serile noastre, sună-ne la',
+  'name' => 'Nume',
+  'evening' => 'Seara',
+  'at' => 'la',
+  'answer' => 'Răspuns',
+  'for' => ', pentru',
+  'status' => 'Stare',
+  'place_on_the_waitlist' => 'Locul pe lista de așteptare',
+  'replies_close' => 'Răspunsurile se închid',
+  'change_your_answer' => 'Schimbă răspunsul',
+  'yes' => 'Da',
+  'maybe' => 'Poate',
+  'no_i_can_t_come' => 'Nu, nu pot veni',
+  'people' => 'Persoane',
+  'change_my_reply' => 'Schimbă răspunsul',
+  'the_evening_s_page' => 'Pagina serii',
+);

@@ -1,4 +1,4 @@
-Raster Café opening hours
+<!-- print.i18n.common('opening_hours_text') -->Raster Café opening hours<!-- /print.i18n.common('opening_hours_text') -->
 <!-- render.cafe.hours -->
 <!-- print.day -->Day<!-- /print.day -->: <!-- print.time -->time<!-- /print.time -->
 <!-- /render.cafe.hours -->

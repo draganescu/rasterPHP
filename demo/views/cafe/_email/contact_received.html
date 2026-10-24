@@ -1,7 +1,7 @@
 <!doctype html>
-<html lang="en" dir="ltr"><head><meta charset="utf-8"><title>A message from the website</title></head>
+<html lang="en" dir="ltr"><head><meta charset="utf-8"><title><!-- print.i18n.emails('a_message_from_the_website') -->A message from the website<!-- /print.i18n.emails('a_message_from_the_website') --></title></head>
 <body style="font-family: system-ui, sans-serif">
-  <p>From <strong><!-- print.self.name -->Ana<!-- /print.self.name --></strong>, <!-- print.self.email -->ana@example.com<!-- /print.self.email -->, about <!-- print.self.subject -->a table<!-- /print.self.subject -->. Phone: <!-- print.self.phone -->none<!-- /print.self.phone --></p>
+  <p><!-- print.i18n.emails('from') -->From<!-- /print.i18n.emails('from') --> <strong><!-- print.self.name -->Ana<!-- /print.self.name --></strong>, <!-- print.self.email -->ana@example.com<!-- /print.self.email --><!-- print.i18n.emails('about') -->, about<!-- /print.i18n.emails('about') --> <!-- print.self.subject -->a table<!-- /print.self.subject --><!-- print.i18n.emails('phone_2') -->. Phone:<!-- /print.i18n.emails('phone_2') --> <!-- print.self.phone -->none<!-- /print.self.phone --></p>
   <p><!-- print.self.message -->message<!-- /print.self.message --></p>
-  <p>Sent from <a href="<!-- print.self.page_url /-->"><!-- print.self.page_url /--></a>. Answer it by replying to this email, and mark it done on the <a href="<!-- print.self.staff_url /-->">staff page</a>.</p>
+  <p><!-- print.i18n.emails('sent_from') -->Sent from<!-- /print.i18n.emails('sent_from') --> <a href="<!-- print.self.page_url /-->"><!-- print.self.page_url /--></a><!-- print.i18n.emails('answer_it_by_replying_to') -->. Answer it by replying to this email, and mark it done on the<!-- /print.i18n.emails('answer_it_by_replying_to') --> <a href="<!-- print.self.staff_url /-->"><!-- print.i18n.emails('staff_page') -->staff page<!-- /print.i18n.emails('staff_page') --></a>.</p>
 </body></html>

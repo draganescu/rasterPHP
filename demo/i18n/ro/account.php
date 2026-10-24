@@ -1,0 +1,22 @@
+<?php
+return array (
+  'your_account' => 'Contul tău',
+  'name' => 'Nume',
+  'email' => 'Email',
+  'new_password' => 'Parolă nouă',
+  'current_password' => 'Parola de acum',
+  'save' => 'Salvează',
+  'your_bookings' => 'Rezervările tale',
+  'what_you_booked_while_logged' => 'Ce ai rezervat cât erai conectat. Le vezi doar tu și personalul.',
+  'at' => 'la',
+  'people' => 'persoane:',
+  'change_or_cancel' => 'Schimbă sau anulează',
+  'newer' => 'Mai noi',
+  'page' => 'pagina',
+  'of' => 'din',
+  'older' => 'Mai vechi',
+  'your_replies' => 'Răspunsurile tale',
+  'your_replies_to_our_evenings' => 'Răspunsurile tale la serile noastre, date cât erai conectat.',
+  'change_my_reply' => 'Schimbă răspunsul',
+  'log_out' => 'Ieși din cont',
+);

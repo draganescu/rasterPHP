@@ -1,7 +1,7 @@
 <!doctype html>
-<html lang="en" dir="ltr"><head><meta charset="utf-8"><title>Your booking has moved</title></head>
+<html lang="en" dir="ltr"><head><meta charset="utf-8"><title><!-- print.i18n.emails('your_booking_has_moved') -->Your booking has moved<!-- /print.i18n.emails('your_booking_has_moved') --></title></head>
 <body style="font-family: system-ui, sans-serif">
-  <p>Hello <!-- print.self.name -->there<!-- /print.self.name -->,</p>
-  <p>Your booking is now on <!-- print.self.date -->2026-10-20<!-- /print.self.date --> at <!-- print.self.time -->19:00<!-- /print.self.time -->: <!-- print.self.resource_name -->Dining room<!-- /print.self.resource_name --> <!-- print.self.service_name --><!-- /print.self.service_name -->, for <!-- print.self.people -->2<!-- /print.self.people -->. It is <!-- print.self.status -->requested<!-- /print.self.status -->: a moved request waits for us to confirm it again.</p>
-  <p>To change or cancel it: <a href="<!-- print.self.manage_url /-->">your booking</a>.</p>
+  <p><!-- print.i18n.emails('hello') -->Hello<!-- /print.i18n.emails('hello') --> <!-- print.self.name -->there<!-- /print.self.name -->,</p>
+  <p><!-- print.i18n.emails('your_booking_is_now_on') -->Your booking is now on<!-- /print.i18n.emails('your_booking_is_now_on') --> <!-- print.self.date -->2026-10-20<!-- /print.self.date --> <!-- print.i18n.emails('at') -->at<!-- /print.i18n.emails('at') --> <!-- print.self.time -->19:00<!-- /print.self.time -->: <!-- print.self.resource_name -->Dining room<!-- /print.self.resource_name --> <!-- print.self.service_name --><!-- /print.self.service_name --><!-- print.i18n.emails('for_2') -->, for<!-- /print.i18n.emails('for_2') --> <!-- print.self.people -->2<!-- /print.self.people --><!-- print.i18n.emails('it_is') -->. It is<!-- /print.i18n.emails('it_is') --> <!-- print.self.status -->requested<!-- /print.self.status --><!-- print.i18n.emails('a_moved_request_waits_for') -->: a moved request waits for us to confirm it again.<!-- /print.i18n.emails('a_moved_request_waits_for') --></p>
+  <p><!-- print.i18n.emails('to_change_or_cancel_it') -->To change or cancel it:<!-- /print.i18n.emails('to_change_or_cancel_it') --> <a href="<!-- print.self.manage_url /-->"><!-- print.i18n.emails('your_booking') -->your booking<!-- /print.i18n.emails('your_booking') --></a>.</p>
 </body></html>

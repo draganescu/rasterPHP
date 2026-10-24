@@ -14,13 +14,20 @@ class cafe
 	// opening hours: day, time, state (open or closed), from the about
 	// page's render.cms.hours list, which editors change; hours.txt, the lab
 	// and /api/cafe/hours read it here (models/cafe/sql/hours.sql), without
-	// drafts and scheduled items, as the list shows them
+	// drafts and scheduled items, as the list shows them, and in the page's
+	// language (/ro/hours.txt: the Romanian day and time, else the English)
 	function hours() {
 		try {
-			return database::instance('cafe')->hours(array(':now' => date('Y-m-d H:i:s')));
+			$rows = database::instance('cafe')->hours(array(':now' => date('Y-m-d H:i:s')));
 		} catch (Exception $e) {
 			return array();
 		}
+		$hours = array();
+		foreach ($rows as $row) {
+			$row = cms_store::localized($row, 'hoursdata');
+			$hours[] = array('day' => $row['day'], 'time' => $row['time'], 'state' => $row['state']);
+		}
+		return $hours;
 	}
 
 	// dishes in a category, counted with an SQL file (models/cafe/sql/count_category.sql)

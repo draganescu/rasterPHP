@@ -2,19 +2,19 @@
 <!-- print.@lang.i18n.language --><!-- print.@dir.i18n.dir --><html lang="en" dir="ltr"><!-- /print.@dir.i18n.dir --><!-- /print.@lang.i18n.language -->
 <head>
   <!-- dry._layout.head /-->
-  <title>Members</title>
+  <title><!-- print.i18n.members('members') -->Members<!-- /print.i18n.members('members') --></title>
 </head>
 <body>
   <!-- dry._layout.header /-->
   <main class="">
-    <h1>Members</h1>
+    <h1><!-- print.i18n.members('members') -->Members<!-- /print.i18n.members('members') --></h1>
     <!-- print.validation.alert('registered') --><p class="notice">Welcome! Your account is ready.</p><!-- /print.validation.alert('registered') -->
     <!-- print.validation.alert('password_changed') --><p class="notice">Your password was changed.</p><!-- /print.validation.alert('password_changed') -->
-    <!-- render.authentication.me --><p>Hello <strong><!-- print.name -->Ana<!-- /print.name --></strong>, you are a <!-- print.role -->member<!-- /print.role -->.</p><!-- /render.authentication.me -->
-    <p>Your session number is <!-- print.session.uid -->0<!-- /print.session.uid -->.</p>
-    <p>Members get the tenth coffee free. Show this page at the counter.</p>
-    <!-- print.if.is_member --><p class="member-note">Your card is active.</p><!-- /print.if.is_member -->
-    <!-- print.if.is_admin --><p class="admin-note">You run this place.</p><!-- /print.if.is_admin -->
+    <!-- render.authentication.me --><p><!-- print.i18n.members('hello') -->Hello<!-- /print.i18n.members('hello') --> <strong><!-- print.name -->Ana<!-- /print.name --></strong><!-- print.i18n.members('you_are_a') -->, you are a<!-- /print.i18n.members('you_are_a') --> <!-- print.role -->member<!-- /print.role -->.</p><!-- /render.authentication.me -->
+    <p><!-- print.i18n.members('your_session_number_is') -->Your session number is<!-- /print.i18n.members('your_session_number_is') --> <!-- print.session.uid -->0<!-- /print.session.uid -->.</p>
+    <p><!-- print.i18n.members('members_get_the_tenth_coffee') -->Members get the tenth coffee free. Show this page at the counter.<!-- /print.i18n.members('members_get_the_tenth_coffee') --></p>
+    <!-- print.if.is_member --><p class="member-note"><!-- print.i18n.members('your_card_is_active') -->Your card is active.<!-- /print.i18n.members('your_card_is_active') --></p><!-- /print.if.is_member -->
+    <!-- print.if.is_admin --><p class="admin-note"><!-- print.i18n.members('you_run_this_place') -->You run this place.<!-- /print.i18n.members('you_run_this_place') --></p><!-- /print.if.is_admin -->
   </main>
   <!-- dry._layout.footer /-->
 </body>
