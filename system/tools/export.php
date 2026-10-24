@@ -83,7 +83,7 @@ class raster_export {
 		$this->start_server();
 		try {
 			$this->languages = class_exists('i18n') ? i18n::available() : array();
-			$this->default_language = $this->languages ? $this->languages[0] : '';
+			$this->default_language = class_exists('i18n') ? i18n::default_language() : '';
 			foreach ($this->seeds() as $path) $this->enqueue($path);
 			while ($this->queue) {
 				$path = array_shift($this->queue);
