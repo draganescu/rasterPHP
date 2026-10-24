@@ -9374,7 +9374,8 @@ test('P1.C: lint warns on href="#…" and href="?…", which leave the page (anc
 test('P1.C: off is identical for an email: its <html> is the mock-up\'s, whatever language the visitor picked', function () use ($root) {
 	$view = "$root/application/views/default/_email/password_reset.html";
 	$now = file_get_contents($view);
-	check(strpos($now, "<!doctype html>\n<html lang=\"en\" dir=\"ltr\">\n<head>") === 0 && strpos($now, 'i18n') === false, 'no language annotations in emails');
+	// its words are dictionary keys (P5.A), its <html> stays as written
+	check(strpos($now, "<!doctype html>\n<html lang=\"en\" dir=\"ltr\">\n<head>") === 0, 'no language annotation on the email\'s <html>');
 	$vars = array('name' => 'Ana', 'reset_url' => 'https://cafe.test/reset?token=x');
 	$render = function () use ($vars) { return controller::render_view('_email/password_reset', $vars); };
 	$html = $render();
@@ -10105,7 +10106,8 @@ test('P2.C: an agent turns a one-language site into a bilingual one over MCP (ne
 				foreach ($batch['missing'] as $missing) {
 					same(false, $missing['shared']);
 					same(mb_strlen($missing['default_value']) <= 300, true);
-					if ($missing['kind'] === 'strings') $strings[$missing['where']][$missing['field']] = 'RO '.$missing['default_value'];
+					// an email's words are a dictionary's too (the starter's emails)
+					if ($missing['kind'] === 'strings' || $missing['kind'] === 'email') $strings[$missing['where']][$missing['field']] = 'RO '.$missing['default_value'];
 					else $pages[$missing['where']][$missing['field']] = 'RO '.$missing['default_value'];
 				}
 				$offset += 5;
@@ -11191,8 +11193,10 @@ test('P2.A: the starter linted multilingual: warnings only, a few per view', fun
 	$per_file = array();
 	foreach ($on as $p) if (strpos($p['message'], 'is the same in every language') !== false || strpos($p['message'], 'more line(s) of this view') !== false) $per_file[$p['file']] = (isset($per_file[$p['file']]) ? $per_file[$p['file']] : 0) + 1;
 	foreach ($per_file as $file => $count) check($count <= 11, "$file: $count");
-	// emails are read too (P4.C): the starter's are plain words
-	check(preg_grep('#_email/password_reset#', array_keys($per_file)) !== array(), 'the emails: '.json_encode(array_keys($per_file)));
+	// emails are read too (P4.C): the starter's words are dictionary keys
+	// (P5.A), its <html lang> is fixed
+	check(preg_grep('#_email/#', array_keys($per_file)) === array(), 'the emails: '.json_encode(array_keys($per_file)));
+	check(array_filter($on, function ($p) { return strpos($p['file'], '_email/password_reset') !== false && strpos($p['message'], 'names one language') !== false; }) !== array(), 'the email\'s <html> is linted');
 });
 
 test('P2.A: schema --rename moves a field\'s translation columns with it', function () {
@@ -12554,7 +12558,8 @@ test('P3 review: the editor on /ro/ writes the Romanian address, never the Engli
 				same(200, http('GET', "$base/zzp3rmenu")[0]);
 				cms_store::connect();
 				cms_store::forget();
-				check(!isset(cms_store::columns($type)['slug__ro']), 'no Romanian slugs yet');
+				// development gives a multilingual list its slug per language when it is first shown (P5.A)
+				check(isset(cms_store::columns($type)['slug__ro']), 'the list has its Romanian slugs');
 				R::exec("DELETE FROM $type");
 				$id = with_settings(p2a_on(), function () use ($type) { return cms_store::save_item($type, 0, array('name' => 'Apple'), array('name'))['id']; });
 				$editor = p2b_login($base);
@@ -13137,7 +13142,8 @@ test('P4.A: a record\'s lang column is kept, not an orphan, when multilingual is
 		foreach ($status['tables'] as $row) if ($row['table'] === 'bookingdata') $table = $row;
 		check($table !== null, 'bookingdata is listed');
 		check(!in_array('lang', $table['orphans'], true), 'lang is an orphan: '.json_encode($table['orphans']));
-		same(array('lang'), isset($status['translations']['bookingdata']) ? $status['translations']['bookingdata'] : null, 'it is kept');
+		// and so is its slug in Romanian, which development made with the table (P5.A)
+		same(array('lang', 'slug__ro'), isset($status['translations']['bookingdata']) ? $status['translations']['bookingdata'] : null, 'it is kept');
 	});
 });
 
@@ -13582,7 +13588,10 @@ test('P4.C: an agent translates the booking emails and service names over MCP, a
 			$listed = array();
 			foreach ($rows as $row) if (in_array($row['kind'], array('email', 'record'), true)) $listed[] = $row['kind'].' '.$row['where'].' '.$row['field'];
 			sort($listed);
-			same(array('email zzp4c_mail confirmed_subject', 'email zzp4c_mail hello', 'email zzp4c_mail new_subject', 'email zzp4c_mail requested_subject', 'record bookingresource/1 name', 'record bookingservice/1 name'), $listed);
+			// the starter's own emails (P5.A: their words are dictionary keys), then the booking's
+			$starter = array();
+			foreach (array('choose_a_new_password', 'hello', 'hi', 'if_it_wasn_t_you', 'if_you_didn_t_ask', 'please_confirm_that_you_want', 'please_confirm_your_subscription', 'reset_your_password', 'someone_asked_to_reset_the', 'yes_subscribe_me') as $key) $starter[] = "email emails $key";
+			same(array_merge($starter, array('email zzp4c_mail confirmed_subject', 'email zzp4c_mail hello', 'email zzp4c_mail new_subject', 'email zzp4c_mail requested_subject', 'record bookingresource/1 name', 'record bookingservice/1 name')), $listed);
 			// 2. everything translated the way its kind says
 			$words = array('Dining room' => 'Sala de mese', 'Dinner' => 'Cină', 'Hello' => 'Bună', 'We have your booking' => 'Am primit rezervarea ta', 'Your booking is confirmed' => 'Rezervarea ta e confirmată');
 			$pages = $items = $strings = array();
