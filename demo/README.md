@@ -23,7 +23,9 @@ Replies to the events come from the bundled rsvp model
 (`system/models/rsvp/`); the café writes only its pages, its emails and the
 words. The seed also adds two evenings: a Jazz night with 40 places in two
 weeks, and a Poetry evening with 4 places in ten days, whose replies close the
-day before, so the waitlist is easy to see.
+day before, so the waitlist is easy to see. It also adds the opening hours
+on `/about`, a `render.cms.hours` list editors change; `hours.txt` and
+`/api/cafe/hours` read the same items through the café model.
 
 | Where | What it shows |
 |---|---|

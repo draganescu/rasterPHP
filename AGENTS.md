@@ -2086,7 +2086,8 @@ row per page with `number`, `url` and `state` (`current`). For your own model,
 use `'model.method'`: `method(true)` returns
 `array('total' => …, 'perpage' => …)`, and the pages are `?page=N`.
 
-**i18n**: the template's text is the default language.
+**i18n**: the template's text is the default language (page content in
+every language is **Multilingual sites**, below).
 - Translations: `print.i18n.home('welcome')` looks up `application/i18n/<lang>/home.php`,
   which returns an array of key => text. A dictionary that sets `$lang`
   instead of returning it still works until 3.0.0 (`doctor` warns, and
@@ -2203,6 +2204,42 @@ URL alone says the content's language, so one URL is always one language.
 - With multilingual off none of this happens: `/ro/menu` is a 404, `?lang=`
   picks the template's language and sets the cookie, links are as before and
   there is no `Content-Language`.
+
+## Multilingual sites
+
+With `multilingual` on and two or more `languages` (`i18n::enabled()`),
+every language has its own addresses and page fields hold a value per
+language. Off, none of it happens: no columns, no prefixes, the same output
+as a one-language site. Each part is described where it lives:
+
+| What | Where |
+|---|---|
+| the settings and the language API (`i18n::current()`, `suffix()`, `with()`, …) | **i18n** |
+| addresses (`/ro/menu`), links, redirects, headers, cache | **Multilingual URLs** |
+| which fields are translated, columns (`headline__ro`), fallback, `update_page($…, $lang)` | **The CMS**: Translations, Page fields in a language |
+| translation columns in `schema`, kept translations | **The CMS**: Changing fields |
+| `untranslatable_text`, `missing_translation_key`, `html_lang_fixed` | **i18n**: Lint, multilingual on |
+| the editor on `/ro/…` and the editor's own language | **Editors and agents**: the in-page editor |
+| `set_languages`, `translation_status`, `read_strings`, `write_strings`, `lang` on the page tools | **Editors and agents**: Tools for languages |
+
+- **Words have one home each.** Words editors change are CMS fields
+  (`print.cms.x`), with a value per language. Fixed words (a button, a
+  label the site never changes) are dictionary keys,
+  `print.i18n.common('menu')`. Words a model returns can't be translated,
+  so a model returns data (addresses, states, flags) and the view words
+  it: the starter's `site::nav()` gives each link its `url` and `state`
+  and `_layout.html` says "Home"; the shop's order mail gets the flags
+  `by_card` and `on_delivery` and words them with `print.if`; the demo's
+  opening hours are a `render.cms.hours` list, content rather than code
+  (translated once collection items are, in a later release).
+- **Making a site multilingual, as an agent** (MCP):
+  1. `set_languages` with `["en", "ro"]`, the default first.
+  2. Words editors change become CMS fields, fixed words dictionary keys
+     (`check_view` and `write_view` say which new fields get a translation).
+  3. `translation_status` with `lang: "ro"` lists what Romanian lacks.
+  4. `update_page` with `lang` writes a page's translation, `write_strings`
+     a dictionary's.
+  5. `render_url` with `/ro/…` shows the result.
 
 ## Environments and cache
 

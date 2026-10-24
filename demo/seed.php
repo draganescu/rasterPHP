@@ -15,6 +15,10 @@
 // ten days, whose replies close the day before, so the waitlist is easy to
 // see. An evening counts as there while one with its title is still to
 // come; the mock-up's own Jazz night is long past.
+//
+// The opening hours on /about are items of the hours collection: closed on
+// Monday, 8 to 18 Tuesday to Friday, 9 to 16 at the weekend. Editors change
+// them on the page; once they have, seeding again leaves the list alone.
 if (PHP_SAPI !== 'cli') exit;
 putenv('RASTER_APP=demo');
 require_once dirname(__DIR__).'/system/boot.php';
@@ -73,4 +77,28 @@ foreach ($evenings as $evening) {
 	if (R::findOne('eventsdata', ' title = ? AND date >= ? ', array($evening['title'], date('Y-m-d')))) continue;
 	cms_store::save_item('eventsdata', 0, $evening, array_keys($evening));
 	echo "added event {$evening['title']}\n";
+}
+
+// the hours table as the about page makes it, also when nobody has opened
+// /about yet. Only a list nobody has edited is filled: none, or the one row
+// the page stores from its mock-up (Monday, whose state it reads as the
+// mock-up's class, "day", and the seed sets to closed)
+$types = array_intersect_key(cms_types::$system, array_flip(array('slug', 'enabled', 'published_at', 'updated_at')));
+foreach ($model['collections']['hours']['fields'] as $name => $field) $types[$name] = $field['type'];
+cms_types::ensure('hoursdata', $types);
+$hours = array(
+	array('day' => 'Monday', 'time' => 'closed', 'state' => 'closed'),
+	array('day' => 'Tuesday to Friday', 'time' => '8:00 to 18:00', 'state' => 'open'),
+	array('day' => 'Weekend', 'time' => '9:00 to 16:00', 'state' => 'open'),
+);
+$mockup = R::count('hoursdata') === 1 ? R::findOne('hoursdata', ' day = ? AND time = ? AND state = ? ', array('Monday', 'closed', 'day')) : null;
+if (R::count('hoursdata') === 0 || $mockup) {
+	foreach ($hours as $row) {
+		if ($mockup && $row['day'] === 'Monday') {
+			cms_store::save_item('hoursdata', (int)$mockup->id, $row, array_keys($row));
+			continue;
+		}
+		cms_store::save_item('hoursdata', 0, $row, array_keys($row));
+		echo "added hours {$row['day']}\n";
+	}
 }

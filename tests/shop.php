@@ -29,6 +29,10 @@ require_once BASE.'tools/inspector.php';
 $passed = 0; $failed = array(); $skipped = array();
 function test($name, $fn) {
 	global $passed, $failed, $skipped;
+	// RASTER_TEST_ONLY=<words> runs only the tests whose name has them. Some
+	// tests build on what earlier ones made (orders, the studio's login), so
+	// a filtered run can fail where the whole suite passes
+	if (getenv('RASTER_TEST_ONLY') && stripos($name, getenv('RASTER_TEST_ONLY')) === false) return;
 	try { $fn(); $passed++; echo '.'; }
 	catch (test_skipped $e) { $skipped[] = "$name: ".$e->getMessage(); echo 's'; }
 	catch (Throwable $e) { $failed[] = "$name: ".$e->getMessage().' (line '.$e->getLine().')'; echo 'F'; }
@@ -253,6 +257,7 @@ test('the pretend provider: paying marks the order paid, and emails the buyer an
 	same(array('bea@example.com', 'studio@bluehour.test'), array_map(function ($m) { return $m['to']; }, $sent));
 	has($sent[0]['text'], "payment for order $number");
 	has($sent[0]['text'], '1 × Soup bowl (€32.00)');
+	has($sent[1]['text'], "$number is in, paid by card: 1 × Soup bowl (€32.00), €32.00.");
 	has($v->go('GET', '/thanks')[1], 'Paid, thank you.');
 	lacks(http('GET', "$base/pay/test?order=$number")[1], 'Pay €', 'a paid order has nothing to pay');
 	$v->go('POST', "/pay/test?order=$number", array('raster_form' => 'order.test_payment'));
@@ -502,7 +507,7 @@ test('pay on delivery, the default: no provider, no pretending the order is paid
 	$sent = array_slice(mails(), $before);
 	same(array('mihai@example.com', 'studio@bluehour.test'), array_map(function ($m) { return $m['to']; }, $sent));
 	has($sent[0]['text'], 'You\'ll pay €32.00 to the courier');
-	has($sent[1]['text'], 'to be paid on delivery');
+	has($sent[1]['text'], 'is in, to be paid on delivery: 1 × ');
 	// the studio ships it unpaid, and marks it paid when the courier brings the money
 	$studio = new visitor($plain);
 	$studio->login('studio@bluehour.test', $GLOBALS['studio_password']);
@@ -644,6 +649,22 @@ test('the webhook during a database outage answers 503, so the provider sends it
 
 // ## 2.1.8 batch H: row loop
 // (batch H adds its tests here)
+
+// ## P2.D: models carry no page words (#127)
+
+test('P2.D: the studio\'s order mail words how it is paid; the order model gives only flags (#127)', function () use ($root) {
+	$order = array('number' => 'BH-9', 'name' => 'Ana', 'lines' => array(array('qty' => 2, 'piece' => 'Mug', 'subtotal' => '€48.00')),
+		'total' => '48.00', 'address' => 'Strada 1', 'postcode' => '010101', 'city' => 'București', 'country' => 'Romania');
+	controller::model('order');
+	$card = order::mail_vars($order + array('payment' => 'card'));
+	$delivery = order::mail_vars($order + array('payment' => 'delivery'));
+	same(array(true, false), array($card['by_card'], $card['on_delivery']));
+	same(array(false, true), array($delivery['by_card'], $delivery['on_delivery']));
+	foreach (array($card, $delivery) as $vars) check(!array_key_exists('payment', $vars), 'no payment words from the model');
+	lacks(file_get_contents("$root/shop/models/order/order.php"), "'paid by card'");
+	has(controller::render_view('_email/new_order', $card), '<strong>BH-9</strong> is in, paid by card: 2 × Mug (€48.00), €48.00.</p>');
+	has(controller::render_view('_email/new_order', $delivery), '<strong>BH-9</strong> is in, to be paid on delivery: 2 × Mug (€48.00), €48.00.</p>');
+});
 
 test('lint is clean and there were no PHP warnings', function () use ($root, $tmp) {
 	$out = shell_exec('RASTER_APP=shop '.php_cmd().' '.escapeshellarg("$root/bin/raster").' lint 2>&1');

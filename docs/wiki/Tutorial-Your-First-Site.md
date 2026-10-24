@@ -141,23 +141,28 @@ On this URL, `render.cms.team` shows only the one person the URL names. A slug t
 
 ## Step 6: data from your own PHP
 
-Not everything belongs in the CMS. Opening hours might come from code. Create `application/models/office/office.php`:
+Not everything belongs in the CMS. The coming week's opening hours can be worked out by code. Create `application/models/office/office.php`:
 
 ```php
 <?php
 class office {
-    // used as <!-- print.office.today -->
+    // used as <!-- render.office.today -->: one row with when we close
+    // today, or none on Sundays, when we are closed
     function today() {
-        // on weekends, say so; on other days keep the template's text
-        return date('N') >= 6 ? 'on weekends from 10 to 14' : false;
+        if (date('N') == 7) return array();
+        return array(array('closes' => date('N') == 6 ? '14:00' : '17:00'));
     }
 
-    // used as <!-- render.office.hours -->
+    // used as <!-- render.office.hours -->: the next seven days we are open
     function hours() {
-        return array(
-            array('day' => 'Monday to Friday', 'time' => '9:00 to 17:00'),
-            array('day' => 'Saturday', 'time' => '10:00 to 14:00'),
-        );
+        $rows = array();
+        for ($i = 0; $i < 7; $i++) {
+            $day = strtotime("+$i days");
+            if (date('N', $day) == 7) continue;     // closed on Sundays
+            $saturday = date('N', $day) == 6;
+            $rows[] = array('date' => date('Y-m-d', $day), 'opens' => $saturday ? '10:00' : '9:00', 'closes' => $saturday ? '14:00' : '17:00');
+        }
+        return $rows;
     }
 }
 ```
@@ -167,15 +172,16 @@ The rules for models:
 - The folder name, file name and class name are the same: `models/office/office.php` holds `class office`.
 - A method used by `print` returns a string. Returning `false` (or `null`) keeps what the template already shows.
 - A method used by `render` returns a list of rows, each row an array with named keys.
+- A model returns data (times, dates, flags), not words. The words stay in the template, where an editor or a translation can reach them.
 
-Add this under the list in `team.html`:
+Add this under the list in `team.html`. On a Sunday `today()` returns no rows, so the sentence isn't shown at all:
 
 ```html
-<p>We are open <!-- print.office.today -->every day<!-- /print.office.today -->.</p>
+<!-- render.office.today --><p>Today we close at <!-- print.closes -->17:00<!-- /print.closes -->.</p><!-- /render.office.today -->
 <h2>Opening hours</h2>
 <table>
   <!-- render.office.hours -->
-  <tr><td><!-- print.day -->Monday<!-- /print.day --></td><td><!-- print.time -->9–17<!-- /print.time --></td></tr>
+  <tr><td><!-- print.date -->2026-10-26<!-- /print.date --></td><td><!-- print.opens -->9:00<!-- /print.opens --> to <!-- print.closes -->17:00<!-- /print.closes --></td></tr>
   <!-- /render.office.hours -->
 </table>
 ```
@@ -228,10 +234,16 @@ In development, emails are not really sent. Each one is saved as a `.eml` file i
 
 ## Step 8: add the page to the navigation
 
-The starter site builds its menu in `application/models/site/site.php`. Add a line to the `$links` array in `nav()`:
+The starter site's menu is `render.site.nav` in `_layout.html`. The model, `nav()` in `application/models/site/site.php`, knows each link's address and which one is the page you're on; the words are in the view. Add the address to the `$links` array in `nav()`:
 
 ```php
-array('label' => 'Team', 'url' => '/team'),
+$links = array('home' => '/', 'news' => '/news', 'about' => '/about', 'team' => '/team');
+```
+
+and its link in `_layout.html`, inside `render.site.nav`, after the About one:
+
+```html
+<!-- print.team --><!-- print.+class.state --><!-- print.@href.url --><a class="nav-link" href="team.html">Team</a><!-- /print.@href.url --><!-- /print.+class.state --><!-- /print.team -->
 ```
 
 ## Step 9: check everything
@@ -243,10 +255,10 @@ php bin/raster schema   # shows the new fields: title, heading, the team collect
 
 `contactmessage` is where the contact form's messages are kept. `lint` shows a warning about it until there is a staff page that lists the messages: nobody can read them otherwise. [Contact forms](Contact-Forms#the-staff-page) shows how to make one.
 
-Try breaking something on purpose. Change `print.office.today` to `print.office.todya` in both tags and run `lint`:
+Try breaking something on purpose. Change `render.office.today` to `render.office.todya` in both tags and run `lint`:
 
 ```
-application/views/default/team.html:11:20: error: Model 'office' has no public method 'todya' (application/models/office/office.php); did you mean 'today'?
+application/views/default/team.html:11:1: error: Model 'office' has no public method 'todya' (application/models/office/office.php); did you mean 'today'?
 ```
 
 In development, loading the page shows the same list instead of the page. Change it back.
@@ -255,7 +267,7 @@ In development, loading the page shows the same list instead of the page. Change
 
 - One HTML file per URL, with shared fragments (`res` and `dry`)
 - CMS page fields (`print.cms.x`) and a collection (`render.cms.x`) with detail pages
-- Your own model returning a string and a list
+- Your own model returning lists of rows, data the template words
 - A form whose rules and messages live in the HTML
 - An email written as a template
 
