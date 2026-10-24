@@ -5398,6 +5398,19 @@ test('J13', 'P5.A: a guest on /ro/ is mailed in Romanian, with /ro/ links', func
 	same('Am primit cererea ta de rezervare', $sent[0]['subject']);
 	has($sent[0]['html'], '<p>Bună Ioana,</p>');
 	check((bool)preg_match('#'.preg_quote($base, '#').'/ro/booking\?token=[a-f0-9]{64}#', $sent[0]['html']), 'the link is to the Romanian page: '.$sent[0]['html']);
+	has($sent[0]['html'], '<html lang="ro" dir="ltr">');
+	same(array('staff@cafe.test', 'New booking request'), array($sent[1]['to'], $sent[1]['subject']), 'staff get theirs in English');
+	// staff confirm it in English (MCP, as from /staff): the guest hears in Romanian
+	cms_store::connect();
+	$booking = R::findOne('bookingdata', ' email = ? ', array('ioana.ro@example.com'));
+	same('ro', i18n::of($booking->export()), 'the booking keeps the language it was made in');
+	$before = count(mails());
+	mcp($base, 'run_action', array('collection' => 'booking', 'id' => (int)$booking->id, 'action' => 'confirm'));
+	$sent = array_slice(mails(), $before);
+	same(array('ioana.ro@example.com', 'Rezervarea ta este confirmată'), array($sent[0]['to'], $sent[0]['subject']));
+	has($sent[0]['html'], "$base/ro/booking?token=");
+	has($sent[0]['html'], 'Sala de mese', 'the dining room\'s Romanian name');
+	mcp($base, 'run_action', array('collection' => 'booking', 'id' => (int)$booking->id, 'action' => 'cancel'));
 	// a reader who signs up on a Romanian page
 	$before = count(mails());
 	same(303, http('POST', "$base/ro/journal", array('raster_form' => 'newsletter.signup', 'email' => 'cititor@example.com'))[0]);

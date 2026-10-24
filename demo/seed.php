@@ -226,6 +226,10 @@ $romanian = array(
 	'<p>On the terrace always, inside if it is calm.</p>' => '<p>Pe terasă oricând, înăuntru dacă e liniștit.</p>',
 	'Do you do takeaway cups?' => 'Aveți pahare la pachet?',
 	'<p>We lend a cup and take it back. Bring your own and pay two lei less.</p>' => '<p>Împrumutăm o cană și o luăm înapoi. Adu-o pe a ta și plătești doi lei mai puțin.</p>',
+	// what the café takes bookings for
+	'Dining room' => 'Sala de mese',
+	'Cut' => 'Tuns',
+	'Colour' => 'Vopsit',
 	// the opening hours
 	'Monday' => 'Luni',
 	'closed' => 'închis',
@@ -258,10 +262,13 @@ if (i18n::enabled() && in_array($lang, i18n::available(), true)) {
 		cms_store::update_page($type, $page['slug'], $values, array_keys($values), $lang);
 		echo "added Romanian for {$page['url']}: ".implode(', ', array_keys($values))."\n";
 	}
-	// the lists' items, those there are
-	foreach ($model['collections'] as $name => $collection) {
-		if (cms_records::info($name)) continue;
-		$fields = array_keys(array_filter($collection['fields'], function ($field) { return !empty($field['translate']); }));
+	// the lists' items, those there are, and the booking setup's names
+	// (the types that say what they translate: the Dining room, the services)
+	$lists = $model['collections'];
+	foreach (array('bookingresource', 'bookingservice') as $name) if (!isset($lists[$name])) $lists[$name] = array('fields' => array());
+	foreach ($lists as $name => $collection) {
+		$info = cms_records::info($name);
+		$fields = $info ? cms_records::translated_fields($info) : array_keys(array_filter($collection['fields'], function ($field) { return !empty($field['translate']); }));
 		$table = cms::collection_type($name);
 		if (!$fields || !cms_store::table_exists($table)) continue;
 		cms_types::ensure($table, array(), array_merge($fields, array('slug')));
@@ -273,7 +280,7 @@ if (i18n::enabled() && in_array($lang, i18n::available(), true)) {
 				$values[$field] = $romanian[$row[$field]];
 			}
 			if (!$values) continue;
-			cms_store::save_item($table, (int)$row['id'], $values, array_keys($values), 'editor', $name, $lang);
+			cms_store::save_item($table, (int)$row['id'], $values, array_keys($values), $info ? 'model' : 'editor', $name, $lang);
 			echo "added Romanian for $name {$row['slug']}\n";
 		}
 	}
