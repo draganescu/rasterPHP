@@ -3,6 +3,20 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.53
+
+What sites need to do: nothing. A site's own `i18n/<lang>/raster_editor.php` still wins over Raster's words.
+
+**The editor's language follows one rule.** Everything Raster shows the person editing (the in-page editor, its messages, the fallback login page) is in one language: in development, the one the sibip builder sends in the `Raster-Editor-Language` header; otherwise the site's base language, the first in its list; otherwise English. It is the same on multilingual and one-language sites, and editing `/fr/` no longer changes the buttons. A missing word falls back to English on its own. A code with no dictionary (`ko`) gets English words and its own dates. Published sites and public previews run in production, where the header is ignored.
+
+**What went:** the dock's language dropdown, the `editor_set_lang` endpoint (now a 404), the `user.editor_lang` column (no longer declared; a site that has it keeps it, unused), and every guess from the browser: nothing reads `Accept-Language`, `?lang=` or the language cookie to pick the editor's words.
+
+**The editor's refusals are codes it words.** "Unknown page", "No such revision", "This page is in ro: reload it" and the other sentences `editor.php` sent keep their English `error` for API callers and MCP, and now add `problems`: `one_value`, `unknown_page`, `unknown_field`, `wrong_language` (with `lang`), `unknown_collection`, `no_such_item`, `no_such_revision`, `broken` and `not_saved` (a store's own exception, its sentence in `detail`, shown after the words). The editor words them from its dictionary.
+
+**Raster's fallback login page** (used when a theme has no `login.html`) is no longer hard-coded English. Its words come from the editor's dictionaries through `print.cms.login_word('login_…')`, in the content's language: the address's on a multilingual site (`/fr/login` is French), else the base language. Its `<html lang>` says which.
+
+**The editor in 14 more languages:** French, German, Spanish, Italian, Portuguese, Dutch, Hungarian, Polish, Bulgarian, Greek, Turkish, Japanese, Hindi and Chinese (Simplified, `zh`), next to Romanian. An AI agent drafted them; corrections are welcome. A test checks that every dictionary has every key and keeps every `{placeholder}`.
+
 ## 2.2.52
 
 What sites need to do: a multilingual site may see new `untranslatable_text` warnings for plain words inside alerts; move them into a `print.i18n` key inside the alert.
