@@ -2711,7 +2711,13 @@ of lists and filter pages come along; drafts and the editor don't.
     (it didn't arrive whole), `upload_not_a_picture` (also for a file the
     browser can't show) or `upload_not_stored`; `form_expired` (the session
     token is stale: reload) and `not_allowed` (not logged in as staff) come
-    from the 403 every refused post gets on `/api`. Reword any of them in
+    from the 403 every refused post gets on `/api`. The editor's own
+    refusals keep their English `error` for API callers and add a name:
+    `one_value` and `unknown_field` (with `field`), `unknown_page`,
+    `unknown_collection`, `no_such_item`, `no_such_revision`,
+    `wrong_language` (with `lang`, the address's, worded as `{lang}`),
+    `broken`, and `not_saved` (a store's own exception, its sentence in
+    `detail`, which the editor shows after the words). Reword any of them in
     `raster_editor.php`: `'problem_upload_too_big' => 'Pictures up to 12 MB, please'`.
 - **MCP** is available in two ways:
   - over stdio: `php bin/raster mcp`, already set up in `.mcp.json`. A PHP

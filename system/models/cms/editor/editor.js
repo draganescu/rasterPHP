@@ -46,6 +46,11 @@
 		problem_upload_too_big: 'That picture is too big', problem_upload_missing: 'The picture didn’t arrive; try again',
 		problem_upload_not_a_picture: 'That isn’t a picture: use a JPEG, PNG, GIF or WebP', problem_upload_not_stored: 'The picture couldn’t be stored',
 		problem_form_expired: 'This page is out of date: reload it and try again', problem_not_allowed: 'You can’t do that; if you were logged out, log in again',
+		problem_one_value: '{field} came more than once: reload the page and try again', problem_unknown_page: 'This page can’t be edited from here: reload it',
+		problem_unknown_field: '{field} isn’t on this page any more: reload it', problem_wrong_language: 'This page is in {lang}: reload it',
+		problem_unknown_collection: 'That list isn’t on this site any more: reload the page', problem_no_such_item: 'That item is gone; someone may have deleted it. Reload the page',
+		problem_no_such_revision: 'That version is gone: reload the page', problem_broken: 'Something went wrong; it is in the error log',
+		problem_not_saved: 'the site refused it',
 		keyboard: 'E to edit · Esc to stop · ⌘Z to undo', fields_changed: '{fields}', page_fields: 'Fields', nothing_here: 'Nothing on this page comes from the CMS.',
 		// a multilingual site: the page's language
 		editing_lang: 'editing: {lang}', falls_back: '(falls back to {lang})', untranslated: 'not translated yet: shows the {lang} text',
@@ -54,10 +59,14 @@
 		problem_translation_columns_missing: 'This language has no place on the site yet: run php bin/raster schema --apply on the server'
 	};
 	for (var k in (C.strings || {})) T[k] = C.strings[k];
-	// a problem's words; {field} is the field it is about, when there is one
-	function problem(name, field) {
+	// a problem's words, from the server's answer (json): {field} is the
+	// field it is about and {lang} the page's language, when there is one;
+	// a raw detail (a store's own sentence) goes after the words
+	function problem(name, json) {
+		json = json || {};
 		var words = T['problem_' + name];
-		return words ? String(words).replace('{field}', field ? human(field) : '').trim() : human(name);
+		words = words ? String(words).replace('{field}', json.field ? human(json.field) : '').replace('{lang}', json.lang ? code(json.lang) : '').trim() : human(name);
+		return json.detail ? words + ': ' + json.detail : words;
 	}
 	function readonly(info) { return info.readonly || []; }
 	function writable(info, values) {
@@ -124,7 +133,7 @@
 				var json = null;
 				try { json = JSON.parse(text); } catch (e) {}
 				// a record's model said no: its problems, in the site's words if it has them
-				if (json && json.problems) throw new Error(json.problems.map(function (name) { return problem(name, json.field); }).join(', '));
+				if (json && json.problems) throw new Error(json.problems.map(function (name) { return problem(name, json); }).join(', '));
 				if (!response.ok || !json || json.error) throw new Error(json && json.error ? json.error : (text.slice(0, 120) || response.status));
 				return json;
 			});

@@ -10705,6 +10705,59 @@ test('P2.B: the editor\'s words: the builder\'s header in development, the base 
 	}
 });
 
+test('P0.C: the editor\'s own refusals are codes too: unknown_field, wrong_language, no_such_item, not_saved with its detail', function () {
+	cms_store::connect();
+	$site_last = (int)R::getCell('SELECT MAX(id) FROM sitepage');
+	try {
+		p2b_site(function ($dir) {
+			file_put_contents("$dir/application/views/default/zzp2bcodes.html", '<!doctype html><html><head><title>Codes</title></head><body>'
+				.'<!-- render.cms.zzp2bcodes --><p><!-- print.name -->Tart<!-- /print.name --></p><!-- /render.cms.zzp2bcodes --></body></html>');
+			p2b_server($dir, function ($base) {
+				$editor = p2b_login($base, 'zzp2b-codes@example.test');
+				list($config) = p2b_config("$base/ro/zzp2babout", $editor);
+				same(200, http('GET', "$base/zzp2bcodes", null, array("Cookie: $editor"))[0]);
+				$post = function ($endpoint, $fields, $lang = 'ro') use ($base, $editor, $config) {
+					$url = $lang === 'ro' ? "$base/ro/api/cms/$endpoint" : "$base/api/cms/$endpoint";
+					list($status, $body) = form_post($url, $fields + array('csrf' => $config['csrf']), array("Cookie: $editor"));
+					return array('status' => $status) + (array)json_decode($body, true);
+				};
+				$page = array('type' => $config['page']['type'], 'slug' => $config['page']['slug']);
+				// the English sentence stays for API callers; problems is what the editor words
+				same(array('status' => 400, 'error' => "Unknown field 'zz_nope'", 'problems' => array('unknown_field'), 'field' => 'zz_nope'),
+					$post('editor_save_field', $page + array('field' => 'zz_nope', 'value' => 'x', 'lang' => 'ro')));
+				same(array('status' => 400, 'error' => 'This page is in ro: reload it', 'problems' => array('wrong_language'), 'lang' => 'ro'),
+					$post('editor_save_field', $page + array('field' => 'zzp2b_headline', 'value' => 'x', 'lang' => 'en')));
+				same(array('status' => 400, 'error' => "'value' takes one value", 'problems' => array('one_value'), 'field' => 'value'),
+					$post('editor_save_field', $page + array('field' => 'zzp2b_headline', 'value' => array('x'), 'lang' => 'ro')));
+				same(array('status' => 400, 'error' => 'Unknown page', 'problems' => array('unknown_page')),
+					$post('editor_history', array('type' => 'zznopepage', 'lang' => 'ro')));
+				same(array('status' => 404, 'error' => 'No such revision', 'problems' => array('no_such_revision')),
+					$post('editor_restore', $page + array('revision' => 999999)));
+				same(array('status' => 400, 'error' => 'Unknown collection', 'problems' => array('unknown_collection')),
+					$post('editor_delete_item', array('collection' => 'Bad!', 'id' => 1)));
+				same(array('status' => 404, 'error' => 'No such item', 'problems' => array('no_such_item')),
+					$post('editor_delete_item', array('collection' => 'zzp2bcodes', 'id' => 999999)));
+				// a store's own refusal: not_saved, and its sentence as the detail
+				$json = $post('editor_save_item', array('collection' => 'zzp2bcodes', 'id' => 0, 'fields' => array('zz_nope' => 'x'), 'lang' => 'en'), 'en');
+				same(array(400, array('not_saved')), array($json['status'], $json['problems']), json_encode($json));
+				check(strpos($json['error'], "Unknown field 'zz_nope'") === 0 && $json['detail'] === $json['error'], json_encode($json));
+			});
+		});
+		// each has its words in editor.js, and problem() fills {field} and {lang}
+		$js = file_get_contents(BASE.'models/cms/editor/editor.js');
+		foreach (array('one_value', 'unknown_page', 'unknown_field', 'wrong_language', 'unknown_collection', 'no_such_item', 'no_such_revision', 'broken', 'not_saved') as $name) {
+			check(strpos($js, "problem_$name:") !== false, "editor.js words problem_$name");
+		}
+		check(strpos($js, "problem(name, json)") !== false && strpos($js, 'json.detail') !== false, 'problem() takes the answer');
+	} finally {
+		@unlink(p2b_copy().'/application/views/default/zzp2bcodes.html');
+		p2b_clean($site_last);
+		R::exec('DROP TABLE IF EXISTS zzp2bcodesdata');
+		R::exec('DROP TABLE IF EXISTS zzp2bcodespage');
+		cms_store::forget();
+	}
+});
+
 test('P2.B: off, the editor\'s config JSON is byte for byte what it was, and saves are what they were', function () use ($base) {
 	$theme = APPBASE.'views/default';
 	test_fixture("$theme/zzp2boff.html");

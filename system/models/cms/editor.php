@@ -198,16 +198,30 @@ class cms_editor {
 
 	// ##Saving
 
-	protected static function fail($message, $status = 400) {
+	// The sentence stays English for API callers and MCP; $problem names it
+	// for the editor, which words it from its dictionary (problem_<name>),
+	// filling in $extra: field, lang, or a raw detail it adds after the words
+	protected static function fail($message, $status = 400, $problem = null, $extra = array()) {
 		http_response_code($status);
-		return array('error' => $message);
+		return $problem === null ? array('error' => $message) : array('error' => $message, 'problems' => array($problem)) + $extra;
+	}
+
+	// a page open in another language than its address says
+	protected static function wrong_language() {
+		return self::fail('This page is in '.i18n::current().': reload it', 400, 'wrong_language', array('lang' => i18n::current()));
+	}
+
+	// the store said no with an exception of its own: its sentence is the
+	// detail, shown after the editor's words
+	protected static function not_saved($e) {
+		return self::fail($e->getMessage(), 400, 'not_saved', array('detail' => $e->getMessage()));
 	}
 
 	// a mistake in the code (a TypeError, not a refusal): logged, and a plain
 	// 500 for the editor to show
 	protected static function broken($e) {
 		log::error('editor: '.get_class($e).': '.$e->getMessage().' in '.$e->getFile().':'.$e->getLine());
-		return self::fail('Something went wrong; it is in the error log', 500);
+		return self::fail('Something went wrong; it is in the error log', 500, 'broken');
 	}
 
 	// a check() or an action said no: the names, and a line to show
@@ -236,7 +250,7 @@ class cms_editor {
 	// value[]=x stored as 'Array'. Every endpoint that reads one of these refuses that first.
 	protected static function one_value() {
 		foreach (array('type', 'slug', 'field', 'value', 'example', 'collection', 'id', 'action', 'revision') as $name) {
-			if (is_array(util::post($name))) return self::fail("'$name' takes one value");
+			if (is_array(util::post($name))) return self::fail("'$name' takes one value", 400, 'one_value', array('field' => $name));
 		}
 		return null;
 	}
@@ -284,13 +298,13 @@ class cms_editor {
 		if ($bad = self::one_value()) return $bad;
 		$type = self::page_type();
 		$field = (string)util::post('field');
-		if (!$type) return self::fail('Unknown page');
+		if (!$type) return self::fail('Unknown page', 400, 'unknown_page');
 		// headline__ro is a language's column, never a field of its own
 		if (!preg_match('/^[a-z][a-z0-9_]*$/', $field) || strpos($field, '__') !== false || cms::reserved($field, 'field') || !array_key_exists($field, cms_store::columns($type))) {
-			return self::fail("Unknown field '$field'");
+			return self::fail("Unknown field '$field'", 400, 'unknown_field', array('field' => $field));
 		}
 		$lang = self::language();
-		if ($lang === false) return self::fail('This page is in '.i18n::current().': reload it');
+		if ($lang === false) return self::wrong_language();
 		$write = $lang !== null && !i18n::is_default($lang) && in_array($field, cms_types::translated($type), true) ? $lang : null;
 		// production before schema --apply made the language's columns: a
 		// text field would land in the default language's column
@@ -306,7 +320,7 @@ class cms_editor {
 		} catch (cms_type_error $e) {
 			return self::mistyped($e);
 		} catch (Exception $e) {
-			return self::fail($e->getMessage());
+			return self::not_saved($e);
 		} catch (Throwable $e) {
 			return self::broken($e);
 		}
@@ -333,19 +347,19 @@ class cms_editor {
 		cms::require_admin(true);
 		if ($bad = self::one_value()) return $bad;
 		$collection = (string)util::post('collection');
-		if (!preg_match('/^[a-z][a-z0-9_]*$/', $collection) || cms::reserved($collection, 'collection')) return self::fail('Unknown collection');
+		if (!preg_match('/^[a-z][a-z0-9_]*$/', $collection) || cms::reserved($collection, 'collection')) return self::fail('Unknown collection', 400, 'unknown_collection');
 		$type = cms::collection_type($collection);
 		$record = cms_records::info($collection);
 		if ($record) cms_records::ensure($record);
 		$columns = cms_store::columns($type);
-		if (!$columns) return self::fail('Unknown collection');
+		if (!$columns) return self::fail('Unknown collection', 400, 'unknown_collection');
 		$fields = util::post('fields');
 		if (!is_array($fields)) $fields = array();
 		unset($fields['id'], $fields['updated_at']);
 		// name__ro is a language's column, and saved_lang Raster's, never fields
 		$allowed = $record ? cms_records::writable($record) : array_values(array_filter(array_diff(array_keys($columns), array('id', 'updated_at', 'saved_lang')), function ($column) { return strpos($column, '__') === false; }));
 		$lang = self::language();
-		if ($lang === false) return self::fail('This page is in '.i18n::current().': reload it');
+		if ($lang === false) return self::wrong_language();
 		$id = (int)util::post('id');
 		$write = $lang !== null && !i18n::is_default($lang) && $id ? $lang : null;
 		$every = $record ? cms_records::translated_fields($record) : cms_types::translated($type);
@@ -361,7 +375,7 @@ class cms_editor {
 			$copy = (int)util::post('copy');
 			if ($copy) {
 				$from = cms_store::get_item($type, $copy);
-				if (!$from) return self::fail('No such item', 404);
+				if (!$from) return self::fail('No such item', 404, 'no_such_item');
 				foreach (array('id', 'updated_at', 'slug', 'created_at', 'owner', 'saved_lang') as $own) unset($from[$own]);
 				$fields = $from + $fields;
 			}
@@ -411,7 +425,7 @@ class cms_editor {
 		} catch (cms_type_error $e) {
 			return self::mistyped($e);
 		} catch (Exception $e) {
-			return self::fail($e->getMessage());
+			return self::not_saved($e);
 		} catch (Throwable $e) {
 			return self::broken($e);
 		}
@@ -422,10 +436,10 @@ class cms_editor {
 		cms::require_admin(true);
 		if ($bad = self::one_value()) return $bad;
 		$collection = (string)util::post('collection');
-		if (!preg_match('/^[a-z][a-z0-9_]*$/', $collection) || cms::reserved($collection, 'collection')) return self::fail('Unknown collection');
+		if (!preg_match('/^[a-z][a-z0-9_]*$/', $collection) || cms::reserved($collection, 'collection')) return self::fail('Unknown collection', 400, 'unknown_collection');
 		$type = cms::collection_type($collection);
 		$item = cms_store::get_item($type, (int)util::post('id'));
-		if (!$item) return self::fail('No such item', 404);
+		if (!$item) return self::fail('No such item', 404, 'no_such_item');
 		// a record's hidden fields never reach the editor, also on the way out
 		$record = cms_records::info($collection);
 		if ($record) $item = cms_records::shown($record, $item);
@@ -445,7 +459,7 @@ class cms_editor {
 		cms::require_admin(true);
 		if ($bad = self::one_value()) return $bad;
 		$collection = (string)util::post('collection');
-		if (!cms_records::info($collection)) return self::fail('Unknown collection');
+		if (!cms_records::info($collection)) return self::fail('Unknown collection', 400, 'unknown_collection');
 		$input = util::post('input');
 		try {
 			$item = cms_records::act($collection, (int)util::post('id'), (string)util::post('action'), is_array($input) ? $input : array());
@@ -455,7 +469,7 @@ class cms_editor {
 		} catch (cms_type_error $e) {
 			return self::mistyped($e);
 		} catch (Exception $e) {
-			return self::fail($e->getMessage());
+			return self::not_saved($e);
 		} catch (Throwable $e) {
 			return self::broken($e);
 		}
@@ -467,8 +481,8 @@ class cms_editor {
 		cms::require_admin(true);
 		if ($bad = self::one_value()) return $bad;
 		$type = self::page_type();
-		if (!$type) return self::fail('Unknown page');
-		if (self::language() === false) return self::fail('This page is in '.i18n::current().': reload it');
+		if (!$type) return self::fail('Unknown page', 400, 'unknown_page');
+		if (self::language() === false) return self::wrong_language();
 		$revisions = cms_store::page_history($type, 30);
 		// times with their offset, so the browser can say "5 minutes ago"
 		foreach ($revisions as $key => $revision) {
@@ -485,9 +499,9 @@ class cms_editor {
 		cms::require_admin(true);
 		if ($bad = self::one_value()) return $bad;
 		$type = self::page_type();
-		if (!$type) return self::fail('Unknown page');
+		if (!$type) return self::fail('Unknown page', 400, 'unknown_page');
 		$old = R::findOne($type, ' id = ? ', array((int)util::post('revision')));
-		if (!$old) return self::fail('No such revision', 404);
+		if (!$old) return self::fail('No such revision', 404, 'no_such_revision');
 		$values = $old->export();
 		foreach (cms_store::$system_fields as $field) unset($values[$field]);
 		$slug = $type === 'sitepage' ? 'site' : (string)util::post('slug');
@@ -498,7 +512,7 @@ class cms_editor {
 		} catch (cms_type_error $e) {
 			return self::mistyped($e);
 		} catch (Exception $e) {
-			return self::fail($e->getMessage());
+			return self::not_saved($e);
 		} catch (Throwable $e) {
 			return self::broken($e);
 		}

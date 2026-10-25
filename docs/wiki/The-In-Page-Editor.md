@@ -105,6 +105,9 @@ What the site refuses comes back as a name, and the editor shows the words for `
 | `type_int`, `type_number`, `type_bool`, `type_date`, `type_datetime`, `type_time`, `type_text` | a value that isn't of its field's type (`{field}` in the words is the field) |
 | `upload_too_big`, `upload_missing`, `upload_not_a_picture`, `upload_not_stored` | a picture that is too big, didn't arrive whole, isn't a JPEG, PNG, GIF or WebP, or couldn't be saved |
 | `form_expired`, `not_allowed` | the page is out of date (reload it), or you are no longer logged in as staff |
+| `unknown_page`, `unknown_field`, `unknown_collection`, `no_such_item`, `no_such_revision`, `one_value` | what the editor posted no longer matches the site (reload the page); `{field}` is the field |
+| `wrong_language` | the page is open in another language than its address says (`{lang}` is the address's) |
+| `not_saved`, `broken` | the site refused the change for a reason of its own, shown after the words, or something went wrong that is in the error log |
 
 ```php
 'problem_type_number' => '{field}: write a number, like 4.50',
