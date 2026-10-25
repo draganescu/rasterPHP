@@ -2695,7 +2695,7 @@ of lists and filter pages come along; drafts and the editor don't.
     `--raster-heading-font`, `--raster-bg`, `--raster-fg`,
     `--raster-surface` or `--raster-radius` on `:root`.
   - Its words are in English; `system/models/cms/editor/lang/<lang>.php`
-    translates them (Romanian is included), and
+    translates them (`fr de es it pt nl ro hu pl bg el tr ja hi zh` are included; `tests/run.php` checks each has every key and keeps every `{placeholder}`), and
     `application/i18n/<lang>/raster_editor.php` overrides any of them.
     **The editor's own language** is one rule, on every site, multilingual
     or not, apart from the page's (`cms_editor::editor_lang()`): in

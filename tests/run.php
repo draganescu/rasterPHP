@@ -10670,8 +10670,10 @@ test('P2.B: the editor\'s words: the builder\'s header in development, the base 
 					same('en', p2b_config("$base/zzp2babout", $editor, array("Raster-Editor-Language: $junk"))[0]['editor_lang'], 'junk is ignored: '.$junk);
 				}
 				// a language the editor has no words in yet: English words, its dates
-				list($c) = p2b_config("$base/zzp2babout", $editor, array('Raster-Editor-Language: hi'));
-				same(array('hi', array()), array($c['editor_lang'], (array)$c['strings']), 'no words yet: English');
+				list($c) = p2b_config("$base/zzp2babout", $editor, array('Raster-Editor-Language: ko'));
+				same(array('ko', array()), array($c['editor_lang'], (array)$c['strings']), 'no words yet: English');
+				list($c) = p2b_config("$base/zzp2babout", $editor, array('Raster-Editor-Language: ja'));
+				same(array('ja', 'E で編集 · Esc で終了 · ⌘Z で元に戻す'), array($c['editor_lang'], $c['strings']['keyboard']), 'a shipped dictionary');
 				// the per-person choice is gone
 				list($status) = form_post("$base/api/cms/editor_set_lang", array('lang' => 'ro', 'csrf' => $c['csrf']), array("Cookie: $editor"));
 				same(404, $status, 'no editor_set_lang');
@@ -10814,6 +10816,43 @@ test('P0.C: the fallback login page is in the content language: /ro/login Romani
 		@unlink($words);
 		if ($made) @rmdir(dirname($words));
 		p2b_clean($site_last);
+	}
+});
+
+// the editor's English: T's keys and words in editor.js, and LOGIN_WORDS
+function editor_english() {
+	preg_match('/\bvar T = \{(.*?)\n\t\};/s', file_get_contents(BASE.'models/cms/editor/editor.js'), $block);
+	preg_match_all("/\\b([a-z_]+): '((?:[^'\\\\]|\\\\.)*)'/", $block[1], $pairs, PREG_SET_ORDER);
+	$words = array();
+	foreach ($pairs as $pair) $words[$pair[1]] = stripslashes($pair[2]);
+	return $words + cms_editor::LOGIN_WORDS;
+}
+function editor_placeholders($words) {
+	preg_match_all('/\{[a-z_]+\}/', (string)$words, $m);
+	$found = array_unique($m[0]);
+	sort($found);
+	return $found;
+}
+
+test('the editor\'s dictionaries: every key is one editor.js or LOGIN_WORDS has, every placeholder is kept, and each file is complete', function () {
+	$english = editor_english();
+	check(count($english) > 100 && isset($english['hello'], $english['problem_not_saved'], $english['login_submit']), 'read '.count($english).' keys');
+	$files = glob(BASE.'models/cms/editor/lang/*.php');
+	$codes = array_map(function ($file) { return basename($file, '.php'); }, $files);
+	sort($codes);
+	same(array('bg', 'de', 'el', 'es', 'fr', 'hi', 'hu', 'it', 'ja', 'nl', 'pl', 'pt', 'ro', 'tr', 'zh'), $codes);
+	foreach ($files as $file) {
+		$code = basename($file, '.php');
+		$words = include $file;
+		check(is_array($words), "$code.php returns an array");
+		check(strpos(file_get_contents($file), "// The in-page editor in ") !== false, "$code.php: the header line");
+		$extra = array_diff_key($words, $english);
+		$missing = array_diff_key($english, $words);
+		same(array(), array_keys($extra), "$code.php: keys editor.js doesn't have");
+		same(array(), array_keys($missing), "$code.php: keys it lacks");
+		foreach (array_intersect_key($words, $english) as $key => $translated) {
+			same(editor_placeholders($english[$key]), editor_placeholders($translated), "$code.php $key keeps its placeholders");
+		}
 	}
 });
 
