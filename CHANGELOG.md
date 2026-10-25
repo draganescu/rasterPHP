@@ -13,7 +13,9 @@ What sites need to do: nothing. A site's own `i18n/<lang>/raster_editor.php` sti
 
 **The editor's refusals are codes it words.** "Unknown page", "No such revision", "This page is in ro: reload it" and the other sentences `editor.php` sent keep their English `error` for API callers and MCP, and now add `problems`: `one_value`, `unknown_page`, `unknown_field`, `wrong_language` (with `lang`), `unknown_collection`, `no_such_item`, `no_such_revision`, `broken` and `not_saved` (a store's own exception, its sentence in `detail`, shown after the words). The editor words them from its dictionary.
 
-**The dock's language label is a badge.** On a translation's page the dock shows the language's code (`RO`), with "editing: RO (falls back to EN)" as its title and label; the default language's pages show none. The sentence took the room of the buttons on a phone.
+**The dock's language label is a badge.** On a translation's page the dock shows the language's code (`RO`), with "editing: RO (falls back to EN)" as its title and label; the default language's pages show none. On a phone the dock shows neither the badge nor the avatar, so every button fits.
+
+**No zooming into the editor's text boxes on a phone.** iOS Safari zoomed in when the link box (and the editor's other boxes) took focus, because their text was 14px; on touch screens they are 16px.
 
 **The formatting bar stays when you move between rich fields.** Tapping or clicking from one rich field to another left no bar until edit mode was turned off and on: the first field's leaving, which runs a moment later, took down the bar the second had just shown. Now it only hides its own.
 

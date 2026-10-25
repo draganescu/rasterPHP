@@ -492,6 +492,9 @@
 			'.format button{width:30px;height:30px;border-radius:7px;display:grid;place-items:center}',
 			'.format button:hover,.format button.on{background:' + look.accentSoft + ';color:' + look.accent + '}',
 			'.format input{border:0;background:transparent;color:inherit;font:inherit;width:220px;padding:0 8px;outline:none}',
+			// iOS Safari zooms into a text box under 16px when it takes focus, and
+			// never zooms back out: on touch screens every box is 16px
+			'@media (pointer:coarse){.layer input,.layer select,.layer textarea{font-size:16px}}',
 			// popovers and dialogs
 			'.popover{width:min(360px,calc(100vw - 24px));padding:16px;pointer-events:auto;animation:pop .18s both;max-height:min(70vh,560px);overflow:auto}',
 			'.popover h3,.panel h3{margin:0 0 12px;font:600 17px/1.25 ' + look.heading + '}',
@@ -529,7 +532,7 @@
 			'.muted{color:' + look.muted + '}',
 			'.close{width:34px;height:34px;border-radius:50%;display:grid;place-items:center}',
 			'.close:hover{background:' + look.accentSoft + '}',
-			'@media (max-width:600px){.dock{left:10px;right:10px;transform:translateY(var(--dy,0px));justify-content:space-between}.dock.hidden{transform:translateY(140%)}.layer.top .dock.hidden{transform:translateY(-140%)}.bubble{bottom:calc(72px + env(safe-area-inset-bottom))}.layer.top .bubble{top:calc(72px + env(safe-area-inset-top))}.toasts{left:10px;right:10px;bottom:calc(70px + env(safe-area-inset-bottom))}.layer.top .toasts{bottom:calc(18px + env(safe-area-inset-bottom))}.panel{top:auto;left:8px;right:8px;width:auto;max-height:80vh;animation-name:up}}',
+			'@media (max-width:600px){.dock{left:10px;right:10px;transform:translateY(var(--dy,0px));justify-content:space-between}.dock .who,.dock .lang{display:none}.dock.hidden{transform:translateY(140%)}.layer.top .dock.hidden{transform:translateY(-140%)}.bubble{bottom:calc(72px + env(safe-area-inset-bottom))}.layer.top .bubble{top:calc(72px + env(safe-area-inset-top))}.toasts{left:10px;right:10px;bottom:calc(70px + env(safe-area-inset-bottom))}.layer.top .toasts{bottom:calc(18px + env(safe-area-inset-bottom))}.panel{top:auto;left:8px;right:8px;width:auto;max-height:80vh;animation-name:up}}',
 			'@keyframes up{from{opacity:0;transform:translateY(30px)}to{opacity:1;transform:none}}',
 			reduceMotion ? '*,*:before,*:after{animation-duration:.01ms!important;animation-delay:0s!important;transition-duration:.01ms!important}' : ''
 		].join('\n');

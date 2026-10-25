@@ -2678,7 +2678,8 @@ of lists and filter pages come along; drafts and the editor don't.
     `/ro/api/cms/…`, posting `lang`, which must be the page's), and
     `/about` keeps its English. The dock says so with a small badge, `RO`,
     whose title is "editing: RO (falls back to EN)" (none on the default
-    language's pages, so the dock fits a phone); a field with no Romanian yet shows the English and is
+    language's pages, nor on a phone, where the dock keeps its room for
+    buttons and drops the avatar too); a field with no Romanian yet shows the English and is
     marked, and the Page panel says which fields are not translated yet
     and which are the same in every language (a photo saved on `/ro/` is
     the photo everywhere). An untranslated field holds nothing in that

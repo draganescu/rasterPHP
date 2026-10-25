@@ -75,6 +75,7 @@ async function multilingual(browser) {
 		await page.setViewportSize({ width: 360, height: 740 });
 		await page.waitForTimeout(300);
 		check(await inShadow(page, h => { const d = h.shadowRoot.querySelector('.dock').getBoundingClientRect(); return [...h.shadowRoot.querySelectorAll('.dock > *')].every(el => { const r = el.getBoundingClientRect(); return r.width === 0 || (r.left >= d.left - 1 && r.right <= d.right + 1 && r.right <= 361); }); }), 'on a phone every button of the dock is in view');
+		check(await inShadow(page, h => getComputedStyle(h.shadowRoot.querySelector('.dock .lang')).display === 'none'), 'on a phone no language badge: the dock keeps its room for buttons');
 		await page.setViewportSize({ width: 1280, height: 860 });
 		await page.waitForTimeout(300);
 		check(await inShadow(page, h => h.shadowRoot.querySelector('.dock .pill.primary').textContent) === 'Edit', 'an English editor gets English words on /ro/');
@@ -562,6 +563,27 @@ async function multilingual(browser) {
 		const panel = await inShadow(page, h => h.shadowRoot.querySelector('.panel').innerText);
 		check(/Description/i.test(panel) && /not shown in the page/i.test(panel), 'the panel offers fields the page can\'t show');
 		await page.screenshot({ path: path.join(screens, 'panel.png') });
+
+		// on a phone: the link box is 16px, so iOS Safari doesn't zoom in on
+		// it, and the dock fits (no avatar, no language badge)
+		const phoneContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, storageState: await context.storageState() });
+		const mobile = await phoneContext.newPage();
+		await mobile.goto(base + '/');
+		await mobile.waitForTimeout(500);
+		await mobile.evaluate(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'e', bubbles: true })));
+		await mobile.waitForTimeout(400);
+		await mobile.locator('.lede[data-raster-field], .lede [data-raster-field]').first().tap();
+		await mobile.waitForTimeout(300);
+		await mobile.locator('[data-raster-host]').evaluate(h => { const b = h.shadowRoot.querySelector('.format button[aria-label=Link]'); b.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })); });
+		await mobile.waitForTimeout(300);
+		const linkSize = await mobile.locator('[data-raster-host]').evaluate(h => { const i = h.shadowRoot.querySelector('.format input'); return i ? parseFloat(getComputedStyle(i).fontSize) : 0; });
+		check(linkSize >= 16, 'on a phone the link box is at least 16px, so Safari doesn\'t zoom: ' + linkSize);
+		const fits = await mobile.locator('[data-raster-host]').evaluate(h => {
+			const shown = [...h.shadowRoot.querySelectorAll('.dock > *')].filter(el => getComputedStyle(el).display !== 'none');
+			return { who: shown.some(el => el.classList.contains('who')), inView: shown.every(el => { const r = el.getBoundingClientRect(); return r.left >= 0 && r.right <= 390; }) };
+		});
+		check(!fits.who && fits.inView, 'on a phone the dock has no avatar and every button is in view: ' + JSON.stringify(fits));
+		await phoneContext.close();
 		check(errors.length === 0, 'no script errors: ' + errors.join('; '));
 		}
 		await multilingual(browser);
