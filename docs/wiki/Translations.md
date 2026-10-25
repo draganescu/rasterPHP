@@ -112,7 +112,7 @@ Without `multilingual`, only the templates' words are translated (dictionaries),
 
 The cookie is the only cookie a visitor gets without logging in, and only after they pick a language. A multilingual site sets no such cookie: the address decides.
 
-A site with a single language (`array('ro')`) is fine this way: its pages say `lang="ro"`, dates are read day first, and the editor speaks Romanian.
+A site with a single language (`array('ro')`) is fine this way: its pages say `lang="ro"`, dates are read day first, and the editor speaks Romanian. The editor's own words always follow the base language, the first in the list, never `?lang=`, the cookie or the browser: those choose what visitors read, not the buttons.
 
 Dates typed with slashes follow `languages` whether or not `multilingual` is on: `5/10/2026` is 5 October for every language except `en-us`, which reads it as May 10. `2026-10-05` and dates in words read the same everywhere. A site without `languages` reads dates as it always did (`5/10/2026` is May 10).
 
@@ -121,5 +121,6 @@ Dates typed with slashes follow `languages` whether or not `multilingual` is on:
 - The page cache keeps one copy per address, so one per language.
 - A [static export](Static-Export) writes each additional language into its own folder (`/ro/…`), and the switcher links there.
 - The [in-page editor](The-In-Page-Editor#the-editors-language) has its own words in several languages.
+- Raster's own login page, used when a theme has no `login.html`, speaks the page's language: `/ro/login` is Romanian on a multilingual site, and elsewhere it uses the base language. Its words are in the editor's dictionaries (`login_title`, `login_submit` and the others), so `raster_editor.php` rewords them.
 - The [sitemap](Feeds-Sitemaps-and-Data-Views) lists every language's address, with `hreflang` links to the others.
 - Dates print as they are stored (`2026-10-05`) in every language: month and day names aren't translated yet ([#238](https://github.com/draganescu/rasterPHP/issues/238)). Write them out with a dictionary key or a CMS field where a page needs them.

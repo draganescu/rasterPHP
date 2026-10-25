@@ -21,7 +21,7 @@
 		hello: 'Hi {name}', hello_anon: 'Hi there',
 		welcome: 'Anything that glows can be changed. Press E or tap Edit to start.',
 		edit: 'Edit', done: 'Done', editing: 'Editing', page: 'Page', admin: 'Admin', admin_pages: 'Admin pages',
-		saving: 'Saving…', saved: 'Saved', all_saved: 'All saved',
+		saved: 'Saved',
 		changed: 'Changed {field}', undo: 'Undo', undone: 'Undone', nothing_to_undo: 'Nothing to undo',
 		added: 'Added to {list}', deleted: 'Deleted {name}', hidden_item: 'Hid {name}', shown_item: '{name} is visible again',
 		duplicated: 'Duplicated {name}', scheduled: '{name} goes live {date}', unscheduled: '{name} is live now',
@@ -46,19 +46,27 @@
 		problem_upload_too_big: 'That picture is too big', problem_upload_missing: 'The picture didn’t arrive; try again',
 		problem_upload_not_a_picture: 'That isn’t a picture: use a JPEG, PNG, GIF or WebP', problem_upload_not_stored: 'The picture couldn’t be stored',
 		problem_form_expired: 'This page is out of date: reload it and try again', problem_not_allowed: 'You can’t do that; if you were logged out, log in again',
+		problem_one_value: '{field} came more than once: reload the page and try again', problem_unknown_page: 'This page can’t be edited from here: reload it',
+		problem_unknown_field: '{field} isn’t on this page any more: reload it', problem_wrong_language: 'This page is in {lang}: reload it',
+		problem_unknown_collection: 'That list isn’t on this site any more: reload the page', problem_no_such_item: 'That item is gone; someone may have deleted it. Reload the page',
+		problem_no_such_revision: 'That version is gone: reload the page', problem_broken: 'Something went wrong; it is in the error log',
+		problem_not_saved: 'the site refused it',
 		keyboard: 'E to edit · Esc to stop · ⌘Z to undo', fields_changed: '{fields}', page_fields: 'Fields', nothing_here: 'Nothing on this page comes from the CMS.',
-		// a multilingual site: the page's language, and the editor's own
+		// a multilingual site: the page's language
 		editing_lang: 'editing: {lang}', falls_back: '(falls back to {lang})', untranslated: 'not translated yet: shows the {lang} text',
-		every_language: 'the same in every language', editor_language: 'The editor’s language',
-		problem_not_multilingual: 'This site has one language: the editor’s follows the browser',
+		every_language: 'the same in every language',
 		restore_every: 'Restore, every language', restored_every: 'Brought back every language of the version from {when}',
 		problem_translation_columns_missing: 'This language has no place on the site yet: run php bin/raster schema --apply on the server'
 	};
 	for (var k in (C.strings || {})) T[k] = C.strings[k];
-	// a problem's words; {field} is the field it is about, when there is one
-	function problem(name, field) {
+	// a problem's words, from the server's answer (json): {field} is the
+	// field it is about and {lang} the page's language, when there is one;
+	// a raw detail (a store's own sentence) goes after the words
+	function problem(name, json) {
+		json = json || {};
 		var words = T['problem_' + name];
-		return words ? String(words).replace('{field}', field ? human(field) : '').trim() : human(name);
+		words = words ? String(words).replace('{field}', json.field ? human(json.field) : '').replace('{lang}', json.lang ? code(json.lang) : '').trim() : human(name);
+		return json.detail ? words + ': ' + json.detail : words;
 	}
 	function readonly(info) { return info.readonly || []; }
 	function writable(info, values) {
@@ -73,8 +81,8 @@
 		name = String(name || '').replace(/^site_/, '').replace(/_/g, ' ');
 		return name.charAt(0).toUpperCase() + name.slice(1);
 	}
-	// dates read in the editor's own language (multilingual: editor_lang)
-	var lang = C.editor_lang || C.lang || document.documentElement.lang || undefined;
+	// dates read in the editor's own language, never the page's or the browser's
+	var lang = C.editor_lang || undefined;
 	// a language code as the dock shows it: RO, PT-BR
 	function code(language) { return String(language || '').toUpperCase(); }
 	// the content language a save is in, posted with it (multilingual only)
@@ -125,7 +133,7 @@
 				var json = null;
 				try { json = JSON.parse(text); } catch (e) {}
 				// a record's model said no: its problems, in the site's words if it has them
-				if (json && json.problems) throw new Error(json.problems.map(function (name) { return problem(name, json.field); }).join(', '));
+				if (json && json.problems) throw new Error(json.problems.map(function (name) { return problem(name, json); }).join(', '));
 				if (!response.ok || !json || json.error) throw new Error(json && json.error ? json.error : (text.slice(0, 120) || response.status));
 				return json;
 			});
@@ -437,12 +445,7 @@
 			'.pill:active{transform:scale(.96)}',
 			'.pill.primary{background:' + look.accent + ';color:' + look.onAccent + ';font-weight:600}',
 			'.pill.primary:hover{filter:brightness(1.08)}',
-			'.lang{padding:0 8px;color:' + look.muted + ';font-size:12px}',
-			'.langs{font:inherit;font-size:12px;color:inherit;background:none;border:1px solid ' + look.line + ';border-radius:999px;height:28px;padding:0 6px;cursor:pointer}',
-			'.status{display:inline-flex;align-items:center;gap:6px;padding:0 10px;color:' + look.muted + ';font-size:13px;min-width:70px}',
-			'.dot{width:7px;height:7px;border-radius:50%;background:#3aa86b;transition:background .2s}',
-			'.dot.busy{background:' + look.accent + ';animation:blink 1s infinite}',
-			'@keyframes blink{50%{opacity:.3}}',
+			'.lang{flex:none;padding:2px 6px;border:1px solid ' + look.line + ';border-radius:999px;color:' + look.muted + ';font-size:11px;font-weight:600;letter-spacing:.04em;line-height:1.2}',
 			// the admin pages menu, above the dock
 			'.menu{position:absolute;left:50%;bottom:calc(70px + env(safe-area-inset-bottom));transform:translateX(-50%);min-width:240px;max-width:calc(100vw - 32px);max-height:min(60vh,440px);overflow:auto;padding:6px;pointer-events:auto;animation:rise .25s cubic-bezier(.2,.9,.3,1.2) both}',
 			'.menu h3{margin:6px 10px;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:' + look.muted + '}',
@@ -485,6 +488,9 @@
 			'.format button{width:30px;height:30px;border-radius:7px;display:grid;place-items:center}',
 			'.format button:hover,.format button.on{background:' + look.accentSoft + ';color:' + look.accent + '}',
 			'.format input{border:0;background:transparent;color:inherit;font:inherit;width:220px;padding:0 8px;outline:none}',
+			// iOS Safari zooms into a text box under 16px when it takes focus, and
+			// never zooms back out: on touch screens every box is 16px
+			'@media (pointer:coarse){.layer input,.layer select,.layer textarea{font-size:16px}}',
 			// popovers and dialogs
 			'.popover{width:min(360px,calc(100vw - 24px));padding:16px;pointer-events:auto;animation:pop .18s both;max-height:min(70vh,560px);overflow:auto}',
 			'.popover h3,.panel h3{margin:0 0 12px;font:600 17px/1.25 ' + look.heading + '}',
@@ -522,7 +528,7 @@
 			'.muted{color:' + look.muted + '}',
 			'.close{width:34px;height:34px;border-radius:50%;display:grid;place-items:center}',
 			'.close:hover{background:' + look.accentSoft + '}',
-			'@media (max-width:600px){.dock{left:10px;right:10px;transform:translateY(var(--dy,0px));justify-content:space-between}.dock.hidden{transform:translateY(140%)}.layer.top .dock.hidden{transform:translateY(-140%)}.bubble{bottom:calc(72px + env(safe-area-inset-bottom))}.layer.top .bubble{top:calc(72px + env(safe-area-inset-top))}.toasts{left:10px;right:10px;bottom:calc(70px + env(safe-area-inset-bottom))}.layer.top .toasts{bottom:calc(18px + env(safe-area-inset-bottom))}.panel{top:auto;left:8px;right:8px;width:auto;max-height:80vh;animation-name:up}}',
+			'@media (max-width:600px){.dock{left:10px;right:10px;transform:translateY(var(--dy,0px));justify-content:space-between}.dock .lang{display:none}.dock.hidden{transform:translateY(140%)}.layer.top .dock.hidden{transform:translateY(-140%)}.bubble{bottom:calc(72px + env(safe-area-inset-bottom))}.layer.top .bubble{top:calc(72px + env(safe-area-inset-top))}.toasts{left:10px;right:10px;bottom:calc(70px + env(safe-area-inset-bottom))}.layer.top .toasts{bottom:calc(18px + env(safe-area-inset-bottom))}.panel{top:auto;left:8px;right:8px;width:auto;max-height:80vh;animation-name:up}}',
 			'@keyframes up{from{opacity:0;transform:translateY(30px)}to{opacity:1;transform:none}}',
 			reduceMotion ? '*,*:before,*:after{animation-duration:.01ms!important;animation-delay:0s!important;transition-duration:.01ms!important}' : ''
 		].join('\n');
@@ -544,23 +550,21 @@
 
 		var initial = (C.user.name || '?').trim().charAt(0).toUpperCase();
 		ui.who = h('span', { class: 'who', title: C.user.name, text: initial });
-		ui.status = h('span', { class: 'status', hidden: true }, [h('span', { class: 'dot' }), h('span', { class: 'label', text: t('all_saved') })]);
 		ui.editButton = h('button', { class: 'pill primary', title: t('keyboard'), onclick: function () { setEditing(!editing); } });
 		ui.pageButton = h('button', { class: 'pill', onclick: function () { closeAdminMenu(); togglePanel(); }, html: icon('layers') + '<span>' + t('page') + '</span>' });
 		ui.adminButton = (C.admin || []).length ? h('button', { class: 'pill', 'aria-haspopup': 'menu', 'aria-expanded': 'false', onclick: toggleAdminMenu, html: icon('grid') + '<span>' + t('admin') + '</span>' }) : null;
-		// multilingual: the page's language, and a picker for the editor's own
+		// multilingual: the page's language
 		if (C.languages) {
 			var base = C.languages[0];
-			ui.lang = h('span', { class: 'lang', text: t('editing_lang', { lang: code(C.lang) }) + (String(C.lang).toLowerCase() === String(base).toLowerCase() ? '' : ' ' + t('falls_back', { lang: code(base) })) });
-			var choices = C.editor_languages || [];
-			if (choices.length > 1) {
-				ui.langs = h('select', { class: 'langs', title: t('editor_language'), 'aria-label': t('editor_language'), onchange: function () {
-					var chosen = ui.langs.value;
-					call('editor_set_lang', { lang: chosen }).then(function () { location.reload(); }, failed);
-				} }, choices.map(function (c) { return h('option', { value: c, selected: c === C.editor_lang ? 'selected' : null, text: code(c) }); }));
+			// a translation's page: its code as a small badge, so the dock fits
+			// a phone; the sentence is its title and label. The default
+			// language's page needs none: nothing falls back there.
+			if (String(C.lang).toLowerCase() !== String(base).toLowerCase()) {
+				var said = t('editing_lang', { lang: code(C.lang) }) + ' ' + t('falls_back', { lang: code(base) });
+				ui.lang = h('span', { class: 'lang', role: 'img', text: code(C.lang), title: said, 'aria-label': said });
 			}
 		}
-		ui.dock = h('div', { class: 'dock surface hidden', role: 'toolbar', 'aria-label': 'Raster' }, [ui.who, ui.lang, ui.langs, ui.status, ui.adminButton, ui.pageButton, ui.editButton]);
+		ui.dock = h('div', { class: 'dock surface hidden', role: 'toolbar', 'aria-label': 'Raster' }, [ui.who, ui.lang, ui.adminButton, ui.pageButton, ui.editButton]);
 		ui.layer.appendChild(ui.dock);
 		dockMoves();
 		setTimeout(function () { ui.dock.classList.remove('hidden'); }, 60);
@@ -644,9 +648,6 @@
 	var busy = 0;
 	function working(delta) {
 		busy += delta;
-		var dot = ui.status.querySelector('.dot'), label = ui.status.querySelector('.label');
-		dot.classList.toggle('busy', busy > 0);
-		label.textContent = busy > 0 ? t('saving') : t('all_saved');
 	}
 	function tick(el) {
 		if (!el || !el.getBoundingClientRect) return;
@@ -833,7 +834,6 @@
 	var plaintextOnly = (function () { var d = document.createElement('div'); d.setAttribute('contenteditable', 'plaintext-only'); return d.contentEditable === 'plaintext-only'; })();
 	function updateDock() {
 		ui.editButton.innerHTML = (editing ? icon('check') : icon('pencil')) + '<span>' + (editing ? t('done') : t('edit')) + '</span>';
-		ui.status.hidden = !editing;
 	}
 	function glow() {
 		if (reduceMotion) return;
@@ -865,7 +865,9 @@
 		if (!field || !editing) return;
 		setTimeout(function () {
 			if (formatBarHasFocus()) return;
-			if (field.kind === 'rich') hideFormatBar();
+			// only this field's bar: moving to another rich field has already
+			// shown that one's (focusin runs before this timeout)
+			if (field.kind === 'rich' && formatBar && formatBar.field === field) hideFormatBar();
 			commit(field);
 		}, 0);
 	});

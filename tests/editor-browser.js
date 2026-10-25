@@ -62,9 +62,22 @@ async function multilingual(browser) {
 		await page.fill('input[name=login]', 'ana@site.test');
 		await page.fill('input[name=password]', 'ana password');
 		await Promise.all([page.waitForNavigation(), page.click('form button')]);
+		// the default language's page has no badge: nothing to fall back to
+		await page.goto(base + '/zzml');
+		await page.waitForTimeout(500);
+		check(await inShadow(page, h => h.shadowRoot.querySelector('.dock .lang') === null), 'no language badge on the default language');
 		await page.goto(base + '/ro/zzml');
 		await page.waitForTimeout(500);
-		check(await inShadow(page, h => h.shadowRoot.querySelector('.dock .lang').textContent) === 'editing: RO (falls back to EN)', 'the dock says the page\'s language');
+		// a short badge, so the dock fits a phone; the sentence is its title
+		const badge = await inShadow(page, h => { const b = h.shadowRoot.querySelector('.dock .lang'); return { text: b.textContent, title: b.title, label: b.getAttribute('aria-label') }; });
+		check(badge.text === 'RO', 'the dock says the page\'s language in two letters: ' + badge.text);
+		check(badge.title === 'editing: RO (falls back to EN)' && badge.label === badge.title, 'and the sentence as its title and label: ' + badge.title);
+		await page.setViewportSize({ width: 360, height: 740 });
+		await page.waitForTimeout(300);
+		check(await inShadow(page, h => { const d = h.shadowRoot.querySelector('.dock').getBoundingClientRect(); return [...h.shadowRoot.querySelectorAll('.dock > *')].every(el => { const r = el.getBoundingClientRect(); return r.width === 0 || (r.left >= d.left - 1 && r.right <= d.right + 1 && r.right <= 361); }); }), 'on a phone every button of the dock is in view');
+		check(await inShadow(page, h => getComputedStyle(h.shadowRoot.querySelector('.dock .lang')).display === 'none'), 'on a phone no language badge: the dock keeps its room for buttons');
+		await page.setViewportSize({ width: 1280, height: 860 });
+		await page.waitForTimeout(300);
 		check(await inShadow(page, h => h.shadowRoot.querySelector('.dock .pill.primary').textContent) === 'Edit', 'an English editor gets English words on /ro/');
 		check(await page.locator('h1[data-raster-untranslated]').count() === 1, 'an untranslated field is marked');
 		check(await page.locator('h1').textContent() === 'Our story', 'and shows the English');
@@ -88,10 +101,9 @@ async function multilingual(browser) {
 		await page.reload();
 		await page.waitForTimeout(500);
 		check(await page.locator('h1[data-raster-untranslated]').count() === 1 && await page.locator('h1').textContent() === 'Our story', 'after undo the Romanian is empty again, and the English shows');
-		// the picker: the editor's own words in Romanian
-		await Promise.all([page.waitForNavigation(), inShadow(page, h => { const s = h.shadowRoot.querySelector('.dock .langs'); s.value = 'ro'; s.dispatchEvent(new Event('change')); })]);
-		await page.waitForTimeout(500);
-		check(await inShadow(page, h => h.shadowRoot.querySelector('.dock .lang').textContent) === 'editezi: RO (dacă lipsește: EN)', 'the dock in Romanian');
+		// the editor's own words follow the site's base language, with no picker
+		check(await inShadow(page, h => h.shadowRoot.querySelector('.dock .langs') === null), 'no language picker in the dock');
+		check(await inShadow(page, h => h.shadowRoot.querySelector('.dock .lang').title) === 'editing: RO (falls back to EN)', 'the dock in the base language\'s words');
 		check(errors.length === 0, 'no script errors on /ro/: ' + errors.join('; '));
 		await context.close();
 	} finally {
@@ -224,6 +236,20 @@ async function multilingual(browser) {
 			await note.click();
 			await page.waitForTimeout(200);
 			check(await inShadow(page, h => !!h.shadowRoot.querySelector('.format button[aria-label=List]')), 'a field in an article offers a list');
+			// moving from one rich field to another keeps the formatting bar:
+			// the first field's leaving must not take down the second's bar
+			const barFor = () => inShadow(page, h => !!h.shadowRoot.querySelector('.float.format'));
+			await page.locator('p.lead[data-raster-field]').click();
+			await page.waitForTimeout(200);
+			check(await barFor(), 'the bar on the lead');
+			await note.click();
+			await page.waitForTimeout(200);
+			check(await barFor(), 'the bar on the note, after the lead');
+			await page.locator('p.lead[data-raster-field]').click();
+			await page.waitForTimeout(200);
+			check(await barFor(), 'the bar on the lead again, after the note');
+			await note.click();
+			await page.waitForTimeout(200);
 			await page.keyboard.press('Control+End');
 			await note.evaluate(el => {
 				const data = new DataTransfer();
@@ -537,6 +563,28 @@ async function multilingual(browser) {
 		const panel = await inShadow(page, h => h.shadowRoot.querySelector('.panel').innerText);
 		check(/Description/i.test(panel) && /not shown in the page/i.test(panel), 'the panel offers fields the page can\'t show');
 		await page.screenshot({ path: path.join(screens, 'panel.png') });
+
+		// on a phone: the link box is 16px, so iOS Safari doesn't zoom in on
+		// it, and the dock fits (no language badge, no save status)
+		const phoneContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, storageState: await context.storageState() });
+		const mobile = await phoneContext.newPage();
+		await mobile.goto(base + '/');
+		await mobile.waitForTimeout(500);
+		await mobile.evaluate(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'e', bubbles: true })));
+		await mobile.waitForTimeout(400);
+		await mobile.locator('.lede[data-raster-field], .lede [data-raster-field]').first().tap();
+		await mobile.waitForTimeout(300);
+		await mobile.locator('[data-raster-host]').evaluate(h => { const b = h.shadowRoot.querySelector('.format button[aria-label=Link]'); b.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })); });
+		await mobile.waitForTimeout(300);
+		const linkSize = await mobile.locator('[data-raster-host]').evaluate(h => { const i = h.shadowRoot.querySelector('.format input'); return i ? parseFloat(getComputedStyle(i).fontSize) : 0; });
+		check(linkSize >= 16, 'on a phone the link box is at least 16px, so Safari doesn\'t zoom: ' + linkSize);
+		const fits = await mobile.locator('[data-raster-host]').evaluate(h => {
+			const shown = [...h.shadowRoot.querySelectorAll('.dock > *')].filter(el => getComputedStyle(el).display !== 'none');
+			return { who: shown.some(el => el.classList.contains('who')), inView: shown.every(el => { const r = el.getBoundingClientRect(); return r.left >= 0 && r.right <= 390; }) };
+		});
+		check(fits.who && fits.inView, 'on a phone the dock keeps its avatar and every button is in view: ' + JSON.stringify(fits));
+		check(await mobile.locator('[data-raster-host]').evaluate(h => !h.shadowRoot.querySelector('.dock .status')), 'no "All saved" in the dock: each save shows its own tick');
+		await phoneContext.close();
 		check(errors.length === 0, 'no script errors: ' + errors.join('; '));
 		}
 		await multilingual(browser);

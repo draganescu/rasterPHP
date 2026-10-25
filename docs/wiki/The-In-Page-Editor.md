@@ -60,7 +60,7 @@ A field editors can't reach means the template doesn't declare it. Add the annot
 
 ## On a multilingual site
 
-On a [multilingual site](Translations) the editor edits the language of the page you are on: on `/ro/about` you write the Romanian, and `/about` keeps its English. The dock says so ("editing: RO (falls back to EN)"). A field with no Romanian yet shows the English and is marked, and the Page panel lists the fields not translated yet and the ones that are the same in every language: a photo or a price changed on `/ro/` changes everywhere. On `/ro/menu` a dish's name is saved in Romanian and its price for every language; a dish added there is made in the default language. The history says which language each revision changed, and Restore brings back every language of that version.
+On a [multilingual site](Translations) the editor edits the language of the page you are on: on `/ro/about` you write the Romanian, and `/about` keeps its English. The dock says so with a small badge, `RO`; point at it for "editing: RO (falls back to EN)". The default language's pages have none, and neither does a phone, so every button fits. A field with no Romanian yet shows the English and is marked, and the Page panel lists the fields not translated yet and the ones that are the same in every language: a photo or a price changed on `/ro/` changes everywhere. On `/ro/menu` a dish's name is saved in Romanian and its price for every language; a dish added there is made in the default language. The history says which language each revision changed, and Restore brings back every language of that version.
 
 On a production server, run `php bin/raster schema --apply` after adding a language: until then a text field saved in that language is refused, with a message saying so, instead of landing in the default language.
 
@@ -83,7 +83,9 @@ The editor's own controls take their colours and fonts from the page: the body t
 
 ## The editor's language
 
-The editor's words are in English, and Romanian ships with Raster. On a site without `multilingual` the editor speaks the page's language (see [Translations](Translations)) when it has words for it. On a multilingual site it speaks the editor's own language, apart from the page's: the one picked in the dock's language menu (kept with the account), else the first of the browser's languages it has words for, else the site's default language. So an English-speaking owner fixing `/ro/` gets English buttons. To translate it into another language, or to change individual words, create `application/i18n/<lang>/raster_editor.php`:
+The editor's words are in English, and Raster ships them in 15 more languages: French, German, Spanish, Italian, Portuguese, Dutch, Romanian, Hungarian, Polish, Bulgarian, Greek, Turkish, Japanese, Hindi and Chinese (Simplified, `zh`). Apart from Romanian they were drafted by an AI agent, so corrections are welcome. The editor speaks the site's base language, the first in its list of languages, on every site, multilingual or not, and whatever the page's language is: editing `/ro/` on an English-first site keeps English buttons. A site with no languages set gets English. A word the language has no translation for stays in English. The browser's language, `?lang=` and the language cookie never change it, and there is no language menu in the dock.
+
+The one exception is the sibip builder's preview: in development mode, the builder sends the person's own language in a `Raster-Editor-Language` header, and the editor uses that. Published sites run in production, where the header is ignored. To translate it into another language, or to change individual words, create `application/i18n/<lang>/raster_editor.php`:
 
 ```php
 <?php
@@ -103,6 +105,9 @@ What the site refuses comes back as a name, and the editor shows the words for `
 | `type_int`, `type_number`, `type_bool`, `type_date`, `type_datetime`, `type_time`, `type_text` | a value that isn't of its field's type (`{field}` in the words is the field) |
 | `upload_too_big`, `upload_missing`, `upload_not_a_picture`, `upload_not_stored` | a picture that is too big, didn't arrive whole, isn't a JPEG, PNG, GIF or WebP, or couldn't be saved |
 | `form_expired`, `not_allowed` | the page is out of date (reload it), or you are no longer logged in as staff |
+| `unknown_page`, `unknown_field`, `unknown_collection`, `no_such_item`, `no_such_revision`, `one_value` | what the editor posted no longer matches the site (reload the page); `{field}` is the field |
+| `wrong_language` | the page is open in another language than its address says (`{lang}` is the address's) |
+| `not_saved`, `broken` | the site refused the change for a reason of its own, shown after the words, or something went wrong that is in the error log |
 
 ```php
 'problem_type_number' => '{field}: write a number, like 4.50',

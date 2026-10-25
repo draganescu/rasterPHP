@@ -1,8 +1,8 @@
 <!doctype html>
-<html>
+<html lang="<!-- print.cms.login_lang /-->">
   <head>
     <meta charset="utf-8">
-    <title>Raster CMS Login</title>
+    <title><!-- print.cms.login_word('login_title') /--></title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="robots" content="noindex">
     <link rel="stylesheet" href="<!-- print.cms.style /-->">
@@ -11,22 +11,22 @@
     <div class="wrapper">
       <!-- render.authentication.login -->
       <form action="" method="post" class="bootstrap-frm">
-        <h1>Raster CMS<span>Log in to edit this site.</span></h1>
-        <!-- print.cms.login_message /--><!-- print.validation.alert('no_database') --><p class="notice">No database is configured for this environment (application/config/db/).</p><!-- /print.validation.alert('no_database') --><!-- print.validation.alert('no_users') --><p class="notice">There are no users yet. Create one from the project folder: <code>php bin/raster user admin</code></p><!-- /print.validation.alert('no_users') -->
-        <!-- print.validation.alert('login_failed') --><p class="notice">Wrong username or password.</p><!-- /print.validation.alert('login_failed') -->
-        <!-- print.validation.alert('slow_down') --><p class="notice">Too many tries from here. Try again in an hour.</p><!-- /print.validation.alert('slow_down') -->
+        <h1><!-- print.cms.login_word('login_heading') /--><span><!-- print.cms.login_word('login_lede') /--></span></h1>
+        <!-- print.cms.login_message /--><!-- print.validation.alert('no_database') --><p class="notice"><!-- print.cms.login_word('login_no_database') /--></p><!-- /print.validation.alert('no_database') --><!-- print.validation.alert('no_users') --><p class="notice"><!-- print.cms.login_word('login_no_users') /--> <code>php bin/raster user admin</code></p><!-- /print.validation.alert('no_users') -->
+        <!-- print.validation.alert('login_failed') --><p class="notice"><!-- print.cms.login_word('login_failed') /--></p><!-- /print.validation.alert('login_failed') -->
+        <!-- print.validation.alert('slow_down') --><p class="notice"><!-- print.cms.login_word('login_slow_down') /--></p><!-- /print.validation.alert('slow_down') -->
         <p>
           <label>
-            <span>Username:</span>
-            <input id="username" type="text" name="login" autocomplete="username" placeholder="Email or username" required>
+            <span><!-- print.cms.login_word('login_username') /--></span>
+            <input id="username" type="text" name="login" autocomplete="username" placeholder="<!-- print.cms.login_word('login_username_hint') /-->" required>
           </label>
           <label>
-            <span>Password:</span>
-            <input id="password" type="password" name="password" autocomplete="current-password" placeholder="Your password" required>
+            <span><!-- print.cms.login_word('login_password') /--></span>
+            <input id="password" type="password" name="password" autocomplete="current-password" placeholder="<!-- print.cms.login_word('login_password_hint') /-->" required>
           </label>
           <label>
             <span>&nbsp;</span>
-            <input type="submit" class="button" value="Log in">
+            <input type="submit" class="button" value="<!-- print.cms.login_word('login_submit') /-->">
           </label>
         </p>
       </form>

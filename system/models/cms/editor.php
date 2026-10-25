@@ -94,15 +94,12 @@ class cms_editor {
 			'lang' => class_exists('i18n') ? i18n::detect() : '',
 			// the site's clock, in its time zone: scheduled items go live by it
 			'now' => date('Y-m-d H:i:s'),
+			// the language of the editor's own words and dates, on every site
+			// (lang is the page's)
+			'editor_lang' => self::editor_lang(),
 		);
-		// multilingual: lang is the page's language, the one the editor
-		// writes; its own words are in editor_lang (D9), and the dock
-		// offers editor_languages to choose from
-		if (class_exists('i18n') && i18n::enabled()) {
-			$config['editor_lang'] = self::editor_lang();
-			$config['languages'] = i18n::available();
-			$config['editor_languages'] = self::editor_languages();
-		}
+		// multilingual: lang is the page's language, the one the editor writes
+		if (class_exists('i18n') && i18n::enabled()) $config['languages'] = i18n::available();
 		$script = '<script id="raster-editor-config" type="application/json">'
 			.json_encode($config, JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR)
 			.'</script><script src="'.config::get('link_uri').'api/cms/editor_script?v='.urlencode(self::version()).'" defer></script>';
@@ -149,11 +146,16 @@ class cms_editor {
 
 	// the editor's own words: English in editor.js, other languages in
 	// system/models/cms/editor/lang/<lang>.php, and your own in
-	// <app>/i18n/<lang>/raster_editor.php. Multilingual, in the editor's
-	// own language (editor_lang()), whatever the page's is
+	// <app>/i18n/<lang>/raster_editor.php, in the editor's own language
+	// (editor_lang()), whatever the page's is
 	static function strings() {
-		$lang = class_exists('i18n') ? (i18n::enabled() ? self::editor_lang() : i18n::detect()) : '';
-		if (!preg_match('/^[a-z]{2}(-[a-z]{2})?$/i', (string)$lang)) return array();
+		return (object)self::words(self::editor_lang());
+	}
+
+	// a language's words, Raster's and the site's (which win); none for a
+	// code that isn't one
+	static function words($lang) {
+		if (!preg_match('/^[a-z]{2}(-[a-z]{2})?$/', (string)$lang)) return array();
 		$strings = array();
 		foreach (array(BASE.'models/cms/editor/lang/'.$lang.'.php', APPBASE.'i18n/'.$lang.'/raster_editor.php') as $file) {
 			if (is_file($file)) {
@@ -161,7 +163,36 @@ class cms_editor {
 				if (is_array($more)) $strings = array_merge($strings, $more);
 			}
 		}
-		return (object)$strings;
+		return $strings;
+	}
+
+	// ##The fallback login page (system/views/cms_admin/login.html)
+
+	// its words in English; the editor's dictionaries translate them
+	const LOGIN_WORDS = array(
+		'login_title' => 'Raster CMS Login', 'login_heading' => 'Raster CMS', 'login_lede' => 'Log in to edit this site.',
+		'login_no_database' => 'No database is configured for this environment (application/config/db/).',
+		'login_no_users' => 'There are no users yet. Create one from the project folder:',
+		'login_failed' => 'Wrong username or password.', 'login_slow_down' => 'Too many tries from here. Try again in an hour.',
+		'login_username' => 'Username:', 'login_username_hint' => 'Email or username',
+		'login_password' => 'Password:', 'login_password_hint' => 'Your password', 'login_submit' => 'Log in',
+	);
+
+	// Visitors reach it, and nobody is logged in yet, so it is in the
+	// content's language: the address's on a multilingual site (/ro/login),
+	// else the base language, else English. Never i18n::detect(), which
+	// reads the browser.
+	static function login_lang() {
+		$lang = i18n::enabled() ? i18n::current() : i18n::default_language();
+		$lang = strtolower((string)$lang);
+		return preg_match('/^[a-z]{2}(-[a-z]{2})?$/', $lang) ? $lang : 'en';
+	}
+
+	// one of its words, falling back to English
+	static function login_word($key) {
+		static $words = null;
+		if ($words === null) $words = self::words(self::login_lang()) + self::LOGIN_WORDS;
+		return isset($words[$key]) ? (string)$words[$key] : '';
 	}
 
 	// ##The editor's own language (D9)
@@ -176,77 +207,55 @@ class cms_editor {
 		return array_values(array_unique(array_filter($codes, function ($code) { return (bool)preg_match('/^[a-z]{2}(-[a-z]{2})?$/', $code); })));
 	}
 
-	// The language of the editor's words, separate from the page's: the
-	// one the person chose (user.editor_lang), else the first of the
-	// browser's (Accept-Language) the editor has words for, else the
-	// site's default language when it has, else English. Asked once per
-	// request (the config and the words both need it)
+	// The language of the editor's words, separate from the page's (see
+	// pick_editor_lang). Asked once per request (the config and the words
+	// both need it)
 	static function editor_lang() {
 		static $known = null;
 		if ($known !== null) return $known;
 		return $known = self::pick_editor_lang();
 	}
 
+	// The builder says whose controls these are; only its preview runs in
+	// development, so a visitor of a live site can't change them. Else the
+	// site's base language, else English. Never the browser, ?lang= or the
+	// cookie: people get the language they have seen, not a guess. A code
+	// with no dictionary is kept, for the dates; its words are English.
 	protected static function pick_editor_lang() {
-		$have = self::editor_languages();
-		$user = authentication::user();
-		if ($user && !empty($user['id'])) {
-			try {
-				$chosen = strtolower((string)R::load('user', (int)$user['id'])->editor_lang);
-				if (in_array($chosen, $have, true)) return $chosen;
-			} catch (Exception $e) {
-				log::warning('editor: '.$e->getMessage());
-			}
+		if (config::get('environment') === 'development' && !empty($_SERVER['HTTP_RASTER_EDITOR_LANGUAGE'])) {
+			$sent = strtolower(trim((string)$_SERVER['HTTP_RASTER_EDITOR_LANGUAGE']));
+			if (preg_match('/^[a-z]{2}(-[a-z]{2})?$/', $sent)) return $sent;
 		}
-		if (!empty($_SERVER['HTTP_ACCEPT_LANGUAGE'])) {
-			foreach (i18n::parse_header($_SERVER['HTTP_ACCEPT_LANGUAGE']) as $candidate) {
-				$candidate = strtolower($candidate);
-				if (in_array($candidate, $have, true)) return $candidate;
-				if (in_array(substr($candidate, 0, 2), $have, true)) return substr($candidate, 0, 2);
-			}
-		}
-		$default = strtolower(i18n::default_language());
-		return in_array($default, $have, true) ? $default : 'en';
-	}
-
-	// lang: the editor's own language from now on, for this account ('' to
-	// follow the browser again)
-	static function set_lang() {
-		cms::require_admin(true);
-		// a multilingual site's choice only: off the account has no such column
-		if (!i18n::enabled()) return self::refused(new cms_refused(array('not_multilingual')));
-		$lang = util::post('lang');
-		if (is_array($lang)) return self::fail("'lang' takes one value");
-		$lang = strtolower((string)$lang);
-		if ($lang !== '' && !in_array($lang, self::editor_languages(), true)) return self::fail("The editor has no words in '$lang'");
-		$user = authentication::user();
-		if (!$user || empty($user['id'])) return self::fail('Unknown account');
-		try {
-			cms_records::transaction(function () use ($user, $lang) {
-				$bean = R::load('user', (int)$user['id']);
-				$bean->editor_lang = $lang;
-				R::store($bean);
-			});
-		} catch (Exception $e) {
-			return self::fail($e->getMessage());
-		} catch (Throwable $e) {
-			return self::broken($e);
-		}
-		return array('editor_lang' => $lang);
+		$base = class_exists('i18n') ? strtolower((string)i18n::default_language()) : '';
+		return preg_match('/^[a-z]{2}(-[a-z]{2})?$/', $base) ? $base : 'en';
 	}
 
 	// ##Saving
 
-	protected static function fail($message, $status = 400) {
+	// The sentence stays English for API callers and MCP; $problem names it
+	// for the editor, which words it from its dictionary (problem_<name>),
+	// filling in $extra: field, lang, or a raw detail it adds after the words
+	protected static function fail($message, $status = 400, $problem = null, $extra = array()) {
 		http_response_code($status);
-		return array('error' => $message);
+		return $problem === null ? array('error' => $message) : array('error' => $message, 'problems' => array($problem)) + $extra;
+	}
+
+	// a page open in another language than its address says
+	protected static function wrong_language() {
+		return self::fail('This page is in '.i18n::current().': reload it', 400, 'wrong_language', array('lang' => i18n::current()));
+	}
+
+	// the store said no with an exception of its own: its sentence is the
+	// detail, shown after the editor's words
+	protected static function not_saved($e) {
+		return self::fail($e->getMessage(), 400, 'not_saved', array('detail' => $e->getMessage()));
 	}
 
 	// a mistake in the code (a TypeError, not a refusal): logged, and a plain
 	// 500 for the editor to show
 	protected static function broken($e) {
 		log::error('editor: '.get_class($e).': '.$e->getMessage().' in '.$e->getFile().':'.$e->getLine());
-		return self::fail('Something went wrong; it is in the error log', 500);
+		return self::fail('Something went wrong; it is in the error log', 500, 'broken');
 	}
 
 	// a check() or an action said no: the names, and a line to show
@@ -275,7 +284,7 @@ class cms_editor {
 	// value[]=x stored as 'Array'. Every endpoint that reads one of these refuses that first.
 	protected static function one_value() {
 		foreach (array('type', 'slug', 'field', 'value', 'example', 'collection', 'id', 'action', 'revision') as $name) {
-			if (is_array(util::post($name))) return self::fail("'$name' takes one value");
+			if (is_array(util::post($name))) return self::fail("'$name' takes one value", 400, 'one_value', array('field' => $name));
 		}
 		return null;
 	}
@@ -323,13 +332,13 @@ class cms_editor {
 		if ($bad = self::one_value()) return $bad;
 		$type = self::page_type();
 		$field = (string)util::post('field');
-		if (!$type) return self::fail('Unknown page');
+		if (!$type) return self::fail('Unknown page', 400, 'unknown_page');
 		// headline__ro is a language's column, never a field of its own
 		if (!preg_match('/^[a-z][a-z0-9_]*$/', $field) || strpos($field, '__') !== false || cms::reserved($field, 'field') || !array_key_exists($field, cms_store::columns($type))) {
-			return self::fail("Unknown field '$field'");
+			return self::fail("Unknown field '$field'", 400, 'unknown_field', array('field' => $field));
 		}
 		$lang = self::language();
-		if ($lang === false) return self::fail('This page is in '.i18n::current().': reload it');
+		if ($lang === false) return self::wrong_language();
 		$write = $lang !== null && !i18n::is_default($lang) && in_array($field, cms_types::translated($type), true) ? $lang : null;
 		// production before schema --apply made the language's columns: a
 		// text field would land in the default language's column
@@ -345,7 +354,7 @@ class cms_editor {
 		} catch (cms_type_error $e) {
 			return self::mistyped($e);
 		} catch (Exception $e) {
-			return self::fail($e->getMessage());
+			return self::not_saved($e);
 		} catch (Throwable $e) {
 			return self::broken($e);
 		}
@@ -372,19 +381,19 @@ class cms_editor {
 		cms::require_admin(true);
 		if ($bad = self::one_value()) return $bad;
 		$collection = (string)util::post('collection');
-		if (!preg_match('/^[a-z][a-z0-9_]*$/', $collection) || cms::reserved($collection, 'collection')) return self::fail('Unknown collection');
+		if (!preg_match('/^[a-z][a-z0-9_]*$/', $collection) || cms::reserved($collection, 'collection')) return self::fail('Unknown collection', 400, 'unknown_collection');
 		$type = cms::collection_type($collection);
 		$record = cms_records::info($collection);
 		if ($record) cms_records::ensure($record);
 		$columns = cms_store::columns($type);
-		if (!$columns) return self::fail('Unknown collection');
+		if (!$columns) return self::fail('Unknown collection', 400, 'unknown_collection');
 		$fields = util::post('fields');
 		if (!is_array($fields)) $fields = array();
 		unset($fields['id'], $fields['updated_at']);
 		// name__ro is a language's column, and saved_lang Raster's, never fields
 		$allowed = $record ? cms_records::writable($record) : array_values(array_filter(array_diff(array_keys($columns), array('id', 'updated_at', 'saved_lang')), function ($column) { return strpos($column, '__') === false; }));
 		$lang = self::language();
-		if ($lang === false) return self::fail('This page is in '.i18n::current().': reload it');
+		if ($lang === false) return self::wrong_language();
 		$id = (int)util::post('id');
 		$write = $lang !== null && !i18n::is_default($lang) && $id ? $lang : null;
 		$every = $record ? cms_records::translated_fields($record) : cms_types::translated($type);
@@ -400,7 +409,7 @@ class cms_editor {
 			$copy = (int)util::post('copy');
 			if ($copy) {
 				$from = cms_store::get_item($type, $copy);
-				if (!$from) return self::fail('No such item', 404);
+				if (!$from) return self::fail('No such item', 404, 'no_such_item');
 				foreach (array('id', 'updated_at', 'slug', 'created_at', 'owner', 'saved_lang') as $own) unset($from[$own]);
 				$fields = $from + $fields;
 			}
@@ -450,7 +459,7 @@ class cms_editor {
 		} catch (cms_type_error $e) {
 			return self::mistyped($e);
 		} catch (Exception $e) {
-			return self::fail($e->getMessage());
+			return self::not_saved($e);
 		} catch (Throwable $e) {
 			return self::broken($e);
 		}
@@ -461,10 +470,10 @@ class cms_editor {
 		cms::require_admin(true);
 		if ($bad = self::one_value()) return $bad;
 		$collection = (string)util::post('collection');
-		if (!preg_match('/^[a-z][a-z0-9_]*$/', $collection) || cms::reserved($collection, 'collection')) return self::fail('Unknown collection');
+		if (!preg_match('/^[a-z][a-z0-9_]*$/', $collection) || cms::reserved($collection, 'collection')) return self::fail('Unknown collection', 400, 'unknown_collection');
 		$type = cms::collection_type($collection);
 		$item = cms_store::get_item($type, (int)util::post('id'));
-		if (!$item) return self::fail('No such item', 404);
+		if (!$item) return self::fail('No such item', 404, 'no_such_item');
 		// a record's hidden fields never reach the editor, also on the way out
 		$record = cms_records::info($collection);
 		if ($record) $item = cms_records::shown($record, $item);
@@ -484,7 +493,7 @@ class cms_editor {
 		cms::require_admin(true);
 		if ($bad = self::one_value()) return $bad;
 		$collection = (string)util::post('collection');
-		if (!cms_records::info($collection)) return self::fail('Unknown collection');
+		if (!cms_records::info($collection)) return self::fail('Unknown collection', 400, 'unknown_collection');
 		$input = util::post('input');
 		try {
 			$item = cms_records::act($collection, (int)util::post('id'), (string)util::post('action'), is_array($input) ? $input : array());
@@ -494,7 +503,7 @@ class cms_editor {
 		} catch (cms_type_error $e) {
 			return self::mistyped($e);
 		} catch (Exception $e) {
-			return self::fail($e->getMessage());
+			return self::not_saved($e);
 		} catch (Throwable $e) {
 			return self::broken($e);
 		}
@@ -506,8 +515,8 @@ class cms_editor {
 		cms::require_admin(true);
 		if ($bad = self::one_value()) return $bad;
 		$type = self::page_type();
-		if (!$type) return self::fail('Unknown page');
-		if (self::language() === false) return self::fail('This page is in '.i18n::current().': reload it');
+		if (!$type) return self::fail('Unknown page', 400, 'unknown_page');
+		if (self::language() === false) return self::wrong_language();
 		$revisions = cms_store::page_history($type, 30);
 		// times with their offset, so the browser can say "5 minutes ago"
 		foreach ($revisions as $key => $revision) {
@@ -524,9 +533,9 @@ class cms_editor {
 		cms::require_admin(true);
 		if ($bad = self::one_value()) return $bad;
 		$type = self::page_type();
-		if (!$type) return self::fail('Unknown page');
+		if (!$type) return self::fail('Unknown page', 400, 'unknown_page');
 		$old = R::findOne($type, ' id = ? ', array((int)util::post('revision')));
-		if (!$old) return self::fail('No such revision', 404);
+		if (!$old) return self::fail('No such revision', 404, 'no_such_revision');
 		$values = $old->export();
 		foreach (cms_store::$system_fields as $field) unset($values[$field]);
 		$slug = $type === 'sitepage' ? 'site' : (string)util::post('slug');
@@ -537,7 +546,7 @@ class cms_editor {
 		} catch (cms_type_error $e) {
 			return self::mistyped($e);
 		} catch (Exception $e) {
-			return self::fail($e->getMessage());
+			return self::not_saved($e);
 		} catch (Throwable $e) {
 			return self::broken($e);
 		}

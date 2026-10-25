@@ -8236,7 +8236,8 @@ test('P0.C: the editor\'s refusals are names it words, in Romanian too, and a si
 	try {
 		p0c_settings("config::set('languages')->to(array('en', 'ro'));", function () use ($base, $root, $db) {
 			$editor = p0c_login($base, 'editor');
-			$page = http('GET', "$base/zzp0c_menu?lang=ro", null, array("Cookie: $editor"))[1];
+			// the builder's header asks for the Romanian words (development)
+			$page = http('GET', "$base/zzp0c_menu", null, array("Cookie: $editor", 'Raster-Editor-Language: ro'))[1];
 			check(preg_match('#<script id="raster-editor-config" type="application/json">(.*?)</script>#s', $page, $m), 'the editor: '.$page);
 			$config = json_decode($m[1], true);
 			$post = function ($endpoint, $fields) use ($base, $editor, $config) {
@@ -10399,7 +10400,7 @@ function p2b_login($base, $email = 'zzp2b-editor@example.test') {
 // the editor's config on a page, decoded, and the raw JSON
 function p2b_config($url, $cookie, $headers = array()) {
 	$page = http('GET', $url, null, array_merge(array("Cookie: $cookie"), $headers))[1];
-	check(preg_match('#<script id="raster-editor-config" type="application/json">(.*?)</script>#s', (string)$page, $m) === 1, 'no editor: '.$page);
+	check(preg_match('#<script id="raster-editor-config" type="application/json">(.*?)</script>#s', (string)$page, $m) === 1, "no editor on $url: ".$page);
 	return array(json_decode($m[1], true), $m[1], $page);
 }
 // the mark of a page field in a config
@@ -10648,43 +10649,210 @@ test('P2.B: an editor on /ro/ saves Romanian, /about keeps English, and an empty
 	}
 });
 
-test('P2.B: the editor\'s own words: an English editor on /ro/ sees English, the browser\'s otherwise, and the dock\'s choice wins', function () {
+test('P2.B: the editor\'s words: the builder\'s header in development, the base language otherwise, never the browser', function () {
+	cms_store::connect();
 	$site_last = (int)R::getCell('SELECT MAX(id) FROM sitepage');
 	try {
 		p2b_site(function ($dir) {
 			p2b_server($dir, function ($base) {
 				$editor = p2b_login($base, 'zzp2b-words@example.test');
-				// English browser on the Romanian page: English words, Romanian content
-				list($config) = p2b_config("$base/ro/zzp2babout", $editor, array('Accept-Language: en-GB,en;q=0.9'));
-				same(array('ro', 'en'), array($config['lang'], $config['editor_lang']));
-				same(array(), (array)$config['strings'], 'English is editor.js\'s own');
-				check(in_array('ro', $config['editor_languages'], true) && $config['editor_languages'][0] === 'en', json_encode($config['editor_languages']));
-				// a Romanian browser on the English page: Romanian words
-				list($config) = p2b_config("$base/zzp2babout", $editor, array('Accept-Language: ro-RO,ro;q=0.9'));
-				same(array('en', 'ro'), array($config['lang'], $config['editor_lang']));
-				same('Editează', $config['strings']['edit']);
-				same('editezi: {lang}', $config['strings']['editing_lang']);
-				// a language the editor has no words in falls back to the default's
-				list($config) = p2b_config("$base/ro/zzp2babout", $editor, array('Accept-Language: de'));
-				same('en', $config['editor_lang']);
-				// the dock's picker: the account's choice wins over the browser
-				$post = function ($fields, $headers = array()) use ($base, $editor, $config) {
-					list($status, $body) = form_post("$base/ro/api/cms/editor_set_lang", $fields, array_merge(array("Cookie: $editor"), $headers));
-					return array($status, json_decode($body, true));
-				};
-				same(403, $post(array('lang' => 'ro'))[0], 'the session token');
-				same(array(400, "The editor has no words in 'xx'"), array($post(array('lang' => 'xx', 'csrf' => $config['csrf']))[0], $post(array('lang' => 'xx', 'csrf' => $config['csrf']))[1]['error']));
-				same(array(200, array('editor_lang' => 'ro')), $post(array('lang' => 'RO', 'csrf' => $config['csrf'])));
-				same('ro', R::getCell('SELECT editor_lang FROM user WHERE email = ?', array('zzp2b-words@example.test')));
-				list($config) = p2b_config("$base/ro/zzp2babout", $editor, array('Accept-Language: en'));
-				same(array('ro', 'Editează'), array($config['editor_lang'], $config['strings']['edit']));
-				// '' follows the browser again
-				same(200, $post(array('lang' => '', 'csrf' => $config['csrf']))[0]);
-				same('en', p2b_config("$base/ro/zzp2babout", $editor, array('Accept-Language: en'))[0]['editor_lang']);
+				// a Romanian browser on the Romanian page of an English-first site: English words
+				list($c) = p2b_config("$base/ro/zzp2babout", $editor, array('Accept-Language: ro-RO,ro;q=0.9'));
+				same(array('ro', 'en', array()), array($c['lang'], $c['editor_lang'], (array)$c['strings']), 'the browser is not asked');
+				check(!array_key_exists('editor_languages', $c), 'no picker');
+				// nor the lang cookie
+				list($c) = p2b_config("$base/zzp2babout", "$editor; lang=ro");
+				same('en', $c['editor_lang'], 'the cookie is not asked');
+				// the builder's header, in development
+				list($c) = p2b_config("$base/zzp2babout", $editor, array('Raster-Editor-Language: RO'));
+				same(array('en', 'ro', 'Editează', 'editezi: {lang}'), array($c['lang'], $c['editor_lang'], $c['strings']['edit'], $c['strings']['editing_lang']));
+				foreach (array('../../x', 'fr;q=1', str_repeat('a', 300), 'ro-RO-x') as $junk) {
+					same('en', p2b_config("$base/zzp2babout", $editor, array("Raster-Editor-Language: $junk"))[0]['editor_lang'], 'junk is ignored: '.$junk);
+				}
+				// a language the editor has no words in yet: English words, its dates
+				list($c) = p2b_config("$base/zzp2babout", $editor, array('Raster-Editor-Language: ko'));
+				same(array('ko', array()), array($c['editor_lang'], (array)$c['strings']), 'no words yet: English');
+				list($c) = p2b_config("$base/zzp2babout", $editor, array('Raster-Editor-Language: ja'));
+				same(array('ja', 'E で編集 · Esc で終了 · ⌘Z で元に戻す'), array($c['editor_lang'], $c['strings']['keyboard']), 'a shipped dictionary');
+				// the per-person choice is gone
+				list($status) = form_post("$base/api/cms/editor_set_lang", array('lang' => 'ro', 'csrf' => $c['csrf']), array("Cookie: $editor"));
+				same(404, $status, 'no editor_set_lang');
+				check(!array_key_exists('editor_lang', authentication::schema()['user']), 'no editor_lang column declared');
 			});
+			// production (a published site, a public preview): the header is ignored
+			p2b_server($dir, function ($base) {
+				$editor = p2b_login($base, 'zzp2b-words@example.test');
+				list($c) = p2b_config("$base/zzp2babout", $editor, array('Raster-Editor-Language: ro'));
+				same(array('en', array()), array($c['editor_lang'], (array)$c['strings']), 'production: the base language');
+			}, array('RASTER_ENV' => 'production', 'RASTER_URL' => 'http://127.0.0.1:{port}/'));
 		});
+		// a Romanian-first site: Romanian words on its English page too
+		p2b_site(function ($dir) {
+			p2b_server($dir, function ($base) {
+				$editor = p2b_login($base, 'zzp2b-words@example.test');
+				list($c) = p2b_config("$base/en/zzp2babout", $editor, array('Accept-Language: en'));
+				same(array('en', 'ro', 'Editează'), array($c['lang'], $c['editor_lang'], $c['strings']['edit']));
+			});
+		}, "config::set('languages')->to(array('ro', 'en'));\nconfig::set('multilingual')->to(true);");
+		// a base language with no dictionary: English words, its code for dates
+		p2b_site(function ($dir) {
+			p2b_server($dir, function ($base) {
+				$editor = p2b_login($base, 'zzp2b-words@example.test');
+				list($c) = p2b_config("$base/zzp2babout", $editor);
+				same(array('sv', array()), array($c['editor_lang'], (array)$c['strings']));
+			});
+		}, "config::set('languages')->to(array('sv', 'en'));\nconfig::set('multilingual')->to(true);");
 	} finally {
 		p2b_clean($site_last);
+	}
+});
+
+test('P0.C: the editor\'s own refusals are codes too: unknown_field, wrong_language, no_such_item, not_saved with its detail', function () {
+	cms_store::connect();
+	$site_last = (int)R::getCell('SELECT MAX(id) FROM sitepage');
+	try {
+		p2b_site(function ($dir) {
+			file_put_contents("$dir/application/views/default/zzp2bcodes.html", '<!doctype html><html><head><title>Codes</title></head><body>'
+				.'<!-- render.cms.zzp2bcodes --><p><!-- print.name -->Tart<!-- /print.name --></p><!-- /render.cms.zzp2bcodes --></body></html>');
+			p2b_server($dir, function ($base) {
+				$editor = p2b_login($base, 'zzp2b-codes@example.test');
+				list($config) = p2b_config("$base/ro/zzp2babout", $editor);
+				same(200, http('GET', "$base/zzp2bcodes", null, array("Cookie: $editor"))[0]);
+				$post = function ($endpoint, $fields, $lang = 'ro') use ($base, $editor, $config) {
+					$url = $lang === 'ro' ? "$base/ro/api/cms/$endpoint" : "$base/api/cms/$endpoint";
+					list($status, $body) = form_post($url, $fields + array('csrf' => $config['csrf']), array("Cookie: $editor"));
+					return array('status' => $status) + (array)json_decode($body, true);
+				};
+				$page = array('type' => $config['page']['type'], 'slug' => $config['page']['slug']);
+				// the English sentence stays for API callers; problems is what the editor words
+				same(array('status' => 400, 'error' => "Unknown field 'zz_nope'", 'problems' => array('unknown_field'), 'field' => 'zz_nope'),
+					$post('editor_save_field', $page + array('field' => 'zz_nope', 'value' => 'x', 'lang' => 'ro')));
+				same(array('status' => 400, 'error' => 'This page is in ro: reload it', 'problems' => array('wrong_language'), 'lang' => 'ro'),
+					$post('editor_save_field', $page + array('field' => 'zzp2b_headline', 'value' => 'x', 'lang' => 'en')));
+				same(array('status' => 400, 'error' => "'value' takes one value", 'problems' => array('one_value'), 'field' => 'value'),
+					$post('editor_save_field', $page + array('field' => 'zzp2b_headline', 'value' => array('x'), 'lang' => 'ro')));
+				same(array('status' => 400, 'error' => 'Unknown page', 'problems' => array('unknown_page')),
+					$post('editor_history', array('type' => 'zznopepage', 'lang' => 'ro')));
+				same(array('status' => 404, 'error' => 'No such revision', 'problems' => array('no_such_revision')),
+					$post('editor_restore', $page + array('revision' => 999999)));
+				same(array('status' => 400, 'error' => 'Unknown collection', 'problems' => array('unknown_collection')),
+					$post('editor_delete_item', array('collection' => 'Bad!', 'id' => 1)));
+				same(array('status' => 404, 'error' => 'No such item', 'problems' => array('no_such_item')),
+					$post('editor_delete_item', array('collection' => 'zzp2bcodes', 'id' => 999999)));
+				// a store's own refusal: not_saved, and its sentence as the detail
+				$json = $post('editor_save_item', array('collection' => 'zzp2bcodes', 'id' => 0, 'fields' => array('zz_nope' => 'x'), 'lang' => 'en'), 'en');
+				same(array(400, array('not_saved')), array($json['status'], $json['problems']), json_encode($json));
+				check(strpos($json['error'], "Unknown field 'zz_nope'") === 0 && $json['detail'] === $json['error'], json_encode($json));
+			});
+		});
+		// each has its words in editor.js, and problem() fills {field} and {lang}
+		$js = file_get_contents(BASE.'models/cms/editor/editor.js');
+		foreach (array('one_value', 'unknown_page', 'unknown_field', 'wrong_language', 'unknown_collection', 'no_such_item', 'no_such_revision', 'broken', 'not_saved') as $name) {
+			check(strpos($js, "problem_$name:") !== false, "editor.js words problem_$name");
+		}
+		check(strpos($js, "problem(name, json)") !== false && strpos($js, 'json.detail') !== false, 'problem() takes the answer');
+	} finally {
+		@unlink(p2b_copy().'/application/views/default/zzp2bcodes.html');
+		p2b_clean($site_last);
+		R::exec('DROP TABLE IF EXISTS zzp2bcodesdata');
+		R::exec('DROP TABLE IF EXISTS zzp2bcodespage');
+		cms_store::forget();
+	}
+});
+
+test('P0.C: the fallback login page is in the content language: /ro/login Romanian on a multilingual site, the base language elsewhere, never the browser', function () {
+	cms_store::connect();
+	$site_last = (int)R::getCell('SELECT MAX(id) FROM sitepage');
+	$dir = p2b_copy();
+	$view = "$dir/application/views/default/login.html";
+	$kept = file_get_contents($view);
+	$words = "$dir/application/i18n/ro/raster_editor.php";
+	$made = !is_dir(dirname($words));
+	unlink($view);
+	try {
+		p2b_site(function ($dir) {
+			p2b_server($dir, function ($base) {
+				p2b_login($base, 'zzp2b-login@example.test');
+				list($status, $page) = http('GET', "$base/ro/login", null, array('Accept-Language: en'));
+				same(200, $status, $page);
+				foreach (array('<html lang="ro">', '<title>Autentificare Raster CMS</title>', 'Intră în cont ca să editezi site-ul.', '<span>Parolă:</span>', 'placeholder="Email sau nume de utilizator"', 'value="Intră în cont"') as $has) {
+					check(strpos($page, $has) !== false, "/ro/login has $has: $page");
+				}
+				check(strpos($page, 'Log in') === false, 'no English on /ro/login');
+				// a refusal's words too
+				list(, $page) = form_post("$base/ro/login", array('raster_form' => 'authentication.login', 'login' => 'zzp2b-login@example.test', 'password' => 'wrong'));
+				check(strpos($page, 'Utilizator sau parolă greșită.') !== false, $page);
+				// the default language's address, a Romanian browser: English
+				list(, $page) = http('GET', "$base/login", null, array('Accept-Language: ro-RO,ro;q=0.9'));
+				foreach (array('<html lang="en">', '<title>Raster CMS Login</title>', 'Log in to edit this site.', 'placeholder="Email or username"', 'value="Log in"') as $has) {
+					check(strpos($page, $has) !== false, "/login has $has: $page");
+				}
+			});
+		});
+		// one language set, Romanian first, without multilingual: Romanian
+		// whatever ?lang= or the browser say; a site's raster_editor.php wins
+		@mkdir(dirname($words), 0777, true);
+		file_put_contents($words, "<?php\nreturn array('login_heading' => 'Zz Cafeneaua');\n");
+		p2b_site(function ($dir) {
+			p2b_server($dir, function ($base) {
+				list(, $page) = http('GET', "$base/login?lang=en", null, array('Accept-Language: en'));
+				foreach (array('<html lang="ro">', '<title>Autentificare Raster CMS</title>', '<h1>Zz Cafeneaua<span>') as $has) {
+					check(strpos($page, $has) !== false, "has $has: $page");
+				}
+			});
+		}, "config::set('languages')->to(array('ro', 'en'));");
+		// no languages: English
+		p2b_site(function ($dir) {
+			p2b_server($dir, function ($base) {
+				list(, $page) = http('GET', "$base/login", null, array('Accept-Language: ro'));
+				check(strpos($page, '<html lang="en">') !== false && strpos($page, '<title>Raster CMS Login</title>') !== false, $page);
+			});
+		}, '');
+		// the view holds no English of its own
+		$system = file_get_contents(BASE.'views/cms_admin/login.html');
+		foreach (array('Log in', 'Username', 'Password', 'Wrong username') as $english) check(strpos($system, $english) === false, "login.html: $english");
+	} finally {
+		file_put_contents($view, $kept);
+		@unlink($words);
+		if ($made) @rmdir(dirname($words));
+		p2b_clean($site_last);
+	}
+});
+
+// the editor's English: T's keys and words in editor.js, and LOGIN_WORDS
+function editor_english() {
+	preg_match('/\bvar T = \{(.*?)\n\t\};/s', file_get_contents(BASE.'models/cms/editor/editor.js'), $block);
+	preg_match_all("/\\b([a-z_]+): '((?:[^'\\\\]|\\\\.)*)'/", $block[1], $pairs, PREG_SET_ORDER);
+	$words = array();
+	foreach ($pairs as $pair) $words[$pair[1]] = stripslashes($pair[2]);
+	return $words + cms_editor::LOGIN_WORDS;
+}
+function editor_placeholders($words) {
+	preg_match_all('/\{[a-z_]+\}/', (string)$words, $m);
+	$found = array_unique($m[0]);
+	sort($found);
+	return $found;
+}
+
+test('the editor\'s dictionaries: every key is one editor.js or LOGIN_WORDS has, every placeholder is kept, and each file is complete', function () {
+	$english = editor_english();
+	check(count($english) > 100 && isset($english['hello'], $english['problem_not_saved'], $english['login_submit']), 'read '.count($english).' keys');
+	$files = glob(BASE.'models/cms/editor/lang/*.php');
+	$codes = array_map(function ($file) { return basename($file, '.php'); }, $files);
+	sort($codes);
+	same(array('bg', 'de', 'el', 'es', 'fr', 'hi', 'hu', 'it', 'ja', 'nl', 'pl', 'pt', 'ro', 'tr', 'zh'), $codes);
+	foreach ($files as $file) {
+		$code = basename($file, '.php');
+		$words = include $file;
+		check(is_array($words), "$code.php returns an array");
+		check(strpos(file_get_contents($file), "// The in-page editor in ") !== false, "$code.php: the header line");
+		$extra = array_diff_key($words, $english);
+		$missing = array_diff_key($english, $words);
+		same(array(), array_keys($extra), "$code.php: keys editor.js doesn't have");
+		same(array(), array_keys($missing), "$code.php: keys it lacks");
+		foreach (array_intersect_key($words, $english) as $key => $translated) {
+			same(editor_placeholders($english[$key]), editor_placeholders($translated), "$code.php $key keeps its placeholders");
+		}
 	}
 });
 
@@ -10696,7 +10864,8 @@ test('P2.B: off, the editor\'s config JSON is byte for byte what it was, and sav
 	try {
 		$editor = p2b_login($base, 'zzp2b-off@example.test');
 		// the 2.2.45 config: these keys, in this order, and nothing else
-		$keys = array('api', 'csrf', 'page', 'user', 'marks', 'admin', 'strings', 'lang', 'now');
+		// (2.2.53 adds editor_lang on every site: the editor's dates follow it)
+		$keys = array('api', 'csrf', 'page', 'user', 'marks', 'admin', 'strings', 'lang', 'now', 'editor_lang');
 		$mark_keys = array('kind', 'type', 'slug', 'field', 'value', 'default', 'rich', 'attr');
 		$same = function ($raw) use ($keys, $mark_keys) {
 			$config = json_decode($raw);
@@ -10713,12 +10882,16 @@ test('P2.B: off, the editor\'s config JSON is byte for byte what it was, and sav
 		};
 		// no languages
 		$config = $same(p2b_config("$base/zzp2boff", $editor, array('Accept-Language: ro'))[1]);
-		same(array('', array()), array($config['lang'], $config['strings']));
-		// template-only languages: ?lang= picks the editor's words, as before
+		same(array('', array(), 'en'), array($config['lang'], $config['strings'], $config['editor_lang']));
+		// the header, not the browser, picks the editor's language, its dates too
+		same('fr', $same(p2b_config("$base/zzp2boff", $editor, array('Raster-Editor-Language: fr', 'Accept-Language: ro'))[1])['editor_lang']);
+		// one language or none, the builder's header still words the controls
+		same((include BASE.'models/cms/editor/lang/ro.php'), $same(p2b_config("$base/zzp2boff", $editor, array('Raster-Editor-Language: ro'))[1])['strings']);
+		// template-only languages: ?lang= picks the page's language, and the
+		// editor's words stay the base language's
 		p0c_settings("config::set('languages')->to(array('en', 'ro'));", function () use ($base, $editor, $same) {
 			$config = $same(p2b_config("$base/zzp2boff?lang=ro", $editor)[1]);
-			same('ro', $config['lang']);
-			same((include BASE.'models/cms/editor/lang/ro.php'), $config['strings']);
+			same(array('ro', array(), 'en'), array($config['lang'], $config['strings'], $config['editor_lang']), 'the page in Romanian, the controls and their dates in the base language');
 			// a save is what it was: no saved_lang, no lang in the event, a stray lang ignored
 			event::bind('cms.page_saved')->to(null, 'p2b_off_saved');
 			list($status, $body) = form_post("$base/api/cms/editor_save_field", array('type' => 'zzp2boffpage', 'slug' => '/zzp2boff', 'field' => 'zzp2b_off', 'value' => 'Saved', 'lang' => 'xx', 'csrf' => $config['csrf']), array("Cookie: $editor"));
@@ -10729,17 +10902,10 @@ test('P2.B: off, the editor\'s config JSON is byte for byte what it was, and sav
 			same('Again', R::getCell('SELECT zzp2b_off FROM zzp2boffpage ORDER BY id DESC LIMIT 1'), 'a language is ignored off');
 			same(array('type', 'slug', 'changed', 'fields'), array_keys($GLOBALS['p2b_events'][0]));
 			same(array('revision', 'updated_at', 'fields'), array_keys(cms_store::page_history('zzp2boffpage')[0]));
-			// editor_set_lang is a multilingual site's: off it changes nothing
-			$had = array_key_exists('editor_lang', cms_store::columns('user'));
-			list($status, $body) = form_post("$base/api/cms/editor_set_lang", array('lang' => 'ro', 'csrf' => $config['csrf']), array("Cookie: $editor"));
-			same(array(422, array('not_multilingual')), array($status, json_decode($body, true)['problems']), $body);
-			if (!$had) check(!array_key_exists('editor_lang', cms_store::columns('user')), 'no editor_lang column');
-			else same('', (string)R::getCell('SELECT editor_lang FROM user WHERE email = ?', array('zzp2b-off@example.test')), 'nothing stored');
-			// the account's editor_lang is a multilingual site's column only:
-			// off, schema --check asks nothing new of an existing database
+			// the account has no editor_lang column, on or off
 			check(!array_key_exists('editor_lang', authentication::schema()['user']), 'off: no editor_lang');
 			with_settings(array('languages' => array('en', 'ro'), 'multilingual' => true), function () {
-				check(array_key_exists('editor_lang', authentication::schema()['user']), 'on: editor_lang');
+				check(!array_key_exists('editor_lang', authentication::schema()['user']), 'on: no editor_lang either');
 			});
 		});
 	} finally {

@@ -1263,6 +1263,13 @@ bundled model declares none of its types, and `lint` warns.
   `no_database` (none is configured for this environment) and `no_users`
   (make one with `php bin/raster user`). The starter's `login.html` words
   both, and `raster upgrade` adds them to an older view that has the tag.
+- A theme with no `login.html` gets Raster's own,
+  `system/views/cms_admin/login.html`. Its words come from the editor's
+  dictionaries (`print.cms.login_word('login_title')`; the keys are
+  `cms_editor::LOGIN_WORDS`, English, and a site's `raster_editor.php`
+  rewords them), in the content's language, `print.cms.login_lang`, also
+  its `<html lang>`: the address's on a multilingual site (`/ro/login`
+  is Romanian), else the base language, else English. Never the browser.
 - Five wrong passwords lock an account for 15 minutes, at the login and
   in the account form's `current_password` alike. Once 15 minutes have
   passed since the last wrong one, counting starts again from zero. Each
@@ -2663,14 +2670,16 @@ of lists and filter pages come along; drafts and the editor don't.
     `#raster-editor-config`), and `system/models/cms/editor/editor.js` saves
     through `POST /api/cms/editor_save_field`, `editor_save_item`,
     `editor_delete_item`, `editor_history`, `editor_restore`,
-    `editor_upload` and `editor_set_lang`, with the session token. They use the same store as MCP,
+    `editor_upload`, with the session token. They use the same store as MCP,
     so revisions, field checks and events are the same. A field name with
     `__` (a language's column) is refused.
   - **On a multilingual site** the editor edits the page's language, the
     one its address names: on `/ro/about` it saves the Romanian (through
     `/ro/api/cms/…`, posting `lang`, which must be the page's), and
-    `/about` keeps its English. The dock says so ("editing: RO (falls back
-    to EN)"); a field with no Romanian yet shows the English and is
+    `/about` keeps its English. The dock says so with a small badge, `RO`,
+    whose title is "editing: RO (falls back to EN)" (none on the default
+    language's pages, nor on a phone, where the dock keeps its room for
+    buttons); a field with no Romanian yet shows the English and is
     marked, and the Page panel says which fields are not translated yet
     and which are the same in every language (a photo saved on `/ro/` is
     the photo everywhere). An untranslated field holds nothing in that
@@ -2681,24 +2690,26 @@ of lists and filter pages come along; drafts and the editor don't.
     that language is refused (`translation_columns_missing`, worded "run
     php bin/raster schema --apply") instead of landing in the default
     language's column. The config's `lang` is the page's language, and it adds
-    `editor_lang`, `languages` and `editor_languages`; off it is as it
-    always was.
+    `languages`. On every site the config has `editor_lang`, the
+    language of the editor's words and dates (below).
   - Its colours and fonts come from the page (body text, background, the
     first button's colour as the accent). To choose them, set
     `--raster-accent`, `--raster-on-accent`, `--raster-font`,
     `--raster-heading-font`, `--raster-bg`, `--raster-fg`,
     `--raster-surface` or `--raster-radius` on `:root`.
   - Its words are in English; `system/models/cms/editor/lang/<lang>.php`
-    translates them (Romanian is included), and
+    translates them (`fr de es it pt nl ro hu pl bg el tr ja hi zh` are included; `tests/run.php` checks each has every key and keeps every `{placeholder}`), and
     `application/i18n/<lang>/raster_editor.php` overrides any of them.
-    Which language: without `multilingual`, the page's (`?lang=`, as
-    detected). Multilingual, the editor's own, apart from the page's: the
-    one the person chose with the dock's picker (kept on the account,
-    `user.editor_lang`, which `schema --apply` adds on a multilingual
-    site), else the first of
-    the browser's languages it has words for, else the site's default
-    language, else English. So an English owner fixing `/ro/` gets English
-    words.
+    **The editor's own language** is one rule, on every site, multilingual
+    or not, apart from the page's (`cms_editor::editor_lang()`): in
+    development, the builder's `Raster-Editor-Language` header (a code like
+    `fr` or `pt-br`; anything else is ignored); else the site's base
+    language, `i18n::default_language()`; else English. Nothing reads
+    `Accept-Language`, `?lang=` or the `lang` cookie for it, and there is no
+    per-person choice or picker (2.2.52's `editor_set_lang` and
+    `user.editor_lang` are gone; an existing column stays, unused). A code
+    with no dictionary gets English words and its own dates. So an English
+    owner fixing `/ro/` gets English words.
   - What the server refuses comes back as names, `problems` in the
     answer, and the editor words each as `problem_<name>` (a record's
     `check()` included): a value that isn't of its field's type is
@@ -2710,7 +2721,13 @@ of lists and filter pages come along; drafts and the editor don't.
     (it didn't arrive whole), `upload_not_a_picture` (also for a file the
     browser can't show) or `upload_not_stored`; `form_expired` (the session
     token is stale: reload) and `not_allowed` (not logged in as staff) come
-    from the 403 every refused post gets on `/api`. Reword any of them in
+    from the 403 every refused post gets on `/api`. The editor's own
+    refusals keep their English `error` for API callers and add a name:
+    `one_value` and `unknown_field` (with `field`), `unknown_page`,
+    `unknown_collection`, `no_such_item`, `no_such_revision`,
+    `wrong_language` (with `lang`, the address's, worded as `{lang}`),
+    `broken`, and `not_saved` (a store's own exception, its sentence in
+    `detail`, which the editor shows after the words). Reword any of them in
     `raster_editor.php`: `'problem_upload_too_big' => 'Pictures up to 12 MB, please'`.
 - **MCP** is available in two ways:
   - over stdio: `php bin/raster mcp`, already set up in `.mcp.json`. A PHP
