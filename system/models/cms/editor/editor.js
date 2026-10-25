@@ -81,8 +81,8 @@
 		name = String(name || '').replace(/^site_/, '').replace(/_/g, ' ');
 		return name.charAt(0).toUpperCase() + name.slice(1);
 	}
-	// dates read in the editor's own language (multilingual: editor_lang)
-	var lang = C.editor_lang || C.lang || document.documentElement.lang || undefined;
+	// dates read in the editor's own language, never the page's or the browser's
+	var lang = C.editor_lang || undefined;
 	// a language code as the dock shows it: RO, PT-BR
 	function code(language) { return String(language || '').toUpperCase(); }
 	// the content language a save is in, posted with it (multilingual only)

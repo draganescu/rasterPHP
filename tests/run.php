@@ -10864,7 +10864,8 @@ test('P2.B: off, the editor\'s config JSON is byte for byte what it was, and sav
 	try {
 		$editor = p2b_login($base, 'zzp2b-off@example.test');
 		// the 2.2.45 config: these keys, in this order, and nothing else
-		$keys = array('api', 'csrf', 'page', 'user', 'marks', 'admin', 'strings', 'lang', 'now');
+		// (2.2.53 adds editor_lang on every site: the editor's dates follow it)
+		$keys = array('api', 'csrf', 'page', 'user', 'marks', 'admin', 'strings', 'lang', 'now', 'editor_lang');
 		$mark_keys = array('kind', 'type', 'slug', 'field', 'value', 'default', 'rich', 'attr');
 		$same = function ($raw) use ($keys, $mark_keys) {
 			$config = json_decode($raw);
@@ -10881,15 +10882,16 @@ test('P2.B: off, the editor\'s config JSON is byte for byte what it was, and sav
 		};
 		// no languages
 		$config = $same(p2b_config("$base/zzp2boff", $editor, array('Accept-Language: ro'))[1]);
-		same(array('', array()), array($config['lang'], $config['strings']));
+		same(array('', array(), 'en'), array($config['lang'], $config['strings'], $config['editor_lang']));
+		// the header, not the browser, picks the editor's language, its dates too
+		same('fr', $same(p2b_config("$base/zzp2boff", $editor, array('Raster-Editor-Language: fr', 'Accept-Language: ro'))[1])['editor_lang']);
 		// one language or none, the builder's header still words the controls
 		same((include BASE.'models/cms/editor/lang/ro.php'), $same(p2b_config("$base/zzp2boff", $editor, array('Raster-Editor-Language: ro'))[1])['strings']);
 		// template-only languages: ?lang= picks the page's language, and the
 		// editor's words stay the base language's
 		p0c_settings("config::set('languages')->to(array('en', 'ro'));", function () use ($base, $editor, $same) {
 			$config = $same(p2b_config("$base/zzp2boff?lang=ro", $editor)[1]);
-			same('ro', $config['lang']);
-			same(array(), $config['strings']);
+			same(array('ro', array(), 'en'), array($config['lang'], $config['strings'], $config['editor_lang']), 'the page in Romanian, the controls and their dates in the base language');
 			// a save is what it was: no saved_lang, no lang in the event, a stray lang ignored
 			event::bind('cms.page_saved')->to(null, 'p2b_off_saved');
 			list($status, $body) = form_post("$base/api/cms/editor_save_field", array('type' => 'zzp2boffpage', 'slug' => '/zzp2boff', 'field' => 'zzp2b_off', 'value' => 'Saved', 'lang' => 'xx', 'csrf' => $config['csrf']), array("Cookie: $editor"));

@@ -94,13 +94,12 @@ class cms_editor {
 			'lang' => class_exists('i18n') ? i18n::detect() : '',
 			// the site's clock, in its time zone: scheduled items go live by it
 			'now' => date('Y-m-d H:i:s'),
+			// the language of the editor's own words and dates, on every site
+			// (lang is the page's)
+			'editor_lang' => self::editor_lang(),
 		);
-		// multilingual: lang is the page's language, the one the editor
-		// writes; its own words are in editor_lang
-		if (class_exists('i18n') && i18n::enabled()) {
-			$config['editor_lang'] = self::editor_lang();
-			$config['languages'] = i18n::available();
-		}
+		// multilingual: lang is the page's language, the one the editor writes
+		if (class_exists('i18n') && i18n::enabled()) $config['languages'] = i18n::available();
 		$script = '<script id="raster-editor-config" type="application/json">'
 			.json_encode($config, JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR)
 			.'</script><script src="'.config::get('link_uri').'api/cms/editor_script?v='.urlencode(self::version()).'" defer></script>';

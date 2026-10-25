@@ -2688,7 +2688,8 @@ of lists and filter pages come along; drafts and the editor don't.
     that language is refused (`translation_columns_missing`, worded "run
     php bin/raster schema --apply") instead of landing in the default
     language's column. The config's `lang` is the page's language, and it adds
-    `editor_lang` and `languages`; off it is as it always was.
+    `languages`. On every site the config has `editor_lang`, the
+    language of the editor's words and dates (below).
   - Its colours and fonts come from the page (body text, background, the
     first button's colour as the accent). To choose them, set
     `--raster-accent`, `--raster-on-accent`, `--raster-font`,
