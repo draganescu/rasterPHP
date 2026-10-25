@@ -150,7 +150,13 @@ class cms_editor {
 	// <app>/i18n/<lang>/raster_editor.php, in the editor's own language
 	// (editor_lang()), whatever the page's is
 	static function strings() {
-		$lang = self::editor_lang();
+		return (object)self::words(self::editor_lang());
+	}
+
+	// a language's words, Raster's and the site's (which win); none for a
+	// code that isn't one
+	static function words($lang) {
+		if (!preg_match('/^[a-z]{2}(-[a-z]{2})?$/', (string)$lang)) return array();
 		$strings = array();
 		foreach (array(BASE.'models/cms/editor/lang/'.$lang.'.php', APPBASE.'i18n/'.$lang.'/raster_editor.php') as $file) {
 			if (is_file($file)) {
@@ -158,7 +164,36 @@ class cms_editor {
 				if (is_array($more)) $strings = array_merge($strings, $more);
 			}
 		}
-		return (object)$strings;
+		return $strings;
+	}
+
+	// ##The fallback login page (system/views/cms_admin/login.html)
+
+	// its words in English; the editor's dictionaries translate them
+	const LOGIN_WORDS = array(
+		'login_title' => 'Raster CMS Login', 'login_heading' => 'Raster CMS', 'login_lede' => 'Log in to edit this site.',
+		'login_no_database' => 'No database is configured for this environment (application/config/db/).',
+		'login_no_users' => 'There are no users yet. Create one from the project folder:',
+		'login_failed' => 'Wrong username or password.', 'login_slow_down' => 'Too many tries from here. Try again in an hour.',
+		'login_username' => 'Username:', 'login_username_hint' => 'Email or username',
+		'login_password' => 'Password:', 'login_password_hint' => 'Your password', 'login_submit' => 'Log in',
+	);
+
+	// Visitors reach it, and nobody is logged in yet, so it is in the
+	// content's language: the address's on a multilingual site (/ro/login),
+	// else the base language, else English. Never i18n::detect(), which
+	// reads the browser.
+	static function login_lang() {
+		$lang = i18n::enabled() ? i18n::current() : i18n::default_language();
+		$lang = strtolower((string)$lang);
+		return preg_match('/^[a-z]{2}(-[a-z]{2})?$/', $lang) ? $lang : 'en';
+	}
+
+	// one of its words, falling back to English
+	static function login_word($key) {
+		static $words = null;
+		if ($words === null) $words = self::words(self::login_lang()) + self::LOGIN_WORDS;
+		return isset($words[$key]) ? (string)$words[$key] : '';
 	}
 
 	// ##The editor's own language (D9)

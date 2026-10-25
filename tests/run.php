@@ -10758,6 +10758,65 @@ test('P0.C: the editor\'s own refusals are codes too: unknown_field, wrong_langu
 	}
 });
 
+test('P0.C: the fallback login page is in the content language: /ro/login Romanian on a multilingual site, the base language elsewhere, never the browser', function () {
+	cms_store::connect();
+	$site_last = (int)R::getCell('SELECT MAX(id) FROM sitepage');
+	$dir = p2b_copy();
+	$view = "$dir/application/views/default/login.html";
+	$kept = file_get_contents($view);
+	$words = "$dir/application/i18n/ro/raster_editor.php";
+	$made = !is_dir(dirname($words));
+	unlink($view);
+	try {
+		p2b_site(function ($dir) {
+			p2b_server($dir, function ($base) {
+				p2b_login($base, 'zzp2b-login@example.test');
+				list($status, $page) = http('GET', "$base/ro/login", null, array('Accept-Language: en'));
+				same(200, $status, $page);
+				foreach (array('<html lang="ro">', '<title>Autentificare Raster CMS</title>', 'Intră în cont ca să editezi site-ul.', '<span>Parolă:</span>', 'placeholder="Email sau nume de utilizator"', 'value="Intră în cont"') as $has) {
+					check(strpos($page, $has) !== false, "/ro/login has $has: $page");
+				}
+				check(strpos($page, 'Log in') === false, 'no English on /ro/login');
+				// a refusal's words too
+				list(, $page) = form_post("$base/ro/login", array('raster_form' => 'authentication.login', 'login' => 'zzp2b-login@example.test', 'password' => 'wrong'));
+				check(strpos($page, 'Utilizator sau parolă greșită.') !== false, $page);
+				// the default language's address, a Romanian browser: English
+				list(, $page) = http('GET', "$base/login", null, array('Accept-Language: ro-RO,ro;q=0.9'));
+				foreach (array('<html lang="en">', '<title>Raster CMS Login</title>', 'Log in to edit this site.', 'placeholder="Email or username"', 'value="Log in"') as $has) {
+					check(strpos($page, $has) !== false, "/login has $has: $page");
+				}
+			});
+		});
+		// one language set, Romanian first, without multilingual: Romanian
+		// whatever ?lang= or the browser say; a site's raster_editor.php wins
+		@mkdir(dirname($words), 0777, true);
+		file_put_contents($words, "<?php\nreturn array('login_heading' => 'Zz Cafeneaua');\n");
+		p2b_site(function ($dir) {
+			p2b_server($dir, function ($base) {
+				list(, $page) = http('GET', "$base/login?lang=en", null, array('Accept-Language: en'));
+				foreach (array('<html lang="ro">', '<title>Autentificare Raster CMS</title>', '<h1>Zz Cafeneaua<span>') as $has) {
+					check(strpos($page, $has) !== false, "has $has: $page");
+				}
+			});
+		}, "config::set('languages')->to(array('ro', 'en'));");
+		// no languages: English
+		p2b_site(function ($dir) {
+			p2b_server($dir, function ($base) {
+				list(, $page) = http('GET', "$base/login", null, array('Accept-Language: ro'));
+				check(strpos($page, '<html lang="en">') !== false && strpos($page, '<title>Raster CMS Login</title>') !== false, $page);
+			});
+		}, '');
+		// the view holds no English of its own
+		$system = file_get_contents(BASE.'views/cms_admin/login.html');
+		foreach (array('Log in', 'Username', 'Password', 'Wrong username') as $english) check(strpos($system, $english) === false, "login.html: $english");
+	} finally {
+		file_put_contents($view, $kept);
+		@unlink($words);
+		if ($made) @rmdir(dirname($words));
+		p2b_clean($site_last);
+	}
+});
+
 test('P2.B: off, the editor\'s config JSON is byte for byte what it was, and saves are what they were', function () use ($base) {
 	$theme = APPBASE.'views/default';
 	test_fixture("$theme/zzp2boff.html");

@@ -724,7 +724,7 @@ class raster_inspector {
 			$this->lint_translation_key($block, $method, $arguments[0], $problems);
 		}
 		if ($ref['model'] === 'cms') {
-			$template_methods = array('style', 'login', 'login_message', 'buttons');
+			$template_methods = array('style', 'login', 'login_message', 'login_word', 'login_lang', 'buttons');
 			// CMS helpers used by templates are written self-closing; a helper name
 			// wrapping default content is a field that would never be stored
 			$reserved = (in_array($method, $info['methods']) && (!in_array($method, $template_methods) || ($block['keyword'] === 'print' && $block['type'] !== 'self')))

@@ -1263,6 +1263,13 @@ bundled model declares none of its types, and `lint` warns.
   `no_database` (none is configured for this environment) and `no_users`
   (make one with `php bin/raster user`). The starter's `login.html` words
   both, and `raster upgrade` adds them to an older view that has the tag.
+- A theme with no `login.html` gets Raster's own,
+  `system/views/cms_admin/login.html`. Its words come from the editor's
+  dictionaries (`print.cms.login_word('login_title')`; the keys are
+  `cms_editor::LOGIN_WORDS`, English, and a site's `raster_editor.php`
+  rewords them), in the content's language, `print.cms.login_lang`, also
+  its `<html lang>`: the address's on a multilingual site (`/ro/login`
+  is Romanian), else the base language, else English. Never the browser.
 - Five wrong passwords lock an account for 15 minutes, at the login and
   in the account form's `current_password` alike. Once 15 minutes have
   passed since the last wrong one, counting starts again from zero. Each

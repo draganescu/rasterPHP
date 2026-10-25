@@ -839,6 +839,17 @@ class cms
 		return '';
 	}
 
+	// the fallback login page's words, print.cms.login_word('login_title'),
+	// in its language (cms_editor::login_lang), escaped for an attribute too
+	function login_word($key) {
+		return htmlspecialchars(cms_editor::login_word((string)$key), ENT_QUOTES, 'UTF-8');
+	}
+
+	// the fallback login page's <html lang>
+	function login_lang() {
+		return cms_editor::login_lang();
+	}
+
 	// editors and admins get the toolbar and see drafts
 	static function loggedin() {
 		return authentication::can('editor');
