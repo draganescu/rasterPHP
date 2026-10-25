@@ -235,6 +235,20 @@ async function multilingual(browser) {
 			await note.click();
 			await page.waitForTimeout(200);
 			check(await inShadow(page, h => !!h.shadowRoot.querySelector('.format button[aria-label=List]')), 'a field in an article offers a list');
+			// moving from one rich field to another keeps the formatting bar:
+			// the first field's leaving must not take down the second's bar
+			const barFor = () => inShadow(page, h => !!h.shadowRoot.querySelector('.float.format'));
+			await page.locator('p.lead[data-raster-field]').click();
+			await page.waitForTimeout(200);
+			check(await barFor(), 'the bar on the lead');
+			await note.click();
+			await page.waitForTimeout(200);
+			check(await barFor(), 'the bar on the note, after the lead');
+			await page.locator('p.lead[data-raster-field]').click();
+			await page.waitForTimeout(200);
+			check(await barFor(), 'the bar on the lead again, after the note');
+			await note.click();
+			await page.waitForTimeout(200);
 			await page.keyboard.press('Control+End');
 			await note.evaluate(el => {
 				const data = new DataTransfer();

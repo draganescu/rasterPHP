@@ -871,7 +871,9 @@
 		if (!field || !editing) return;
 		setTimeout(function () {
 			if (formatBarHasFocus()) return;
-			if (field.kind === 'rich') hideFormatBar();
+			// only this field's bar: moving to another rich field has already
+			// shown that one's (focusin runs before this timeout)
+			if (field.kind === 'rich' && formatBar && formatBar.field === field) hideFormatBar();
 			commit(field);
 		}, 0);
 	});

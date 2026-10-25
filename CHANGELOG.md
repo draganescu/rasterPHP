@@ -15,6 +15,8 @@ What sites need to do: nothing. A site's own `i18n/<lang>/raster_editor.php` sti
 
 **The dock's language label is a badge.** On a translation's page the dock shows the language's code (`RO`), with "editing: RO (falls back to EN)" as its title and label; the default language's pages show none. The sentence took the room of the buttons on a phone.
 
+**The formatting bar stays when you move between rich fields.** Tapping or clicking from one rich field to another left no bar until edit mode was turned off and on: the first field's leaving, which runs a moment later, took down the bar the second had just shown. Now it only hides its own.
+
 **Raster's fallback login page** (used when a theme has no `login.html`) is no longer hard-coded English. Its words come from the editor's dictionaries through `print.cms.login_word('login_…')`, in the content's language: the address's on a multilingual site (`/fr/login` is French), else the base language. Its `<html lang>` says which.
 
 **The editor in 14 more languages:** French, German, Spanish, Italian, Portuguese, Dutch, Hungarian, Polish, Bulgarian, Greek, Turkish, Japanese, Hindi and Chinese (Simplified, `zh`), next to Romanian. An AI agent drafted them; corrections are welcome. A test checks that every dictionary has every key and keeps every `{placeholder}`.
