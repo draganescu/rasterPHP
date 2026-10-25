@@ -789,7 +789,7 @@ class cms
 	// override of it, answers there.
 	static function api() {
 		return array_fill_keys(array('editor_save_field', 'editor_save_item', 'editor_delete_item', 'editor_history', 'editor_restore',
-			'editor_upload', 'editor_action', 'editor_script', 'editor_set_lang', 'style', 'logout'), 'visitor');
+			'editor_upload', 'editor_action', 'editor_script', 'style', 'logout'), 'visitor');
 	}
 
 	// ##The in-page editor (see editor.php): POST /api/cms/editor_… with csrf
@@ -801,7 +801,6 @@ class cms
 	public function editor_upload() { return cms_editor::upload(); }
 	public function editor_action() { return cms_editor::action(); }
 	public function editor_script() { return cms_editor::script(); }
-	public function editor_set_lang() { return cms_editor::set_lang(); }
 
 	function style() {
 		if (!util::param('output', false)) {

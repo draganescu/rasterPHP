@@ -47,10 +47,9 @@
 		problem_upload_not_a_picture: 'That isn’t a picture: use a JPEG, PNG, GIF or WebP', problem_upload_not_stored: 'The picture couldn’t be stored',
 		problem_form_expired: 'This page is out of date: reload it and try again', problem_not_allowed: 'You can’t do that; if you were logged out, log in again',
 		keyboard: 'E to edit · Esc to stop · ⌘Z to undo', fields_changed: '{fields}', page_fields: 'Fields', nothing_here: 'Nothing on this page comes from the CMS.',
-		// a multilingual site: the page's language, and the editor's own
+		// a multilingual site: the page's language
 		editing_lang: 'editing: {lang}', falls_back: '(falls back to {lang})', untranslated: 'not translated yet: shows the {lang} text',
-		every_language: 'the same in every language', editor_language: 'The editor’s language',
-		problem_not_multilingual: 'This site has one language: the editor’s follows the browser',
+		every_language: 'the same in every language',
 		restore_every: 'Restore, every language', restored_every: 'Brought back every language of the version from {when}',
 		problem_translation_columns_missing: 'This language has no place on the site yet: run php bin/raster schema --apply on the server'
 	};
@@ -438,7 +437,6 @@
 			'.pill.primary{background:' + look.accent + ';color:' + look.onAccent + ';font-weight:600}',
 			'.pill.primary:hover{filter:brightness(1.08)}',
 			'.lang{padding:0 8px;color:' + look.muted + ';font-size:12px}',
-			'.langs{font:inherit;font-size:12px;color:inherit;background:none;border:1px solid ' + look.line + ';border-radius:999px;height:28px;padding:0 6px;cursor:pointer}',
 			'.status{display:inline-flex;align-items:center;gap:6px;padding:0 10px;color:' + look.muted + ';font-size:13px;min-width:70px}',
 			'.dot{width:7px;height:7px;border-radius:50%;background:#3aa86b;transition:background .2s}',
 			'.dot.busy{background:' + look.accent + ';animation:blink 1s infinite}',
@@ -548,19 +546,12 @@
 		ui.editButton = h('button', { class: 'pill primary', title: t('keyboard'), onclick: function () { setEditing(!editing); } });
 		ui.pageButton = h('button', { class: 'pill', onclick: function () { closeAdminMenu(); togglePanel(); }, html: icon('layers') + '<span>' + t('page') + '</span>' });
 		ui.adminButton = (C.admin || []).length ? h('button', { class: 'pill', 'aria-haspopup': 'menu', 'aria-expanded': 'false', onclick: toggleAdminMenu, html: icon('grid') + '<span>' + t('admin') + '</span>' }) : null;
-		// multilingual: the page's language, and a picker for the editor's own
+		// multilingual: the page's language
 		if (C.languages) {
 			var base = C.languages[0];
 			ui.lang = h('span', { class: 'lang', text: t('editing_lang', { lang: code(C.lang) }) + (String(C.lang).toLowerCase() === String(base).toLowerCase() ? '' : ' ' + t('falls_back', { lang: code(base) })) });
-			var choices = C.editor_languages || [];
-			if (choices.length > 1) {
-				ui.langs = h('select', { class: 'langs', title: t('editor_language'), 'aria-label': t('editor_language'), onchange: function () {
-					var chosen = ui.langs.value;
-					call('editor_set_lang', { lang: chosen }).then(function () { location.reload(); }, failed);
-				} }, choices.map(function (c) { return h('option', { value: c, selected: c === C.editor_lang ? 'selected' : null, text: code(c) }); }));
-			}
 		}
-		ui.dock = h('div', { class: 'dock surface hidden', role: 'toolbar', 'aria-label': 'Raster' }, [ui.who, ui.lang, ui.langs, ui.status, ui.adminButton, ui.pageButton, ui.editButton]);
+		ui.dock = h('div', { class: 'dock surface hidden', role: 'toolbar', 'aria-label': 'Raster' }, [ui.who, ui.lang, ui.status, ui.adminButton, ui.pageButton, ui.editButton]);
 		ui.layer.appendChild(ui.dock);
 		dockMoves();
 		setTimeout(function () { ui.dock.classList.remove('hidden'); }, 60);

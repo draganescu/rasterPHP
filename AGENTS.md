@@ -2663,7 +2663,7 @@ of lists and filter pages come along; drafts and the editor don't.
     `#raster-editor-config`), and `system/models/cms/editor/editor.js` saves
     through `POST /api/cms/editor_save_field`, `editor_save_item`,
     `editor_delete_item`, `editor_history`, `editor_restore`,
-    `editor_upload` and `editor_set_lang`, with the session token. They use the same store as MCP,
+    `editor_upload`, with the session token. They use the same store as MCP,
     so revisions, field checks and events are the same. A field name with
     `__` (a language's column) is refused.
   - **On a multilingual site** the editor edits the page's language, the
@@ -2681,8 +2681,7 @@ of lists and filter pages come along; drafts and the editor don't.
     that language is refused (`translation_columns_missing`, worded "run
     php bin/raster schema --apply") instead of landing in the default
     language's column. The config's `lang` is the page's language, and it adds
-    `editor_lang`, `languages` and `editor_languages`; off it is as it
-    always was.
+    `editor_lang` and `languages`; off it is as it always was.
   - Its colours and fonts come from the page (body text, background, the
     first button's colour as the accent). To choose them, set
     `--raster-accent`, `--raster-on-accent`, `--raster-font`,
@@ -2691,14 +2690,16 @@ of lists and filter pages come along; drafts and the editor don't.
   - Its words are in English; `system/models/cms/editor/lang/<lang>.php`
     translates them (Romanian is included), and
     `application/i18n/<lang>/raster_editor.php` overrides any of them.
-    Which language: without `multilingual`, the page's (`?lang=`, as
-    detected). Multilingual, the editor's own, apart from the page's: the
-    one the person chose with the dock's picker (kept on the account,
-    `user.editor_lang`, which `schema --apply` adds on a multilingual
-    site), else the first of
-    the browser's languages it has words for, else the site's default
-    language, else English. So an English owner fixing `/ro/` gets English
-    words.
+    **The editor's own language** is one rule, on every site, multilingual
+    or not, apart from the page's (`cms_editor::editor_lang()`): in
+    development, the builder's `Raster-Editor-Language` header (a code like
+    `fr` or `pt-br`; anything else is ignored); else the site's base
+    language, `i18n::default_language()`; else English. Nothing reads
+    `Accept-Language`, `?lang=` or the `lang` cookie for it, and there is no
+    per-person choice or picker (2.2.52's `editor_set_lang` and
+    `user.editor_lang` are gone; an existing column stays, unused). A code
+    with no dictionary gets English words and its own dates. So an English
+    owner fixing `/ro/` gets English words.
   - What the server refuses comes back as names, `problems` in the
     answer, and the editor words each as `problem_<name>` (a record's
     `check()` included): a value that isn't of its field's type is

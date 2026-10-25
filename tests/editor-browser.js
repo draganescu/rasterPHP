@@ -88,10 +88,9 @@ async function multilingual(browser) {
 		await page.reload();
 		await page.waitForTimeout(500);
 		check(await page.locator('h1[data-raster-untranslated]').count() === 1 && await page.locator('h1').textContent() === 'Our story', 'after undo the Romanian is empty again, and the English shows');
-		// the picker: the editor's own words in Romanian
-		await Promise.all([page.waitForNavigation(), inShadow(page, h => { const s = h.shadowRoot.querySelector('.dock .langs'); s.value = 'ro'; s.dispatchEvent(new Event('change')); })]);
-		await page.waitForTimeout(500);
-		check(await inShadow(page, h => h.shadowRoot.querySelector('.dock .lang').textContent) === 'editezi: RO (dacă lipsește: EN)', 'the dock in Romanian');
+		// the editor's own words follow the site's base language, with no picker
+		check(await inShadow(page, h => h.shadowRoot.querySelector('.dock .langs') === null), 'no language picker in the dock');
+		check(await inShadow(page, h => h.shadowRoot.querySelector('.dock .lang').textContent) === 'editing: RO (falls back to EN)', 'the dock in the base language\'s words');
 		check(errors.length === 0, 'no script errors on /ro/: ' + errors.join('; '));
 		await context.close();
 	} finally {

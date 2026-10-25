@@ -112,7 +112,7 @@ Without `multilingual`, only the templates' words are translated (dictionaries),
 
 The cookie is the only cookie a visitor gets without logging in, and only after they pick a language. A multilingual site sets no such cookie: the address decides.
 
-A site with a single language (`array('ro')`) is fine this way: its pages say `lang="ro"`, dates are read day first, and the editor speaks Romanian.
+A site with a single language (`array('ro')`) is fine this way: its pages say `lang="ro"`, dates are read day first, and the editor speaks Romanian. The editor's own words always follow the base language, the first in the list, never `?lang=`, the cookie or the browser: those choose what visitors read, not the buttons.
 
 Dates typed with slashes follow `languages` whether or not `multilingual` is on: `5/10/2026` is 5 October for every language except `en-us`, which reads it as May 10. `2026-10-05` and dates in words read the same everywhere. A site without `languages` reads dates as it always did (`5/10/2026` is May 10).
 

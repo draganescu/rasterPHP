@@ -96,12 +96,10 @@ class cms_editor {
 			'now' => date('Y-m-d H:i:s'),
 		);
 		// multilingual: lang is the page's language, the one the editor
-		// writes; its own words are in editor_lang (D9), and the dock
-		// offers editor_languages to choose from
+		// writes; its own words are in editor_lang
 		if (class_exists('i18n') && i18n::enabled()) {
 			$config['editor_lang'] = self::editor_lang();
 			$config['languages'] = i18n::available();
-			$config['editor_languages'] = self::editor_languages();
 		}
 		$script = '<script id="raster-editor-config" type="application/json">'
 			.json_encode($config, JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR)
@@ -149,11 +147,10 @@ class cms_editor {
 
 	// the editor's own words: English in editor.js, other languages in
 	// system/models/cms/editor/lang/<lang>.php, and your own in
-	// <app>/i18n/<lang>/raster_editor.php. Multilingual, in the editor's
-	// own language (editor_lang()), whatever the page's is
+	// <app>/i18n/<lang>/raster_editor.php, in the editor's own language
+	// (editor_lang()), whatever the page's is
 	static function strings() {
-		$lang = class_exists('i18n') ? (i18n::enabled() ? self::editor_lang() : i18n::detect()) : '';
-		if (!preg_match('/^[a-z]{2}(-[a-z]{2})?$/i', (string)$lang)) return array();
+		$lang = self::editor_lang();
 		$strings = array();
 		foreach (array(BASE.'models/cms/editor/lang/'.$lang.'.php', APPBASE.'i18n/'.$lang.'/raster_editor.php') as $file) {
 			if (is_file($file)) {
@@ -176,63 +173,27 @@ class cms_editor {
 		return array_values(array_unique(array_filter($codes, function ($code) { return (bool)preg_match('/^[a-z]{2}(-[a-z]{2})?$/', $code); })));
 	}
 
-	// The language of the editor's words, separate from the page's: the
-	// one the person chose (user.editor_lang), else the first of the
-	// browser's (Accept-Language) the editor has words for, else the
-	// site's default language when it has, else English. Asked once per
-	// request (the config and the words both need it)
+	// The language of the editor's words, separate from the page's (see
+	// pick_editor_lang). Asked once per request (the config and the words
+	// both need it)
 	static function editor_lang() {
 		static $known = null;
 		if ($known !== null) return $known;
 		return $known = self::pick_editor_lang();
 	}
 
+	// The builder says whose controls these are; only its preview runs in
+	// development, so a visitor of a live site can't change them. Else the
+	// site's base language, else English. Never the browser, ?lang= or the
+	// cookie: people get the language they have seen, not a guess. A code
+	// with no dictionary is kept, for the dates; its words are English.
 	protected static function pick_editor_lang() {
-		$have = self::editor_languages();
-		$user = authentication::user();
-		if ($user && !empty($user['id'])) {
-			try {
-				$chosen = strtolower((string)R::load('user', (int)$user['id'])->editor_lang);
-				if (in_array($chosen, $have, true)) return $chosen;
-			} catch (Exception $e) {
-				log::warning('editor: '.$e->getMessage());
-			}
+		if (config::get('environment') === 'development' && !empty($_SERVER['HTTP_RASTER_EDITOR_LANGUAGE'])) {
+			$sent = strtolower(trim((string)$_SERVER['HTTP_RASTER_EDITOR_LANGUAGE']));
+			if (preg_match('/^[a-z]{2}(-[a-z]{2})?$/', $sent)) return $sent;
 		}
-		if (!empty($_SERVER['HTTP_ACCEPT_LANGUAGE'])) {
-			foreach (i18n::parse_header($_SERVER['HTTP_ACCEPT_LANGUAGE']) as $candidate) {
-				$candidate = strtolower($candidate);
-				if (in_array($candidate, $have, true)) return $candidate;
-				if (in_array(substr($candidate, 0, 2), $have, true)) return substr($candidate, 0, 2);
-			}
-		}
-		$default = strtolower(i18n::default_language());
-		return in_array($default, $have, true) ? $default : 'en';
-	}
-
-	// lang: the editor's own language from now on, for this account ('' to
-	// follow the browser again)
-	static function set_lang() {
-		cms::require_admin(true);
-		// a multilingual site's choice only: off the account has no such column
-		if (!i18n::enabled()) return self::refused(new cms_refused(array('not_multilingual')));
-		$lang = util::post('lang');
-		if (is_array($lang)) return self::fail("'lang' takes one value");
-		$lang = strtolower((string)$lang);
-		if ($lang !== '' && !in_array($lang, self::editor_languages(), true)) return self::fail("The editor has no words in '$lang'");
-		$user = authentication::user();
-		if (!$user || empty($user['id'])) return self::fail('Unknown account');
-		try {
-			cms_records::transaction(function () use ($user, $lang) {
-				$bean = R::load('user', (int)$user['id']);
-				$bean->editor_lang = $lang;
-				R::store($bean);
-			});
-		} catch (Exception $e) {
-			return self::fail($e->getMessage());
-		} catch (Throwable $e) {
-			return self::broken($e);
-		}
-		return array('editor_lang' => $lang);
+		$base = class_exists('i18n') ? strtolower((string)i18n::default_language()) : '';
+		return preg_match('/^[a-z]{2}(-[a-z]{2})?$/', $base) ? $base : 'en';
 	}
 
 	// ##Saving

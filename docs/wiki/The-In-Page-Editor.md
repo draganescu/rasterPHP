@@ -83,7 +83,9 @@ The editor's own controls take their colours and fonts from the page: the body t
 
 ## The editor's language
 
-The editor's words are in English, and Romanian ships with Raster. On a site without `multilingual` the editor speaks the page's language (see [Translations](Translations)) when it has words for it. On a multilingual site it speaks the editor's own language, apart from the page's: the one picked in the dock's language menu (kept with the account), else the first of the browser's languages it has words for, else the site's default language. So an English-speaking owner fixing `/ro/` gets English buttons. To translate it into another language, or to change individual words, create `application/i18n/<lang>/raster_editor.php`:
+The editor's words are in English, and Raster ships them in Romanian too. The editor speaks the site's base language, the first in its list of languages, on every site, multilingual or not, and whatever the page's language is: editing `/ro/` on an English-first site keeps English buttons. A site with no languages set gets English. A word the language has no translation for stays in English. The browser's language, `?lang=` and the language cookie never change it, and there is no language menu in the dock.
+
+The one exception is the sibip builder's preview: in development mode, the builder sends the person's own language in a `Raster-Editor-Language` header, and the editor uses that. Published sites run in production, where the header is ignored. To translate it into another language, or to change individual words, create `application/i18n/<lang>/raster_editor.php`:
 
 ```php
 <?php
