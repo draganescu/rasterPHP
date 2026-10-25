@@ -2676,8 +2676,9 @@ of lists and filter pages come along; drafts and the editor don't.
   - **On a multilingual site** the editor edits the page's language, the
     one its address names: on `/ro/about` it saves the Romanian (through
     `/ro/api/cms/…`, posting `lang`, which must be the page's), and
-    `/about` keeps its English. The dock says so ("editing: RO (falls back
-    to EN)"); a field with no Romanian yet shows the English and is
+    `/about` keeps its English. The dock says so with a small badge, `RO`,
+    whose title is "editing: RO (falls back to EN)" (none on the default
+    language's pages, so the dock fits a phone); a field with no Romanian yet shows the English and is
     marked, and the Page panel says which fields are not translated yet
     and which are the same in every language (a photo saved on `/ro/` is
     the photo everywhere). An untranslated field holds nothing in that

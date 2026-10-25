@@ -445,7 +445,7 @@
 			'.pill:active{transform:scale(.96)}',
 			'.pill.primary{background:' + look.accent + ';color:' + look.onAccent + ';font-weight:600}',
 			'.pill.primary:hover{filter:brightness(1.08)}',
-			'.lang{padding:0 8px;color:' + look.muted + ';font-size:12px}',
+			'.lang{flex:none;padding:2px 6px;border:1px solid ' + look.line + ';border-radius:999px;color:' + look.muted + ';font-size:11px;font-weight:600;letter-spacing:.04em;line-height:1.2}',
 			'.status{display:inline-flex;align-items:center;gap:6px;padding:0 10px;color:' + look.muted + ';font-size:13px;min-width:70px}',
 			'.dot{width:7px;height:7px;border-radius:50%;background:#3aa86b;transition:background .2s}',
 			'.dot.busy{background:' + look.accent + ';animation:blink 1s infinite}',
@@ -558,7 +558,13 @@
 		// multilingual: the page's language
 		if (C.languages) {
 			var base = C.languages[0];
-			ui.lang = h('span', { class: 'lang', text: t('editing_lang', { lang: code(C.lang) }) + (String(C.lang).toLowerCase() === String(base).toLowerCase() ? '' : ' ' + t('falls_back', { lang: code(base) })) });
+			// a translation's page: its code as a small badge, so the dock fits
+			// a phone; the sentence is its title and label. The default
+			// language's page needs none: nothing falls back there.
+			if (String(C.lang).toLowerCase() !== String(base).toLowerCase()) {
+				var said = t('editing_lang', { lang: code(C.lang) }) + ' ' + t('falls_back', { lang: code(base) });
+				ui.lang = h('span', { class: 'lang', role: 'img', text: code(C.lang), title: said, 'aria-label': said });
+			}
 		}
 		ui.dock = h('div', { class: 'dock surface hidden', role: 'toolbar', 'aria-label': 'Raster' }, [ui.who, ui.lang, ui.status, ui.adminButton, ui.pageButton, ui.editButton]);
 		ui.layer.appendChild(ui.dock);

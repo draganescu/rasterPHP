@@ -13,6 +13,8 @@ What sites need to do: nothing. A site's own `i18n/<lang>/raster_editor.php` sti
 
 **The editor's refusals are codes it words.** "Unknown page", "No such revision", "This page is in ro: reload it" and the other sentences `editor.php` sent keep their English `error` for API callers and MCP, and now add `problems`: `one_value`, `unknown_page`, `unknown_field`, `wrong_language` (with `lang`), `unknown_collection`, `no_such_item`, `no_such_revision`, `broken` and `not_saved` (a store's own exception, its sentence in `detail`, shown after the words). The editor words them from its dictionary.
 
+**The dock's language label is a badge.** On a translation's page the dock shows the language's code (`RO`), with "editing: RO (falls back to EN)" as its title and label; the default language's pages show none. The sentence took the room of the buttons on a phone.
+
 **Raster's fallback login page** (used when a theme has no `login.html`) is no longer hard-coded English. Its words come from the editor's dictionaries through `print.cms.login_word('login_…')`, in the content's language: the address's on a multilingual site (`/fr/login` is French), else the base language. Its `<html lang>` says which.
 
 **The editor in 14 more languages:** French, German, Spanish, Italian, Portuguese, Dutch, Hungarian, Polish, Bulgarian, Greek, Turkish, Japanese, Hindi and Chinese (Simplified, `zh`), next to Romanian. An AI agent drafted them; corrections are welcome. A test checks that every dictionary has every key and keeps every `{placeholder}`.

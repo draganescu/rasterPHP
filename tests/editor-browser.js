@@ -62,9 +62,21 @@ async function multilingual(browser) {
 		await page.fill('input[name=login]', 'ana@site.test');
 		await page.fill('input[name=password]', 'ana password');
 		await Promise.all([page.waitForNavigation(), page.click('form button')]);
+		// the default language's page has no badge: nothing to fall back to
+		await page.goto(base + '/zzml');
+		await page.waitForTimeout(500);
+		check(await inShadow(page, h => h.shadowRoot.querySelector('.dock .lang') === null), 'no language badge on the default language');
 		await page.goto(base + '/ro/zzml');
 		await page.waitForTimeout(500);
-		check(await inShadow(page, h => h.shadowRoot.querySelector('.dock .lang').textContent) === 'editing: RO (falls back to EN)', 'the dock says the page\'s language');
+		// a short badge, so the dock fits a phone; the sentence is its title
+		const badge = await inShadow(page, h => { const b = h.shadowRoot.querySelector('.dock .lang'); return { text: b.textContent, title: b.title, label: b.getAttribute('aria-label') }; });
+		check(badge.text === 'RO', 'the dock says the page\'s language in two letters: ' + badge.text);
+		check(badge.title === 'editing: RO (falls back to EN)' && badge.label === badge.title, 'and the sentence as its title and label: ' + badge.title);
+		await page.setViewportSize({ width: 360, height: 740 });
+		await page.waitForTimeout(300);
+		check(await inShadow(page, h => { const d = h.shadowRoot.querySelector('.dock').getBoundingClientRect(); return [...h.shadowRoot.querySelectorAll('.dock > *')].every(el => { const r = el.getBoundingClientRect(); return r.width === 0 || (r.left >= d.left - 1 && r.right <= d.right + 1 && r.right <= 361); }); }), 'on a phone every button of the dock is in view');
+		await page.setViewportSize({ width: 1280, height: 860 });
+		await page.waitForTimeout(300);
 		check(await inShadow(page, h => h.shadowRoot.querySelector('.dock .pill.primary').textContent) === 'Edit', 'an English editor gets English words on /ro/');
 		check(await page.locator('h1[data-raster-untranslated]').count() === 1, 'an untranslated field is marked');
 		check(await page.locator('h1').textContent() === 'Our story', 'and shows the English');
@@ -90,7 +102,7 @@ async function multilingual(browser) {
 		check(await page.locator('h1[data-raster-untranslated]').count() === 1 && await page.locator('h1').textContent() === 'Our story', 'after undo the Romanian is empty again, and the English shows');
 		// the editor's own words follow the site's base language, with no picker
 		check(await inShadow(page, h => h.shadowRoot.querySelector('.dock .langs') === null), 'no language picker in the dock');
-		check(await inShadow(page, h => h.shadowRoot.querySelector('.dock .lang').textContent) === 'editing: RO (falls back to EN)', 'the dock in the base language\'s words');
+		check(await inShadow(page, h => h.shadowRoot.querySelector('.dock .lang').title) === 'editing: RO (falls back to EN)', 'the dock in the base language\'s words');
 		check(errors.length === 0, 'no script errors on /ro/: ' + errors.join('; '));
 		await context.close();
 	} finally {
