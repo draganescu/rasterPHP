@@ -4,7 +4,7 @@ return array(
 	'hello' => 'Hoi {name}', 'hello_anon' => 'Hoi',
 	'welcome' => 'Alles wat oplicht kun je aanpassen. Druk op E of tik op Bewerk om te beginnen.',
 	'edit' => 'Bewerk', 'done' => 'Klaar', 'editing' => 'Bezig met bewerken', 'page' => 'Pagina', 'admin' => 'Beheer', 'admin_pages' => 'Beheerpagina’s',
-	'saving' => 'Opslaan…', 'saved' => 'Opgeslagen', 'all_saved' => 'Alles is opgeslagen',
+	'saved' => 'Opgeslagen', 
 	'changed' => '{field} aangepast', 'undo' => 'Ongedaan maken', 'undone' => 'Ongedaan gemaakt', 'nothing_to_undo' => 'Niets om ongedaan te maken',
 	'added' => 'Toegevoegd aan {list}', 'deleted' => '{name} verwijderd', 'hidden_item' => '{name} verborgen', 'shown_item' => '{name} is weer zichtbaar',
 	'duplicated' => '{name} gedupliceerd', 'scheduled' => '{name} gaat live op {date}', 'unscheduled' => '{name} is nu live',

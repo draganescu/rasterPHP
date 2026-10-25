@@ -4,7 +4,7 @@ return array(
 	'hello' => 'Olá, {name}', 'hello_anon' => 'Olá',
 	'welcome' => 'Tudo o que brilha pode ser alterado. Prime E ou toca em Editar para começar.',
 	'edit' => 'Editar', 'done' => 'Concluir', 'editing' => 'A editar', 'page' => 'Página', 'admin' => 'Administração', 'admin_pages' => 'Páginas de administração',
-	'saving' => 'A guardar…', 'saved' => 'Guardado', 'all_saved' => 'Tudo guardado',
+	'saved' => 'Guardado', 
 	'changed' => '{field} alterado', 'undo' => 'Desfazer', 'undone' => 'Desfeito', 'nothing_to_undo' => 'Nada para desfazer',
 	'added' => 'Adicionado a {list}', 'deleted' => '{name} eliminado', 'hidden_item' => '{name} ocultado', 'shown_item' => '{name} voltou a estar visível',
 	'duplicated' => '{name} duplicado', 'scheduled' => '{name} fica visível em {date}', 'unscheduled' => '{name} está visível agora',

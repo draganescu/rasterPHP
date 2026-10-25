@@ -4,7 +4,7 @@ return array(
 	'hello' => 'Szia, {name}', 'hello_anon' => 'Szia',
 	'welcome' => 'Ami világít, azt át lehet írni. Nyomj E-t, vagy koppints a Szerkesztésre a kezdéshez.',
 	'edit' => 'Szerkesztés', 'done' => 'Kész', 'editing' => 'Szerkesztés', 'page' => 'Oldal', 'admin' => 'Admin', 'admin_pages' => 'Admin oldalak',
-	'saving' => 'Mentés…', 'saved' => 'Mentve', 'all_saved' => 'Minden mentve',
+	'saved' => 'Mentve', 
 	'changed' => 'Módosítva: {field}', 'undo' => 'Visszavonás', 'undone' => 'Visszavonva', 'nothing_to_undo' => 'Nincs mit visszavonni',
 	'added' => 'Hozzáadva ide: {list}', 'deleted' => 'Törölve: {name}', 'hidden_item' => 'Elrejtve: {name}', 'shown_item' => '{name} újra látható',
 	'duplicated' => 'Megkettőzve: {name}', 'scheduled' => '{name} megjelenik: {date}', 'unscheduled' => '{name} most látható',

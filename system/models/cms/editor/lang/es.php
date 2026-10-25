@@ -4,7 +4,7 @@ return array(
 	'hello' => 'Hola, {name}', 'hello_anon' => 'Hola',
 	'welcome' => 'Todo lo que brilla se puede cambiar. Pulsa E o toca Editar para empezar.',
 	'edit' => 'Editar', 'done' => 'Listo', 'editing' => 'Editando', 'page' => 'Página', 'admin' => 'Administración', 'admin_pages' => 'Páginas de administración',
-	'saving' => 'Guardando…', 'saved' => 'Guardado', 'all_saved' => 'Todo guardado',
+	'saved' => 'Guardado', 
 	'changed' => 'Cambiaste {field}', 'undo' => 'Deshacer', 'undone' => 'Deshecho', 'nothing_to_undo' => 'Nada que deshacer',
 	'added' => 'Añadido a {list}', 'deleted' => 'Eliminaste {name}', 'hidden_item' => 'Ocultaste {name}', 'shown_item' => '{name} vuelve a verse',
 	'duplicated' => 'Duplicaste {name}', 'scheduled' => '{name} se publica {date}', 'unscheduled' => '{name} ya se ve',

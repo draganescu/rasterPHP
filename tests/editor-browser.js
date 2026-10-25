@@ -565,7 +565,7 @@ async function multilingual(browser) {
 		await page.screenshot({ path: path.join(screens, 'panel.png') });
 
 		// on a phone: the link box is 16px, so iOS Safari doesn't zoom in on
-		// it, and the dock fits (no avatar, no language badge)
+		// it, and the dock fits (no language badge, no save status)
 		const phoneContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, storageState: await context.storageState() });
 		const mobile = await phoneContext.newPage();
 		await mobile.goto(base + '/');
@@ -582,7 +582,8 @@ async function multilingual(browser) {
 			const shown = [...h.shadowRoot.querySelectorAll('.dock > *')].filter(el => getComputedStyle(el).display !== 'none');
 			return { who: shown.some(el => el.classList.contains('who')), inView: shown.every(el => { const r = el.getBoundingClientRect(); return r.left >= 0 && r.right <= 390; }) };
 		});
-		check(!fits.who && fits.inView, 'on a phone the dock has no avatar and every button is in view: ' + JSON.stringify(fits));
+		check(fits.who && fits.inView, 'on a phone the dock keeps its avatar and every button is in view: ' + JSON.stringify(fits));
+		check(await mobile.locator('[data-raster-host]').evaluate(h => !h.shadowRoot.querySelector('.dock .status')), 'no "All saved" in the dock: each save shows its own tick');
 		await phoneContext.close();
 		check(errors.length === 0, 'no script errors: ' + errors.join('; '));
 		}

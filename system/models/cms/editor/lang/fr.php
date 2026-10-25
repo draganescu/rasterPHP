@@ -4,7 +4,7 @@ return array(
 	'hello' => 'Salut {name}', 'hello_anon' => 'Salut',
 	'welcome' => 'Tout ce qui brille peut être modifié. Appuie sur E ou touche Modifier pour commencer.',
 	'edit' => 'Modifier', 'done' => 'Terminé', 'editing' => 'Modification', 'page' => 'Page', 'admin' => 'Administration', 'admin_pages' => 'Pages d’administration',
-	'saving' => 'Enregistrement…', 'saved' => 'Enregistré', 'all_saved' => 'Tout est enregistré',
+	'saved' => 'Enregistré', 
 	'changed' => 'Tu as modifié {field}', 'undo' => 'Annuler', 'undone' => 'Annulé', 'nothing_to_undo' => 'Rien à annuler',
 	'added' => 'Ajouté à {list}', 'deleted' => 'Tu as supprimé {name}', 'hidden_item' => 'Tu as masqué {name}', 'shown_item' => '{name} est de nouveau visible',
 	'duplicated' => 'Tu as dupliqué {name}', 'scheduled' => '{name} sera en ligne le {date}', 'unscheduled' => '{name} est en ligne maintenant',

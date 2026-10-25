@@ -4,7 +4,7 @@ return array(
 	'hello' => 'नमस्ते {name}', 'hello_anon' => 'नमस्ते',
 	'welcome' => 'जो कुछ भी चमकता है, उसे बदला जा सकता है। शुरू करने के लिए E दबाओ या एडिट पर टैप करो।',
 	'edit' => 'एडिट करो', 'done' => 'हो गया', 'editing' => 'एडिट हो रहा है', 'page' => 'पेज', 'admin' => 'एडमिन', 'admin_pages' => 'एडमिन पेज',
-	'saving' => 'सेव हो रहा है…', 'saved' => 'सेव हो गया', 'all_saved' => 'सब सेव हो गया',
+	'saved' => 'सेव हो गया', 
 	'changed' => '{field} बदल दिया', 'undo' => 'पहले जैसा करो', 'undone' => 'पहले जैसा हो गया', 'nothing_to_undo' => 'पहले जैसा करने के लिए कुछ नहीं',
 	'added' => '{list} में जोड़ दिया', 'deleted' => '{name} हटा दिया', 'hidden_item' => '{name} छिपा दिया', 'shown_item' => '{name} फिर से दिख रहा है',
 	'duplicated' => '{name} की कॉपी बना दी', 'scheduled' => '{name} {date} को दिखेगा', 'unscheduled' => '{name} अब दिख रहा है',

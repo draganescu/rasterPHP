@@ -4,7 +4,7 @@ return array(
 	'hello' => 'Здравей, {name}', 'hello_anon' => 'Здравей',
 	'welcome' => 'Всичко, което свети, може да се променя. Натисни E или Редактирай, за да започнеш.',
 	'edit' => 'Редактирай', 'done' => 'Готово', 'editing' => 'Редактираш', 'page' => 'Страница', 'admin' => 'Администрация', 'admin_pages' => 'Административни страници',
-	'saving' => 'Запазва се…', 'saved' => 'Запазено', 'all_saved' => 'Всичко е запазено',
+	'saved' => 'Запазено', 
 	'changed' => 'Промени {field}', 'undo' => 'Отмени', 'undone' => 'Отменено', 'nothing_to_undo' => 'Няма какво да се отмени',
 	'added' => 'Добавено в {list}', 'deleted' => 'Изтри {name}', 'hidden_item' => 'Скри {name}', 'shown_item' => '{name} отново се вижда',
 	'duplicated' => 'Дублира {name}', 'scheduled' => '{name} се показва на {date}', 'unscheduled' => '{name} се вижда сега',

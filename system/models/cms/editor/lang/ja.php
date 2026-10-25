@@ -4,7 +4,7 @@ return array(
 	'hello' => '{name}さん、こんにちは', 'hello_anon' => 'こんにちは',
 	'welcome' => '光っているところはすべて編集できます。Eキーか「編集」を押して始めましょう。',
 	'edit' => '編集', 'done' => '完了', 'editing' => '編集中', 'page' => 'ページ', 'admin' => '管理', 'admin_pages' => '管理ページ',
-	'saving' => '保存中…', 'saved' => '保存しました', 'all_saved' => 'すべて保存しました',
+	'saved' => '保存しました', 
 	'changed' => '{field}を変更しました', 'undo' => '元に戻す', 'undone' => '元に戻しました', 'nothing_to_undo' => '元に戻せるものはありません',
 	'added' => '{list}に追加しました', 'deleted' => '{name}を削除しました', 'hidden_item' => '{name}を非表示にしました', 'shown_item' => '{name}を再び表示しました',
 	'duplicated' => '{name}を複製しました', 'scheduled' => '{name}は{date}に公開されます', 'unscheduled' => '{name}を公開しました',

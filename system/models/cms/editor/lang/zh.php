@@ -4,7 +4,7 @@ return array(
 	'hello' => '你好，{name}', 'hello_anon' => '你好',
 	'welcome' => '会发光的地方都可以修改。按 E 或点“编辑”开始。',
 	'edit' => '编辑', 'done' => '完成', 'editing' => '正在编辑', 'page' => '页面', 'admin' => '管理', 'admin_pages' => '管理页面',
-	'saving' => '正在保存…', 'saved' => '已保存', 'all_saved' => '全部已保存',
+	'saved' => '已保存', 
 	'changed' => '已修改{field}', 'undo' => '撤销', 'undone' => '已撤销', 'nothing_to_undo' => '没有可撤销的内容',
 	'added' => '已添加到{list}', 'deleted' => '已删除{name}', 'hidden_item' => '已隐藏{name}', 'shown_item' => '{name}又显示出来了',
 	'duplicated' => '已复制{name}', 'scheduled' => '{name}将于{date}上线', 'unscheduled' => '{name}现已上线',

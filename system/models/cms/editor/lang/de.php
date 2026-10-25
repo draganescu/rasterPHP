@@ -4,7 +4,7 @@ return array(
 	'hello' => 'Hallo {name}', 'hello_anon' => 'Hallo',
 	'welcome' => 'Alles, was leuchtet, lässt sich ändern. Drück E oder tippe auf Bearbeiten, um loszulegen.',
 	'edit' => 'Bearbeiten', 'done' => 'Fertig', 'editing' => 'Bearbeiten', 'page' => 'Seite', 'admin' => 'Verwaltung', 'admin_pages' => 'Verwaltungsseiten',
-	'saving' => 'Wird gespeichert…', 'saved' => 'Gespeichert', 'all_saved' => 'Alles gespeichert',
+	'saved' => 'Gespeichert', 
 	'changed' => '{field} geändert', 'undo' => 'Rückgängig', 'undone' => 'Rückgängig gemacht', 'nothing_to_undo' => 'Nichts zum Rückgängigmachen',
 	'added' => 'Zu {list} hinzugefügt', 'deleted' => '{name} gelöscht', 'hidden_item' => '{name} ausgeblendet', 'shown_item' => '{name} ist wieder sichtbar',
 	'duplicated' => '{name} dupliziert', 'scheduled' => '{name} erscheint am {date}', 'unscheduled' => '{name} ist jetzt sichtbar',

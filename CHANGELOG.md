@@ -13,7 +13,9 @@ What sites need to do: nothing. A site's own `i18n/<lang>/raster_editor.php` sti
 
 **The editor's refusals are codes it words.** "Unknown page", "No such revision", "This page is in ro: reload it" and the other sentences `editor.php` sent keep their English `error` for API callers and MCP, and now add `problems`: `one_value`, `unknown_page`, `unknown_field`, `wrong_language` (with `lang`), `unknown_collection`, `no_such_item`, `no_such_revision`, `broken` and `not_saved` (a store's own exception, its sentence in `detail`, shown after the words). The editor words them from its dictionary.
 
-**The dock's language label is a badge.** On a translation's page the dock shows the language's code (`RO`), with "editing: RO (falls back to EN)" as its title and label; the default language's pages show none. On a phone the dock shows neither the badge nor the avatar, so every button fits.
+**The dock's language label is a badge.** On a translation's page the dock shows the language's code (`RO`), with "editing: RO (falls back to EN)" as its title and label; the default language's pages show none. On a phone the dock shows no badge, so every button fits.
+
+**No "All saved" in the dock.** Every change saves when you leave its field, and each save shows its own tick and a toast with Undo, so the dock's status only ever said "All saved". It is gone, and the dock has room for its buttons; leaving the page while a save is still on its way still asks first.
 
 **No zooming into the editor's text boxes on a phone.** iOS Safari zoomed in when the link box (and the editor's other boxes) took focus, because their text was 14px; on touch screens they are 16px.
 

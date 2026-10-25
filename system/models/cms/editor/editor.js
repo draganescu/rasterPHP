@@ -21,7 +21,7 @@
 		hello: 'Hi {name}', hello_anon: 'Hi there',
 		welcome: 'Anything that glows can be changed. Press E or tap Edit to start.',
 		edit: 'Edit', done: 'Done', editing: 'Editing', page: 'Page', admin: 'Admin', admin_pages: 'Admin pages',
-		saving: 'Saving…', saved: 'Saved', all_saved: 'All saved',
+		saved: 'Saved',
 		changed: 'Changed {field}', undo: 'Undo', undone: 'Undone', nothing_to_undo: 'Nothing to undo',
 		added: 'Added to {list}', deleted: 'Deleted {name}', hidden_item: 'Hid {name}', shown_item: '{name} is visible again',
 		duplicated: 'Duplicated {name}', scheduled: '{name} goes live {date}', unscheduled: '{name} is live now',
@@ -446,10 +446,6 @@
 			'.pill.primary{background:' + look.accent + ';color:' + look.onAccent + ';font-weight:600}',
 			'.pill.primary:hover{filter:brightness(1.08)}',
 			'.lang{flex:none;padding:2px 6px;border:1px solid ' + look.line + ';border-radius:999px;color:' + look.muted + ';font-size:11px;font-weight:600;letter-spacing:.04em;line-height:1.2}',
-			'.status{display:inline-flex;align-items:center;gap:6px;padding:0 10px;color:' + look.muted + ';font-size:13px;min-width:70px}',
-			'.dot{width:7px;height:7px;border-radius:50%;background:#3aa86b;transition:background .2s}',
-			'.dot.busy{background:' + look.accent + ';animation:blink 1s infinite}',
-			'@keyframes blink{50%{opacity:.3}}',
 			// the admin pages menu, above the dock
 			'.menu{position:absolute;left:50%;bottom:calc(70px + env(safe-area-inset-bottom));transform:translateX(-50%);min-width:240px;max-width:calc(100vw - 32px);max-height:min(60vh,440px);overflow:auto;padding:6px;pointer-events:auto;animation:rise .25s cubic-bezier(.2,.9,.3,1.2) both}',
 			'.menu h3{margin:6px 10px;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:' + look.muted + '}',
@@ -532,7 +528,7 @@
 			'.muted{color:' + look.muted + '}',
 			'.close{width:34px;height:34px;border-radius:50%;display:grid;place-items:center}',
 			'.close:hover{background:' + look.accentSoft + '}',
-			'@media (max-width:600px){.dock{left:10px;right:10px;transform:translateY(var(--dy,0px));justify-content:space-between}.dock .who,.dock .lang{display:none}.dock.hidden{transform:translateY(140%)}.layer.top .dock.hidden{transform:translateY(-140%)}.bubble{bottom:calc(72px + env(safe-area-inset-bottom))}.layer.top .bubble{top:calc(72px + env(safe-area-inset-top))}.toasts{left:10px;right:10px;bottom:calc(70px + env(safe-area-inset-bottom))}.layer.top .toasts{bottom:calc(18px + env(safe-area-inset-bottom))}.panel{top:auto;left:8px;right:8px;width:auto;max-height:80vh;animation-name:up}}',
+			'@media (max-width:600px){.dock{left:10px;right:10px;transform:translateY(var(--dy,0px));justify-content:space-between}.dock .lang{display:none}.dock.hidden{transform:translateY(140%)}.layer.top .dock.hidden{transform:translateY(-140%)}.bubble{bottom:calc(72px + env(safe-area-inset-bottom))}.layer.top .bubble{top:calc(72px + env(safe-area-inset-top))}.toasts{left:10px;right:10px;bottom:calc(70px + env(safe-area-inset-bottom))}.layer.top .toasts{bottom:calc(18px + env(safe-area-inset-bottom))}.panel{top:auto;left:8px;right:8px;width:auto;max-height:80vh;animation-name:up}}',
 			'@keyframes up{from{opacity:0;transform:translateY(30px)}to{opacity:1;transform:none}}',
 			reduceMotion ? '*,*:before,*:after{animation-duration:.01ms!important;animation-delay:0s!important;transition-duration:.01ms!important}' : ''
 		].join('\n');
@@ -554,7 +550,6 @@
 
 		var initial = (C.user.name || '?').trim().charAt(0).toUpperCase();
 		ui.who = h('span', { class: 'who', title: C.user.name, text: initial });
-		ui.status = h('span', { class: 'status', hidden: true }, [h('span', { class: 'dot' }), h('span', { class: 'label', text: t('all_saved') })]);
 		ui.editButton = h('button', { class: 'pill primary', title: t('keyboard'), onclick: function () { setEditing(!editing); } });
 		ui.pageButton = h('button', { class: 'pill', onclick: function () { closeAdminMenu(); togglePanel(); }, html: icon('layers') + '<span>' + t('page') + '</span>' });
 		ui.adminButton = (C.admin || []).length ? h('button', { class: 'pill', 'aria-haspopup': 'menu', 'aria-expanded': 'false', onclick: toggleAdminMenu, html: icon('grid') + '<span>' + t('admin') + '</span>' }) : null;
@@ -569,7 +564,7 @@
 				ui.lang = h('span', { class: 'lang', role: 'img', text: code(C.lang), title: said, 'aria-label': said });
 			}
 		}
-		ui.dock = h('div', { class: 'dock surface hidden', role: 'toolbar', 'aria-label': 'Raster' }, [ui.who, ui.lang, ui.status, ui.adminButton, ui.pageButton, ui.editButton]);
+		ui.dock = h('div', { class: 'dock surface hidden', role: 'toolbar', 'aria-label': 'Raster' }, [ui.who, ui.lang, ui.adminButton, ui.pageButton, ui.editButton]);
 		ui.layer.appendChild(ui.dock);
 		dockMoves();
 		setTimeout(function () { ui.dock.classList.remove('hidden'); }, 60);
@@ -653,9 +648,6 @@
 	var busy = 0;
 	function working(delta) {
 		busy += delta;
-		var dot = ui.status.querySelector('.dot'), label = ui.status.querySelector('.label');
-		dot.classList.toggle('busy', busy > 0);
-		label.textContent = busy > 0 ? t('saving') : t('all_saved');
 	}
 	function tick(el) {
 		if (!el || !el.getBoundingClientRect) return;
@@ -842,7 +834,6 @@
 	var plaintextOnly = (function () { var d = document.createElement('div'); d.setAttribute('contenteditable', 'plaintext-only'); return d.contentEditable === 'plaintext-only'; })();
 	function updateDock() {
 		ui.editButton.innerHTML = (editing ? icon('check') : icon('pencil')) + '<span>' + (editing ? t('done') : t('edit')) + '</span>';
-		ui.status.hidden = !editing;
 	}
 	function glow() {
 		if (reduceMotion) return;

@@ -4,7 +4,7 @@ return array(
 	'hello' => 'Cześć, {name}', 'hello_anon' => 'Cześć',
 	'welcome' => 'Wszystko, co świeci, można zmienić. Naciśnij E albo Edytuj, żeby zacząć.',
 	'edit' => 'Edytuj', 'done' => 'Gotowe', 'editing' => 'Edytujesz', 'page' => 'Strona', 'admin' => 'Administracja', 'admin_pages' => 'Strony administracyjne',
-	'saving' => 'Zapisywanie…', 'saved' => 'Zapisano', 'all_saved' => 'Wszystko zapisane',
+	'saved' => 'Zapisano', 
 	'changed' => 'Zmieniono {field}', 'undo' => 'Cofnij', 'undone' => 'Cofnięto', 'nothing_to_undo' => 'Nie ma nic do cofnięcia',
 	'added' => 'Dodano do: {list}', 'deleted' => 'Usunięto {name}', 'hidden_item' => 'Ukryto {name}', 'shown_item' => 'Znów widać: {name}',
 	'duplicated' => 'Zduplikowano {name}', 'scheduled' => '{name} pojawi się {date}', 'unscheduled' => 'Teraz widać: {name}',

@@ -4,7 +4,7 @@ return array(
 	'hello' => 'Ciao {name}', 'hello_anon' => 'Ciao',
 	'welcome' => 'Tutto ciò che brilla si può cambiare. Premi E o tocca Modifica per iniziare.',
 	'edit' => 'Modifica', 'done' => 'Fatto', 'editing' => 'Stai modificando', 'page' => 'Pagina', 'admin' => 'Amministrazione', 'admin_pages' => 'Pagine di amministrazione',
-	'saving' => 'Salvataggio…', 'saved' => 'Salvato', 'all_saved' => 'Tutto salvato',
+	'saved' => 'Salvato', 
 	'changed' => 'Hai cambiato {field}', 'undo' => 'Annulla', 'undone' => 'Annullato', 'nothing_to_undo' => 'Niente da annullare',
 	'added' => 'Aggiunto a {list}', 'deleted' => 'Hai eliminato {name}', 'hidden_item' => 'Hai nascosto {name}', 'shown_item' => '{name} è di nuovo visibile',
 	'duplicated' => 'Hai duplicato {name}', 'scheduled' => '{name} sarà online {date}', 'unscheduled' => '{name} è online adesso',

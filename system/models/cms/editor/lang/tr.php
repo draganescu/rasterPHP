@@ -4,7 +4,7 @@ return array(
 	'hello' => 'Merhaba {name}', 'hello_anon' => 'Merhaba',
 	'welcome' => 'Parlayan her şey değiştirilebilir. Başlamak için E tuşuna bas veya Düzenle’ye dokun.',
 	'edit' => 'Düzenle', 'done' => 'Bitti', 'editing' => 'Düzenleniyor', 'page' => 'Sayfa', 'admin' => 'Yönetim', 'admin_pages' => 'Yönetim sayfaları',
-	'saving' => 'Kaydediliyor…', 'saved' => 'Kaydedildi', 'all_saved' => 'Hepsi kaydedildi',
+	'saved' => 'Kaydedildi', 
 	'changed' => '{field} değiştirildi', 'undo' => 'Geri al', 'undone' => 'Geri alındı', 'nothing_to_undo' => 'Geri alınacak bir şey yok',
 	'added' => '{list} listesine eklendi', 'deleted' => '{name} silindi', 'hidden_item' => '{name} gizlendi', 'shown_item' => '{name} yeniden görünüyor',
 	'duplicated' => '{name} çoğaltıldı', 'scheduled' => '{name} şu tarihte yayına girecek: {date}', 'unscheduled' => '{name} artık yayında',
