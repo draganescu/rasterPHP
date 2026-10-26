@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<!-- print.@lang.i18n.language --><!-- print.@dir.i18n.dir --><html lang="en" dir="ltr"><!-- /print.@dir.i18n.dir --><!-- /print.@lang.i18n.language -->
 <head>
   <!-- dry._layout.head /-->
   <title><!-- print.cms.title -->News<!-- /print.cms.title --></title>
@@ -17,9 +17,9 @@
     <!-- /render.cms.news('order=newest') -->
     <!-- render.pagination.links('cms.news') -->
     <nav class="pager">
-      <!-- print.+class.prev_state --><!-- print.@href.prev_url --><a class="page" href="#">&larr; Newer</a><!-- /print.@href.prev_url --><!-- /print.+class.prev_state -->
+      <!-- print.+class.prev_state --><!-- print.@href.prev_url --><a class="page" href="#"><!-- print.i18n.news('newer') -->&larr; Newer<!-- /print.i18n.news('newer') --></a><!-- /print.@href.prev_url --><!-- /print.+class.prev_state -->
       <!-- render.pagination.pages('cms.news') --><!-- print.+class.state --><!-- print.@href.url --><a class="page" href="#"><!-- print.number -->1<!-- /print.number --></a><!-- /print.@href.url --><!-- /print.+class.state --><!-- /render.pagination.pages('cms.news') -->
-      <!-- print.+class.next_state --><!-- print.@href.next_url --><a class="page" href="#">Older &rarr;</a><!-- /print.@href.next_url --><!-- /print.+class.next_state -->
+      <!-- print.+class.next_state --><!-- print.@href.next_url --><a class="page" href="#"><!-- print.i18n.news('older') -->Older &rarr;<!-- /print.i18n.news('older') --></a><!-- /print.@href.next_url --><!-- /print.+class.next_state -->
     </nav>
     <!-- /render.pagination.links('cms.news') -->
   </main>

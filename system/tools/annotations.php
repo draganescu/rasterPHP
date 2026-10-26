@@ -29,6 +29,17 @@ return array(
 	// (template::unscript) and lint read the same list
 	'script_form' => template::$script_form,
 
+	// ##Names
+	// The characters each kind of name is made of, as regex character
+	// classes: model (print.<model>.method), key (what follows print. inside
+	// a render block: line2, @data-id.key, +class.state), field (a row key on
+	// its own), attribute (print.@<attribute>.x), view and res
+	// (dry.<view>.<res>). The engine's patterns are built from this list
+	// (template::$names), and lint reads it here, so the two accept the same
+	// names. dry_depth is how many levels of dry inside a res both fill in.
+	'names' => template::$names,
+	'dry_depth' => template::DRY_DEPTH,
+
 	// ##Keywords
 	// - `name`: the keyword takes a `.reference` (remove does not)
 	// - `block`: it wraps content and needs a closing tag
@@ -75,7 +86,7 @@ return array(
 		'arguments' => "Literals only: numbers, 'quoted strings', true, false, null. Nothing is evaluated: render.news.latest(3, 'sports', -1).",
 		'builtin_models' => array('session', 'self', 'if'),
 		'builtin_keys' => array('raster_detail_link'),
-		'reserved_fields' => array('slug', 'id', 'updated_at', 'enabled', 'published_at'),
+		'reserved_fields' => array('slug', 'id', 'updated_at', 'enabled', 'published_at', 'saved_lang'),
 		'reserved_collections' => array('users', 'raster'),
 		'reserved_note' => 'A page field may not be named after a method of the cms model either; lint reports it.',
 		'cms_list_options' => "render.cms.<name>('…') and pagination.links('cms.<name>', '…') take key=value pairs joined by &: order=newest|oldest|<field>|-<field>, several with commas (order=date,-time); limit=<n>; <field>=<value> filters; <field>=?<param> takes ?<param>= from the URL and is left out when the URL has none; >, >=, <, <= and != compare (date>=today); today is the date the page is shown. Values compare as the field's type, which its mock-up sets: 14 an int, 4.50 a number, 2026-10-10 a date, 19:00 a time, anything else text. Keep lists staff edit on render.cms, or have the model return its records through cms_records::listed(): other rows a model builds can't be edited in the page.",

@@ -5,7 +5,8 @@
 // fresh database, logs in as an editor and uses the editor the way a person
 // would: edit mode, typing, undo, adding an item with a photo, hiding,
 // deleting and undoing, a keyboard-only pass, Enter in a paragraph field,
-// the page panel. Screenshots go to tests/screens/.
+// the page panel, and a multilingual site's /ro/ page (RASTER_TEST_ONLY=multilingual
+// runs only that one). Screenshots go to tests/screens/.
 const { chromium } = require('playwright');
 const { spawn, execFileSync } = require('child_process');
 const fs = require('fs');
@@ -32,6 +33,86 @@ function port() { return new Promise(r => { const s = net.createServer(); s.list
 const host = page => page.locator('[data-raster-host]');
 const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 
+// The editor on a multilingual site (#200): the starter in English and
+// Romanian, written to its the_events.php for the test, with a page of two
+// fields. An English editor on /ro/ edits Romanian with English words.
+async function multilingual(browser) {
+	const app = path.join(root, 'application');
+	const view = path.join(app, 'views/default/zzml.html');
+	const events = path.join(app, 'config/the_events.php');
+	const kept = fs.readFileSync(events, 'utf8');
+	const mlEnv = Object.assign({}, env, { RASTER_APP: 'application', RASTER_DB: path.join(tmp, 'ml.sqlite'), RASTER_ENV: 'development' });
+	fs.writeFileSync(view, '<!doctype html><html><head><title>About</title></head><body><main><h1><!-- print.cms.zzml_headline -->Our story<!-- /print.cms.zzml_headline --></h1>'
+		+ '<p class="intro"><!-- print.cms.zzml_intro -->Coffee since 2001.<!-- /print.cms.zzml_intro --></p></main></body></html>');
+	fs.writeFileSync(events, (kept.startsWith('<?php') ? kept : '<?php\n') + "\nconfig::set('languages')->to(array('en', 'ro'));\nconfig::set('multilingual')->to(true);\n");
+	const p = await port();
+	const base = 'http://127.0.0.1:' + p;
+	let server = null;
+	try {
+		execFileSync('php', [path.join(root, 'bin/raster'), 'user', 'ana@site.test', '--role=editor', '--password=ana password', '--name=Ana'], { env: mlEnv });
+		server = spawn('php', ['-S', '127.0.0.1:' + p, path.join(root, 'index.php')], { cwd: root, env: mlEnv, stdio: 'ignore' });
+		await new Promise(r => setTimeout(r, 600));
+		// the first view makes the fields, and their Romanian columns
+		await fetch(base + '/zzml');
+		const context = await browser.newContext({ viewport: { width: 1280, height: 860 }, locale: 'en-GB' });
+		const page = await context.newPage();
+		const errors = [];
+		page.on('pageerror', e => errors.push(e.message));
+		await page.goto(base + '/login');
+		await page.fill('input[name=login]', 'ana@site.test');
+		await page.fill('input[name=password]', 'ana password');
+		await Promise.all([page.waitForNavigation(), page.click('form button')]);
+		// the default language's page has no badge: nothing to fall back to
+		await page.goto(base + '/zzml');
+		await page.waitForTimeout(500);
+		check(await inShadow(page, h => h.shadowRoot.querySelector('.dock .lang') === null), 'no language badge on the default language');
+		await page.goto(base + '/ro/zzml');
+		await page.waitForTimeout(500);
+		// a short badge, so the dock fits a phone; the sentence is its title
+		const badge = await inShadow(page, h => { const b = h.shadowRoot.querySelector('.dock .lang'); return { text: b.textContent, title: b.title, label: b.getAttribute('aria-label') }; });
+		check(badge.text === 'RO', 'the dock says the page\'s language in two letters: ' + badge.text);
+		check(badge.title === 'editing: RO (falls back to EN)' && badge.label === badge.title, 'and the sentence as its title and label: ' + badge.title);
+		await page.setViewportSize({ width: 360, height: 740 });
+		await page.waitForTimeout(300);
+		check(await inShadow(page, h => { const d = h.shadowRoot.querySelector('.dock').getBoundingClientRect(); return [...h.shadowRoot.querySelectorAll('.dock > *')].every(el => { const r = el.getBoundingClientRect(); return r.width === 0 || (r.left >= d.left - 1 && r.right <= d.right + 1 && r.right <= 361); }); }), 'on a phone every button of the dock is in view');
+		check(await inShadow(page, h => getComputedStyle(h.shadowRoot.querySelector('.dock .lang')).display === 'none'), 'on a phone no language badge: the dock keeps its room for buttons');
+		await page.setViewportSize({ width: 1280, height: 860 });
+		await page.waitForTimeout(300);
+		check(await inShadow(page, h => h.shadowRoot.querySelector('.dock .pill.primary').textContent) === 'Edit', 'an English editor gets English words on /ro/');
+		check(await page.locator('h1[data-raster-untranslated]').count() === 1, 'an untranslated field is marked');
+		check(await page.locator('h1').textContent() === 'Our story', 'and shows the English');
+		// a save on /ro/ is the Romanian
+		await page.keyboard.press('e');
+		await page.waitForTimeout(300);
+		await page.locator('h1').click();
+		await page.keyboard.press('Control+A');
+		await page.keyboard.type('Povestea noastră');
+		await page.keyboard.press('Enter');
+		await page.waitForTimeout(800);
+		check((await (await fetch(base + '/ro/zzml')).text()).includes('<h1>Povestea noastră</h1>'), 'the Romanian is saved');
+		check((await (await fetch(base + '/zzml')).text()).includes('<h1>Our story</h1>'), 'the English stays');
+		check(await page.locator('h1[data-raster-untranslated]').count() === 0, 'translated now');
+		check(await page.locator('p.intro[data-raster-untranslated]').count() === 1 && await page.locator('p.intro').textContent() === 'Coffee since 2001.', 'the other field still shows English');
+		await page.screenshot({ path: path.join(screens, 'multilingual.png') });
+		// undo puts back what the Romanian held, nothing, never the English it showed
+		await page.mouse.click(5, 5);
+		await page.keyboard.press('Control+z');
+		await page.waitForTimeout(800);
+		await page.reload();
+		await page.waitForTimeout(500);
+		check(await page.locator('h1[data-raster-untranslated]').count() === 1 && await page.locator('h1').textContent() === 'Our story', 'after undo the Romanian is empty again, and the English shows');
+		// the editor's own words follow the site's base language, with no picker
+		check(await inShadow(page, h => h.shadowRoot.querySelector('.dock .langs') === null), 'no language picker in the dock');
+		check(await inShadow(page, h => h.shadowRoot.querySelector('.dock .lang').title) === 'editing: RO (falls back to EN)', 'the dock in the base language\'s words');
+		check(errors.length === 0, 'no script errors on /ro/: ' + errors.join('; '));
+		await context.close();
+	} finally {
+		if (server) server.kill();
+		fs.writeFileSync(events, kept);
+		fs.rmSync(view, { force: true });
+	}
+}
+
 (async () => {
 	const p = await port();
 	const base = 'http://127.0.0.1:' + p;
@@ -53,6 +134,9 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 	const browser = await chromium.launch(process.env.CHROMIUM ? { executablePath: process.env.CHROMIUM } : {});
 	const errors = [];
 	try {
+		// the café, unless only the multilingual case runs
+		cafe: {
+		if (process.env.RASTER_TEST_ONLY === 'multilingual') break cafe;
 		const context = await browser.newContext({ viewport: { width: 1280, height: 860 } });
 		const page = await context.newPage();
 		page.on('pageerror', e => errors.push(e.message));
@@ -90,7 +174,7 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 		// not a paragraph inside the paragraph (#114)
 		const about = path.join(root, 'demo/views/cafe/about.html');
 		const aboutView = fs.readFileSync(about, 'utf8');
-		fs.writeFileSync(about, aboutView.replace('<h2>Opening hours</h2>', '<p class="lead"><!-- print.cms.lead -->We roast <em>our own</em> beans.<!-- /print.cms.lead --></p><ul class="features"><!-- print.cms.features --><li>Fast</li><li>Cheap</li><!-- /print.cms.features --></ul><article class="note"><!-- print.cms.note -->Fresh <em>bread</em> daily.<!-- /print.cms.note --></article><h2>Opening hours</h2>'));
+		fs.writeFileSync(about, aboutView.replace("<h2><!-- print.i18n.about('opening_hours') -->", '<p class="lead"><!-- print.cms.lead -->We roast <em>our own</em> beans.<!-- /print.cms.lead --></p><ul class="features"><!-- print.cms.features --><li>Fast</li><li>Cheap</li><!-- /print.cms.features --></ul><article class="note"><!-- print.cms.note -->Fresh <em>bread</em> daily.<!-- /print.cms.note --></article><h2><!-- print.i18n.about(\'opening_hours\') -->'));
 		try {
 			await page.goto(base + '/about');
 			await page.waitForTimeout(500);
@@ -152,6 +236,20 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 			await note.click();
 			await page.waitForTimeout(200);
 			check(await inShadow(page, h => !!h.shadowRoot.querySelector('.format button[aria-label=List]')), 'a field in an article offers a list');
+			// moving from one rich field to another keeps the formatting bar:
+			// the first field's leaving must not take down the second's bar
+			const barFor = () => inShadow(page, h => !!h.shadowRoot.querySelector('.float.format'));
+			await page.locator('p.lead[data-raster-field]').click();
+			await page.waitForTimeout(200);
+			check(await barFor(), 'the bar on the lead');
+			await note.click();
+			await page.waitForTimeout(200);
+			check(await barFor(), 'the bar on the note, after the lead');
+			await page.locator('p.lead[data-raster-field]').click();
+			await page.waitForTimeout(200);
+			check(await barFor(), 'the bar on the lead again, after the note');
+			await note.click();
+			await page.waitForTimeout(200);
 			await page.keyboard.press('Control+End');
 			await note.evaluate(el => {
 				const data = new DataTransfer();
@@ -334,11 +432,15 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 			const f = await focused();
 			if (f.kind === 'item') { first = f.text; break; }
 		}
-		const firstItem = page.locator('[data-raster-item]').first();
-		check(first !== null && await firstItem.evaluate(el => el === document.activeElement), 'Tab lands on the first item');
+		check(first !== null && await page.locator('[data-raster-item]').first().evaluate(el => el === document.activeElement), 'Tab lands on the first item');
+		// the hidden dish (Flat white, hidden above; Cortado sorts first)
+		const firstItem = page.locator('[data-raster-item]', { hasText: 'Flat white' }).first();
+		check(await firstItem.getAttribute('data-raster-state') === 'draft', 'the dish to show is hidden');
+		await firstItem.focus();
 		await page.keyboard.press('Enter');
 		check(await inShadow(page, h => !!h.shadowRoot.activeElement && !!h.shadowRoot.activeElement.closest('.handle')), 'Enter on an item moves into its handle');
 		for (let i = 0; i < 8 && !(await inShadow(page, h => h.shadowRoot.activeElement && h.shadowRoot.activeElement.getAttribute('aria-label') === 'Show')); i++) await page.keyboard.press('Tab');
+		check(await inShadow(page, h => h.shadowRoot.activeElement && h.shadowRoot.activeElement.getAttribute('aria-label') === 'Show'), 'Tab reaches Show in the handle');
 		await page.keyboard.press('Enter');
 		await page.waitForTimeout(900);
 		check(await firstItem.getAttribute('data-raster-state') === 'live', 'Show, from the keyboard, shows the hidden dish');
@@ -478,8 +580,8 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 		await page.mouse.click(bold.x, bold.y);
 		check(/<b>small<\/b>/.test(await page.locator('.lede').innerHTML()), 'Bold, clicked, makes the words chosen bold');
 		await page.keyboard.press('Escape');
-		const phoneContext = await browser.newContext({ viewport: { width: 390, height: 664 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, storageState: await context.storageState() });
-		const phoneTab = await phoneContext.newPage();
+		const formatContext = await browser.newContext({ viewport: { width: 390, height: 664 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, storageState: await context.storageState() });
+		const phoneTab = await formatContext.newPage();
 		phoneTab.on('pageerror', e => errors.push(e.message));
 		await phoneTab.goto(base + '/');
 		await phoneTab.waitForTimeout(500);
@@ -494,8 +596,31 @@ const inShadow = (page, fn, arg) => host(page).evaluate(fn, arg);
 		check(/<b>small<\/b>/.test(await phoneTab.locator('.lede').innerHTML()), 'Bold, tapped, makes the words chosen bold');
 		check(await phoneTab.evaluate(() => document.activeElement.classList.contains('lede') && String(getSelection()) === 'small'), 'after the tap the field keeps its focus and the words chosen');
 		await phoneTab.screenshot({ path: path.join(screens, 'format-phone.png') });
+		await formatContext.close();
+		// on a phone: the link box is 16px, so iOS Safari doesn't zoom in on
+		// it, and the dock fits (no language badge, no save status)
+		const phoneContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, storageState: await context.storageState() });
+		const mobile = await phoneContext.newPage();
+		await mobile.goto(base + '/');
+		await mobile.waitForTimeout(500);
+		await mobile.evaluate(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'e', bubbles: true })));
+		await mobile.waitForTimeout(400);
+		await mobile.locator('.lede[data-raster-field], .lede [data-raster-field]').first().tap();
+		await mobile.waitForTimeout(300);
+		await mobile.locator('[data-raster-host]').evaluate(h => { const b = h.shadowRoot.querySelector('.format button[aria-label=Link]'); b.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })); });
+		await mobile.waitForTimeout(300);
+		const linkSize = await mobile.locator('[data-raster-host]').evaluate(h => { const i = h.shadowRoot.querySelector('.format input'); return i ? parseFloat(getComputedStyle(i).fontSize) : 0; });
+		check(linkSize >= 16, 'on a phone the link box is at least 16px, so Safari doesn\'t zoom: ' + linkSize);
+		const fits = await mobile.locator('[data-raster-host]').evaluate(h => {
+			const shown = [...h.shadowRoot.querySelectorAll('.dock > *')].filter(el => getComputedStyle(el).display !== 'none');
+			return { who: shown.some(el => el.classList.contains('who')), inView: shown.every(el => { const r = el.getBoundingClientRect(); return r.left >= 0 && r.right <= 390; }) };
+		});
+		check(fits.who && fits.inView, 'on a phone the dock keeps its avatar and every button is in view: ' + JSON.stringify(fits));
+		check(await mobile.locator('[data-raster-host]').evaluate(h => !h.shadowRoot.querySelector('.dock .status')), 'no "All saved" in the dock: each save shows its own tick');
 		await phoneContext.close();
 		check(errors.length === 0, 'no script errors: ' + errors.join('; '));
+		}
+		await multilingual(browser);
 	} finally {
 		await browser.close();
 		server.kill();

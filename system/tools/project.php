@@ -351,6 +351,11 @@ class raster_project
 		$rules = include $root.'/system/tools/deprecations.php';
 		$app_dir = $root.'/'.$app;
 		$iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($app_dir, FilesystemIterator::SKIP_DOTS));
+		// a rule with `when` counts only while it says the site uses it
+		foreach ($rules as $id => $rule) {
+			if (isset($rule['when']) && !call_user_func($rule['when'])) unset($rules[$id]);
+		}
+		$hits = array();
 		foreach ($iterator as $file) {
 			if (!$file->isFile() || !preg_match('/\.(php|html|rss|atom|xml|json|txt|sql)$/', $file->getFilename())) continue;
 			$relative = substr($file->getPathname(), strlen($app_dir) + 1);
@@ -359,6 +364,7 @@ class raster_project
 			foreach ($rules as $id => $rule) {
 				if (isset($rule['in']) && !preg_match($rule['in'], $relative)) continue;
 				if (!preg_match_all($rule['pattern'], $source, $matches, PREG_OFFSET_CAPTURE)) continue;
+				$hits[$id] = true;
 				foreach ($matches[0] as $match) {
 					$found[] = array(
 						'file' => $app.'/'.$relative,
@@ -368,6 +374,13 @@ class raster_project
 						'allowed' => self::deprecation_allowed($allowed, $id, $relative),
 					);
 				}
+			}
+		}
+		// a `when` rule its pattern can't place (the setting is made in
+		// code) still counts, at the app's config
+		foreach ($rules as $id => $rule) {
+			if (isset($rule['when']) && empty($hits[$id])) {
+				$found[] = array('file' => $app.'/config', 'line' => 0, 'id' => $id, 'message' => $rule['message'].' (deprecated in '.$rule['since'].', removed in '.$rule['removed_in'].')', 'allowed' => self::deprecation_allowed($allowed, $id, 'config'));
 			}
 		}
 		usort($found, function ($a, $b) { return strcmp($a['file'], $b['file']) ?: $a['line'] - $b['line']; });
@@ -492,6 +505,18 @@ class raster_project
 			} else {
 				$add('ok', 'Database matches the templates');
 			}
+			// multilingual: a translated field without its column in some
+			// language shows the default there and can't be translated (#200 R8)
+			if (i18n::enabled()) {
+				$lines = array();
+				$count = 0;
+				foreach ($schema['tables'] as $table) {
+					if (empty($table['missing_translations'])) continue;
+					$lines[] = $table['table'].': '.implode(', ', $table['missing_translations']);
+					$count += count($table['missing_translations']);
+				}
+				if ($lines) $add($environment === 'production' ? 'fail' : 'warn', "$count language column(s) missing", implode("\n", $lines)."\nphp bin/raster schema --apply adds them, empty: each language shows the default until it is translated");
+			}
 		} catch (Exception $e) {
 			$add('fail', 'No database', $e->getMessage());
 		}
@@ -526,13 +551,35 @@ class raster_project
 		if ($flagged) {
 			$groups = array();
 			foreach ($flagged as $d) {
-				$groups[$d['message']][] = "{$d['file']}:{$d['line']}";
+				$groups[$d['message']][] = $d['line'] ? "{$d['file']}:{$d['line']}" : $d['file'];
 			}
 			$lines = array();
 			foreach ($groups as $message => $places) $lines[] = $message."\n  ".implode("\n  ", $places);
 			$add('warn', count($flagged).' use(s) of deprecated features', implode("\n", $lines));
 		}
 		if ($intended) $add('ok', "$intended use(s) of deprecated features kept on purpose", 'config allow_deprecated');
+
+		// languages (#200 D1): a code Raster can't read is skipped, and
+		// multilingual needs two of them; template-only translation is
+		// among the deprecations above
+		$codes = array_merge((array)config::get('languages', array()), array_values((array)config::get('domain_language', array())));
+		$bad = array_values(array_unique(array_filter($codes, function ($l) { return !is_string($l) || !preg_match('/^[a-z]{2,3}(-[a-z0-9]{2,8})?$/i', $l); })));
+		if ($bad) {
+			$add('fail', 'Language code(s) Raster can\'t read: '.implode(', ', array_map(function ($l) { return var_export($l, true); }, $bad)), "Raster skips them. In languages and domain_language, a code is two or three letters, then an optional region: en, ro, pt-br");
+		}
+		if (config::get('multilingual') && !i18n::enabled()) {
+			$add('fail', 'multilingual is on with fewer than two languages', "The site behaves as if it were off. List two or more, the default first:\nconfig::set('languages')->to(array('en', 'ro'))");
+		} elseif (i18n::enabled()) {
+			$add('ok', 'Multilingual: '.implode(', ', i18n::available()));
+			// on a language's own domain the languages without one are linked
+			// on the site's address, which must be a host that takes prefixes
+			$domains = array_change_key_case((array)config::get('domain_language', array()));
+			$site = parse_url((string)(getenv('RASTER_URL') ?: config::get('site_url')));
+			$without = array_filter(i18n::available(), function ($l) use ($domains) { return !in_array(strtolower($l), array_map('strtolower', $domains), true); });
+			if ($domains && $without && (empty($site['host']) || isset($domains[strtolower($site['host'])]))) {
+				$add('fail', 'domain_language needs the site\'s address', "On a language's own domain Raster can't link to the other languages.\nSet RASTER_URL (or config site_url) to the address that takes the /ro/ prefixes, a host not in domain_language");
+			}
+		}
 
 		// the time zone today and scheduled items follow
 		$zone = config::get('timezone');

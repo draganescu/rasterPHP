@@ -75,12 +75,13 @@ This works on every URL, including `/docs/setup` and `/news/news_item/3`, becaus
 <script>var BASE = "http://localhost:8000/"</script>
 ```
 
-It also defines a JavaScript variable, `BASE`, holding the site's root address, for scripts that need to build URLs.
+It also defines a JavaScript variable, `BASE`, holding the site's root address, for scripts that need to build URLs. On a multilingual site it is the address of the page's language (`http://localhost:8000/ro/` on a Romanian page), so a link a script builds stays in that language; `/ro/api/…` answers as `/api/…` does.
 
 Two things follow from the `<base>` tag:
 
-- **In-page anchors need the page name.** `href="#contact"` would point at the theme folder, not the current page. Write `href="about.html#contact"` (which becomes `/about#contact`) or `href="/about#contact"`.
-- The tag is only added when your `<head>` is written exactly as `<head>` (no attributes) and when the page doesn't already have a `<base>` tag. If you write your own `<base>`, asset paths are up to you.
+- **In-page anchors and query links need the page name.** `href="#contact"` and `href="?sort=price"` would point at the theme folder, not the current page. Write `href="about.html#contact"` (which becomes `/about#contact`), `href="about.html?sort=price"`, or `href="/about#contact"`. `lint` warns about the short forms.
+- The tag goes right after your `<head>` tag, with attributes or without (`<head prefix="og: …">`), unless the page already has a `<base>` tag. If you write your own `<base>`, asset paths are up to you.
+- A link to another site without its scheme, `href="//cdn.example.com/guide.html"`, is left as written.
 
 Emails and newsletter issues don't get the tag; their relative links and images are turned into absolute addresses instead.
 
@@ -120,22 +121,38 @@ How routes match:
 - The pattern is a **regular expression**, matched from the **start** of the path. `blog` matches `/blog` and `/blog/post/1`, but not `/my-blog`. Escape special characters (`.`, `?`, `+`) if you mean them literally.
 - Routes are tried in the order they are written. The first match wins, and a matching route wins over a file with the same name.
 - A routed URL is a page of its own: CMS page fields on `/specials` are stored separately from those on `/menu`.
-- `->from('theme')` renders the view from another theme folder, for example a print-friendly version of a page.
+- `->from('theme')` renders the view from another theme folder, for example a print-friendly version of a page. `lint` checks that theme too, and the page's fields are known to `schema`, `describe` and MCP like any other page's.
 - A routed URL with an extension renders the view's file in that format: `/news/news_page/2.rss` is page 2 of `news.rss`. When the view has no such file (`/specials.json` with no `menu.json`), the answer is the 404 page.
 
 Most sites need no routes at all. CMS collection URLs such as `/news/news_item/3` and `/news/news_page/2` are routed automatically; see [The CMS](The-CMS).
 
 `php bin/raster lint` reports routes that point to missing views or aren't valid regular expressions as errors.
 
-## 404 pages
+## Error pages
 
-By default an unknown URL gets a bare "404 Not Found" heading. To use your own page, create a view (for example `404.html`) and set:
+Raster prints no words of its own to visitors. Without a view of yours, an unknown URL gets the bare status: a page whose body is only `404`. To use your own page, create a view (for example `404.html`) and set:
 
 ```php
 config::set('error_document_404')->to('404');
 ```
 
 The page is rendered with status 404, so it can use the layout and CMS fields like any other page. It is always an HTML page, also for a missing `/about.json` or `/feed.rss`. A CMS item URL whose item doesn't exist (`/news/news_item/no-such-post`) also returns 404.
+
+The other refusals work the same way, each with its own setting:
+
+```php
+config::set('error_document_403')->to('403');   // a refused post, a page the account can't open
+config::set('error_document_500')->to('500');   // a page that broke, outside development
+config::set('error_document_503')->to('503');   // the database can't be reached
+```
+
+A 403 has three causes, and each raises an alert the view words: `cross_site` (the form was sent from another site), `form_expired` (a logged in person's form was open too long; reload and send again) and `not_allowed` (logged in, but without the role a `protected` page needs):
+
+```html
+<!-- print.validation.alert('form_expired') --><p>That form was open a long time. Reload the page and send it again.</p><!-- /print.validation.alert('form_expired') -->
+```
+
+These pages show the view as it is written: their CMS fields show the template's text, and the post that was refused never reaches a form on them.
 
 ## Sites in a subfolder, and servers without URL rewriting
 

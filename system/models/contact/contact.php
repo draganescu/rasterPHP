@@ -53,7 +53,7 @@ class contact
 	static $writing = false;
 
 	static function types() {
-		return array(
+		$types = array(
 			'contactmessage' => array(
 				// title first: the slug is made from it, never from the email
 				'fields' => array(
@@ -70,6 +70,14 @@ class contact
 				'actions' => array('done' => 'editor', 'spam' => 'editor', 'not_spam' => 'editor'),
 			),
 		);
+		// the language the sender wrote in, for staff's email: only a
+		// multilingual site's; staff and agents see it, and only the
+		// model writes it (#200 D13)
+		if (i18n::enabled()) {
+			$types['contactmessage']['fields']['lang'] = '';
+			$types['contactmessage']['readonly'][] = 'lang';
+		}
+		return $types;
 	}
 
 	// A new message's title is when it came. One a visitor sent on the form
@@ -78,6 +86,8 @@ class contact
 	static function fill($type, $after, $before) {
 		if ($type !== 'contactmessage' || $before) return array();
 		$values = array('title' => date('Y-m-d H:i'));
+		// the language it was written in, for staff's email (#200 D13)
+		if (i18n::enabled()) $values['lang'] = i18n::current();
 		if (!self::$writing || cms_records::writer() !== 'visitor') return $values;
 		$values['page'] = '/'.ltrim((string)strtok((string)config::get('uri_string'), '?'), '/');
 		if (self::$reasons) {
@@ -188,19 +198,27 @@ class contact
 			log::warning('contact: no address for staff emails: set contact_staff_email or mail_from');
 			return null;
 		}
-		$vars = $message;
-		$vars['page_url'] = util::url(isset($message['page']) ? $message['page'] : '');
-		$vars['staff_url'] = util::url(config::get('contact_staff_page', 'staff'));
-		$vars['site_url'] = util::url('');
-		$headers = array('Reply-To' => self::reply_to(isset($message['name']) ? $message['name'] : '', $message['email']));
-		// the message stays stored when its email can't go; the failure is
-		// logged without the address
-		$mail = controller::model_class('mail');
-		try {
-			if (!$mail::send_view('_email/contact_received', $to, $vars, $headers)) log::error('contact: _email/contact_received was not sent');
-		} catch (Exception $e) {
-			log::error('contact: _email/contact_received: '.$e->getMessage());
-		}
+		// multilingual (#200 D13): in the default language, with the
+		// sender's as lang and page_url the page as they read it
+		$lang = i18n::of($message);
+		$page = mail::in_language($lang, function () use ($message) { return util::url(isset($message['page']) ? $message['page'] : ''); });
+		$default = i18n::default_language();
+		mail::in_language($default, function () use ($message, $to, $lang, $page, $default) {
+			$vars = $message;
+			if (i18n::enabled()) $vars['lang'] = $lang;
+			$vars['page_url'] = $page;
+			$vars['staff_url'] = util::url(config::get('contact_staff_page', 'staff'));
+			$vars['site_url'] = util::url('');
+			$headers = array('Reply-To' => self::reply_to(isset($message['name']) ? $message['name'] : '', $message['email']));
+			// the message stays stored when its email can't go; the failure is
+			// logged without the address
+			$mail = controller::model_class('mail');
+			try {
+				if (!$mail::send_view('_email/contact_received', $to, $vars, $headers, $default)) log::error('contact: _email/contact_received was not sent');
+			} catch (Exception $e) {
+				log::error('contact: _email/contact_received: '.$e->getMessage());
+			}
+		});
 		return null;
 	}
 

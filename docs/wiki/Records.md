@@ -143,7 +143,7 @@ function by_day() {                           // render.inquiry.by_day
 
 `listed()` prints what visitors typed as text and marks each row as its record: staff edit the requests in place and press their buttons. The model decides which records show, and values it adds to a row print without being editable. New requests are added from a `render.cms` list or a request's own page. The booking model's agenda works this way. Without `listed()`, a `false` bool prints the mock-up and what visitors typed prints as HTML, and `raster lint` warns on any page that shows such rows (on admin pages, also that the editor can't edit them).
 
-When even that doesn't fit, link each record to its own page with `<!-- print.@href.raster_detail_link -->` (`/inquiry/inquiry_item/<slug>`, shown by a view that renders `render.cms.inquiry`). Editors edit it there; visitors get a 404 for a private type.
+When even that doesn't fit, link each record to its own page with `<!-- print.@href.raster_detail_link -->` (`/inquiry/inquiry_item/{slug}`, shown by a view that renders `render.cms.inquiry`). Editors edit it there; visitors get a 404 for a private type.
 
 So: list options first, then a model view with `listed()` or links to each record's page, and ask only when none of these work.
 

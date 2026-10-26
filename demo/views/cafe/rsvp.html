@@ -1,43 +1,43 @@
 <!doctype html>
-<html lang="en">
+<!-- print.@lang.i18n.language --><!-- print.@dir.i18n.dir --><html lang="en" dir="ltr"><!-- /print.@dir.i18n.dir --><!-- /print.@lang.i18n.language -->
 <head>
   <!-- dry._layout.head /-->
-  <title>Your reply</title>
+  <title><!-- print.i18n.rsvp('your_reply') -->Your reply<!-- /print.i18n.rsvp('your_reply') --></title>
 </head>
 <body>
   <!-- dry._layout.header /-->
   <main class="narrow">
-    <h1>Your reply</h1>
-    <!-- print.if.static --><p>To change your reply to one of our evenings, call us on <a href="tel:+40721000000">+40 721 000 000</a>.</p><!-- /print.if.static -->
+    <h1><!-- print.i18n.rsvp('your_reply') -->Your reply<!-- /print.i18n.rsvp('your_reply') --></h1>
+    <!-- print.if.static --><p><!-- print.i18n.rsvp('to_change_your_reply_to') -->To change your reply to one of our evenings, call us on<!-- /print.i18n.rsvp('to_change_your_reply_to') --> <a href="tel:+40721000000">+40 721 000 000</a>.</p><!-- /print.if.static -->
     <!-- print.if.live -->
-    <!-- print.validation.alert('changed') --><p class="notice">Done: we have emailed you your reply.</p><!-- /print.validation.alert('changed') -->
-    <!-- print.validation.alert('link_invalid') --><p class="error">This link no longer works: the evening has started, or was called off, or the link is not complete. Call us on +40 721 000 000.</p><!-- /print.validation.alert('link_invalid') -->
-    <!-- print.validation.alert('closed') --><p class="error">Replies are closed: you can still tell us you can't come, or come with fewer.</p><!-- /print.validation.alert('closed') -->
-    <!-- print.validation.alert('full_for_more') --><p class="error">There aren't places for more of you. Your places are kept.</p><!-- /print.validation.alert('full_for_more') -->
-    <!-- print.validation.alert('full') --><p class="error">It's full, and there is no waitlist.</p><!-- /print.validation.alert('full') -->
-    <!-- print.validation.alert('too_many') --><p class="error">For more than 6, call us and we'll see what we can do.</p><!-- /print.validation.alert('too_many') -->
-    <!-- print.validation.alert('people_invalid') --><p class="error">How many of you are coming?</p><!-- /print.validation.alert('people_invalid') -->
-    <!-- print.validation.alert('answer_invalid') --><p class="error">Pick yes, maybe or no.</p><!-- /print.validation.alert('answer_invalid') -->
+    <!-- print.validation.alert('changed') --><p class="notice"><!-- print.i18n.rsvp('done_we_have_emailed_you') -->Done: we have emailed you your reply.<!-- /print.i18n.rsvp('done_we_have_emailed_you') --></p><!-- /print.validation.alert('changed') -->
+    <!-- print.validation.alert('link_invalid') --><p class="error"><!-- print.i18n.rsvp('this_link_no_longer_works') -->This link no longer works: the evening has started, or was called off, or the link is not complete. Call us on +40 721 000 000.<!-- /print.i18n.rsvp('this_link_no_longer_works') --></p><!-- /print.validation.alert('link_invalid') -->
+    <!-- print.validation.alert('closed') --><p class="error"><!-- print.i18n.rsvp('replies_are_closed_you_can') -->Replies are closed: you can still tell us you can't come, or come with fewer.<!-- /print.i18n.rsvp('replies_are_closed_you_can') --></p><!-- /print.validation.alert('closed') -->
+    <!-- print.validation.alert('full_for_more') --><p class="error"><!-- print.i18n.rsvp('there_arent_places_for_more') -->There aren't places for more of you. Your places are kept.<!-- /print.i18n.rsvp('there_arent_places_for_more') --></p><!-- /print.validation.alert('full_for_more') -->
+    <!-- print.validation.alert('full') --><p class="error"><!-- print.i18n.rsvp('its_full_and_there_is') -->It's full, and there is no waitlist.<!-- /print.i18n.rsvp('its_full_and_there_is') --></p><!-- /print.validation.alert('full') -->
+    <!-- print.validation.alert('too_many') --><p class="error"><!-- print.i18n.rsvp('for_more_than_6_call') -->For more than 6, call us and we'll see what we can do.<!-- /print.i18n.rsvp('for_more_than_6_call') --></p><!-- /print.validation.alert('too_many') -->
+    <!-- print.validation.alert('people_invalid') --><p class="error"><!-- print.i18n.rsvp('how_many_of_you_are') -->How many of you are coming?<!-- /print.i18n.rsvp('how_many_of_you_are') --></p><!-- /print.validation.alert('people_invalid') -->
+    <!-- print.validation.alert('answer_invalid') --><p class="error"><!-- print.i18n.rsvp('pick_yes_maybe_or_no') -->Pick yes, maybe or no.<!-- /print.i18n.rsvp('pick_yes_maybe_or_no') --></p><!-- /print.validation.alert('answer_invalid') -->
     <!-- render.rsvp.manage -->
     <dl class="booking-details">
-      <dt>Name</dt><dd><!-- print.name -->Ana<!-- /print.name --></dd>
-      <dt>Evening</dt><dd><!-- print.event_title -->Jazz night<!-- /print.event_title -->, <!-- print.event_date -->2026-11-20<!-- /print.event_date --> at <!-- print.event_starts -->20:00<!-- /print.event_starts --></dd>
-      <dt>Answer</dt><dd><!-- print.answer -->yes<!-- /print.answer -->, for <!-- print.people -->2<!-- /print.people --></dd>
-      <dt>Status</dt><dd class="status"><!-- print.status -->going<!-- /print.status --></dd>
-      <dt>Place on the waitlist</dt><dd><!-- print.position -->1<!-- /print.position --></dd>
-      <dt>Replies close</dt><dd><!-- print.deadline -->2026-11-20 20:00<!-- /print.deadline --></dd>
+      <dt><!-- print.i18n.rsvp('name') -->Name<!-- /print.i18n.rsvp('name') --></dt><dd><!-- print.name -->Ana<!-- /print.name --></dd>
+      <dt><!-- print.i18n.rsvp('evening') -->Evening<!-- /print.i18n.rsvp('evening') --></dt><dd><!-- print.event_title -->Jazz night<!-- /print.event_title -->, <!-- print.event_date -->2026-11-20<!-- /print.event_date --> <!-- print.i18n.rsvp('at') -->at<!-- /print.i18n.rsvp('at') --> <!-- print.event_starts -->20:00<!-- /print.event_starts --></dd>
+      <dt><!-- print.i18n.rsvp('answer') -->Answer<!-- /print.i18n.rsvp('answer') --></dt><dd><!-- print.answer -->yes<!-- /print.answer --><!-- print.i18n.rsvp('for') -->, for<!-- /print.i18n.rsvp('for') --> <!-- print.people -->2<!-- /print.people --></dd>
+      <dt><!-- print.i18n.rsvp('status') -->Status<!-- /print.i18n.rsvp('status') --></dt><dd class="status"><!-- print.status -->going<!-- /print.status --></dd>
+      <dt><!-- print.i18n.rsvp('place_on_the_waitlist') -->Place on the waitlist<!-- /print.i18n.rsvp('place_on_the_waitlist') --></dt><dd><!-- print.position -->1<!-- /print.position --></dd>
+      <dt><!-- print.i18n.rsvp('replies_close') -->Replies close<!-- /print.i18n.rsvp('replies_close') --></dt><dd><!-- print.deadline -->2026-11-20 20:00<!-- /print.deadline --></dd>
     </dl>
     <form method="post" class="stack">
       <input type="hidden" name="do" value="change">
-      <fieldset><legend>Change your answer</legend>
-        <label><input type="radio" name="answer" value="yes"> Yes</label>
-        <label><input type="radio" name="answer" value="maybe"> Maybe</label>
-        <label><input type="radio" name="answer" value="no"> No, I can't come</label>
+      <fieldset><legend><!-- print.i18n.rsvp('change_your_answer') -->Change your answer<!-- /print.i18n.rsvp('change_your_answer') --></legend>
+        <label><input type="radio" name="answer" value="yes"> <!-- print.i18n.rsvp('yes') -->Yes<!-- /print.i18n.rsvp('yes') --></label>
+        <label><input type="radio" name="answer" value="maybe"> <!-- print.i18n.rsvp('maybe') -->Maybe<!-- /print.i18n.rsvp('maybe') --></label>
+        <label><input type="radio" name="answer" value="no"> <!-- print.i18n.rsvp('no_i_can_t_come') -->No, I can't come<!-- /print.i18n.rsvp('no_i_can_t_come') --></label>
       </fieldset>
-      <label>People <input type="number" name="people" min="1" max="6"></label>
-      <button>Change my reply</button>
+      <label><!-- print.i18n.rsvp('people') -->People<!-- /print.i18n.rsvp('people') --> <input type="number" name="people" min="1" max="6"></label>
+      <button><!-- print.i18n.rsvp('change_my_reply') -->Change my reply<!-- /print.i18n.rsvp('change_my_reply') --></button>
     </form>
-    <p><!-- print.@href.event_url --><a href="events.html">The evening's page</a><!-- /print.@href.event_url --></p>
+    <p><!-- print.@href.event_url --><a href="events.html"><!-- print.i18n.rsvp('the_evening_s_page') -->The evening's page<!-- /print.i18n.rsvp('the_evening_s_page') --></a><!-- /print.@href.event_url --></p>
     <!-- /render.rsvp.manage -->
     <!-- /print.if.live -->
   </main>

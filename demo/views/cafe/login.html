@@ -1,24 +1,24 @@
 <!doctype html>
-<html lang="en">
+<!-- print.@lang.i18n.language --><!-- print.@dir.i18n.dir --><html lang="en" dir="ltr"><!-- /print.@dir.i18n.dir --><!-- /print.@lang.i18n.language -->
 <head>
   <!-- dry._layout.head /-->
-  <title>Log in</title>
+  <title><!-- print.i18n.login('log_in') -->Log in<!-- /print.i18n.login('log_in') --></title>
 </head>
 <body>
   <!-- dry._layout.header /-->
   <main class="narrow">
-    <h1>Log in</h1>
-    <!-- print.validation.alert('login_failed') --><p class="error">Wrong email or password.</p><!-- /print.validation.alert('login_failed') -->
-    <!-- print.cms.login_message /-->
+    <h1><!-- print.i18n.login('log_in') -->Log in<!-- /print.i18n.login('log_in') --></h1>
+    <!-- print.validation.alert('login_failed') --><p class="error"><!-- print.i18n.login('wrong_email_or_password') -->Wrong email or password.<!-- /print.i18n.login('wrong_email_or_password') --></p><!-- /print.validation.alert('login_failed') -->
+    <!-- print.cms.login_message /--><!-- print.validation.alert('no_database') --><p class="notice"><!-- print.i18n.login('no_database_is_configured_for') -->No database is configured for this environment (application/config/db/).<!-- /print.i18n.login('no_database_is_configured_for') --></p><!-- /print.validation.alert('no_database') --><!-- print.validation.alert('no_users') --><p class="notice"><!-- print.i18n.login('there_are_no_users_yet') -->There are no users yet. Create one from the project folder: <code>php bin/raster user admin</code><!-- /print.i18n.login('there_are_no_users_yet') --></p><!-- /print.validation.alert('no_users') -->
     <!-- render.authentication.login -->
     <form method="post" class="stack">
-      <label>Email or username <input type="text" name="login" autocomplete="username" required></label>
-      <!-- render.validation.field('login') --><p class="error">Enter your email or username.</p><!-- /render.validation.field('login') -->
-      <label>Password <input type="password" name="password" autocomplete="current-password" required></label>
-      <button>Log in</button>
+      <label><!-- print.i18n.login('email_or_username') -->Email or username<!-- /print.i18n.login('email_or_username') --> <input type="text" name="login" autocomplete="username" required></label>
+      <!-- render.validation.field('login') --><p class="error"><!-- print.i18n.login('enter_your_email_or_username') -->Enter your email or username.<!-- /print.i18n.login('enter_your_email_or_username') --></p><!-- /render.validation.field('login') -->
+      <label><!-- print.i18n.login('password') -->Password<!-- /print.i18n.login('password') --> <input type="password" name="password" autocomplete="current-password" required></label>
+      <button><!-- print.i18n.login('log_in') -->Log in<!-- /print.i18n.login('log_in') --></button>
     </form>
     <!-- /render.authentication.login -->
-    <p><a href="forgot.html">Forgot your password?</a> · <a href="register.html">Become a member</a></p>
+    <p><a href="forgot.html"><!-- print.i18n.login('forgot_your_password') -->Forgot your password?<!-- /print.i18n.login('forgot_your_password') --></a> · <a href="register.html"><!-- print.i18n.login('become_a_member') -->Become a member<!-- /print.i18n.login('become_a_member') --></a></p>
   </main>
   <!-- dry._layout.footer /-->
 </body>

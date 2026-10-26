@@ -28,7 +28,9 @@ Runs the site with PHP's built-in web server. For development only; see [Deployi
 php bin/raster lint [--fix] [--json] [--theme=name] [--all-themes]
 ```
 
-Checks every view of the theme: annotation spelling, blocks that aren't closed or don't nest, models and methods that don't exist (with the nearest real name), the number of arguments, reserved CMS names, attributes an `@` annotation sets that the tag doesn't have, `dry` fragments that don't exist, forms nobody handles, alerts nobody raises, validation blocks that can never show, routes to missing views, event bindings to missing methods, and named SQL queries that don't exist.
+Checks every view of the site's theme, and of every theme a route serves views from (`->from('print')`): annotation spelling, blocks that aren't closed or don't nest, models and methods that don't exist (with the nearest real name), the number of arguments, reserved CMS names, attributes an `@` annotation sets that the tag doesn't have, `dry` fragments that don't exist, forms nobody handles, alerts nobody raises, validation blocks that can never show, routes to missing views, event bindings to missing methods, and named SQL queries that don't exist.
+
+`--theme=name` checks that one theme alone, `--all-themes` every folder under `views/`.
 
 Problems are **errors** (the page won't work) or **warnings** (probably a mistake). Exit code 1 means at least one error.
 
@@ -63,7 +65,7 @@ Compares the content model your templates declare with the database, and changes
 php bin/raster doctor [--json]
 ```
 
-A health check: PHP version and extensions, whether the app needs upgrade steps, whether framework files were edited, whether `.htaccess` has every protection rule, whether `data/` and `media/` are writable, template errors, database drift, deprecated features in use, and in production the site address, mail transport, MCP token, `RASTER_ENV`, `display_errors` and whether PHP takes uploads as large as the editor's (12 MB: `upload_max_filesize` and `post_max_size`). Exit code 1 when something must be fixed. Run it on the server after every deploy.
+A health check: PHP version and extensions, whether the app needs upgrade steps, whether framework files were edited, whether `.htaccess` has every protection rule, whether `data/` and `media/` are writable, template errors, database drift, deprecated features in use, language settings (a code it can't read, `multilingual` with fewer than two languages, and on a multilingual site the language columns the database still lacks (translations and `saved_lang`)), and in production the site address, mail transport, MCP token, `RASTER_ENV`, `display_errors` and whether PHP takes uploads as large as the editor's (12 MB: `upload_max_filesize` and `post_max_size`). Exit code 1 when something must be fixed. Run it on the server after every deploy.
 
 ## Accounts
 
@@ -77,10 +79,10 @@ php bin/raster users
 ## Newsletter
 
 ```sh
-php bin/raster send <url> [--to=email] [--subject="…"] [--dry-run] [--again]
+php bin/raster send <url> [--to=email] [--subject="…"] [--dry-run] [--again] [--lang=code]
 ```
 
-Sends a page of the site as a newsletter issue. Run it again after a stop or a failure and it mails only the subscribers who don't have it yet. Needs `RASTER_URL` (or the `site_url` setting). See [Newsletter](Newsletter#sending-an-issue).
+Sends a page of the site as a newsletter issue. Run it again after a stop or a failure and it mails only the subscribers who don't have it yet. Needs `RASTER_URL` (or the `site_url` setting). On a multilingual site it sends each language's version of the page to the subscribers who read it (`--lang` for just one). See [Newsletter](Newsletter#sending-an-issue).
 
 ## Publishing
 

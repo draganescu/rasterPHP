@@ -151,6 +151,13 @@ class config {
 		// index.php out, answer 301 to /menu, so outside links make no
 		// duplicates and the page cache keeps one copy (#131)
 		$method = isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : 'GET';
+		// link_uri without the language prefix; with multilingual on, link_uri
+		// adds the prefix of the language the URL names (url_language)
+		$config->link_base = $config->link_uri;
+		$config->url_language = '';
+		if ($config->multilingual && i18n::enabled()) {
+			$path_info = config::language_of_url($config, $path_info, $parts ?? array(), PHP_SAPI !== 'cli' && in_array($method, array('GET', 'HEAD'), true));
+		}
 		$prefixed = config::get('rewrite') == true && strpos($request_uri.'/', '/'.$config->index_file.'/') === 0 && $path_info !== '/';
 		$slashed = $path_info !== '/' && substr($path_info, -1) === '/';
 		if (PHP_SAPI !== 'cli' && in_array($method, array('GET', 'HEAD'), true) && ($prefixed || $slashed)) {
@@ -188,6 +195,57 @@ class config {
 		}
 
 		return $config;
+	}
+
+	// Multilingual (#200): the URL alone names the content language. A host
+	// in domain_language (exactly, port aside) is its language and takes no
+	// prefix; else /ro/ names ro; else it is the default language. The
+	// prefix is taken off here, before the one-address rule and before
+	// anything reads the path, so routes, `protected`, /api, /mcp, forms and
+	// the cache key see /menu, and every link keeps the language through
+	// link_uri. /ro answers 301 to /ro/, /en/menu (the default) to /menu,
+	// /ro/menu to example.ro/menu when ro has its own domain (one language,
+	// one address), and ?lang=ro to the same page at that language's
+	// address. Returns the path left.
+	static function language_of_url($config, $path, $site, $redirects) {
+		$languages = i18n::available();
+		$codes = array_map('strtolower', $languages);
+		$host = strtolower(preg_replace('/:\d+$/', '', (string)$config->host));
+		$domains = array_change_key_case((array)$config->domain_language);
+		$domain_of = array();
+		foreach ($domains as $domain => $language) {
+			if (in_array(strtolower($language), $codes, true) && !isset($domain_of[strtolower($language)])) $domain_of[strtolower($language)] = $domain;
+		}
+		$on_domain = isset($domains[$host]) && in_array(strtolower($domains[$host]), $codes, true);
+		$redirect = null;
+		if ($on_domain) {
+			$config->url_language = $languages[array_search(strtolower($domains[$host]), $codes, true)];
+		} elseif (preg_match('#^/([^/]+)(/.*)?\z#s', $path, $m) && ($index = array_search($m[1], $codes, true)) !== false) {
+			$rest = isset($m[2]) ? $m[2] : '';
+			if ($index > 0) $config->url_language = $languages[$index];
+			// the default language has no prefix, a language with its own
+			// domain lives there (seen from the site's own address, see
+			// i18n::address), and a language's home is /ro/
+			$target = i18n::address($m[1]);
+			if ($index === 0 || (isset($domain_of[$m[1]]) && $target !== $config->link_base.$m[1].'/') || $rest === '') $redirect = $target;
+			$path = $rest === '' ? '/' : $rest;
+		}
+		$config->link_uri = $config->link_base.i18n::prefix($config->url_language);
+		$query = isset($_SERVER['QUERY_STRING']) ? (string)$_SERVER['QUERY_STRING'] : '';
+		// ?lang=xx is a link from before: the same page at its language's
+		// address. ro, RO and ro-RO all name ro, as i18n matches languages.
+		$lang = isset($_GET['lang']) && is_string($_GET['lang']) ? strtolower($_GET['lang']) : '';
+		$code = in_array($lang, $codes, true) ? $lang : (in_array(substr($lang, 0, 2), $codes, true) ? substr($lang, 0, 2) : null);
+		if ($code !== null && ($target = i18n::address($code)) !== null) {
+			$redirect = $target;
+			$query = implode('&', array_filter(explode('&', $query), function ($pair) { return $pair !== '' && urldecode(strtok($pair, '=')) !== 'lang'; }));
+		}
+		if ($redirects && $redirect !== null) {
+			$tail = implode('/', array_map('rawurlencode', explode('/', trim($path, '/'))));
+			header('Location: '.$redirect.$tail.($query !== '' ? '?'.$query : ''), true, 301);
+			exit;
+		}
+		return $path;
 	}
 
 	// the set_environment method looks up the current domain in the servers config

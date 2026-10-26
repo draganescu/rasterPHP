@@ -37,6 +37,8 @@ if (!$sent) {
 
 `send_view($view, $to, $values, $headers)` returns `false` when the message can't be sent at all (a bad recipient address, an unknown transport, an unknown site address in production) and `true` otherwise. In a web request `true` means the message is kept to be sent after the answer (see below), so it doesn't tell you the mail server took it: `mail.failed` does. On the command line `true` means the message was handed over. The optional `$headers` array adds headers, such as `array('Reply-To' => 'sales@example.com')`.
 
+On a multilingual site, `send_view($view, $to, $values, $headers, $lang)` sends it in the recipient's language: the view's words, its `<title>` and its links (`/ro/…`) are that language's. The bundled emails (bookings, RSVPs, password resets, newsletter confirmations, shop orders) go to each guest in the language they used on the site, whoever acts; emails to staff go in the site's default language. Without `$lang`, or on a site that isn't multilingual, the email is in the request's language, as always.
+
 To send HTML you built yourself: `mail::send($to, $subject, $html)`. It returns `false` and `true` the same way, without the check of the site's address.
 
 ## Mail goes out after the answer

@@ -3,11 +3,125 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
-## 2.2.46
+## 2.2.54
 
 Nothing for sites to do.
 
 - **On a phone, the in-page editor's formatting bar shows, and its buttons work.** It sat just above a rich field, where iOS draws its own Copy, Cut and Paste menu over the words chosen, so with text selected the bar was hidden under that menu (or off screen, for a long field). On a touch screen it now sits at the bottom of what shows, just above the keyboard, with buttons big enough for a finger, and follows the keyboard as it opens and closes. A tap on Bold, Italic, Link, List or Plain text now acts on the press and keeps the field's focus and the words chosen, instead of waiting for the tap and losing the selection. The phone's own menu stays: a page can't turn it off in a field being edited.
+
+## 2.2.53
+
+What sites need to do: nothing. A site's own `i18n/<lang>/raster_editor.php` still wins over Raster's words.
+
+**The editor's language follows one rule.** Everything Raster shows the person editing (the in-page editor, its messages, the fallback login page) is in one language: in development, the one the sibip builder sends in the `Raster-Editor-Language` header; otherwise the site's base language, the first in its list; otherwise English. It is the same on multilingual and one-language sites, and editing `/fr/` no longer changes the buttons. A missing word falls back to English on its own. The editor's dates follow the same language, so the config has `editor_lang` on every site now. A code with no dictionary (`ko`) gets English words and its own dates. Published sites and public previews run in production, where the header is ignored.
+
+**What went:** the dock's language dropdown, the `editor_set_lang` endpoint (now a 404), the `user.editor_lang` column (no longer declared; a site that has it keeps it, unused), and every guess from the browser: nothing reads `Accept-Language`, `?lang=` or the language cookie to pick the editor's words.
+
+**The editor's refusals are codes it words.** "Unknown page", "No such revision", "This page is in ro: reload it" and the other sentences `editor.php` sent keep their English `error` for API callers and MCP, and now add `problems`: `one_value`, `unknown_page`, `unknown_field`, `wrong_language` (with `lang`), `unknown_collection`, `no_such_item`, `no_such_revision`, `broken` and `not_saved` (a store's own exception, its sentence in `detail`, shown after the words). The editor words them from its dictionary.
+
+**The dock's language label is a badge.** On a translation's page the dock shows the language's code (`RO`), with "editing: RO (falls back to EN)" as its title and label; the default language's pages show none. On a phone the dock shows no badge, so every button fits.
+
+**No "All saved" in the dock.** Every change saves when you leave its field, and each save shows its own tick and a toast with Undo, so the dock's status only ever said "All saved". It is gone, and the dock has room for its buttons; leaving the page while a save is still on its way still asks first.
+
+**No zooming into the editor's text boxes on a phone.** iOS Safari zoomed in when the link box (and the editor's other boxes) took focus, because their text was 14px; on touch screens they are 16px.
+
+**The formatting bar stays when you move between rich fields.** Tapping or clicking from one rich field to another left no bar until edit mode was turned off and on: the first field's leaving, which runs a moment later, took down the bar the second had just shown. Now it only hides its own.
+
+**Raster's fallback login page** (used when a theme has no `login.html`) is no longer hard-coded English. Its words come from the editor's dictionaries through `print.cms.login_word('login_…')`, in the content's language: the address's on a multilingual site (`/fr/login` is French), else the base language. Its `<html lang>` says which.
+
+**The editor in 14 more languages:** French, German, Spanish, Italian, Portuguese, Dutch, Hungarian, Polish, Bulgarian, Greek, Turkish, Japanese, Hindi and Chinese (Simplified, `zh`), next to Romanian. An AI agent drafted them; corrections are welcome. A test checks that every dictionary has every key and keeps every `{placeholder}`.
+
+## 2.2.52
+
+What sites need to do: a multilingual site may see new `untranslatable_text` warnings for plain words inside alerts; move them into a `print.i18n` key inside the alert.
+
+**On a multilingual site an event's page in another language now takes replies.** The Romanian page of an evening (`/ro/events/events_item/seara-de-poezie`, its Romanian slug) said "this evening doesn't take replies here" while the English page took them: the rsvp model looked the event up by its default slug only. It now finds it as the list does, through the new `cms_store::item_at()` and `item_id()`: the language's slug, else the default slug, else a number as an id. That is now the one place an item's address is read (`render.cms` uses it too), and a test checks no other bundled model writes a slug lookup of its own. AGENTS.md has a short "Writing a model for a multilingual site" with the four core calls a model uses.
+
+**`/ro/login` shows the layout's site fields in Romanian.** The login page never read CMS fields; on a multilingual site its `site_*` fields (the tagline, the footer) now follow the page's language as on every other page. Off, the login page is as it was.
+
+**Lint reads an alert's words** (multilingual on). A `print.validation.alert` block prints its words as written, so on a multilingual site every language showed them in the default language and lint said nothing. `untranslatable_text` now reports them, and says to put a `print.i18n.<file>('key')` inside the alert. Off, lint is as it was. The starter's alerts are dictionary keys now, with the English as the default, so its pages are byte for byte what they were.
+
+**Lint warns about one alert name worded twice** (`alert_twice`, always). Two `print.validation.alert('x')` blocks with different words in one view show the first one's words in both places.
+
+**The demo café words every alert in Romanian.** The booking, reply, contact, account and newsletter alerts of the visitor pages are dictionary keys now, with their Romanian in `demo/i18n/ro/`. The contact form's `name_invalid` and `email_invalid` share the booking form's words: one alert name shows one text on a page.
+
+## 2.2.51
+
+**Multilingual sites** (#200). A site can now serve its template text and everything editors write in several languages, behind one setting that is off by default. A site that doesn't turn it on renders as before.
+
+What sites need to do after `php bin/raster update`:
+
+- **Nothing, unless you turn multilingual on.** With `multilingual` off your pages, headers, links and SQL are as they were.
+- **Dates typed day first.** On a site that sets `languages` (multilingual or not), a date typed as `5/10/2026` or `5/10/26` is read as 5 October, except for `en-us`. ISO dates (`2026-10-05`) are read as always. A site without `languages` reads dates as before.
+- **A site with `languages` and no `multilingual`** (template-only translation) keeps working until 3.0.0; `doctor` suggests the switch. Keep it on purpose with `allow_deprecated` (`'template-only-languages' => true`).
+- **A dictionary that sets `$lang = array(…)`** instead of returning its array is deprecated (#44); the upgrade step adds `return $lang;`.
+- **The demo café** gained an editable opening-hours list: run `php bin/raster schema --apply` and `php demo/seed.php` on a demo install.
+
+To turn it on: `config::set('multilingual')->to(true);` and `config::set('languages')->to(array('en', 'ro'));` (the first is the default) in `config/the_app.php`, then `php bin/raster schema --apply` in production. Or ask an agent: MCP `set_languages(["en", "ro"])`.
+
+- **Addresses.** Every language but the default has its own addresses under its code (`/ro/menu`, its home `/ro/`), or its own domain (`domain_language`). The URL alone picks the language: one URL is one language, so the page cache, CDNs and 304s stay correct, every page answers `Content-Language`, `?lang=ro` answers 301 to the page in that language, and no language cookie is set. The prefix is taken off before anything reads the path, so `protected` pages, `/ro/api`, `/ro/mcp` and the login keep working, and every link Raster builds (pages and emails) keeps the language. A site under a path (`/preview/abc/ro/menu`) works too.
+- **Pages, site fields and items in every language.** A text field printed as content (or as `alt`, `title`, `placeholder`, `aria-label`, a meta `content`) gets one column per language (`headline__ro`); photos, links, numbers and dates stay one value for every language. An empty translation shows the default language. Lists sort and filter by the translated text. `php bin/raster schema --apply` adds the columns; turning multilingual off keeps them ("kept translations"), never offered for `--drop`.
+- **Item addresses per language** (#138). Items get a Romanian slug from their Romanian title; another language's slug, or an old one, answers 301 to the right address.
+- **The in-page editor** edits the page's language on `/ro/…`, says which fields still show the default, and speaks the editor's own language (chosen in the dock), not the page's.
+- **Emails go out in the recipient's language** (D13): bookings, replies, contact messages, accounts, subscribers and shop orders remember the language they were made in, and every email to them (also those staff trigger) is rendered in it, with `/ro/` links. Staff copies go in the default language. `raster send` sends each subscriber the issue in their language.
+- **SEO.** `<html lang dir>` follows the page (#138); multilingual pages carry `canonical`, `hreflang` and `x-default` links; the sitemap lists every language with alternates.
+- **The sitemap lists every published item** (#126): collections without an item view, no 1,000 cap, `lastmod` from the last save.
+- **Static export** crawls each language at its own addresses.
+- **Lint** (multilingual on) warns about words no annotation prints, dictionary keys missing in a language, and an `<html>` whose `lang` is fixed; always about `__` in names and `href="#…"` links (#117).
+- **`doctor`** checks the languages: the switch with fewer than two, codes it can't read, `domain_language` without a site address, and missing translation columns.
+- **The coding MCP builds multilingual sites:** `set_languages`, `translation_status` (pages, site fields, items, records, dictionary words, emails), `read_strings`/`write_strings` (Raster writes the PHP), `lang` on the page and item tools, a `languages` block in `describe`, and the theme's CSS, JS and SVG through `read_asset`/`write_asset` (#159). Over HTTP the writing tools need `mcp_write_views`.
+- **The language API** for every model: `i18n::enabled()`, `current()`, `default_language()`, `suffix()`, `prefix()`, `address()`, `with()`, `dir()`, `date_order()`, `alternates()`, `of()`.
+- **Groundwork that shipped on the way:** see 2.2.46–2.2.50 (lint/engine agreement, one URL parser, no English from the framework, the switch and `/ro/` URLs, `<html lang dir>`).
+- **Other fixes:** the framework's error pages and the editor's refusals are words a site can change (#38 #128, 2.2.48); the starter, demo and shop models return no words (#127); newsletter queries live in `sql/` files.
+
+## 2.2.50
+
+Nothing for sites to do. Every view's `<html>` tag in the starter, the demo and the shop now prints its language and direction; a site's own views keep theirs until it changes them.
+
+- **`<html lang dir>` follows the page's language** (#138). `print.i18n.dir` gives `rtl` for languages written right to left (Arabic, Hebrew, Persian, Urdu, …), else `ltr`. The bundled views wrap their tag as `<!-- print.@lang.i18n.language --><!-- print.@dir.i18n.dir --><html lang="en" dir="ltr">…`, so the mock-up still reads `lang="en"` and a site without languages prints the same page, now with `dir="ltr"`. Emails keep `lang="en"` as written for now.
+- **Multilingual pages say where their other languages are**: in `<head>`, after the `<base>`, a `<link rel="canonical">`, one `<link rel="alternate" hreflang="xx">` per language and `hreflang="x-default"`, from `i18n::alternates()`. None on a 404 or on a URL with a query; a page that writes its own keeps them. The switcher's rows (`render.i18n.languages`) gain `url` (the language's own address in multilingual mode, `?lang=` otherwise) and `current`, and the starter's `_layout.html` shows it when the site has more than one language (`if.languages`).
+- **The `<base>` goes after any `<head …>` tag** (#117), with attributes (`<head prefix="og: …">`) or in capitals, never into a `<head>` inside a comment or a script; `//host/…` links are left as written. `lint` warns about `href="#…"` and `href="?…"`, which open the theme folder: write `about.html#…`. The `#anchor` part of #117 stays open.
+- **Static export crawls each language from its own address** (#200): `/ro/` is written to `ro/index.html`, links already carry the prefix, every language gets its own `404.html`, and a language with its own domain is fetched there. Template-only and one-language exports are as before. It warns when a multilingual export has no absolute address.
+- **`raster export` reads `site_url`** when neither `--url` nor `RASTER_URL` is set (#137).
+
+## 2.2.49
+
+Nothing for most sites to do. Two things `doctor` may now say:
+
+- **A site with `languages` and no `multilingual`** (template-only translation, with `?lang=` and the cookie) gets a deprecation hint: it keeps working until 3.0.0, and `multilingual` is the way forward (below). Keep it on purpose with `allow_deprecated` (`'template-only-languages' => true`).
+- **A dictionary that sets `$lang = array(…)` instead of returning its array** is deprecated (#44). `php bin/raster update` (its upgrade step) adds `return $lang;` to such files.
+
+- **One switch for multilingual sites: `multilingual`, off by default** (#200). With `config::set('multilingual')->to(true)` and two or more `languages` (the first is the default), the URL alone says the language: the default language has no prefix (`/menu`), the others are under their code (`/ro/menu`, a language's home is `/ro/`), and a host listed in `domain_language` is its language with no prefix. `/ro` answers 301 to `/ro/`, `/en/menu` (the default's code) 301 to `/menu`, and `?lang=ro` 301 to the same page in that language. A language with its own domain lives only there. The prefix is taken off in `config::initialize()` before anything reads the path, so routes, `protected` pages (`/ro/staff` goes to `/ro/login` and back), `/ro/api` and `/ro/mcp` work as without it, and every link Raster builds keeps the language: `link_uri` carries the prefix, and on a `/ro/` page hand-written root links to pages (`href="/menu"`, `action`, `formaction`) get it too, while links to files don't. Pages and feeds answer `Content-Language`, kept with the cached copy; the page cache keeps one copy per URL, and no `lang` cookie is set. A site under a path (`RASTER_URL=https://host/preview/abc/`) serves `/preview/abc/ro/menu`. With `multilingual` off nothing of this happens, and output, headers and cache keys are as before.
+- **The language API for every model** (`system/models/i18n/i18n.php`): `i18n::enabled()`, `default_language()`, `current()`, `is_default()`, `suffix()`, `prefix()`, `address()`, `with($lang, $fn)`, `dir()`, `date_order()` and `alternates()`. Raster's own code reads language state only through it. `i18n` can't be overridden by a `the_i18n` for these calls (AGENTS.md, Extending).
+- **`doctor` checks the languages**: `multilingual` with fewer than two languages (the site behaves as off), a language code Raster can't read, and `domain_language` with multilingual but no site address.
+
+## 2.2.48
+
+`php bin/raster update` does what sites need: its upgrade step adds the `no_database` and `no_users` alerts after `<!-- print.cms.login_message /-->` in a site's login view, since that tag now prints nothing. To word the refusals, a site can set `error_document_403` and `error_document_500` views (below). A listener or script that read `{"error":"cross-site"}` from `/api` now gets `cross_site`.
+
+- **The framework prints no English to visitors** (#38). Every refusal goes through `controller::refuse($code, $alert)`: it renders the site's `error_document_<code>` view, with an alert the view words (`cross_site`, `form_expired`, `not_allowed`), or answers the bare status (`<h1>403</h1>`) with no sentences. That covers a post from another site, a stale form, a protected page someone without the role asks for, the 404, the 500 outside development and the 503. The refused post is never handled, error pages are never cached, and they keep the page's flags (`if.logged_in`, `if.live`). On `/api` the answer is JSON with `problems`. The login page's notices are alerts, and an email without a `<title>` gets the site's name (or the host) as its subject.
+- **The in-page editor's refusals are names, worded in the editor's language** (#128). Type errors answer `problems: ['type_<type>']`, uploads `upload_missing`, `upload_too_big` (also over PHP's `post_max_size`), `upload_not_a_picture` and `upload_not_stored`. English and Romanian ship; a site rewords any of them in `i18n/<lang>/raster_editor.php`.
+
+## 2.2.47
+
+Nothing for most sites to do. A listener of `cms.item_saved` or `cms.item_deleted` that compared `collection` with a name rebuilt from the table (`teammembers` for a `team_members` collection) now gets the collection's own name.
+
+- **One place reads and writes collection and item URLs** (#40). `cms::collection_uri()` parses `/<view>/<name>_item|_items|_page/…`, `cms::collection_request()` says what a list is asked for, and `cms::item_url()`, `cms::page_link()` and `cms::filter_link()` build the links. The router, page fields, pagination, feed, the sitemap, records, RSVP, the inspector, `describe` and MCP all call them, so the URLs a site's links write render as before. On a page with two paginated lists, each pager now keeps the other's page, and `/landing_page/landing_page/2` shows page 2.
+- **One place matches `protected` paths**, `authentication::protection($path)`, ignoring case. The page check, the sitemap, the Admin menu, lint and `describe` agree: `Faq` protects `/faq` and the Admin menu now lists it.
+- **Item URLs are written `/<name>/<name>_item/{slug}` everywhere** (#37): `describe`, MCP's `site_overview` and the inspector said `{id}`.
+- **`cms.item_saved` and `cms.item_deleted` carry the collection's own name** (#33), and lint reports two collection names that share one table (`team_members` and `teammembers`) as an error.
+
+## 2.2.46
+
+Two things for some sites to check, after `php bin/raster update`:
+
+- **A view named like `<name>_page.html` or `<name>_items.html`** (say `landing_page.html`) now keeps its own fields. Before, it read and saved them under another page (`/landing`), so text an editor wrote on it seems to disappear: copy it again on that page.
+- **A site with a route into another theme** (`->from('print')`) whose views print `print.cms` fields: `schema --check` and `doctor` now see those fields, so run `php bin/raster schema --apply` once.
+
+- **Lint, schema and the page agree on every name** (#28). The characters a model, key, field, attribute, view and `res`/`dry` name may use are one list in the engine (`template::$names`, printed by `raster annotations`), and lint reads the same list. `print.@data-x.key`, `print.@aria-label.key` and `print.line2` inside a render block now print, and `dry._layout.nav2` inserts `res.nav2`. A row key the engine can't read is a lint error.
+- **A `dry` inside a fragment is filled in**, up to five levels, as lint already read it (#36). The page, lint, `schema` and MCP list the same fields. A page with no nested `dry` renders as before.
+- **`/landing_page` is its own page** (#132). `<name>_page` and `<name>_items` are list segments only where the router serves the list (`/news/news_page/2`, `/news/news_items`), and the inspector uses the same rule as the page.
+- **Views a route serves from another theme are linted and get their tables** (#133). `lint`, MCP `lint_templates`, `describe` and `schema` include every theme a route names; `lint --theme=<name>` checks that theme alone and `--all-themes` works as before.
 
 ## 2.2.45
 

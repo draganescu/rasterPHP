@@ -363,6 +363,78 @@ OpenAI), a site's privacy page should say staff may use AI assistants to
 view bookings and messages; the starter site's privacy text and AGENTS.md
 say so.
 
+## Languages
+
+A multilingual site (`multilingual` on with two or more `languages`,
+`i18n::enabled()`; AGENTS.md, **Multilingual sites**) keeps a value per
+language for its translated fields, and the URL alone picks the language
+(`/ro/about`, or a `domain_language` host). The site MCP follows the same
+rules as the coding MCP's content tools, so a person can say "fix the
+Romanian headline" or "what does the menu say in Romanian".
+
+- **One argument, `lang`.** When the site is multilingual, every tool below
+  takes an optional `lang`: one of `i18n::available()`, as an `enum` in its
+  schema. Left out, or the default language, the tool does what it does
+  without it. A code the site doesn't list is refused. With multilingual
+  off no tool has `lang`, and every schema and answer is as this design
+  describes it elsewhere.
+- **`lang` is the content's language, never the person's.** The assistant
+  talks in whatever language the person writes. Tool answers carry codes
+  and problem names (`fully_booked`, `field_shared`) that the assistant
+  words itself.
+- **A prefixed URL names its language.** `get_page('/ro/about')` is
+  `get_page('/about', lang: 'ro')`. A `lang` that disagrees with the URL's
+  prefix (or its `domain_language` host) is refused, as the in-page editor
+  refuses a posted `lang` that isn't its page's.
+- **Shared fields are one value.** A field that isn't translated (a photo,
+  a price, a link, every int, date and bool; D7) is the same in every
+  language. A write to one with a translation language is refused with
+  `field_shared` ("'price' is shared by every language; update it without
+  lang"). A field name with `__` (a translation column, `headline__ro`) is
+  refused by every tool: name the field and pass `lang`.
+
+How each tool takes it:
+
+| Tool | With `lang` |
+|---|---|
+| `site_info` | takes no `lang`. It gains a `languages` block, the same as `describe`'s: `{ default, list, urls }`, `urls` being where each language's pages start (`/`, `/ro/`, or its host). Pages are listed at their default addresses; the agent puts the prefix on or passes `lang`. |
+| `get_page(url, field?, lang?)` | renders the page **at that language's own address** (`/ro/about`, or its host), as an editor sees it there. Since the URL picks the language (D4), the render needs no cookie, so it never comes out in the default language by mistake. The outline's values are the ones that page shows: the translation, or the default language's value where there is none. Each field also says `translated` (it has its own value in `lang`) and `shared` (one value for every language), and the outline marks them (`falls back to EN`, `shared: every language`). |
+| `update_fields(url, fields, lang?)` | saves through `cms_store::update_page(…, $lang)`: each translated field into its column for `lang`, a shared field refused (`field_shared`), nothing stored on a refusal. `site_*` fields save for the whole site in that language. The answer's old and new values are that language's. The revision keeps `saved_lang`, and `cms.page_saved` carries `lang`. |
+| `page_history(url, lang?)` | every revision says which language it changed (`saved_lang`). With `lang`, only the revisions saved in that language. |
+| `revert_page(url, revision, lang?)` | without `lang`: that revision's whole row, every language, as the editor's Restore does. With `lang`: only that language's values come back (for a translation language, its translated fields; for the default, the default columns and the shared fields), saved through `update_page(…, $lang)` as a new revision. The other languages keep what they have now. |
+| `describe_type(type)` | takes no `lang`. Each field says whether it is translated (`cms_records::translated_fields()`). |
+| `find_records(type, filter, order, limit, lang?)` | records shown through `cms_store::localized()` in `lang`, each with `untranslated` (its translated fields with no value in `lang`). Filter and order compare the language's words, with the default's where there is none (`conditions_sql` and `order_sql` with `$lang`, as `render.cms` lists on `/ro/`). |
+| `get_record(type, id, lang?)` | each translated field as `{ value, default_value, translated, shared }`, as the coding MCP's `get_item`; `slug` is the record's slug in `lang`. |
+| `create_record(type, fields, lang?)` | the record is made inside `i18n::with($lang)`, so a row that stores its person's language (booking, rsvp, contact message, order; D13) stores `lang`, and that person's emails go in it: "book Ana for Friday, she reads Romanian". For a type with translated fields (`bookingservice`), a translation `lang` is refused, as the coding MCP's `create_item` refuses it: create it in the default language, then translate it with `update_record`. |
+| `update_record(type, id, fields, lang?)` | through `cms_store::save_item(…, $lang)`: translated fields into that language, shared fields refused. It never changes a row's stored language (the readonly `lang` field, D13). |
+| `run_action(type, id, action, input, lang?)` | `lang` is only the language the answer shows the record in, as `get_record`. Emails the action sends follow D13, whatever `lang` is: the guest's in the language stored on their row (`i18n::of($row)`), staff's in the default language. |
+| `delete_record`, `restore_record`, `upload_image` | take no `lang`: a record or a picture is the same in every language. |
+| a model's own tools (`mcp()`) | each takes `lang` too, and the method runs inside `i18n::with($lang)`, so what it reads through Raster (localized names, links) is in that language. `takes` never has to declare it. |
+
+- **A record's `lang` field and the `lang` argument are different things.**
+  The field is the language its guest wrote in, set once when the row was
+  made and readonly (D13). The argument picks the language a call reads
+  or writes. `get_record` shows the field as any readonly field.
+- **Emails follow D13 everywhere.** No tool sends mail in the caller's
+  language: a staff member's agent confirming a booking made on `/ro/`
+  mails the guest in Romanian, with `/ro/` links, and staff in the
+  default language.
+- **`initialize`** adds one sentence on a multilingual site: pass `lang` to
+  read or change one language, leave it out for the default.
+- **Tests** add: `get_page` with `lang` (and with a `/ro/` URL) outlines the
+  Romanian page, marks untranslated and shared fields, and a `lang` that
+  disagrees with the URL is refused; `update_fields` with `lang` writes the
+  translation and refuses a shared field; `revert_page` with `lang` leaves
+  the other languages alone; `find_records` with `lang` filters and sorts
+  by the translated words; `create_record` with `lang` stores it on a
+  booking and the guest's email is in that language; `run_action` by an
+  English caller mails a Romanian guest in Romanian; with multilingual off,
+  `tools/list` is byte-identical to the list without this section.
+- **Which release.** `site_info`'s `languages` block goes in release 1, and
+  `lang` on the page tools in release 2, alongside the tools themselves;
+  `lang` on the record tools, `describe_type`'s translated fields and
+  `mcp()` tools in release 3.
+
 ## Soft delete
 
 Deleting an item, from any writer (editor, site MCP, model code, CLI, and

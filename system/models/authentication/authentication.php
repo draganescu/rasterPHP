@@ -109,6 +109,9 @@ class authentication
 				$user->email = $is_email ? strtolower($login) : '';
 				$user->username = $is_email ? '' : $login;
 				$user->created_at = R::isoDateTime();
+				// the language it was made in, which its emails go out in
+				// (#200 D13); a frozen database without the column skips it
+				if (i18n::enabled() && (!R::getRedBean()->isFrozen() || array_key_exists('lang', cms_store::columns('user')))) $user->lang = i18n::current();
 			}
 			if ($name !== null || empty($user->name)) $user->name = $name !== null ? $name : preg_replace('/@.*$/', '', $login);
 			if ($role !== null) $user->role = $role;
@@ -120,11 +123,16 @@ class authentication
 
 	// the columns this model uses, for `raster schema --apply`
 	static function schema() {
-		return array('user' => array(
+		$user = array(
 			'email' => '', 'username' => '', 'name' => '', 'password' => '', 'role' => 'member',
 			'created_at' => '', 'last_login' => '', 'failed_count' => 0, 'failed_at' => '',
 			'reset_hash' => '', 'reset_expires' => '', 'login_hash' => '', 'login_expires' => '',
-		));
+		);
+		// the language the account's email goes out in (D13), only a
+		// multilingual site's. (2.2.52 and older also had editor_lang; a
+		// site that has it keeps it, unused.)
+		if (i18n::enabled()) $user['lang'] = '';
+		return array('user' => $user);
 	}
 
 	// what a site with accounts needs: the reset email's view, the pages
@@ -209,7 +217,10 @@ class authentication
 	// what the authentication.* events carry: id, email, name, role
 	static function payload($id) {
 		$bean = R::load('user', (int)$id);
-		return array('id' => (int)$bean->id, 'email' => (string)$bean->email, 'name' => (string)$bean->name, 'role' => (string)$bean->role);
+		$payload = array('id' => (int)$bean->id, 'email' => (string)$bean->email, 'name' => (string)$bean->name, 'role' => (string)$bean->role);
+		// multilingual: the account's language (i18n::of), for its emails
+		if (i18n::enabled()) $payload['lang'] = i18n::of($bean);
+		return $payload;
 	}
 
 	static function log_in($id) {
@@ -380,14 +391,11 @@ class authentication
 		// a pattern protects the URLs and the views it matches, in any case:
 		// /Staff on a disk that ignores case still renders staff.html
 		$view = '/'.controller::instance()->current_view;
-		foreach ((array)config::get('protected', array()) as $pattern => $role) {
-			$match = '%^/'.ltrim($pattern, '/').'%i';
-			if (!preg_match($match, $uri) && ($view === '/' || !preg_match($match, $view))) continue;
+		foreach (self::protection($uri) + ($view === '/' ? array() : self::protection($view)) as $pattern => $role) {
 			if (self::can($role)) continue;
-			if ($user) {
-				http_response_code(403);
-				exit('You do not have access to this page.');
-			}
+			// logged in without the role: 403, the site's error_document_403
+			// with the alert not_allowed
+			if ($user) controller::refuse(403, 'not_allowed');
 			$this->redirect(util::url(config::get('login_page', 'login')).'?next='.rawurlencode(strtok($uri, '?')));
 		}
 		return true;
@@ -396,11 +404,23 @@ class authentication
 	// whether the person asking may open the page at $uri: the 'protected'
 	// patterns setup() checks, for the in-page editor's saves
 	static function may_open($uri) {
-		$uri = '/'.ltrim((string)$uri, '/');
-		foreach ((array)config::get('protected', array()) as $pattern => $role) {
-			if (preg_match('%^/'.ltrim($pattern, '/').'%i', $uri) && !self::can($role)) return false;
+		foreach (self::protection($uri) as $role) {
+			if (!self::can($role)) return false;
 		}
 		return true;
+	}
+
+	// The 'protected' patterns that keep $path, pattern => role. A pattern
+	// matches the start of the path, in any case: 'Faq' keeps /faq and
+	// /faq/x, 'staff' keeps /staff and /staff/rota. The one place they are
+	// matched: pages, the editor's saves, the Admin menu, the sitemap and lint (#40).
+	static function protection($path) {
+		$path = '/'.ltrim((string)$path, '/');
+		$found = array();
+		foreach ((array)config::get('protected', array()) as $pattern => $role) {
+			if (preg_match('%^/'.ltrim($pattern, '/').'%i', $path)) $found[$pattern] = $role;
+		}
+		return $found;
 	}
 
 	// on the command line only `raster render` follows it: the page ends
@@ -504,10 +524,15 @@ class authentication
 			$user->reset_hash = hash('sha256', $token);
 			$user->reset_expires = date('Y-m-d H:i:s', time() + 3600);
 			R::store($user);
-			// through the site's the_mail, when it has one
+			// through the site's the_mail, when it has one; in the account's
+			// language, its link too (#200 D13)
 			$mail = controller::model_class('mail');
-			$reset = util::url(config::get('reset_page', 'reset'), array('token' => $token));
-			if (!$mail::send_view('_email/password_reset', $user->email, array('reset_url' => $reset, 'name' => $user->name))) {
+			$lang = i18n::of($user);
+			$sent = $mail::in_language($lang, function () use ($mail, $user, $token, $lang) {
+				$reset = util::url(config::get('reset_page', 'reset'), array('token' => $token));
+				return $mail::send_view('_email/password_reset', $user->email, array('reset_url' => $reset, 'name' => $user->name), array(), $lang);
+			});
+			if (!$sent) {
 				log::error('Password reset email failed: '.$mail::$last_error);
 			}
 		}
@@ -630,21 +655,21 @@ class authentication
 		require_once BASE.'tools/inspector.php';
 		$inspector = new raster_inspector();
 		$link = rtrim((string)config::get('link_uri'), '/');
-		$protected = (array)config::get('protected', array());
 		$pages = array();
 		foreach ($inspector->views() as $view) {
-			if (preg_match('#(^|/)_#', $view) || substr($view, -strlen($inspector->ext)) !== $inspector->ext) continue;
+			$path = cms::page_path($view, $inspector->ext);
+			if ($path === null) continue;
 			$name = substr($view, 0, -strlen($inspector->ext));
-			if (preg_match('/_item$/', $name)) continue;
+			if (cms::item_view($name) !== null) continue;
 			$role = null;
-			foreach ($protected as $pattern => $needs) {
+			foreach (self::protection('/'.$name) as $needs) {
 				if ($needs === 'edit') $needs = 'editor';
-				if (!isset(self::$roles[$needs]) || !preg_match('%^/'.ltrim($pattern, '/').'%', '/'.$name)) continue;
+				if (!isset(self::$roles[$needs])) continue;
 				if ($role === null || self::$roles[$needs] > self::$roles[$role]) $role = $needs;
 			}
 			if ($role === null || self::$roles[$role] < self::$roles['editor']) continue;
 			$pages[] = array(
-				'url' => $name === config::get('default_view', 'index') ? $link.'/' : $link.'/'.$name,
+				'url' => $link.$path,
 				'view' => $name,
 				'title' => self::view_title($inspector->theme_dir().'/'.$view, $name),
 				'role' => $role,

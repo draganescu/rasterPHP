@@ -1,29 +1,29 @@
 <!doctype html>
-<html lang="en">
+<!-- print.@lang.i18n.language --><!-- print.@dir.i18n.dir --><html lang="en" dir="ltr"><!-- /print.@dir.i18n.dir --><!-- /print.@lang.i18n.language -->
 <head>
   <!-- dry._layout.head /-->
-  <title>Your account</title>
+  <title><!-- print.i18n.account('your_account') -->Your account<!-- /print.i18n.account('your_account') --></title>
 </head>
 <body>
   <!-- dry._layout.header /-->
   <main class="narrow">
-    <h1>Your account</h1>
-    <!-- print.validation.alert('account_saved') --><p class="notice">Saved.</p><!-- /print.validation.alert('account_saved') -->
-    <!-- print.validation.alert('registered') --><p class="notice">Welcome! Your account is ready.</p><!-- /print.validation.alert('registered') -->
-    <!-- print.validation.alert('current_password_wrong') --><p class="error">Your current password is not right.</p><!-- /print.validation.alert('current_password_wrong') -->
-    <!-- print.validation.alert('email_taken') --><p class="error">Another account uses that email.</p><!-- /print.validation.alert('email_taken') -->
-    <!-- render.authentication.me --><p>Logged in as <strong><!-- print.name -->Ada<!-- /print.name --></strong> (<!-- print.role -->member<!-- /print.role -->).</p><!-- /render.authentication.me -->
+    <h1><!-- print.i18n.account('your_account') -->Your account<!-- /print.i18n.account('your_account') --></h1>
+    <!-- print.validation.alert('account_saved') --><p class="notice"><!-- print.i18n.account('saved') -->Saved.<!-- /print.i18n.account('saved') --></p><!-- /print.validation.alert('account_saved') -->
+    <!-- print.validation.alert('registered') --><p class="notice"><!-- print.i18n.account('welcome_your_account_is_ready') -->Welcome! Your account is ready.<!-- /print.i18n.account('welcome_your_account_is_ready') --></p><!-- /print.validation.alert('registered') -->
+    <!-- print.validation.alert('current_password_wrong') --><p class="error"><!-- print.i18n.account('your_current_password_is_not') -->Your current password is not right.<!-- /print.i18n.account('your_current_password_is_not') --></p><!-- /print.validation.alert('current_password_wrong') -->
+    <!-- print.validation.alert('email_taken') --><p class="error"><!-- print.i18n.account('another_account_uses_that_email') -->Another account uses that email.<!-- /print.i18n.account('another_account_uses_that_email') --></p><!-- /print.validation.alert('email_taken') -->
+    <!-- render.authentication.me --><p><!-- print.i18n.account('logged_in_as') -->Logged in as<!-- /print.i18n.account('logged_in_as') --> <strong><!-- print.name -->Ada<!-- /print.name --></strong> (<!-- print.role -->member<!-- /print.role -->).</p><!-- /render.authentication.me -->
     <!-- render.authentication.account -->
     <form method="post" class="stack">
-      <label>Name <input type="text" name="name" maxlength="100"></label>
-      <label>Email <input type="email" name="email" required></label>
-      <label>New password <input type="password" name="password" minlength="8" autocomplete="new-password"></label>
-      <label>Current password (needed to change email or password) <input type="password" name="current_password" autocomplete="current-password"></label>
-      <button>Save</button>
+      <label><!-- print.i18n.account('name') -->Name<!-- /print.i18n.account('name') --> <input type="text" name="name" maxlength="100"></label>
+      <label><!-- print.i18n.account('email') -->Email<!-- /print.i18n.account('email') --> <input type="email" name="email" required></label>
+      <label><!-- print.i18n.account('new_password') -->New password<!-- /print.i18n.account('new_password') --> <input type="password" name="password" minlength="8" autocomplete="new-password"></label>
+      <label><!-- print.i18n.account('current_password_needed_to_change') -->Current password (needed to change email or password)<!-- /print.i18n.account('current_password_needed_to_change') --> <input type="password" name="current_password" autocomplete="current-password"></label>
+      <button><!-- print.i18n.account('save') -->Save<!-- /print.i18n.account('save') --></button>
     </form>
     <!-- /render.authentication.account -->
     <!-- render.authentication.logout -->
-    <form method="post"><button class="secondary">Log out</button></form>
+    <form method="post"><button class="secondary"><!-- print.i18n.account('log_out') -->Log out<!-- /print.i18n.account('log_out') --></button></form>
     <!-- /render.authentication.logout -->
   </main>
   <!-- dry._layout.footer /-->

@@ -14,7 +14,7 @@
   * Anything not listed answers 404, whatever the method would return. The
   * roles are visitor (anyone), member, editor and admin. Bundled models
   * follow the same rule: cms lists its editor endpoints. A method listed
-  * for any role but visitor answers 403 {"error":"cross-site"} to a request
+  * for any role but visitor answers 403 {"error":"cross_site"} to a request
   * another site started, on every verb.
   *
   * A method that throws answers {"error":"server error"} with a 500, and the
@@ -53,7 +53,7 @@
       // a staff or member method never runs for a request another site
       // started, whatever the verb: the session cookie (SameSite=Lax) comes
       // along when someone follows a link from elsewhere
-      if ($offered[$method] !== 'visitor' && controller::is_foreign()) $this->fail(403, 'cross-site');
+      if ($offered[$method] !== 'visitor' && controller::is_foreign()) $this->fail(403, array('error' => 'cross_site', 'problems' => array('cross_site')));
       // a database that can't be reached is an outage, not an empty table:
       // a webhook told "no such order" would never be sent again. Checked
       // before the role, since who is asking can't be known without it.

@@ -23,6 +23,8 @@ Staff set this up as records, edited in the page like anything else:
 
 A café has one resource, the Dining room with `people` 20, and hours every 120 minutes from 19:00 to 21:00: two sittings. A salon has a resource per stylist with `bookings` 1, hours every 30 minutes, and services: a 30 minute cut, a 90 minute colour. Without services a booking lasts until the next start of its hours (a sitting lasts until the next sitting).
 
+On a [multilingual site](Translations) the names of resources and services can be translated like any other field (in the page on `/ro/…`, or over MCP): the booking pages and emails in Romanian show the Romanian name, or the default one until it has a translation.
+
 Put the four lists on a staff page (`render.cms.bookingresource`, `render.cms.bookinghours`, `render.cms.bookingclosed`, `render.cms.bookingservice`), or make the first ones in a seed script with `cms_records::create()`, as the demo's `demo/seed.php` does. Until there is a resource, the form says `not_open` and `raster lint` warns.
 
 ## The booking page
@@ -140,7 +142,7 @@ Protect the staff pages by their own names, never by `booking` (that prefix woul
 config::set('protected')->to(array('staff' => 'editor', 'booking_item' => 'editor'));
 ```
 
-A `booking_item.html` view that renders `render.cms.booking` is each booking's own page (`/booking/booking_item/<slug>`).
+A `booking_item.html` view that renders `render.cms.booking` is each booking's own page (`/booking/booking_item/{slug}`).
 
 **Needs attention.** Staff may close a day, change the hours or lower a limit even where bookings already sit. Nothing is refused or cancelled; the bookings that no longer fit show in `render.booking.attention` and the agenda, with the reason: `closed`, `resource_inactive`, `service_unavailable`, `not_a_slot` or `over_capacity`. Confirming one is refused with that reason; cancelling, declining or moving it is not.
 

@@ -21,7 +21,7 @@
 		hello: 'Hi {name}', hello_anon: 'Hi there',
 		welcome: 'Anything that glows can be changed. Press E or tap Edit to start.',
 		edit: 'Edit', done: 'Done', editing: 'Editing', page: 'Page', admin: 'Admin', admin_pages: 'Admin pages',
-		saving: 'Saving…', saved: 'Saved', all_saved: 'All saved',
+		saved: 'Saved',
 		changed: 'Changed {field}', undo: 'Undo', undone: 'Undone', nothing_to_undo: 'Nothing to undo',
 		added: 'Added to {list}', deleted: 'Deleted {name}', hidden_item: 'Hid {name}', shown_item: '{name} is visible again',
 		duplicated: 'Duplicated {name}', scheduled: '{name} goes live {date}', unscheduled: '{name} is live now',
@@ -38,10 +38,36 @@
 		items: '{n} items', one_item: '1 item', hidden_count: '{n} hidden', empty_field: 'Empty: the template’s text shows',
 		new_item: 'New', edit_mode_on: 'Editing. Click anything that glows.', edit_mode_off: 'Done editing',
 		action_done: 'Done: {action}',
-		keyboard: 'E to edit · Esc to stop · ⌘Z to undo', fields_changed: '{fields}', page_fields: 'Fields', nothing_here: 'Nothing on this page comes from the CMS.'
+		// refusals the server names (problems), as a record's are
+		problem_type_int: '{field} needs a whole number, like 4', problem_type_number: '{field} needs a number, like 4.50',
+		problem_type_bool: '{field} needs yes or no (1 or 0)', problem_type_date: '{field} needs a date, like 2026-10-05',
+		problem_type_datetime: '{field} needs a date and time, like 2026-10-05 19:30', problem_type_time: '{field} needs a time, like 19:30',
+		problem_type_text: '{field} needs one piece of text',
+		problem_upload_too_big: 'That picture is too big', problem_upload_missing: 'The picture didn’t arrive; try again',
+		problem_upload_not_a_picture: 'That isn’t a picture: use a JPEG, PNG, GIF or WebP', problem_upload_not_stored: 'The picture couldn’t be stored',
+		problem_form_expired: 'This page is out of date: reload it and try again', problem_not_allowed: 'You can’t do that; if you were logged out, log in again',
+		problem_one_value: '{field} came more than once: reload the page and try again', problem_unknown_page: 'This page can’t be edited from here: reload it',
+		problem_unknown_field: '{field} isn’t on this page any more: reload it', problem_wrong_language: 'This page is in {lang}: reload it',
+		problem_unknown_collection: 'That list isn’t on this site any more: reload the page', problem_no_such_item: 'That item is gone; someone may have deleted it. Reload the page',
+		problem_no_such_revision: 'That version is gone: reload the page', problem_broken: 'Something went wrong; it is in the error log',
+		problem_not_saved: 'the site refused it',
+		keyboard: 'E to edit · Esc to stop · ⌘Z to undo', fields_changed: '{fields}', page_fields: 'Fields', nothing_here: 'Nothing on this page comes from the CMS.',
+		// a multilingual site: the page's language
+		editing_lang: 'editing: {lang}', falls_back: '(falls back to {lang})', untranslated: 'not translated yet: shows the {lang} text',
+		every_language: 'the same in every language',
+		restore_every: 'Restore, every language', restored_every: 'Brought back every language of the version from {when}',
+		problem_translation_columns_missing: 'This language has no place on the site yet: run php bin/raster schema --apply on the server'
 	};
 	for (var k in (C.strings || {})) T[k] = C.strings[k];
-	function problem(name) { return T['problem_' + name] || human(name); }
+	// a problem's words, from the server's answer (json): {field} is the
+	// field it is about and {lang} the page's language, when there is one;
+	// a raw detail (a store's own sentence) goes after the words
+	function problem(name, json) {
+		json = json || {};
+		var words = T['problem_' + name];
+		words = words ? String(words).replace('{field}', json.field ? human(json.field) : '').replace('{lang}', json.lang ? code(json.lang) : '').trim() : human(name);
+		return json.detail ? words + ': ' + json.detail : words;
+	}
 	function readonly(info) { return info.readonly || []; }
 	function writable(info, values) {
 		var out = Object.assign({}, values);
@@ -55,7 +81,12 @@
 		name = String(name || '').replace(/^site_/, '').replace(/_/g, ' ');
 		return name.charAt(0).toUpperCase() + name.slice(1);
 	}
-	var lang = C.lang || document.documentElement.lang || undefined;
+	// dates read in the editor's own language, never the page's or the browser's
+	var lang = C.editor_lang || undefined;
+	// a language code as the dock shows it: RO, PT-BR
+	function code(language) { return String(language || '').toUpperCase(); }
+	// the content language a save is in, posted with it (multilingual only)
+	function withLang(data) { if (C.languages) data.lang = C.lang; return data; }
 	// Stored times are the site's wall clock (its time zone setting), and are
 	// read here as if they were the browser's. The site's now, read the same
 	// way, is Date.now() + skew, so a badge and the Schedule box agree with
@@ -102,7 +133,7 @@
 				var json = null;
 				try { json = JSON.parse(text); } catch (e) {}
 				// a record's model said no: its problems, in the site's words if it has them
-				if (json && json.problems) throw new Error(json.problems.map(problem).join(', '));
+				if (json && json.problems) throw new Error(json.problems.map(function (name) { return problem(name, json); }).join(', '));
 				if (!response.ok || !json || json.error) throw new Error(json && json.error ? json.error : (text.slice(0, 120) || response.status));
 				return json;
 			});
@@ -300,6 +331,7 @@
 			}
 			field.el.setAttribute('data-raster-field', id);
 			if (field.kind !== 'image' && field.kind !== 'attr') field.el.setAttribute('data-raster-edit', field.kind);
+			if (info.untranslated) field.el.setAttribute('data-raster-untranslated', '');
 			fields.push(field);
 		});
 		lists.forEach(function (list) {
@@ -341,6 +373,9 @@
 			'.raster-ghost:hover{opacity:.85}',
 			'.raster-ghost.raster-new{opacity:1;cursor:auto}',
 			'[data-raster-default]{opacity:.5}',
+			// no translation yet: the default language's words show
+			'html.raster-editing [data-raster-untranslated]{text-decoration-style:wavy}',
+			'html.raster-editing img[data-raster-untranslated]{outline-color:color-mix(in srgb,var(--raster-a) 45%,transparent)}',
 			'.raster-pulse{animation:raster-pulse 1.4s ease-out 1}',
 			'@keyframes raster-pulse{0%{box-shadow:0 0 0 0 var(--raster-a)}100%{box-shadow:0 0 0 18px transparent}}',
 			'@media (prefers-reduced-motion:reduce){html.raster-glow [data-raster-edit],.raster-arriving,.raster-pulse{animation:none!important}.raster-leaving{transition:none!important}}'
@@ -410,10 +445,7 @@
 			'.pill:active{transform:scale(.96)}',
 			'.pill.primary{background:' + look.accent + ';color:' + look.onAccent + ';font-weight:600}',
 			'.pill.primary:hover{filter:brightness(1.08)}',
-			'.status{display:inline-flex;align-items:center;gap:6px;padding:0 10px;color:' + look.muted + ';font-size:13px;min-width:70px}',
-			'.dot{width:7px;height:7px;border-radius:50%;background:#3aa86b;transition:background .2s}',
-			'.dot.busy{background:' + look.accent + ';animation:blink 1s infinite}',
-			'@keyframes blink{50%{opacity:.3}}',
+			'.lang{flex:none;padding:2px 6px;border:1px solid ' + look.line + ';border-radius:999px;color:' + look.muted + ';font-size:11px;font-weight:600;letter-spacing:.04em;line-height:1.2}',
 			// the admin pages menu, above the dock
 			'.menu{position:absolute;left:50%;bottom:calc(70px + env(safe-area-inset-bottom));transform:translateX(-50%);min-width:240px;max-width:calc(100vw - 32px);max-height:min(60vh,440px);overflow:auto;padding:6px;pointer-events:auto;animation:rise .25s cubic-bezier(.2,.9,.3,1.2) both}',
 			'.menu h3{margin:6px 10px;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:' + look.muted + '}',
@@ -460,6 +492,9 @@
 			'.format.docked{gap:4px;border-radius:12px;z-index:1}',
 			'.format.docked button{width:44px;height:44px;border-radius:9px}',
 			'.format.docked input{width:min(220px,calc(100vw - 100px));font-size:16px}',
+			// iOS Safari zooms into a text box under 16px when it takes focus, and
+			// never zooms back out: on touch screens every box is 16px
+			'@media (pointer:coarse){.layer input,.layer select,.layer textarea{font-size:16px}}',
 			// popovers and dialogs
 			'.popover{width:min(360px,calc(100vw - 24px));padding:16px;pointer-events:auto;animation:pop .18s both;max-height:min(70vh,560px);overflow:auto}',
 			'.popover h3,.panel h3{margin:0 0 12px;font:600 17px/1.25 ' + look.heading + '}',
@@ -497,7 +532,7 @@
 			'.muted{color:' + look.muted + '}',
 			'.close{width:34px;height:34px;border-radius:50%;display:grid;place-items:center}',
 			'.close:hover{background:' + look.accentSoft + '}',
-			'@media (max-width:600px){.dock{left:10px;right:10px;transform:translateY(var(--dy,0px));justify-content:space-between}.dock.hidden{transform:translateY(140%)}.layer.top .dock.hidden{transform:translateY(-140%)}.bubble{bottom:calc(72px + env(safe-area-inset-bottom))}.layer.top .bubble{top:calc(72px + env(safe-area-inset-top))}.toasts{left:10px;right:10px;bottom:calc(70px + env(safe-area-inset-bottom))}.layer.top .toasts{bottom:calc(18px + env(safe-area-inset-bottom))}.panel{top:auto;left:8px;right:8px;width:auto;max-height:80vh;animation-name:up}}',
+			'@media (max-width:600px){.dock{left:10px;right:10px;transform:translateY(var(--dy,0px));justify-content:space-between}.dock .lang{display:none}.dock.hidden{transform:translateY(140%)}.layer.top .dock.hidden{transform:translateY(-140%)}.bubble{bottom:calc(72px + env(safe-area-inset-bottom))}.layer.top .bubble{top:calc(72px + env(safe-area-inset-top))}.toasts{left:10px;right:10px;bottom:calc(70px + env(safe-area-inset-bottom))}.layer.top .toasts{bottom:calc(18px + env(safe-area-inset-bottom))}.panel{top:auto;left:8px;right:8px;width:auto;max-height:80vh;animation-name:up}}',
 			'@keyframes up{from{opacity:0;transform:translateY(30px)}to{opacity:1;transform:none}}',
 			reduceMotion ? '*,*:before,*:after{animation-duration:.01ms!important;animation-delay:0s!important;transition-duration:.01ms!important}' : ''
 		].join('\n');
@@ -519,11 +554,21 @@
 
 		var initial = (C.user.name || '?').trim().charAt(0).toUpperCase();
 		ui.who = h('span', { class: 'who', title: C.user.name, text: initial });
-		ui.status = h('span', { class: 'status', hidden: true }, [h('span', { class: 'dot' }), h('span', { class: 'label', text: t('all_saved') })]);
 		ui.editButton = h('button', { class: 'pill primary', title: t('keyboard'), onclick: function () { setEditing(!editing); } });
 		ui.pageButton = h('button', { class: 'pill', onclick: function () { closeAdminMenu(); togglePanel(); }, html: icon('layers') + '<span>' + t('page') + '</span>' });
 		ui.adminButton = (C.admin || []).length ? h('button', { class: 'pill', 'aria-haspopup': 'menu', 'aria-expanded': 'false', onclick: toggleAdminMenu, html: icon('grid') + '<span>' + t('admin') + '</span>' }) : null;
-		ui.dock = h('div', { class: 'dock surface hidden', role: 'toolbar', 'aria-label': 'Raster' }, [ui.who, ui.status, ui.adminButton, ui.pageButton, ui.editButton]);
+		// multilingual: the page's language
+		if (C.languages) {
+			var base = C.languages[0];
+			// a translation's page: its code as a small badge, so the dock fits
+			// a phone; the sentence is its title and label. The default
+			// language's page needs none: nothing falls back there.
+			if (String(C.lang).toLowerCase() !== String(base).toLowerCase()) {
+				var said = t('editing_lang', { lang: code(C.lang) }) + ' ' + t('falls_back', { lang: code(base) });
+				ui.lang = h('span', { class: 'lang', role: 'img', text: code(C.lang), title: said, 'aria-label': said });
+			}
+		}
+		ui.dock = h('div', { class: 'dock surface hidden', role: 'toolbar', 'aria-label': 'Raster' }, [ui.who, ui.lang, ui.adminButton, ui.pageButton, ui.editButton]);
 		ui.layer.appendChild(ui.dock);
 		dockMoves();
 		setTimeout(function () { ui.dock.classList.remove('hidden'); }, 60);
@@ -607,9 +652,6 @@
 	var busy = 0;
 	function working(delta) {
 		busy += delta;
-		var dot = ui.status.querySelector('.dot'), label = ui.status.querySelector('.label');
-		dot.classList.toggle('busy', busy > 0);
-		label.textContent = busy > 0 ? t('saving') : t('all_saved');
 	}
 	function tick(el) {
 		if (!el || !el.getBoundingClientRect) return;
@@ -659,16 +701,22 @@
 	function saveValue(field, value) {
 		working(1);
 		var request = field.item
-			? call('editor_save_item', { collection: field.item.info.collection, id: field.item.info.id, fields: obj(field.info.field, value), examples: field.item.info.examples }).then(function (item) { field.item.info.values = item; return item[field.info.field]; })
-			: call('editor_save_field', { type: field.info.type, slug: field.info.slug, field: field.info.field, value: value, example: field.info.default }).then(function (r) { field.info.value = r.value; return r.value; });
+			? call('editor_save_item', withLang({ collection: field.item.info.collection, id: field.item.info.id, fields: obj(field.info.field, value), examples: field.item.info.examples })).then(function (item) { field.item.info.values = item; return item[field.info.field]; })
+			: call('editor_save_field', withLang({ type: field.info.type, slug: field.info.slug, field: field.info.field, value: value, example: field.info.default })).then(function (r) { field.info.value = r.value; return r.value; });
 		return request.then(function (saved) { working(-1); return saved; }, function (e) { working(-1); throw e; });
 	}
 	function obj(key, value) { var o = {}; o[key] = value; return o; }
 	function show(field, value) {
-		// an empty page field shows the template's text again
-		var empty = value === '' && field.info.default != null && !field.item;
-		var shown = empty ? field.info.default : value;
+		// an empty translation shows the default language's value (fallback),
+		// and an empty page field the template's text
+		var fallback = !field.item && value === '' && field.info.fallback ? field.info.fallback : null;
+		var empty = value === '' && fallback === null && field.info.default != null && !field.item;
+		var shown = fallback !== null ? fallback : (empty ? field.info.default : value);
 		[field].concat(twins(field)).forEach(function (f) {
+			if (f.info.fallback != null) {
+				f.info.untranslated = value === '';
+				if (value === '') f.el.setAttribute('data-raster-untranslated', ''); else f.el.removeAttribute('data-raster-untranslated');
+			}
 			if (f.kind === 'image' || f.kind === 'attr') { if (shown) setAttr(f, shown); return; }
 			if (f.kind === 'text') f.el.textContent = shown; else f.el.innerHTML = shown;
 			if (empty) f.el.setAttribute('data-raster-default', ''); else f.el.removeAttribute('data-raster-default');
@@ -677,7 +725,8 @@
 	function commit(field) {
 		var value = fieldValue(field), before = field.before;
 		field.before = null;
-		if (before == null || value === before.value) return;
+		// left as it was: an untranslated field still showing the default's words saves nothing
+		if (before == null || value === before.value || (field.info.untranslated && value === before.shown)) return;
 		// what was stored, as the page prints it: 2026-10-05 for "5 Oct 2026",
 		// 14.50 for 14.5
 		var shown = function (saved) { return saved == null ? '' : String(saved); };
@@ -789,7 +838,6 @@
 	var plaintextOnly = (function () { var d = document.createElement('div'); d.setAttribute('contenteditable', 'plaintext-only'); return d.contentEditable === 'plaintext-only'; })();
 	function updateDock() {
 		ui.editButton.innerHTML = (editing ? icon('check') : icon('pencil')) + '<span>' + (editing ? t('done') : t('edit')) + '</span>';
-		ui.status.hidden = !editing;
 	}
 	function glow() {
 		if (reduceMotion) return;
@@ -810,7 +858,9 @@
 		}
 		var field = fieldFor(e.target);
 		if (!field || !editing || field.kind === 'image') return;
-		if (field.before == null) field.before = { value: fieldValue(field), html: field.el.innerHTML };
+		// an untranslated field shows the default language's words, but holds
+		// nothing in this language: that is what an undo puts back
+		if (field.before == null) field.before = { value: field.info.untranslated && !field.item ? '' : fieldValue(field), shown: fieldValue(field), html: field.el.innerHTML };
 		if (field.el.hasAttribute('data-raster-default')) field.el.removeAttribute('data-raster-default');
 		if (field.kind === 'rich') showFormatBar(field); else hideFormatBar();
 	});
@@ -819,7 +869,9 @@
 		if (!field || !editing) return;
 		setTimeout(function () {
 			if (formatBarHasFocus()) return;
-			if (field.kind === 'rich') hideFormatBar();
+			// only this field's bar: moving to another rich field has already
+			// shown that one's (focusin runs before this timeout)
+			if (field.kind === 'rich' && formatBar && formatBar.field === field) hideFormatBar();
 			commit(field);
 		}, 0);
 	});
@@ -1065,7 +1117,7 @@
 
 	function saveItem(item, values) {
 		working(1);
-		return call('editor_save_item', { collection: item.info.collection, id: item.info.id, fields: values, examples: item.info.examples }).then(function (saved) {
+		return call('editor_save_item', withLang({ collection: item.info.collection, id: item.info.id, fields: values, examples: item.info.examples })).then(function (saved) {
 			working(-1);
 			item.info.values = saved;
 			item.info.enabled = saved.enabled;
@@ -1100,7 +1152,7 @@
 			toast(t('deleted', { name: itemName(item) }), item.info.record ? null : function () {
 				var values = writable(item.info, result.item);
 				['id', 'updated_at', 'created_at', 'owner'].forEach(function (k) { delete values[k]; });
-				return call('editor_save_item', { collection: item.info.collection, id: 0, fields: values, examples: item.info.examples }).then(function (saved) {
+				return call('editor_save_item', withLang({ collection: item.info.collection, id: 0, fields: values, examples: item.info.examples })).then(function (saved) {
 					item.info.id = saved.id;
 					item.info.values = saved;
 					if (putBack) putBack();
@@ -1112,11 +1164,11 @@
 			});
 		}, function (e) { working(-1); item.el.classList.remove('raster-leaving'); failed(e); });
 	}
+	// the server copies the stored item, every language of it (the page
+	// shows only its own)
 	function duplicate(item) {
-		var values = Object.assign({}, item.info.values);
-		['id', 'updated_at', 'slug'].forEach(function (k) { delete values[k]; });
 		working(1);
-		call('editor_save_item', { collection: item.info.collection, id: 0, fields: values, examples: item.info.examples }).then(function (saved) {
+		call('editor_save_item', withLang({ collection: item.info.collection, id: 0, copy: item.info.id, examples: item.info.examples })).then(function (saved) {
 			working(-1);
 			var copy = cloneItem(item, saved);
 			clearFloats();
@@ -1377,7 +1429,7 @@
 			fieldsOut[name] = node.getAttribute('data-raster-edit') === 'text' ? node.innerText.replace(/\s+/g, ' ').trim() : clean(node.innerHTML, !holdsBlocks(node)).trim();
 		});
 		working(1);
-		call('editor_save_item', { collection: list.info.collection, id: 0, fields: fieldsOut, examples: list.info.fields }).then(function (saved) {
+		call('editor_save_item', withLang({ collection: list.info.collection, id: 0, fields: fieldsOut, examples: list.info.fields })).then(function (saved) {
 			working(-1);
 			var el = ghost.el;
 			if (ghost.bar) ghost.bar.remove();
@@ -1448,11 +1500,11 @@
 	function hideDrop() { if (dropZone) { dropZone.remove(); dropZone = null; } }
 
 	function framePhoto(field, file) {
-		if (!file || !/^image\//.test(file.type)) return failed(new Error('not a picture'));
+		if (!file || !/^image\//.test(file.type)) return failed(new Error(problem('upload_not_a_picture')));
 		var url = URL.createObjectURL(file);
 		var image = new Image();
 		image.onload = function () { cropDialog(field, file, image, url); };
-		image.onerror = function () { failed(new Error('not a picture')); };
+		image.onerror = function () { failed(new Error(problem('upload_not_a_picture'))); };
 		image.src = url;
 	}
 	function cropDialog(field, file, image, url) {
@@ -1610,7 +1662,7 @@
 			var f = pageFields[key][0];
 			seen[key] = true;
 			fieldsSection.appendChild(h('div', { class: 'entry' }, [
-				h('div', {}, [h('div', { class: 'name', text: human(f.info.field) }), h('div', { class: 'sub', text: f.info.type === 'sitepage' ? t('site_wide') : '' })]),
+				h('div', {}, [h('div', { class: 'name', text: human(f.info.field) }), h('div', { class: 'sub', text: [f.info.type === 'sitepage' ? t('site_wide') : '', languageNote(f.info)].filter(Boolean).join(' · ') })]),
 				h('button', { class: 'link', text: t('show_me'), onclick: function () { togglePanel(); reveal(f); } })
 			]));
 		});
@@ -1620,7 +1672,8 @@
 			seen[key] = true;
 			var input = h(info.rich ? 'textarea' : 'input', { class: 'in', type: 'text' });
 			input.value = info.value;
-			var status = h('span', { class: 'sub muted', text: (info.type === 'sitepage' ? t('site_wide') + ' · ' : '') + t('not_on_page') });
+			if (info.untranslated) input.placeholder = info.fallback;
+			var status = h('span', { class: 'sub muted', text: (info.type === 'sitepage' ? t('site_wide') + ' · ' : '') + t('not_on_page') + (languageNote(info) ? ' · ' + languageNote(info) : '') });
 			input.addEventListener('change', function () {
 				var before = info.value, field = { info: info, el: input };
 				saveValue(field, input.value).then(function () {
@@ -1664,6 +1717,18 @@
 		var closeButton = panel.querySelector('.close');
 		if (closeButton) closeButton.focus();
 	}
+	// what the panel says of a field in a translation: not translated yet,
+	// or one value for every language
+	function languageNote(info) {
+		if (!C.languages) return '';
+		if (info.untranslated) return t('untranslated', { lang: code(C.languages[0]) });
+		return info.shared ? t('every_language') : '';
+	}
+	// a revision's changed field: headline, or headline · RO for its translation
+	function changedName(key) {
+		var m = /^(.+?)__([a-z0-9_]+)$/.exec(key);
+		return m ? human(m[1]) + ' · ' + code(m[2].replace(/_/g, '-')) : human(key);
+	}
 	function reveal(field) {
 		if (!editing) setEditing(true, true);
 		field.el.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'center' });
@@ -1671,17 +1736,20 @@
 		setTimeout(function () { field.el.classList.remove('raster-pulse'); if (field.kind !== 'image') field.el.focus(); }, 500);
 	}
 	function loadHistory(section) {
-		call('editor_history', { type: C.page.type, slug: C.page.slug }).then(function (result) {
+		call('editor_history', withLang({ type: C.page.type, slug: C.page.slug })).then(function (result) {
 			var list = result.revisions || [];
 			section.innerHTML = '';
 			section.appendChild(h('h3', { text: t('history') }));
 			if (list.length < 2) { section.appendChild(h('p', { class: 'muted', text: t('no_history') })); return; }
 			list.slice(0, 12).forEach(function (rev, i) {
 				var older = list[i + 1];
-				var changed = older ? Object.keys(rev.fields).filter(function (k) { return String(rev.fields[k]) !== String(older.fields[k]); }).map(human) : [];
+				var changed = older ? Object.keys(rev.fields).filter(function (k) { return String(rev.fields[k]) !== String(older.fields[k]); }).map(C.languages ? changedName : human) : [];
+				// multilingual: the language the revision was saved in
+				var saved = C.languages && rev.saved_lang ? code(rev.saved_lang) + ' · ' : '';
 				var entry = h('div', { class: 'entry' }, [
-					h('div', {}, [h('div', { class: 'name', text: i === 0 ? t('current') : when(rev.updated_at) }), h('div', { class: 'sub', text: changed.join(', ') })]),
-					i === 0 ? null : h('button', { class: 'link', text: t('restore'), onclick: function () { restore(rev, list[0]); } })
+					h('div', {}, [h('div', { class: 'name', text: i === 0 ? t('current') : when(rev.updated_at) }), h('div', { class: 'sub', text: saved + changed.join(', ') })]),
+					// multilingual, a restore brings back every language of that version
+					i === 0 ? null : h('button', { class: 'link', text: C.languages ? t('restore_every') : t('restore'), onclick: function () { restore(rev, list[0]); } })
 				]);
 				section.appendChild(entry);
 			});
@@ -1690,7 +1758,7 @@
 	function restore(rev, current) {
 		working(1);
 		call('editor_restore', { type: C.page.type, slug: C.page.slug, revision: rev.revision }).then(function () {
-			store('raster-flash', JSON.stringify({ text: t('restored', { when: when(rev.updated_at) }), type: C.page.type, slug: C.page.slug, revision: current.revision }));
+			store('raster-flash', JSON.stringify({ text: t(C.languages ? 'restored_every' : 'restored', { when: when(rev.updated_at) }), type: C.page.type, slug: C.page.slug, revision: current.revision }));
 			location.reload();
 		}, function (e) { working(-1); failed(e); });
 	}

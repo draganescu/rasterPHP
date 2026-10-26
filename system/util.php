@@ -245,7 +245,7 @@ class raster_cache {
 
 	static function key() {
 		// multilingual sites cache one copy per language
-		$language = config::get('languages') ? i18n::detect() : '';
+		$language = i18n::current();
 		return sha1(config::get('protocol').'://'.config::get('host').'|'.config::get('uri_string').'|'.$language);
 	}
 

@@ -34,18 +34,18 @@ The template calls a method with fewer (or more) arguments than its PHP signatur
 
 ## My CSS or images don't load on some pages
 
-Asset paths are relative to the **theme folder**: write `href="style.css"`, not `href="../style.css"` or `href="/style.css"`. Raster adds a `<base>` tag that makes this work on every URL. The tag is only added when your `<head>` tag is written exactly as `<head>`, without attributes. See [Pages and URLs](Pages-and-URLs#assets-css-images-scripts).
+Asset paths are relative to the **theme folder**: write `href="style.css"`, not `href="../style.css"` or `href="/style.css"`. Raster adds a `<base>` tag that makes this work on every URL, right after your `<head>` tag (with attributes or without, `<head prefix="og: …">` too). See [Pages and URLs](Pages-and-URLs#assets-css-images-scripts).
 
 ## In-page anchor links (`href="#section"`) go to the wrong place
 
-Because of that same `<base>` tag, `#section` points at the theme folder. Write `href="about.html#section"` or `href="/about#section"`.
+Because of that same `<base>` tag, `#section` points at the theme folder, and so does `href="?sort=price"`. Write `href="about.html#section"` (or `about.html?sort=price`), or `href="/about#section"`. `lint` warns about such links.
 
 ## My form doesn't do anything when sent
 
 - The `<form>` must have `method="post"` and be **inside** the `render.<model>.<method>` block that handles it. `lint` warns about a post form outside any render block.
 - The handler must check `validation::get()->submitted()`. It's `false` for other forms on the page, for GET requests, and for calls through `/api`.
-- **403 "this form was sent from another site"**: the browser reported a different origin. This happens when you open the site under one host name (`127.0.0.1:8000`) and the form posts to another, or behind a proxy that changes the host. Set `RASTER_URL` to the address people use.
-- **403 "This form has expired"**: a logged-in user's session changed (they logged out and in elsewhere). Reload the page and send again.
+- **403 on a post, alert `cross_site`** (your `error_document_403` words it; without one the page says only `403`): the browser reported a different origin. This happens when you open the site under one host name (`127.0.0.1:8000`) and the form posts to another, or behind a proxy that changes the host. Set `RASTER_URL` to the address people use.
+- **403 on a post, alert `form_expired`**: a logged-in user's session changed (they logged out and in elsewhere). Reload the page and send again.
 
 ## A validation message never shows
 

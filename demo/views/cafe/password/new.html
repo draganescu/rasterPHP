@@ -1,21 +1,21 @@
 <!doctype html>
-<html lang="en">
+<!-- print.@lang.i18n.language --><!-- print.@dir.i18n.dir --><html lang="en" dir="ltr"><!-- /print.@dir.i18n.dir --><!-- /print.@lang.i18n.language -->
 <head>
   <!-- dry._layout.head /-->
-  <title>New password</title>
+  <title><!-- print.i18n.password_new('new_password') -->New password<!-- /print.i18n.password_new('new_password') --></title>
 </head>
 <body>
   <!-- dry._layout.header /-->
   <main class="narrow">
-    <h1>Choose a new password</h1>
-    <!-- print.validation.alert('reset_invalid') --><p class="error">This link has expired or was already used.</p><!-- /print.validation.alert('reset_invalid') -->
-    <!-- print.validation.alert('password_short') --><p class="error">Use at least 8 characters.</p><!-- /print.validation.alert('password_short') -->
+    <h1><!-- print.i18n.password_new('choose_a_new_password') -->Choose a new password<!-- /print.i18n.password_new('choose_a_new_password') --></h1>
+    <!-- print.validation.alert('reset_invalid') --><p class="error"><!-- print.i18n.password_new('this_link_has_expired_or') -->This link has expired or was already used.<!-- /print.i18n.password_new('this_link_has_expired_or') --></p><!-- /print.validation.alert('reset_invalid') -->
+    <!-- print.validation.alert('password_short') --><p class="error"><!-- print.i18n.password_new('use_at_least_8_characters') -->Use at least 8 characters.<!-- /print.i18n.password_new('use_at_least_8_characters') --></p><!-- /print.validation.alert('password_short') -->
     <!-- render.authentication.reset -->
     <form method="post" class="stack">
-      <label>New password <input type="password" name="password" required minlength="10"></label>
-      <label>Again <input type="password" name="password_again" required></label>
-      <!-- render.validation.are_the_same('password', 'password_again') --><p class="error">The passwords are different.</p><!-- /render.validation.are_the_same('password', 'password_again') -->
-      <button>Save</button>
+      <label><!-- print.i18n.password_new('new_password') -->New password<!-- /print.i18n.password_new('new_password') --> <input type="password" name="password" required minlength="10"></label>
+      <label><!-- print.i18n.password_new('again') -->Again<!-- /print.i18n.password_new('again') --> <input type="password" name="password_again" required></label>
+      <!-- render.validation.are_the_same('password', 'password_again') --><p class="error"><!-- print.i18n.password_new('the_passwords_are_different') -->The passwords are different.<!-- /print.i18n.password_new('the_passwords_are_different') --></p><!-- /render.validation.are_the_same('password', 'password_again') -->
+      <button><!-- print.i18n.password_new('save') -->Save<!-- /print.i18n.password_new('save') --></button>
     </form>
     <!-- /render.authentication.reset -->
   </main>

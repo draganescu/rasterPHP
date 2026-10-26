@@ -30,35 +30,24 @@ class pagination
 		list(, $model, $name) = $m;
 		if ($model === 'cms') {
 			$type = cms::collection_type($name);
-			$filters = array();
 			// /news/news_items/tag/php narrows the list, and so the pages
-			$segments = (array)config::get('uri_segments');
-			$start = array_search($name.'_items', $segments);
-			if ($start !== false) {
-				for ($i = $start + 1; $i + 1 < count($segments); $i += 2) {
-					if (preg_match('/^'.preg_quote($name, '/').'_page$/', $segments[$i])) break;
-					$filters[$segments[$i]] = $segments[$i + 1];
-				}
-			}
+			$asked = cms::collection_request($name);
+			$filters = $asked['filters'];
 			// the list's own rows, counted: pagination.links('cms.news',
 			// 'featured=1') with the filters the list has, drafts for editors,
 			// a private type's records for whoever may read them (#88)
 			$list = cms_store::list_options($filter);
 			list($perpage, $limited) = cms_store::page_size($name, $list['options']);
-			$where = cms_store::table_exists($type) ? cms_store::list_where($name, $list['conditions'], $filters, $filters) : null;
+			$where = cms_store::table_exists($type) ? cms_store::list_where($name, $list['conditions'], $filters, $filters, i18n::current()) : null;
 			$total = $where === null ? 0 : (int)R::count($type, $where[0], $where[1]);
 			// a limit list is one page
 			if ($limited) $total = min($total, $perpage);
-			$current = max(1, (int)util::param($name.'_page', 1));
-			$uri = (string)config::get('uri_string');
-			$base = preg_replace('#/'.preg_quote($name, '#').'_page/\d+/?$#', '', rtrim($uri, '/'));
-			if ($base === '') $base = '/';
-			$link = rtrim(config::get('link_uri'), '/');
+			$current = max(1, $asked['page']);
 			// a list filtered from the URL (stylist=?stylist) keeps its query
 			$query = http_build_query(array_diff_key($_GET, array('done' => 1)));
 			$query = $query === '' ? '' : '?'.$query;
-			$url = function ($n) use ($link, $base, $name, $query) {
-				return ($n <= 1 ? $link.($base === '/' ? '/' : $base) : $link.rtrim($base, '/').'/'.$name.'_page/'.$n).$query;
+			$url = function ($n) use ($name, $query) {
+				return cms::page_link($name, $n).$query;
 			};
 		} else {
 			controller::load_model($model);

@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<base href='http://localhost:8000/application/views/default/' />
+<script>var BASE = "http://localhost:8000/"</script>
+  
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="style.css?v=">
+  <link rel="alternate" type="application/rss+xml" title="News" href="http://localhost:8000/news.rss">
+  
+  <title>News</title>
+</head>
+<body>
+  
+  <header class="site-header">
+    <a class="brand" href="http://localhost:8000/">My website</a>
+    <nav>
+      
+
+      <a class="nav-link" href="http://localhost:8000/">Home</a>
+      
+
+      <a class="nav-link active" href="http://localhost:8000/news">News</a>
+      
+
+      <a class="nav-link" href="http://localhost:8000/about">About</a>
+      
+      <a class="nav-link" href="http://localhost:8000/login">Log in</a>
+      
+    </nav>
+  </header>
+  
+  
+  
+  <main>
+    <h1>News</h1>
+    
+
+    <article class="news-item">
+      <h2><a href="http://localhost:8000/news/news_item/hello-world">Hello, world</a></h2>
+      <p class="meta">2026-09-25</p>
+      <div><p>The first post on a brand-new website, and a quick note on what to expect here.</p></div>
+    </article>
+    
+    
+  </main>
+  
+  <footer class="site-footer">
+    <section class="signup">
+      <h2>Get new posts by email</h2>
+      <p>One email when something new goes up. Unsubscribe any time.</p>
+      
+      
+      <form method="post" class="inline-form">
+<input type="hidden" name="raster_form" value="newsletter.signup">
+<input type="text" name="raster_hp" value="" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden">
+<input type="hidden" name="raster_ts" value="">
+        <label for="signup-email" class="visually-hidden">Email</label>
+        <input id="signup-email" type="email" name="email" placeholder="you@example.com" required maxlength="200">
+        <button>Subscribe</button>
+        
+      </form>
+      
+    </section>
+    <p>&copy; 2026 · Made with Raster · <a href="http://localhost:8000/news.rss">RSS feed</a></p>
+  </footer>
+  
+</body>
+</html>

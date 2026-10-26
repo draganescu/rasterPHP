@@ -1,46 +1,46 @@
 <!doctype html>
-<html lang="en">
+<!-- print.@lang.i18n.language --><!-- print.@dir.i18n.dir --><html lang="en" dir="ltr"><!-- /print.@dir.i18n.dir --><!-- /print.@lang.i18n.language -->
 <head>
   <!-- dry._layout.head /-->
-  <title>Your account</title>
+  <title><!-- print.i18n.account('your_account') -->Your account<!-- /print.i18n.account('your_account') --></title>
 </head>
 <body>
   <!-- dry._layout.header /-->
   <main class="narrow">
-    <h1>Your account</h1>
-    <!-- print.validation.alert('account_saved') --><p class="notice">Saved.</p><!-- /print.validation.alert('account_saved') -->
-    <!-- print.validation.alert('current_password_wrong') --><p class="error">Your current password is not right.</p><!-- /print.validation.alert('current_password_wrong') -->
-    <!-- print.validation.alert('email_taken') --><p class="error">Another account uses that email.</p><!-- /print.validation.alert('email_taken') -->
-    <!-- print.validation.alert('email_invalid') --><p class="error">That email does not look right.</p><!-- /print.validation.alert('email_invalid') -->
-    <!-- print.validation.alert('password_short') --><p class="error">Use at least 8 characters.</p><!-- /print.validation.alert('password_short') -->
+    <h1><!-- print.i18n.account('your_account') -->Your account<!-- /print.i18n.account('your_account') --></h1>
+    <!-- print.validation.alert('account_saved') --><p class="notice"><!-- print.i18n.account('saved') -->Saved.<!-- /print.i18n.account('saved') --></p><!-- /print.validation.alert('account_saved') -->
+    <!-- print.validation.alert('current_password_wrong') --><p class="error"><!-- print.i18n.account('your_current_password_is_not') -->Your current password is not right.<!-- /print.i18n.account('your_current_password_is_not') --></p><!-- /print.validation.alert('current_password_wrong') -->
+    <!-- print.validation.alert('email_taken') --><p class="error"><!-- print.i18n.account('another_account_uses_that_email') -->Another account uses that email.<!-- /print.i18n.account('another_account_uses_that_email') --></p><!-- /print.validation.alert('email_taken') -->
+    <!-- print.validation.alert('email_invalid') --><p class="error"><!-- print.i18n.account('that_email_does_not_look') -->That email does not look right.<!-- /print.i18n.account('that_email_does_not_look') --></p><!-- /print.validation.alert('email_invalid') -->
+    <!-- print.validation.alert('password_short') --><p class="error"><!-- print.i18n.account('use_at_least_8_characters') -->Use at least 8 characters.<!-- /print.i18n.account('use_at_least_8_characters') --></p><!-- /print.validation.alert('password_short') -->
     <!-- render.authentication.account -->
     <form method="post" class="stack">
-      <label>Name <input type="text" name="name" maxlength="100"></label>
-      <label>Email <input type="email" name="email" required></label>
-      <label>New password <input type="password" name="password" minlength="8"></label>
-      <label>Current password <input type="password" name="current_password"></label>
-      <button>Save</button>
+      <label><!-- print.i18n.account('name') -->Name<!-- /print.i18n.account('name') --> <input type="text" name="name" maxlength="100"></label>
+      <label><!-- print.i18n.account('email') -->Email<!-- /print.i18n.account('email') --> <input type="email" name="email" required></label>
+      <label><!-- print.i18n.account('new_password') -->New password<!-- /print.i18n.account('new_password') --> <input type="password" name="password" minlength="8"></label>
+      <label><!-- print.i18n.account('current_password') -->Current password<!-- /print.i18n.account('current_password') --> <input type="password" name="current_password"></label>
+      <button><!-- print.i18n.account('save') -->Save<!-- /print.i18n.account('save') --></button>
     </form>
     <!-- /render.authentication.account -->
-    <h2>Your bookings</h2>
-    <p>What you booked while logged in. Only you, and the staff, see them.</p>
+    <h2><!-- print.i18n.account('your_bookings') -->Your bookings<!-- /print.i18n.account('your_bookings') --></h2>
+    <p><!-- print.i18n.account('what_you_booked_while_logged') -->What you booked while logged in. Only you, and the staff, see them.<!-- /print.i18n.account('what_you_booked_while_logged') --></p>
     <ul class="bookings">
       <!-- render.cms.booking('owner=me&order=-date,-time') -->
-      <li><!-- print.date -->2026-10-20<!-- /print.date --> at <!-- print.time -->19:00<!-- /print.time -->, <!-- print.people -->2<!-- /print.people --> people: <!-- print.status -->requested<!-- /print.status --> <form method="get" action="booking.html" class="inline"><!-- print.@value.id --><button class="secondary" name="booking" value="1">Change or cancel</button><!-- /print.@value.id --></form></li>
+      <li><!-- print.date -->2026-10-20<!-- /print.date --> <!-- print.i18n.account('at') -->at<!-- /print.i18n.account('at') --> <!-- print.time -->19:00<!-- /print.time -->, <!-- print.people -->2<!-- /print.people --> <!-- print.i18n.account('people') -->people:<!-- /print.i18n.account('people') --> <!-- print.status -->requested<!-- /print.status --> <form method="get" action="booking.html" class="inline"><!-- print.@value.id --><button class="secondary" name="booking" value="1"><!-- print.i18n.account('change_or_cancel') -->Change or cancel<!-- /print.i18n.account('change_or_cancel') --></button><!-- /print.@value.id --></form></li>
       <!-- /render.cms.booking('owner=me&order=-date,-time') -->
     </ul>
     <!-- render.pagination.links('cms.booking', 'owner=me') -->
-    <nav class="pager"><!-- print.@href.prev_url --><a class="prev" href="#">Newer</a><!-- /print.@href.prev_url --> page <!-- print.current -->1<!-- /print.current --> of <!-- print.total -->1<!-- /print.total --> <!-- print.@href.next_url --><a class="next" href="#">Older</a><!-- /print.@href.next_url --></nav>
+    <nav class="pager"><!-- print.@href.prev_url --><a class="prev" href="#"><!-- print.i18n.account('newer') -->Newer<!-- /print.i18n.account('newer') --></a><!-- /print.@href.prev_url --> <!-- print.i18n.account('page') -->page<!-- /print.i18n.account('page') --> <!-- print.current -->1<!-- /print.current --> <!-- print.i18n.account('of') -->of<!-- /print.i18n.account('of') --> <!-- print.total -->1<!-- /print.total --> <!-- print.@href.next_url --><a class="next" href="#"><!-- print.i18n.account('older') -->Older<!-- /print.i18n.account('older') --></a><!-- /print.@href.next_url --></nav>
     <!-- /render.pagination.links('cms.booking', 'owner=me') -->
-    <h2>Your replies</h2>
-    <p>Your replies to our evenings, made while logged in.</p>
+    <h2><!-- print.i18n.account('your_replies') -->Your replies<!-- /print.i18n.account('your_replies') --></h2>
+    <p><!-- print.i18n.account('your_replies_to_our_evenings') -->Your replies to our evenings, made while logged in.<!-- /print.i18n.account('your_replies_to_our_evenings') --></p>
     <ul class="bookings">
       <!-- render.cms.rsvp('owner=me&order=-created_at') -->
-      <li><!-- print.answer -->yes<!-- /print.answer -->, <!-- print.people -->2<!-- /print.people --> people: <!-- print.status -->going<!-- /print.status --> <form method="get" action="rsvp.html" class="inline"><!-- print.@value.id --><button class="secondary" name="reply" value="1">Change my reply</button><!-- /print.@value.id --></form></li>
+      <li><!-- print.answer -->yes<!-- /print.answer -->, <!-- print.people -->2<!-- /print.people --> <!-- print.i18n.account('people') -->people:<!-- /print.i18n.account('people') --> <!-- print.status -->going<!-- /print.status --> <form method="get" action="rsvp.html" class="inline"><!-- print.@value.id --><button class="secondary" name="reply" value="1"><!-- print.i18n.account('change_my_reply') -->Change my reply<!-- /print.i18n.account('change_my_reply') --></button><!-- /print.@value.id --></form></li>
       <!-- /render.cms.rsvp('owner=me&order=-created_at') -->
     </ul>
     <!-- render.authentication.logout -->
-    <form method="post"><button class="secondary">Log out</button></form>
+    <form method="post"><button class="secondary"><!-- print.i18n.account('log_out') -->Log out<!-- /print.i18n.account('log_out') --></button></form>
     <!-- /render.authentication.logout -->
   </main>
   <!-- dry._layout.footer /-->

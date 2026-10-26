@@ -7,7 +7,7 @@ Recommendations for building and running sites with Raster, collected from how t
 - **Start from finished static HTML with real content**, then annotate. The page should look right opened straight from disk before any model exists.
 - **Link by file name** (`href="about.html"`) and write asset paths relative to the theme folder (`src="images/logo.svg"`). The file then works both as a mock-up and live.
 - **Give every CMS field a meaningful default.** It's what editors see first and what shows if the value is ever emptied.
-- **Put shared parts in `_layout.html`** as `res` fragments and pull them in with `dry`. Keep fragments one level deep (a `dry` inside a fragment isn't expanded).
+- **Put shared parts in `_layout.html`** as `res` fragments and pull them in with `dry`. A `dry` inside a fragment is expanded too, up to five levels deep, but one level is easier to follow.
 - **Put `site_*` fields in the layout**: the site name, footer text, contact details.
 - **Use `remove` for extra sample items**, so a list looks full in the mock-up but visitors only see real items.
 - **Write every word in the template.** Error and success messages, emails and button labels belong in HTML, not PHP strings.

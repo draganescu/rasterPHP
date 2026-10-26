@@ -6,7 +6,7 @@ The events themselves stay content: the items of a collection your views declare
 
 The model counts only on a site whose views use `render.rsvp.*` or `print.rsvp.*`. Other sites get no table, no Admin entries and nothing new in `describe` or MCP. A site with its own model or record type called `rsvp` keeps it: the bundled one stays out of the way, and `raster lint` says so.
 
-The demo café in the Raster repository (`demo/`) is a complete example: replies on each event's page (`/events/events_item/<slug>`), the guest's page on `/rsvp` and the staff page on `/staff/events`. `php demo/seed.php` adds a jazz night with 40 places and a poetry evening with 4, so the waitlist is easy to see.
+The demo café in the Raster repository (`demo/`) is a complete example: replies on each event's page (`/events/events_item/{slug}`), the guest's page on `/rsvp` and the staff page on `/staff/events`. `php demo/seed.php` adds a jazz night with 40 places and a poetry evening with 4, so the waitlist is easy to see.
 
 Emails go out through the `mail` model, so set up [Sending email](Sending-Email) first.
 
@@ -39,6 +39,8 @@ The model reads four fields of an event by name. Write them in the collection's 
 | `starts` (or `time`) | time | when it starts; without one, midnight of its date |
 | `places` | number | the most people with a yes; empty or 0 is no limit, and no waitlist |
 | `rsvp_until` | date and time | when replies close; empty is when it starts (or `rsvp_closes` minutes before) |
+
+On a [multilingual site](Translations) the event's title translates like any item's, and the reply pages and emails in a language show the event's title and link in that language.
 
 A field's type comes from the collection's own view (`events.html`, else `events_item.html`), so put `places` with its mock-up (`40`) in the list's view too. A draft or a scheduled event takes no replies from guests.
 
@@ -183,7 +185,7 @@ Protect the staff page by its own name, never by `rsvp`:
 config::set('protected')->to(array('staff' => 'editor', 'rsvp_item' => 'editor'));
 ```
 
-An `rsvp_item.html` view that renders `render.cms.rsvp` is each reply's own page (`/rsvp/rsvp_item/<slug>`).
+An `rsvp_item.html` view that renders `render.cms.rsvp` is each reply's own page (`/rsvp/rsvp_item/{slug}`).
 
 **Needs attention.** Staff edit events all the time, so nothing they do to an event is refused, nobody going is moved out, and nobody is emailed. Instead each reply that no longer fits shows why: `event_gone` (deleted), `event_hidden` (a draft or scheduled), `over_places` (places lowered under the people going) or `moved` (the date or time changed since the guest replied). Phone the guest and save the reply (a note, "phoned them") to clear `moved`.
 

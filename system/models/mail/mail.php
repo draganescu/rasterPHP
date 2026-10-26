@@ -85,17 +85,55 @@ class mail
 	}
 
 	// Renders a view and sends it. Returns true when it was handed over (or,
-	// in a web request, kept to send after the answer).
-	static function send_view($view, $to, $vars = array(), $headers = array()) {
+	// in a web request, kept to send after the answer). $lang is the
+	// recipient's language (i18n::of($row) of the row the mail is about):
+	// on a multilingual site the view, its links and its <title> are in it
+	// (#200 D13; P4.A). Null, or off: the request's own, as always.
+	static function send_view($view, $to, $vars = array(), $headers = array(), $lang = null) {
 		if (!util::trusted_links()) {
 			static::$last_error = 'Set RASTER_URL (or config site_url) to the site address before sending email from the site';
 			log::error('Mail: '.static::$last_error);
 			return false;
 		}
-		$html = controller::render_view($view, $vars);
-		$subject = preg_match('/<title>(.*?)<\/title>/is', $html, $m) ? html_entity_decode(trim(strip_tags($m[1])), ENT_QUOTES) : 'Message from '.config::get('host');
+		// the view, its <title> and the site's name in the recipient's language
+		list($html, $subject) = static::in_language($lang, function () use ($view, $vars, $lang) {
+			$html = controller::render_view($view, $vars, 'html', $lang);
+			$subject = preg_match('/<title>(.*?)<\/title>/is', $html, $m) ? html_entity_decode(trim(strip_tags($m[1])), ENT_QUOTES) : static::site_name();
+			return array($html, $subject);
+		});
 		// static: a site's the_mail sends it, when it has one
 		return static::send($to, $subject, $html, null, $headers);
+	}
+
+	// Runs $fn in $lang: inside i18n::with() on a multilingual site, so what
+	// it renders and the links it makes (util::url) are that language's;
+	// with $lang null, or off, it just runs $fn, so a site without
+	// multilingual reads its language as it always did. A sender builds its
+	// vars (manage_url, names) and calls send_view inside it.
+	static function in_language($lang, $fn) {
+		if ($lang === null || !i18n::enabled()) return $fn();
+		return i18n::with($lang, $fn);
+	}
+
+	// the subject of a view without a <title>: the site's name (the
+	// site_name field every page shares, print.cms.site_name), else its host
+	static function site_name() {
+		$name = '';
+		try {
+			database::instance();
+			$site = database::configured() ? cms_store::latest('sitepage') : null;
+			// multilingual: as it reads in i18n::current(), the recipient's
+			// language inside in_language()
+			if ($site && i18n::enabled()) {
+				$row = cms_store::localized($site->export(), 'sitepage');
+				$name = trim(html_entity_decode(strip_tags(isset($row['site_name']) ? (string)$row['site_name'] : ''), ENT_QUOTES));
+			} elseif ($site) {
+				$name = trim(html_entity_decode(strip_tags((string)$site->site_name), ENT_QUOTES));
+			}
+		} catch (Throwable $e) {
+			log::warning('mail: '.$e->getMessage());
+		}
+		return $name !== '' ? $name : (string)config::get('host');
 	}
 
 	static function text_version($html) {

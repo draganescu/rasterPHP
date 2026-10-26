@@ -1,26 +1,26 @@
 <!doctype html>
-<html lang="en">
+<!-- print.@lang.i18n.language --><!-- print.@dir.i18n.dir --><html lang="en" dir="ltr"><!-- /print.@dir.i18n.dir --><!-- /print.@lang.i18n.language -->
 <head>
   <!-- dry._layout.head /-->
-  <title>Become a member</title>
+  <title><!-- print.i18n.register('become_a_member') -->Become a member<!-- /print.i18n.register('become_a_member') --></title>
 </head>
 <body>
   <!-- dry._layout.header /-->
   <main class="narrow">
-    <h1>Become a member</h1>
-    <!-- print.validation.alert('email_taken') --><p class="error">There is already an account with that email.</p><!-- /print.validation.alert('email_taken') -->
-    <!-- print.validation.alert('email_invalid') --><p class="error">That email does not look right.</p><!-- /print.validation.alert('email_invalid') -->
-    <!-- print.validation.alert('password_short') --><p class="error">For this café, passwords need at least 10 characters.</p><!-- /print.validation.alert('password_short') -->
+    <h1><!-- print.i18n.register('become_a_member') -->Become a member<!-- /print.i18n.register('become_a_member') --></h1>
+    <!-- print.validation.alert('email_taken') --><p class="error"><!-- print.i18n.register('there_is_already_an_account') -->There is already an account with that email.<!-- /print.i18n.register('there_is_already_an_account') --></p><!-- /print.validation.alert('email_taken') -->
+    <!-- print.validation.alert('email_invalid') --><p class="error"><!-- print.i18n.register('that_email_does_not_look') -->That email does not look right.<!-- /print.i18n.register('that_email_does_not_look') --></p><!-- /print.validation.alert('email_invalid') -->
+    <!-- print.validation.alert('password_short') --><p class="error"><!-- print.i18n.register('for_this_cafe_passwords_need') -->For this café, passwords need at least 10 characters.<!-- /print.i18n.register('for_this_cafe_passwords_need') --></p><!-- /print.validation.alert('password_short') -->
     <!-- render.authentication.register -->
     <form method="post" class="stack">
-      <label>Name <input type="text" name="name" maxlength="100"></label>
-      <label>Email <input type="email" name="email" required></label>
-      <!-- render.validation.field('email') --><p class="error">Enter a valid email address.</p><!-- /render.validation.field('email') -->
-      <label>Password <input type="password" name="password" required minlength="8"></label>
-      <!-- render.validation.field('password') --><p class="error">Use at least 8 characters.</p><!-- /render.validation.field('password') -->
-      <label>Again <input type="password" name="password_again" required></label>
-      <!-- render.validation.matches('password', 'password_again') --><p class="error">The passwords are different.</p><!-- /render.validation.matches('password', 'password_again') -->
-      <button>Join</button>
+      <label><!-- print.i18n.register('name') -->Name<!-- /print.i18n.register('name') --> <input type="text" name="name" maxlength="100"></label>
+      <label><!-- print.i18n.register('email') -->Email<!-- /print.i18n.register('email') --> <input type="email" name="email" required></label>
+      <!-- render.validation.field('email') --><p class="error"><!-- print.i18n.register('enter_a_valid_email_address') -->Enter a valid email address.<!-- /print.i18n.register('enter_a_valid_email_address') --></p><!-- /render.validation.field('email') -->
+      <label><!-- print.i18n.register('password') -->Password<!-- /print.i18n.register('password') --> <input type="password" name="password" required minlength="8"></label>
+      <!-- render.validation.field('password') --><p class="error"><!-- print.i18n.register('use_at_least_8_characters') -->Use at least 8 characters.<!-- /print.i18n.register('use_at_least_8_characters') --></p><!-- /render.validation.field('password') -->
+      <label><!-- print.i18n.register('again') -->Again<!-- /print.i18n.register('again') --> <input type="password" name="password_again" required></label>
+      <!-- render.validation.matches('password', 'password_again') --><p class="error"><!-- print.i18n.register('the_passwords_are_different') -->The passwords are different.<!-- /print.i18n.register('the_passwords_are_different') --></p><!-- /render.validation.matches('password', 'password_again') -->
+      <button><!-- print.i18n.register('join') -->Join<!-- /print.i18n.register('join') --></button>
     </form>
     <!-- /render.authentication.register -->
   </main>

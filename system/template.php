@@ -15,8 +15,75 @@ class template {
   // the annotations the engine sees.
   static $script_form = array('/*-' => '<!--', '-*/' => '-->');
 
+  // The characters each kind of name is made of, as regex character
+  // classes. The patterns below are built from these, and
+  // system/tools/annotations.php hands the same list to the inspector
+  // ('names'), so lint and the engine accept the same names (#28).
+  // - model: print.<model>.method
+  // - key: what follows print. inside a render block: line2, line-2,
+  //   @data-id.key, @aria-label.key, +class.state, @xlink:href.url
+  // - field: one row key on its own (line2, line-2)
+  // - attribute: the attribute of print.@<attribute>.x (data-id, xlink:href)
+  // - view and res: dry.<view>.<res>, res.<res> (nav2, _layout, docs/menu)
+  static $names = array(
+  	'model' => '[a-z0-9_\-]',
+  	'key' => '[@+a-zA-Z0-9_.:\-]',
+  	'field' => '[A-Za-z0-9_\-]',
+  	'attribute' => '[a-zA-Z0-9_\-:]',
+  	'view' => '[a-z0-9_\-\/]',
+  	'res' => '[a-z0-9_\-]',
+  );
+
   static function unscript($html) {
   	return str_replace(array_keys(self::$script_form), array_values(self::$script_form), $html);
+  }
+
+  // $tags right after the first <head>, attributes or not (<head prefix="og: …">),
+  // that isn't inside a comment or a script
+  static function insert_in_head($html, $tags) {
+  	$from = 0;
+  	while (preg_match('/<!--|<script\b|<head(\s[^>]*)?>/i', $html, $m, PREG_OFFSET_CAPTURE, $from)) {
+  		$at = $m[0][1];
+  		if (stripos($m[0][0], '<head') === 0) {
+  			$at += strlen($m[0][0]);
+  			return substr($html, 0, $at)."\n".$tags.substr($html, $at);
+  		}
+  		$end = $m[0][0] === '<!--' ? strpos($html, '-->', $at + 4) : stripos($html, '</script', $at);
+  		if ($end === false) return $html;
+  		$from = $end + 3;
+  	}
+  	return $html;
+  }
+
+  // In multilingual mode the page's canonical address and its address in
+  // every language (hreflang, x-default the default language's), for <head>.
+  // '' when off. What the page writes itself ($html has a canonical or an
+  // hreflang link) is left to it. None on a refusal (a 404), nor on a URL
+  // with a query (?page=2 of a model's list): its address isn't the page's.
+  // Tracking parameters (utm_*, fbclid, …) don't count: it is the same page
+  // ($status: the response's, http_response_code() when null)
+  static function language_links($html = '', $status = null) {
+  	if (!i18n::enabled()) return '';
+  	if ($status === null) $status = http_response_code();
+  	if ($status && $status !== 200) return '';
+  	foreach (array_keys($_GET) as $name) {
+  		if (!preg_match(raster_cache::$tracking, $name)) return '';
+  	}
+  	$current = strtolower(i18n::current());
+  	$default = strtolower(i18n::default_language());
+  	$canonical = '';
+  	$links = '';
+  	$fallback = '';
+  	foreach (i18n::alternates() as $row) {
+  		$url = htmlspecialchars($row['url'], ENT_QUOTES);
+  		$links .= "\n<link rel=\"alternate\" hreflang=\"".htmlspecialchars($row['lang'], ENT_QUOTES)."\" href=\"$url\">";
+  		if (strtolower($row['lang']) === $current) $canonical = $url;
+  		if (strtolower($row['lang']) === $default) $fallback = $url;
+  	}
+  	if ($fallback !== '') $links .= "\n<link rel=\"alternate\" hreflang=\"x-default\" href=\"$fallback\">";
+  	if (preg_match('/<link\b[^>]*\shreflang\s*=/i', $html)) $links = '';
+  	if (preg_match('/<link\b[^>]*\srel\s*=\s*["\']?canonical\b/i', $html)) $canonical = '';
+  	return ($canonical !== '' ? "\n<link rel=\"canonical\" href=\"$canonical\">" : '').$links;
   }
   
 
@@ -258,14 +325,19 @@ class template {
 			$base = $script;
 		
 		if ($template->format === 'html' && !$template->is_email) {
-			$template->output = str_replace('<head>', "<head>\n".$base, $template->output);
+			$template->output = self::insert_in_head($template->output, $base.self::language_links($template->output));
 		}
+		// print.if.languages: the language switcher has somewhere to go
+		if (!array_key_exists('languages', $template->vars)) $template->vars['languages'] = count(i18n::available()) > 1;
+		// print.if.multilingual: every language has its own addresses (the sitemap's alternates)
+		if (!array_key_exists('multilingual', $template->vars)) $template->vars['multilingual'] = i18n::enabled();
 		
 		// mock-up content goes first, so models inside it are never called
 		$template->remove();
 		$template->index_forms();
 
-		$res = preg_match_all('/<!-- ((print|render)\.(([a-z,_,-,0-9]*)\.(.*?))) (\/?)-->/', $template->output, $methodstarts);
+		$n = self::$names;
+		$res = preg_match_all('/<!-- ((print|render)\.(('.$n['model'].'*)\.(.*?))) (\/?)-->/', $template->output, $methodstarts);
 		$template->models = array_unique($methodstarts[4]);
 
 		foreach ($methodstarts[2] as $k=>$v) {
@@ -275,7 +347,7 @@ class template {
 				$template->models_methods_print[] = array($methodstarts[4][$k],$methodstarts[5][$k]);
 		}
 		// a model value in an attribute: <!-- print.@src.cms.photo --><img src="a.jpg"><!-- /print.@src.cms.photo -->
-		preg_match_all('/<!-- print\.([@+][a-zA-Z0-9_\-:]+)\.([a-z0-9_\-]+)\.([^\s]+?) -->/', $template->output, $attrstarts);
+		preg_match_all('/<!-- print\.([@+]'.$n['attribute'].'+)\.('.$n['model'].'+)\.([^\s]+?) -->/', $template->output, $attrstarts);
 		foreach ($attrstarts[0] as $k => $v) {
 			$template->models[] = $attrstarts[2][$k];
 			$template->models_methods_print[] = array($attrstarts[2][$k], $attrstarts[3][$k], $attrstarts[1][$k]);
@@ -364,7 +436,7 @@ class template {
 			
 			$render_template = substr($this->output, $pos1+strlen($start), $pos2 - strlen($start) - strlen($end));
 			$this->current_block = $render_template;
-			$res = preg_match_all('/<!-- print\.([@\+,a-z,A-Z,_,-,\.,0-9]*) (\/?)-->/', $render_template, $datastarts);
+			$res = preg_match_all('/<!-- print\.('.self::$names['key'].'*) (\/?)-->/', $render_template, $datastarts);
 			$this->current_params['render_template'] = $render_template;
 			$this->current_params['pos1'] = $pos1;
 			$this->current_params['pos2'] = $pos2;
@@ -769,7 +841,8 @@ class template {
     // (raster_record, from cms_records::listed) are marked either way.
     // $nested: a list inside a row, whose rows are joined as they are.
     function render_rows($render_template, $rows, $list = null, $marking = false, $nested = false) {
-		preg_match_all('/<!-- print\.([@\+,a-z,A-Z,_,-,\.,0-9]*) (\/?)-->/', $render_template, $datastarts);
+		$n = self::$names;
+		preg_match_all('/<!-- print\.('.$n['key'].'*) (\/?)-->/', $render_template, $datastarts);
 		$rendered_data = '';
 		// the mock-up of each field, for the editor: what it saves comes back
 		// printed the way this template prints it (4.5 as 4.50)
@@ -805,7 +878,7 @@ class template {
 			// a list inside the row (a day's bookings) renders its block once per
 			// row of the list, through this same function, marks included
 			foreach ($data as $nested_key => $nested_rows) {
-				if (!is_array($nested_rows) || !preg_match('/^[A-Za-z0-9_\-]+$/', (string)$nested_key)) continue;
+				if (!is_array($nested_rows) || !preg_match('/^'.$n['field'].'+$/', (string)$nested_key)) continue;
 				$open = "<!-- print.$nested_key -->";
 				$close = "<!-- /print.$nested_key -->";
 				while (($at = strpos($rendered_tpl, $open)) !== false && ($to = strpos($rendered_tpl, $close, $at)) !== false) {
@@ -858,6 +931,8 @@ class template {
 
 		            // lists inside the row were rendered above
 		            if(array_key_exists($datakey, $data) && is_array($data[$datakey])) continue;
+		            // a plain key is a field name: print.a:b is not one, as lint says
+		            if(!$is_attr && !preg_match('/^'.$n['field'].'+$/', $datakey)) continue;
 
 		            if(!array_key_exists($datakey, $data)) {	
 		            	continue;
@@ -928,7 +1003,7 @@ class template {
 		            }
 			}
 			// keys the row doesn't have keep their mock-up content, without the tags
-			$rendered_tpl = preg_replace_callback('/<!-- \/?print\.([@+][a-zA-Z0-9_\-:]+\.)?([A-Za-z0-9_\-]+) \/?-->/', function ($m) {
+			$rendered_tpl = preg_replace_callback('/<!-- \/?print\.([@+]'.$n['attribute'].'+\.)?('.$n['field'].'+) \/?-->/', function ($m) {
 				return $m[2] === '' ? $m[0] : '';
 			}, $rendered_tpl);
 			if ($item_mark !== null) $rendered_tpl = '<!--raster:s '.$item_mark.'-->'.$rendered_tpl.'<!--raster:e '.$item_mark.'-->';
@@ -951,7 +1026,8 @@ class template {
 		$mockup = $this->mockup($render_template);
 		$mark = array('kind' => 'collection', 'collection' => $list['collection'], 'list' => $list['argument'], 'filters' => $list['filters'], 'fields' => $mockup['fields']);
 		// the card for a new item: never on an item's own page
-		$mark['addable'] = !preg_match('#_item(/|$)#', (string)config::get('uri_string'));
+		$url = cms::collection_uri(config::get('uri_string'));
+		$mark['addable'] = !$url || $url['kind'] !== 'item';
 		if ($record) {
 			$locked = array_merge($record['readonly'], $record['hidden'], array('owner', 'created_at'));
 			$mark = array_merge($mark, array('record' => true, 'readonly' => $locked, 'lists' => $record['lists'], 'addable' => $mark['addable'] && cms_records::addable($record)));
@@ -965,17 +1041,18 @@ class template {
     // attribute fields <!--raster:ma name attr--> before their tag.
     function mockup($html) {
       $fields = array();
-      $html = preg_replace_callback('/<!-- print\.([@+])([a-zA-Z0-9_\-:]+)\.([A-Za-z0-9_\-@]+) -->(.*?)<!-- \/print\.\1\2\.\3 -->/s', function ($m) use (&$fields) {
+      $n = self::$names;
+      $html = preg_replace_callback('/<!-- print\.([@+])('.$n['attribute'].'+)\.((?:'.$n['field'].'|@)+) -->(.*?)<!-- \/print\.\1\2\.\3 -->/s', function ($m) use (&$fields) {
         if (strpos($m[3], 'raster_') === 0) return $m[4];
         $fields[$m[3]] = self::get_attribute($m[4], $m[2]);
         return '<!--raster:ma '.$m[3].' '.$m[2].'-->'.$m[4];
       }, $html);
-      $html = preg_replace_callback('/<!-- print\.([A-Za-z0-9_\-]+) -->(.*?)<!-- \/print\.\1 -->/s', function ($m) use (&$fields) {
+      $html = preg_replace_callback('/<!-- print\.('.$n['field'].'+) -->(.*?)<!-- \/print\.\1 -->/s', function ($m) use (&$fields) {
         if (strpos($m[1], 'raster_') === 0) return $m[2];
         if (!isset($fields[$m[1]])) $fields[$m[1]] = trim($m[2]);
         return '<!--raster:m '.$m[1].'-->'.$m[2].'<!--raster:/m-->';
       }, $html);
-      $html = preg_replace_callback('/<!-- print\.([A-Za-z0-9_\-]+) \/-->/', function ($m) use (&$fields) {
+      $html = preg_replace_callback('/<!-- print\.('.$n['field'].'+) \/-->/', function ($m) use (&$fields) {
         if (!isset($fields[$m[1]])) $fields[$m[1]] = '';
         return '<!--raster:m '.$m[1].'--><!--raster:/m-->';
       }, $html);
@@ -988,14 +1065,33 @@ class template {
     	return APPBASE.config::get('views_path').DIRECTORY_SEPARATOR.$this->theme.DIRECTORY_SEPARATOR.$view.$this->view_ext;
     }
     
+    // A res may hold dry tags of its own. They are filled in too, level by
+    // level, up to DRY_DEPTH levels deep, the way lint, schema and MCP read
+    // a view (raster_inspector::expand), so a field they list is one the
+    // page shows (#36). A deeper dry stays in the page as a comment.
+    const DRY_DEPTH = 5;
+
     function dry_template(){
 
     	$this->current_action = 'dry';
 		event::dispatch('before_drying');
 
-		$this->output = preg_replace('/<!-- (\/?)res\.([a-z,_,-]*) -->/', "", $this->output);
-		$res = preg_match_all('/<!-- dry\.([a-z,_,-,\/]*)\.([a-z,_,-]*) (\/?)-->/', $this->output, $datastarts);
+		$dry = '/<!-- dry\.('.self::$names['view'].'*)\.('.self::$names['res'].'*) (\/?)-->/';
 		$loaded_files = array();
+		// the page's own res marks go; a fragment keeps the marks inside it,
+		// on every level, as it did when there was one
+		$this->output = preg_replace('/<!-- (\/?)res\.('.self::$names['res'].'*) -->/', "", $this->output);
+		for ($level = 0; $level < self::DRY_DEPTH; $level++) {
+			// after the page's own, a level only when a fragment brought dry tags
+			if ($level > 0 && !preg_match($dry, $this->output)) break;
+			$this->dry_level($dry, $loaded_files);
+		}
+		event::dispatch('after_drying');
+    }
+
+    // fills every dry tag in the output with its fragment, once
+    function dry_level($dry, &$loaded_files) {
+		$res = preg_match_all($dry, $this->output, $datastarts);
 		arsort($datastarts);
 		foreach ($datastarts[0] as $key => $value) {					
 
@@ -1034,7 +1130,6 @@ class template {
 			$this->output = substr_replace($this->output, $data, $pos1, $pos2);
 
 		}
-		event::dispatch('after_drying');
     }
     
     public static function set($property)

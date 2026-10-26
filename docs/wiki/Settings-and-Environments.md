@@ -34,7 +34,7 @@ An **environment** is a name for where the site is running. Raster uses two:
 | | development | production |
 |---|---|---|
 | Database | fluid: tables and columns are created as templates change | frozen: changes only through `raster schema --apply` |
-| Template errors | the page shows a list of problems (HTTP 500) | a plain "This page could not be shown", details go to the PHP error log |
+| Template errors | the page shows a list of problems (HTTP 500) | 500, as the view `error_document_500` if set, else the bare status; details go to the PHP error log |
 | PHP's own errors | shown as php.ini says | never shown to visitors (`display_errors` off, `log_errors` on, whatever php.ini says); `/api` answers `{"error":"server error"}` |
 | Database can't be reached | the page says why (HTTP 500) | every page answers 503 (the view `error_document_503`, if set) and `/api` a JSON 503, logged, nothing cached |
 | Page cache | off | on |
@@ -111,6 +111,8 @@ Set with `config::set('name')->to(value)` in `config/the_app.php`.
 | `rewrite` | `true` | `false` puts `index.php/` in every link, for servers that can't rewrite URLs |
 | `strict_templates` | `true` in development | template errors stop the page with a list (HTTP 500) |
 | `error_document_404` | none | a view for 404 pages |
+| `error_document_403` | none | a view for refusals (a post from another site, a stale form, a page the account can't open), with the alerts `cross_site`, `form_expired`, `not_allowed` |
+| `error_document_500` | none | a view for a page that broke, outside development |
 | `error_document_503` | none | a view for when the database can't be reached, outside development; use no model that needs the database in it |
 | `site_url` | none | the site's address (same as `RASTER_URL`) |
 | `cms_enabled` | `true` | the CMS and the editor |
@@ -143,6 +145,7 @@ Set with `config::set('name')->to(value)` in `config/the_app.php`.
 | `newsletter_unsubscribe_page` | `newsletter-unsubscribe` | |
 | `mail` | see `RASTER_MAIL` | how email is sent |
 | `mail_from` | see `RASTER_MAIL_FROM` | the sender |
+| `multilingual` | `false` | one address per language (`/ro/menu`) and CMS fields in every language, for the `languages`, which need to be two or more (see [Translations](Translations)) |
 | `languages` | none | e.g. `array('en', 'ro')`, default first |
 | `domain_language` | none | e.g. `array('example.ro' => 'ro')` |
 | `language_cookie` | `lang` | the cookie that remembers a language choice |
@@ -151,7 +154,7 @@ Set with `config::set('name')->to(value)` in `config/the_app.php`.
 | `page_cache_skip` | none | path patterns |
 | `export_skip` | none | paths or `#regex#` patterns left out of `raster export` |
 | `mcp_token` | none | turns on MCP over HTTP (same as `RASTER_MCP_TOKEN`) |
-| `mcp_write_views` | `false` | lets MCP over HTTP rewrite templates |
+| `mcp_write_views` | `false` | lets MCP over HTTP rewrite templates, theme files, dictionaries and the languages setting (`write_view`, `write_asset`, `write_strings`, `set_languages`) |
 | `api_system_models` | `cms` | bundled models reachable at `/api`, for what their `api()` lists |
 | `api_blocked` | `mcp`, `api` | models never reachable at `/api`. Setting it replaces the list, so keep `mcp` and `api` in it: `array('mcp', 'api', 'billing')` |
 | `allow_deprecated` | none | deprecated features this site keeps on purpose, so `doctor` doesn't warn |

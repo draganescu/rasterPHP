@@ -1,8 +1,8 @@
 <!doctype html>
-<html lang="en">
+<!-- print.@lang.i18n.language --><!-- print.@dir.i18n.dir --><html lang="en" dir="ltr"><!-- /print.@dir.i18n.dir --><!-- /print.@lang.i18n.language -->
 <head>
   <!-- dry._layout.head /-->
-  <title>Event</title>
+  <title><!-- print.i18n.events_item('event') -->Event<!-- /print.i18n.events_item('event') --></title>
 </head>
 <body>
   <!-- dry._layout.header /-->
@@ -10,57 +10,57 @@
     <!-- render.cms.events -->
     <article class="event">
       <h1><!-- print.title -->Jazz night<!-- /print.title --></h1>
-      <p class="meta"><!-- print.date -->2026-10-10<!-- /print.date --> at <!-- print.starts -->19:00<!-- /print.starts --></p>
-      <p class="meta"><!-- print.places -->40<!-- /print.places --> places</p>
-      <!-- print.if.is_editor --><p class="meta">Replies until <!-- print.rsvp_until -->2026-10-10 17:00<!-- /print.rsvp_until --> (left empty, until it starts)</p><!-- /print.if.is_editor -->
+      <p class="meta"><!-- print.date -->2026-10-10<!-- /print.date --> <!-- print.i18n.events_item('at') -->at<!-- /print.i18n.events_item('at') --> <!-- print.starts -->19:00<!-- /print.starts --></p>
+      <p class="meta"><!-- print.places -->40<!-- /print.places --> <!-- print.i18n.events_item('places') -->places<!-- /print.i18n.events_item('places') --></p>
+      <!-- print.if.is_editor --><p class="meta"><!-- print.i18n.events_item('replies_until') -->Replies until<!-- /print.i18n.events_item('replies_until') --> <!-- print.rsvp_until -->2026-10-10 17:00<!-- /print.rsvp_until --> <!-- print.i18n.events_item('left_empty_until_it_starts') -->(left empty, until it starts)<!-- /print.i18n.events_item('left_empty_until_it_starts') --></p><!-- /print.if.is_editor -->
       <div><!-- print.body --><p>Details about the evening.</p><!-- /print.body --></div>
     </article>
     <!-- /render.cms.events -->
-    <!-- print.if.static --><p>Call us to reply on <a href="tel:+40721000000">+40 721 000 000</a>, and tell us how many of you are coming.</p><!-- /print.if.static -->
+    <!-- print.if.static --><p><!-- print.i18n.events_item('call_us_to_reply_on') -->Call us to reply on<!-- /print.i18n.events_item('call_us_to_reply_on') --> <a href="tel:+40721000000">+40 721 000 000</a><!-- print.i18n.events_item('and_tell_us_how_many') -->, and tell us how many of you are coming.<!-- /print.i18n.events_item('and_tell_us_how_many') --></p><!-- /print.if.static -->
     <!-- print.if.live -->
     <section class="rsvp">
-      <h2>Are you coming?</h2>
+      <h2><!-- print.i18n.events_item('are_you_coming') -->Are you coming?<!-- /print.i18n.events_item('are_you_coming') --></h2>
       <!-- render.rsvp.event -->
       <!-- print.+class.state --><div class="rsvp-state">
-        <p class="if-open"><!-- print.left -->12<!-- /print.left --> of <!-- print.places -->40<!-- /print.places --> places left. Replies close <!-- print.deadline -->2026-10-10 19:00<!-- /print.deadline -->.</p>
-        <p class="if-full">Full: join the waitlist, and we'll email you if a place frees up. <!-- print.waiting -->0<!-- /print.waiting --> waiting.</p>
-        <p class="if-closed">Replies closed. If you can't come after all, the link in your email still lets you tell us.</p>
-        <p class="if-over">This evening has started.</p>
+        <p class="if-open"><!-- print.left -->12<!-- /print.left --> <!-- print.i18n.events_item('of') -->of<!-- /print.i18n.events_item('of') --> <!-- print.places -->40<!-- /print.places --> <!-- print.i18n.events_item('places_left_replies_close') -->places left. Replies close<!-- /print.i18n.events_item('places_left_replies_close') --> <!-- print.deadline -->2026-10-10 19:00<!-- /print.deadline -->.</p>
+        <p class="if-full"><!-- print.i18n.events_item('full_join_the_waitlist_and') -->Full: join the waitlist, and we'll email you if a place frees up.<!-- /print.i18n.events_item('full_join_the_waitlist_and') --> <!-- print.waiting -->0<!-- /print.waiting --> <!-- print.i18n.events_item('waiting') -->waiting.<!-- /print.i18n.events_item('waiting') --></p>
+        <p class="if-closed"><!-- print.i18n.events_item('replies_closed_if_you_can') -->Replies closed. If you can't come after all, the link in your email still lets you tell us.<!-- /print.i18n.events_item('replies_closed_if_you_can') --></p>
+        <p class="if-over"><!-- print.i18n.events_item('this_evening_has_started') -->This evening has started.<!-- /print.i18n.events_item('this_evening_has_started') --></p>
       </div><!-- /print.+class.state -->
       <!-- /render.rsvp.event -->
-      <!-- print.validation.alert('going') --><p class="notice">You're in. We've emailed you a link to change your reply.</p><!-- /print.validation.alert('going') -->
-      <!-- print.validation.alert('waiting') --><p class="notice">It's full, so you're on the waitlist. We'll email you as soon as a place frees up.</p><!-- /print.validation.alert('waiting') -->
-      <!-- print.validation.alert('noted') --><p class="notice">Thanks for letting us know.</p><!-- /print.validation.alert('noted') -->
-      <!-- print.validation.alert('already_replied') --><p class="notice">You've replied already: we've emailed you a link to change your reply.</p><!-- /print.validation.alert('already_replied') -->
-      <!-- print.validation.alert('closed') --><p class="error">Replies are closed. Call us on +40 721 000 000.</p><!-- /print.validation.alert('closed') -->
-      <!-- print.validation.alert('full') --><p class="error">It's full, and there is no waitlist.</p><!-- /print.validation.alert('full') -->
-      <!-- print.validation.alert('too_many') --><p class="error">For more than 6, call us and we'll see what we can do.</p><!-- /print.validation.alert('too_many') -->
-      <!-- print.validation.alert('people_invalid') --><p class="error">How many of you are coming?</p><!-- /print.validation.alert('people_invalid') -->
-      <!-- print.validation.alert('not_open') --><p class="error">This evening doesn't take replies here. Call us.</p><!-- /print.validation.alert('not_open') -->
-      <!-- print.validation.alert('name_invalid') --><p class="error">Tell us your name.</p><!-- /print.validation.alert('name_invalid') -->
-      <!-- print.validation.alert('email_invalid') --><p class="error">We need a valid email to send you your link.</p><!-- /print.validation.alert('email_invalid') -->
+      <!-- print.validation.alert('going') --><p class="notice"><!-- print.i18n.events_item('youre_in_weve_emailed_you') -->You're in. We've emailed you a link to change your reply.<!-- /print.i18n.events_item('youre_in_weve_emailed_you') --></p><!-- /print.validation.alert('going') -->
+      <!-- print.validation.alert('waiting') --><p class="notice"><!-- print.i18n.events_item('its_full_so_youre_on') -->It's full, so you're on the waitlist. We'll email you as soon as a place frees up.<!-- /print.i18n.events_item('its_full_so_youre_on') --></p><!-- /print.validation.alert('waiting') -->
+      <!-- print.validation.alert('noted') --><p class="notice"><!-- print.i18n.events_item('thanks_for_letting_us_know') -->Thanks for letting us know.<!-- /print.i18n.events_item('thanks_for_letting_us_know') --></p><!-- /print.validation.alert('noted') -->
+      <!-- print.validation.alert('already_replied') --><p class="notice"><!-- print.i18n.events_item('youve_replied_already_weve_emailed') -->You've replied already: we've emailed you a link to change your reply.<!-- /print.i18n.events_item('youve_replied_already_weve_emailed') --></p><!-- /print.validation.alert('already_replied') -->
+      <!-- print.validation.alert('closed') --><p class="error"><!-- print.i18n.events_item('replies_are_closed_call_us') -->Replies are closed. Call us on +40 721 000 000.<!-- /print.i18n.events_item('replies_are_closed_call_us') --></p><!-- /print.validation.alert('closed') -->
+      <!-- print.validation.alert('full') --><p class="error"><!-- print.i18n.events_item('its_full_and_there_is') -->It's full, and there is no waitlist.<!-- /print.i18n.events_item('its_full_and_there_is') --></p><!-- /print.validation.alert('full') -->
+      <!-- print.validation.alert('too_many') --><p class="error"><!-- print.i18n.events_item('for_more_than_6_call') -->For more than 6, call us and we'll see what we can do.<!-- /print.i18n.events_item('for_more_than_6_call') --></p><!-- /print.validation.alert('too_many') -->
+      <!-- print.validation.alert('people_invalid') --><p class="error"><!-- print.i18n.events_item('how_many_of_you_are') -->How many of you are coming?<!-- /print.i18n.events_item('how_many_of_you_are') --></p><!-- /print.validation.alert('people_invalid') -->
+      <!-- print.validation.alert('not_open') --><p class="error"><!-- print.i18n.events_item('this_evening_doesnt_take_replies') -->This evening doesn't take replies here. Call us.<!-- /print.i18n.events_item('this_evening_doesnt_take_replies') --></p><!-- /print.validation.alert('not_open') -->
+      <!-- print.validation.alert('name_invalid') --><p class="error"><!-- print.i18n.events_item('tell_us_your_name') -->Tell us your name.<!-- /print.i18n.events_item('tell_us_your_name') --></p><!-- /print.validation.alert('name_invalid') -->
+      <!-- print.validation.alert('email_invalid') --><p class="error"><!-- print.i18n.events_item('we_need_a_valid_email') -->We need a valid email to send you your link.<!-- /print.i18n.events_item('we_need_a_valid_email') --></p><!-- /print.validation.alert('email_invalid') -->
       <!-- render.rsvp.form -->
       <form method="post" class="stack">
-        <fieldset><legend>Your answer</legend>
-          <label><input type="radio" name="answer" value="yes" checked> Yes</label>
-          <label><input type="radio" name="answer" value="maybe"> Maybe</label>
-          <label><input type="radio" name="answer" value="no"> No</label>
+        <fieldset><legend><!-- print.i18n.events_item('your_answer') -->Your answer<!-- /print.i18n.events_item('your_answer') --></legend>
+          <label><input type="radio" name="answer" value="yes" checked> <!-- print.i18n.events_item('yes') -->Yes<!-- /print.i18n.events_item('yes') --></label>
+          <label><input type="radio" name="answer" value="maybe"> <!-- print.i18n.events_item('maybe') -->Maybe<!-- /print.i18n.events_item('maybe') --></label>
+          <label><input type="radio" name="answer" value="no"> <!-- print.i18n.events_item('no') -->No<!-- /print.i18n.events_item('no') --></label>
         </fieldset>
-        <label>People <input type="number" name="people" min="1" max="6" value="1"></label>
-        <!-- render.validation.field('people') --><p class="error">From 1 to 6. For more than 6, call us.</p><!-- /render.validation.field('people') -->
-        <label>Name <input type="text" name="name" required maxlength="200"></label>
-        <!-- render.validation.field('name') --><p class="error">Tell us your name.</p><!-- /render.validation.field('name') -->
-        <label>Email <input type="email" name="email" required maxlength="254"></label>
-        <!-- render.validation.field('email') --><p class="error">We need a valid email to send you your link.</p><!-- /render.validation.field('email') -->
-        <label>Phone <input type="tel" name="phone" maxlength="40"></label>
-        <label>Notes <textarea name="notes" maxlength="300"></textarea></label>
-        <button>Reply</button>
+        <label><!-- print.i18n.events_item('people') -->People<!-- /print.i18n.events_item('people') --> <input type="number" name="people" min="1" max="6" value="1"></label>
+        <!-- render.validation.field('people') --><p class="error"><!-- print.i18n.events_item('from_1_to_6_for') -->From 1 to 6. For more than 6, call us.<!-- /print.i18n.events_item('from_1_to_6_for') --></p><!-- /render.validation.field('people') -->
+        <label><!-- print.i18n.events_item('name') -->Name<!-- /print.i18n.events_item('name') --> <input type="text" name="name" required maxlength="200"></label>
+        <!-- render.validation.field('name') --><p class="error"><!-- print.i18n.events_item('tell_us_your_name') -->Tell us your name.<!-- /print.i18n.events_item('tell_us_your_name') --></p><!-- /render.validation.field('name') -->
+        <label><!-- print.i18n.events_item('email') -->Email<!-- /print.i18n.events_item('email') --> <input type="email" name="email" required maxlength="254"></label>
+        <!-- render.validation.field('email') --><p class="error"><!-- print.i18n.events_item('we_need_a_valid_email') -->We need a valid email to send you your link.<!-- /print.i18n.events_item('we_need_a_valid_email') --></p><!-- /render.validation.field('email') -->
+        <label><!-- print.i18n.events_item('phone') -->Phone<!-- /print.i18n.events_item('phone') --> <input type="tel" name="phone" maxlength="40"></label>
+        <label><!-- print.i18n.events_item('notes') -->Notes<!-- /print.i18n.events_item('notes') --> <textarea name="notes" maxlength="300"></textarea></label>
+        <button><!-- print.i18n.events_item('reply') -->Reply<!-- /print.i18n.events_item('reply') --></button>
       </form>
       <!-- /render.rsvp.form -->
-      <p class="meta">Each email we send has a link to change your reply. Logged in, <a href="account.html">your account</a> lists your replies.</p>
+      <p class="meta"><!-- print.i18n.events_item('each_email_we_send_has') -->Each email we send has a link to change your reply. Logged in,<!-- /print.i18n.events_item('each_email_we_send_has') --> <a href="account.html"><!-- print.i18n.events_item('your_account') -->your account<!-- /print.i18n.events_item('your_account') --></a> <!-- print.i18n.events_item('lists_your_replies') -->lists your replies.<!-- /print.i18n.events_item('lists_your_replies') --></p>
     </section>
     <!-- /print.if.live -->
-    <p><a href="events.html">&larr; All events</a></p>
+    <p><a href="events.html"><!-- print.i18n.events_item('all_events') -->&larr; All events<!-- /print.i18n.events_item('all_events') --></a></p>
   </main>
   <!-- dry._layout.footer /-->
 </body>
