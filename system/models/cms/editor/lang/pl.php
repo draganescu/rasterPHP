@@ -3,7 +3,7 @@
 return array(
 	'hello' => 'Cześć, {name}', 'hello_anon' => 'Cześć',
 	'welcome' => 'Wszystko, co świeci, można zmienić. Naciśnij E albo Edytuj, żeby zacząć.',
-	'edit' => 'Edytuj', 'done' => 'Gotowe', 'editing' => 'Edytujesz', 'page' => 'Strona', 'admin' => 'Administracja', 'admin_pages' => 'Strony administracyjne',
+	'edit' => 'Edytuj', 'done' => 'Gotowe', 'editing' => 'Edytujesz', 'page' => 'Strona', 'admin' => 'Zarządzaj', 'admin_pages' => 'Strony administracyjne',
 	'saved' => 'Zapisano', 
 	'changed' => 'Zmieniono {field}', 'undo' => 'Cofnij', 'undone' => 'Cofnięto', 'nothing_to_undo' => 'Nie ma nic do cofnięcia',
 	'added' => 'Dodano do: {list}', 'deleted' => 'Usunięto {name}', 'hidden_item' => 'Ukryto {name}', 'shown_item' => 'Znów widać: {name}',
@@ -31,7 +31,7 @@ return array(
 	'problem_form_expired' => 'Ta strona jest nieaktualna: odśwież ją i spróbuj jeszcze raz', 'problem_not_allowed' => 'Nie możesz tego zrobić; jeśli zostałeś wylogowany, zaloguj się ponownie',
 	'editing_lang' => 'edytujesz: {lang}', 'falls_back' => '(gdy brakuje: {lang})', 'untranslated' => 'jeszcze nieprzetłumaczone: widać tekst w języku {lang}',
 	'every_language' => 'takie samo w każdym języku',
-	'restore_every' => 'Przywróć, we wszystkich językach', 'restored_every' => 'Przywrócono wszystkie języki wersji z {when}',
+	'restore_every' => 'Przywróć wszystkie', 'restored_every' => 'Przywrócono wszystkie języki wersji z {when}',
 	'problem_translation_columns_missing' => 'Ten język nie ma jeszcze miejsca na stronie: uruchom php bin/raster schema --apply na serwerze',
 	'problem_one_value' => 'Pole {field} przyszło więcej niż raz: odśwież stronę i spróbuj jeszcze raz', 'problem_unknown_page' => 'Tej strony nie można stąd edytować: odśwież ją',
 	'problem_unknown_field' => 'Pola {field} nie ma już na tej stronie: odśwież ją', 'problem_wrong_language' => 'Ta strona jest w języku {lang}: odśwież ją',

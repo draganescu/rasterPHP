@@ -3,7 +3,7 @@
 return array(
 	'hello' => 'Ciao {name}', 'hello_anon' => 'Ciao',
 	'welcome' => 'Tutto ciò che brilla si può cambiare. Premi E o tocca Modifica per iniziare.',
-	'edit' => 'Modifica', 'done' => 'Fatto', 'editing' => 'Stai modificando', 'page' => 'Pagina', 'admin' => 'Amministrazione', 'admin_pages' => 'Pagine di amministrazione',
+	'edit' => 'Modifica', 'done' => 'Fatto', 'editing' => 'Stai modificando', 'page' => 'Pagina', 'admin' => 'Gestione', 'admin_pages' => 'Pagine di gestione',
 	'saved' => 'Salvato', 
 	'changed' => 'Hai cambiato {field}', 'undo' => 'Annulla', 'undone' => 'Annullato', 'nothing_to_undo' => 'Niente da annullare',
 	'added' => 'Aggiunto a {list}', 'deleted' => 'Hai eliminato {name}', 'hidden_item' => 'Hai nascosto {name}', 'shown_item' => '{name} è di nuovo visibile',
@@ -37,7 +37,7 @@ return array(
 	'page_fields' => 'Campi', 'nothing_here' => 'Niente in questa pagina viene dal CMS.',
 	'editing_lang' => 'stai modificando: {lang}', 'falls_back' => '(se manca: {lang})', 'untranslated' => 'non ancora tradotto: si vede il testo in {lang}',
 	'every_language' => 'uguale in tutte le lingue',
-	'restore_every' => 'Ripristina, in tutte le lingue', 'restored_every' => 'Hai ripristinato tutte le lingue della versione del {when}',
+	'restore_every' => 'Ripristina tutte le lingue', 'restored_every' => 'Hai ripristinato tutte le lingue della versione del {when}',
 	'problem_translation_columns_missing' => 'Questa lingua non ha ancora posto nel sito: esegui php bin/raster schema --apply sul server',
 	'login_title' => 'Accesso a Raster CMS', 'login_heading' => 'Raster CMS', 'login_lede' => 'Accedi per modificare questo sito.',
 	'login_no_database' => 'Non è configurato nessun database per questo ambiente (application/config/db/).',

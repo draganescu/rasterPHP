@@ -2,8 +2,8 @@
 // The in-page editor in Bulgarian. Keys missing here stay in English.
 return array(
 	'hello' => 'Здравей, {name}', 'hello_anon' => 'Здравей',
-	'welcome' => 'Всичко, което свети, може да се променя. Натисни E или Редактирай, за да започнеш.',
-	'edit' => 'Редактирай', 'done' => 'Готово', 'editing' => 'Редактираш', 'page' => 'Страница', 'admin' => 'Администрация', 'admin_pages' => 'Административни страници',
+	'welcome' => 'Всичко, което свети, може да се променя. Натисни E или „Смени“, за да започнеш.',
+	'edit' => 'Смени', 'done' => 'Готово', 'editing' => 'Редактираш', 'page' => 'Страница', 'admin' => 'Админ', 'admin_pages' => 'Админ страници',
 	'saved' => 'Запазено', 
 	'changed' => 'Промени {field}', 'undo' => 'Отмени', 'undone' => 'Отменено', 'nothing_to_undo' => 'Няма какво да се отмени',
 	'added' => 'Добавено в {list}', 'deleted' => 'Изтри {name}', 'hidden_item' => 'Скри {name}', 'shown_item' => '{name} отново се вижда',
@@ -37,7 +37,7 @@ return array(
 	'page_fields' => 'Полета', 'nothing_here' => 'Нищо на тази страница не идва от CMS.',
 	'editing_lang' => 'редактираш: {lang}', 'falls_back' => '(ако липсва: {lang})', 'untranslated' => 'още непреведено: показва се текстът на {lang}',
 	'every_language' => 'еднакво на всички езици',
-	'restore_every' => 'Върни, на всички езици', 'restored_every' => 'Върна всички езици на версията от {when}',
+	'restore_every' => 'Върни всички', 'restored_every' => 'Върна всички езици на версията от {when}',
 	'problem_translation_columns_missing' => 'За този език в сайта още няма място: изпълни php bin/raster schema --apply на сървъра',
 	'login_title' => 'Вход в Raster CMS', 'login_heading' => 'Raster CMS', 'login_lede' => 'Влез, за да редактираш сайта.',
 	'login_no_database' => 'За тази среда не е настроена база данни (application/config/db/).',

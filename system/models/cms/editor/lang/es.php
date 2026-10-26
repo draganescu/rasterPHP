@@ -3,7 +3,7 @@
 return array(
 	'hello' => 'Hola, {name}', 'hello_anon' => 'Hola',
 	'welcome' => 'Todo lo que brilla se puede cambiar. Pulsa E o toca Editar para empezar.',
-	'edit' => 'Editar', 'done' => 'Listo', 'editing' => 'Editando', 'page' => 'Página', 'admin' => 'Administración', 'admin_pages' => 'Páginas de administración',
+	'edit' => 'Editar', 'done' => 'Listo', 'editing' => 'Editando', 'page' => 'Página', 'admin' => 'Gestión', 'admin_pages' => 'Páginas de gestión',
 	'saved' => 'Guardado', 
 	'changed' => 'Cambiaste {field}', 'undo' => 'Deshacer', 'undone' => 'Deshecho', 'nothing_to_undo' => 'Nada que deshacer',
 	'added' => 'Añadido a {list}', 'deleted' => 'Eliminaste {name}', 'hidden_item' => 'Ocultaste {name}', 'shown_item' => '{name} vuelve a verse',
@@ -37,7 +37,7 @@ return array(
 	'nothing_here' => 'Nada de esta página viene del CMS.',
 	'editing_lang' => 'editando: {lang}', 'falls_back' => '(si falta: {lang})', 'untranslated' => 'sin traducir aún: se muestra el texto en {lang}',
 	'every_language' => 'igual en todos los idiomas',
-	'restore_every' => 'Restaurar, en todos los idiomas', 'restored_every' => 'Restauraste todos los idiomas de la versión del {when}',
+	'restore_every' => 'Restaurar todo', 'restored_every' => 'Restauraste todos los idiomas de la versión del {when}',
 	'problem_translation_columns_missing' => 'Este idioma aún no tiene sitio en el sitio web: ejecuta php bin/raster schema --apply en el servidor',
 	'login_title' => 'Acceso a Raster CMS', 'login_heading' => 'Raster CMS', 'login_lede' => 'Inicia sesión para editar este sitio.',
 	'login_no_database' => 'No hay ninguna base de datos configurada para este entorno (application/config/db/).',

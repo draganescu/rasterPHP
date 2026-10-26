@@ -2,8 +2,8 @@
 // The in-page editor in Greek. Keys missing here stay in English.
 return array(
 	'hello' => 'Γεια σου, {name}', 'hello_anon' => 'Γεια σου',
-	'welcome' => 'Ό,τι λάμπει μπορεί να αλλάξει. Πάτα E ή Επεξεργασία για να ξεκινήσεις.',
-	'edit' => 'Επεξεργασία', 'done' => 'Τέλος', 'editing' => 'Επεξεργάζεσαι', 'page' => 'Σελίδα', 'admin' => 'Διαχείριση', 'admin_pages' => 'Σελίδες διαχείρισης',
+	'welcome' => 'Ό,τι λάμπει μπορεί να αλλάξει. Πάτα E ή «Επεξ.» για να ξεκινήσεις.',
+	'edit' => 'Επεξ.', 'done' => 'Τέλος', 'editing' => 'Επεξεργάζεσαι', 'page' => 'Σελίδα', 'admin' => 'Διαχείριση', 'admin_pages' => 'Σελίδες διαχείρισης',
 	'saved' => 'Αποθηκεύτηκε', 
 	'changed' => 'Άλλαξες το πεδίο {field}', 'undo' => 'Αναίρεση', 'undone' => 'Αναιρέθηκε', 'nothing_to_undo' => 'Δεν υπάρχει τίποτα για αναίρεση',
 	'added' => 'Προστέθηκε στη λίστα {list}', 'deleted' => 'Διέγραψες το στοιχείο {name}', 'hidden_item' => 'Έκρυψες το στοιχείο {name}', 'shown_item' => 'Το στοιχείο {name} φαίνεται ξανά',
@@ -37,7 +37,7 @@ return array(
 	'page_fields' => 'Πεδία', 'nothing_here' => 'Τίποτα σε αυτή τη σελίδα δεν προέρχεται από το CMS.',
 	'editing_lang' => 'επεξεργάζεσαι: {lang}', 'falls_back' => '(αλλιώς εμφανίζεται το {lang})', 'untranslated' => 'δεν έχει μεταφραστεί ακόμη: φαίνεται το κείμενο στα {lang}',
 	'every_language' => 'το ίδιο σε όλες τις γλώσσες',
-	'restore_every' => 'Επαναφορά, σε όλες τις γλώσσες', 'restored_every' => 'Έφερες πίσω όλες τις γλώσσες της έκδοσης από {when}',
+	'restore_every' => 'Επαναφορά όλων', 'restored_every' => 'Έφερες πίσω όλες τις γλώσσες της έκδοσης από {when}',
 	'problem_translation_columns_missing' => 'Αυτή η γλώσσα δεν έχει ακόμη χώρο στον ιστότοπο: τρέξε php bin/raster schema --apply στον διακομιστή',
 	'login_title' => 'Σύνδεση στο Raster CMS', 'login_heading' => 'Raster CMS', 'login_lede' => 'Συνδέσου για να επεξεργαστείς αυτόν τον ιστότοπο.',
 	'login_no_database' => 'Δεν έχει ρυθμιστεί βάση δεδομένων για αυτό το περιβάλλον (application/config/db/).',

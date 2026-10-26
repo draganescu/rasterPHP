@@ -37,7 +37,7 @@ return array(
 	'page_fields' => 'Mezők', 'nothing_here' => 'Ezen az oldalon semmi sem a CMS-ből jön.',
 	'editing_lang' => 'szerkesztés: {lang}', 'falls_back' => '(ennek hiányában: {lang})', 'untranslated' => 'még nincs lefordítva: a(z) {lang} szöveg látszik',
 	'every_language' => 'minden nyelven ugyanaz',
-	'restore_every' => 'Visszaállítás, minden nyelven', 'restored_every' => 'Visszaállítva minden nyelv a(z) {when} állapotból',
+	'restore_every' => 'Teljes visszaállítás', 'restored_every' => 'Visszaállítva minden nyelv a(z) {when} állapotból',
 	'problem_translation_columns_missing' => 'Ennek a nyelvnek még nincs helye az oldalon: futtasd a szerveren: php bin/raster schema --apply',
 	'login_title' => 'Raster CMS bejelentkezés', 'login_heading' => 'Raster CMS', 'login_lede' => 'Jelentkezz be az oldal szerkesztéséhez.',
 	'login_no_database' => 'Ehhez a környezethez nincs adatbázis beállítva (application/config/db/).',

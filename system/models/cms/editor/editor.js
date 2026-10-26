@@ -55,7 +55,7 @@
 		// a multilingual site: the page's language
 		editing_lang: 'editing: {lang}', falls_back: '(falls back to {lang})', untranslated: 'not translated yet: shows the {lang} text',
 		every_language: 'the same in every language',
-		restore_every: 'Restore, every language', restored_every: 'Brought back every language of the version from {when}',
+		restore_every: 'Restore all languages', restored_every: 'Brought back every language of the version from {when}',
 		problem_translation_columns_missing: 'This language has no place on the site yet: run php bin/raster schema --apply on the server'
 	};
 	for (var k in (C.strings || {})) T[k] = C.strings[k];
