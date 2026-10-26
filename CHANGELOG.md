@@ -3,6 +3,12 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.54
+
+Nothing for sites to do.
+
+- **On a phone, the in-page editor's formatting bar shows, and its buttons work.** It sat just above a rich field, where iOS draws its own Copy, Cut and Paste menu over the words chosen, so with text selected the bar was hidden under that menu (or off screen, for a long field). On a touch screen it now sits at the bottom of what shows, just above the keyboard, with buttons big enough for a finger, and follows the keyboard as it opens and closes. A tap on Bold, Italic, Link, List or Plain text now acts on the press and keeps the field's focus and the words chosen, instead of waiting for the tap and losing the selection. The phone's own menu stays: a page can't turn it off in a field being edited.
+
 ## 2.2.53
 
 What sites need to do: nothing. A site's own `i18n/<lang>/raster_editor.php` still wins over Raster's words.
