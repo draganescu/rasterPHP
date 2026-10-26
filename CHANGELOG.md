@@ -3,6 +3,13 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.55
+
+Nothing for sites to do. A site's own `i18n/<lang>/raster_editor.php` still wins over Raster's words.
+
+- **The editor's words fit in every language, on a phone and a desktop.** In several languages the dock's last button stuck out past the dock on a phone, the Admin menu's heading wrapped, and the page panel's "Restore" button took two lines. Shorter words fix them: for example Romanian and German "Admin", French "Gestion", Greek "Επεξ." for Edit. The English "Restore, every language" is now "Restore all languages". No sizes or spacing changed.
+- **A check keeps them fitting.** `tests/editor-browser.js` opens every part of the editor that has words on it, in all 16 languages, at 390px and 1280px wide, and fails when a label is cut off, leaves its box or the screen, or takes more lines than in English. `RASTER_TEST_ONLY=labels-fit` runs only that part; `RASTER_LABELS_LANGS=ro,de` narrows it.
+
 ## 2.2.54
 
 Nothing for sites to do.
