@@ -14,7 +14,7 @@
     <form method="post" class="stack">
       <label><!-- print.i18n.password_new('new_password') -->New password<!-- /print.i18n.password_new('new_password') --> <input type="password" name="password" required minlength="10"></label>
       <label><!-- print.i18n.password_new('again') -->Again<!-- /print.i18n.password_new('again') --> <input type="password" name="password_again" required></label>
-      <!-- render.validation.are_the_same('password', 'password_again') --><p class="error"><!-- print.i18n.password_new('the_passwords_are_different') -->The passwords are different.<!-- /print.i18n.password_new('the_passwords_are_different') --></p><!-- /render.validation.are_the_same('password', 'password_again') -->
+      <!-- render.validation.matches('password', 'password_again') --><p class="error"><!-- print.i18n.password_new('the_passwords_are_different') -->The passwords are different.<!-- /print.i18n.password_new('the_passwords_are_different') --></p><!-- /render.validation.matches('password', 'password_again') -->
       <button><!-- print.i18n.password_new('save') -->Save<!-- /print.i18n.password_new('save') --></button>
     </form>
     <!-- /render.authentication.reset -->

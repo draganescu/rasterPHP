@@ -61,14 +61,17 @@ When a feature is replaced, the old way keeps working for at least one more rele
 
 | Old | New | Removed in |
 |---|---|---|
-| `render.cms.login` | `render.authentication.login` (`raster upgrade` changes it) | 2.2.0 |
-| validation regions `not_empty`, `email_format`, `are_the_same` | `required` / `type="email"` with `validation.field(…)`, and `matches` | 3.0.0 |
+| `authentication::url()`, `newsletter::page_url()` | `util::url($page, $query)` | 2.3.0 |
+| two or more `languages` without `multilingual` | `config::set('multilingual')->to(true)`, then `schema --apply` | 3.0.0 |
+| an i18n dictionary that sets `$lang` | `return array('key' => 'text');` (`raster upgrade` adds `return $lang;`) | 3.0.0 |
+
+Removed in 2.2.55: `render.cms.login` (use `render.authentication.login`) and the validation regions `not_empty`, `email_format` and `are_the_same` (use `required` and `type="email"` with `validation.field('email', 'required')` and `validation.field('email', 'email')`, and `matches`). `raster lint` reports any use left.
 
 If you keep a deprecated feature on purpose for a while, tell `doctor` so it stops warning:
 
 ```php
 config::set('allow_deprecated')->to(array(
-    'legacy-validation-regions' => '#^views/default/contact\.html$#',   // only in this file
+    'i18n-lang-variable' => '#^i18n/ro/#',                              // only in these files
     'url-helpers' => true,                                              // everywhere
 ));
 ```
@@ -85,7 +88,7 @@ prints the framework's version and the version each app has been upgraded to.
 
 An app from Raster 1.x has no `config/raster-version`, and `raster upgrade` would take it as current. Write `1.0.0` into that file first, then run `php bin/raster upgrade`.
 
-`raster upgrade` handles the file changes: it adds `CLAUDE.md` and `.mcp.json`, adds `.gitignore` files to `data/` and `media/`, renames `render.cms.login`. A `$querries` array in `models/sql.php` is no longer read since 2.2: rename it `$queries` by hand. Old accounts (the `usersdata` table and MD5 passwords) are moved to the new `user` table automatically on a fluid (development) connection, so open the site once that way before freezing it for production. MD5 passwords are re-hashed at the next log in. See the 2.0.0 section of `CHANGELOG.md` for everything else.
+`raster upgrade` handles the file changes: it adds `CLAUDE.md` and `.mcp.json`, adds `.gitignore` files to `data/` and `media/`. Rename `render.cms.login` to `render.authentication.login` by hand: it was removed in 2.2.55. A `$querries` array in `models/sql.php` is no longer read since 2.2: rename it `$queries` by hand. Old accounts (the `usersdata` table and MD5 passwords) are moved to the new `user` table automatically on a fluid (development) connection, so open the site once that way before freezing it for production. MD5 passwords are re-hashed at the next log in. See the 2.0.0 section of `CHANGELOG.md` for everything else.
 
 ## If you work from a git clone
 

@@ -2221,7 +2221,8 @@ field every page shares, `print.cms.site_name`), else its host.
 - `render.feed.pages`: every page and item, with `url` and `updated`
   (`YYYY-MM-DD`), for `sitemap.xml`:
   - pages: every view that is a page, but those that need an account, the
-    pages the models in use name in `requires()` and `sitemap_skip`;
+    pages the models in use name in `requires()`, `sitemap_skip` and the
+    site's error pages (`error_document_404` and the others);
     `updated` is the page's last save in the CMS (its newest revision),
     else the view file's date.
   - items: every published item (no drafts, nothing scheduled) of every
@@ -2958,7 +2959,9 @@ of lists and filter pages come along; drafts and the editor don't.
   false), and without one answers the bare status: a page whose body is
   only the code (`<h1>403</h1>`). A site words them:
   - `config::set('error_document_404')->to('404')` renders `404.html`
-    with status 404, for a URL no view answers.
+    with status 404, for a URL no view answers. A `404.html` (or `403`,
+    `500`, `503`) without its setting is a page of its own: `/404`
+    answers 200 and the sitemap lists it, so `lint` warns.
   - `error_document_403`: a post from another site (alert `cross_site`),
     a logged in person's post with a stale session token (`form_expired`),
     and a protected page someone logged in without the role asked for

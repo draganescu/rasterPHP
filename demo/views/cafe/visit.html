@@ -81,9 +81,9 @@
       <!-- render.contact.form -->
       <form method="post" class="stack">
         <label><!-- print.i18n.visit('name') -->Name<!-- /print.i18n.visit('name') --> <input type="text" name="name" maxlength="80"></label>
-        <label><!-- print.i18n.visit('email') -->Email<!-- /print.i18n.visit('email') --> <input type="email" name="email"></label>
-        <!-- render.validation.not_empty('email') --><p class="error"><!-- print.i18n.visit('your_email_please') -->Your email, please.<!-- /print.i18n.visit('your_email_please') --></p><!-- /render.validation.not_empty('email') -->
-        <!-- render.validation.email_format('email') --><p class="error"><!-- print.i18n.visit('that_email_does_not_look') -->That email does not look right.<!-- /print.i18n.visit('that_email_does_not_look') --></p><!-- /render.validation.email_format('email') -->
+        <label><!-- print.i18n.visit('email') -->Email<!-- /print.i18n.visit('email') --> <input type="email" name="email" required></label>
+        <!-- render.validation.field('email', 'required') --><p class="error"><!-- print.i18n.visit('your_email_please') -->Your email, please.<!-- /print.i18n.visit('your_email_please') --></p><!-- /render.validation.field('email', 'required') -->
+        <!-- render.validation.field('email', 'email') --><p class="error"><!-- print.i18n.visit('that_email_does_not_look') -->That email does not look right.<!-- /print.i18n.visit('that_email_does_not_look') --></p><!-- /render.validation.field('email', 'email') -->
         <label><!-- print.i18n.visit('about') -->About<!-- /print.i18n.visit('about') -->
           <select name="subject"><option value="A table"><!-- print.i18n.visit('a_table') -->A table<!-- /print.i18n.visit('a_table') --></option><option value="An event"><!-- print.i18n.visit('an_event') -->An event<!-- /print.i18n.visit('an_event') --></option><option value="Something else"><!-- print.i18n.visit('something_else') -->Something else<!-- /print.i18n.visit('something_else') --></option></select>
         </label>

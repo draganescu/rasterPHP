@@ -60,6 +60,10 @@ class feed
 		// the pages the models in use need PHP for (login, the newsletter's
 		// answers), and what sitemap_skip adds
 		$skip = array_merge(controller::required('pages'), (array)config::get('sitemap_skip', array()));
+		// nor are the site's error pages (error_document_404 and the others)
+		foreach (array(403, 404, 500, 503) as $code) {
+			if (config::get('error_document_'.$code)) $skip[] = (string)config::get('error_document_'.$code);
+		}
 		// a page that needs an account isn't listed, nor are the items of a
 		// collection whose item page does: matched as authentication::setup()
 		// matches, by URL and by view, in any case
