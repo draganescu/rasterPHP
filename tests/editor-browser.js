@@ -792,7 +792,51 @@ async function labelsFit(browser) {
 		check(/<b>small<\/b>/.test(await phoneTab.locator('.lede').innerHTML()), 'Bold, tapped, makes the words chosen bold');
 		check(await phoneTab.evaluate(() => document.activeElement.classList.contains('lede') && String(getSelection()) === 'small'), 'after the tap the field keeps its focus and the words chosen');
 		await phoneTab.screenshot({ path: path.join(screens, 'format-phone.png') });
+		check(await host(phoneTab).evaluate(h => getComputedStyle(h.shadowRoot.querySelector('.dock')).visibility === 'hidden'), 'on a phone the dock steps aside while a field is typed in');
+		check(/interactive-widget=resizes-content/.test(await phoneTab.locator('meta[name=viewport]').getAttribute('content')), 'while editing on a phone, Android browsers are asked to shrink the page above the keyboard');
 		await formatContext.close();
+
+		// a phone's keyboard, faked: Chromium has none, so visualViewport is
+		// played by hand, as iOS Safari reports it
+		const keysContext = await browser.newContext({ viewport: { width: 390, height: 664 }, isMobile: true, hasTouch: true, storageState: await context.storageState() });
+		await keysContext.addInitScript(() => {
+			const vv = Object.assign(new EventTarget(), { offsetLeft: 0, offsetTop: 0, width: 390, height: 664, scale: 1 });
+			Object.defineProperty(window, 'visualViewport', { get: () => vv, configurable: true });
+			window.fakeViewport = (height, top) => { vv.height = height; vv.offsetTop = top; vv.dispatchEvent(new Event('resize')); };
+		});
+		const keysTab = await keysContext.newPage();
+		keysTab.on('pageerror', e => errors.push(e.message));
+		await keysTab.goto(base + '/');
+		await keysTab.waitForTimeout(500);
+		await startEditing(keysTab);
+		await keysTab.locator('.lede').tap();
+		await keysTab.waitForTimeout(400);
+		const bar = p => host(p).evaluate(h => { const f = h.shadowRoot.querySelector('.format'), k = h.shadowRoot.querySelector('.keys'); return { bottom: f ? Math.round(f.getBoundingClientRect().bottom) : null, moving: k.classList.contains('moving'), dock: getComputedStyle(h.shadowRoot.querySelector('.dock')).visibility }; });
+		// the keyboard opens and the part that shows has slid down the page
+		await keysTab.evaluate(() => fakeViewport(364, 120));
+		check((await bar(keysTab)).moving, 'while what shows moves, the format bar fades out');
+		await keysTab.waitForTimeout(400);
+		let at = await bar(keysTab);
+		check(!at.moving && Math.abs(at.bottom - (120 + 364 - 8)) <= 2, 'once still, the format bar sits just above the keyboard: ' + JSON.stringify(at));
+		// the page scrolls under it: out, then back in the same place
+		await keysTab.evaluate(() => window.scrollBy(0, 200));
+		await keysTab.waitForTimeout(50);
+		check((await bar(keysTab)).moving, 'while the page scrolls, the format bar fades out');
+		await keysTab.waitForTimeout(400);
+		at = await bar(keysTab);
+		check(!at.moving && Math.abs(at.bottom - (120 + 364 - 8)) <= 2, 'after a scroll, the format bar is back above the keyboard: ' + JSON.stringify(at));
+		// the keyboard closes, and iOS 26 leaves a 24px offset behind: no keyboard
+		// is up, so the bar sits at the bottom of the window, not 24px off
+		await keysTab.evaluate(() => fakeViewport(640, 24));
+		await keysTab.waitForTimeout(400);
+		at = await bar(keysTab);
+		check(Math.abs(at.bottom - (664 - 8)) <= 2, 'with the keyboard down, a leftover visualViewport offset moves nothing: ' + JSON.stringify(at));
+		// done typing: the bar goes and the dock comes back
+		await keysTab.evaluate(() => document.activeElement.blur());
+		await keysTab.waitForTimeout(400);
+		at = await bar(keysTab);
+		check(at.bottom === null && at.dock === 'visible', 'leaving the field takes the bar away and brings the dock back: ' + JSON.stringify(at));
+		await keysContext.close();
 		// on a phone: the link box is 16px, so iOS Safari doesn't zoom in on
 		// it, and the dock fits (no language badge, no save status)
 		const phoneContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, storageState: await context.storageState() });

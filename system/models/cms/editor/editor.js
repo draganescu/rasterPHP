@@ -489,7 +489,14 @@
 			'.format button:hover,.format button.on{background:' + look.accentSoft + ';color:' + look.accent + '}',
 			'.format input{border:0;background:transparent;color:inherit;font:inherit;width:220px;padding:0 8px;outline:none}',
 			// on a phone it sits above the keyboard, with buttons a finger can hit
-			'.format.docked{gap:4px;border-radius:12px;z-index:1}',
+			'.format.docked{gap:4px;border-radius:12px;z-index:1;left:0;right:0;width:max-content;margin:0 auto;bottom:calc(8px + env(safe-area-inset-bottom))}',
+			// the box laid over what shows of the page, keyboard or not
+			'.keys{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;transition:opacity .15s}',
+			'.keys.up .format.docked{bottom:8px}',
+			'.keys.moving{opacity:0}',
+			'.keys.moving *{pointer-events:none!important}',
+			// a field being typed in on a phone: the dock steps aside
+			'.layer.typing .dock{opacity:0;visibility:hidden;pointer-events:none}',
 			'.format.docked button{width:44px;height:44px;border-radius:9px}',
 			'.format.docked input{width:min(220px,calc(100vw - 100px));font-size:16px}',
 			// iOS Safari zooms into a text box under 16px when it takes focus, and
@@ -549,6 +556,8 @@
 		shadow.appendChild(ui.layer);
 		ui.floats = h('div');
 		ui.layer.appendChild(ui.floats);
+		ui.keys = h('div', { class: 'keys' });
+		ui.layer.appendChild(ui.keys);
 		ui.toasts = h('div', { class: 'toasts', role: 'status', 'aria-live': 'polite' });
 		ui.layer.appendChild(ui.toasts);
 
@@ -819,6 +828,8 @@
 			if (on && (f.kind === 'text' || f.kind === 'rich')) { f.el.setAttribute('spellcheck', 'true'); if (!f.el.hasAttribute('aria-label')) f.el.setAttribute('aria-label', human(f.info.field)); }
 		});
 		reachable(on);
+		keyboardResizes(on);
+		updateTyping();
 		if (on) { glow(); addGhosts(); } else { removeGhosts(); clearFloats(); if (document.activeElement && document.activeElement.isContentEditable) document.activeElement.blur(); }
 		store('raster-editing', on ? '1' : null);
 		updateDock();
@@ -863,11 +874,13 @@
 		if (field.before == null) field.before = { value: field.info.untranslated && !field.item ? '' : fieldValue(field), shown: fieldValue(field), html: field.el.innerHTML };
 		if (field.el.hasAttribute('data-raster-default')) field.el.removeAttribute('data-raster-default');
 		if (field.kind === 'rich') showFormatBar(field); else hideFormatBar();
+		updateTyping();
 	});
 	document.addEventListener('focusout', function (e) {
 		var field = fieldFor(e.target);
 		if (!field || !editing) return;
 		setTimeout(function () {
+			updateTyping();
 			if (formatBarHasFocus()) return;
 			// only this field's bar: moving to another rich field has already
 			// shown that one's (focusin runs before this timeout)
@@ -959,7 +972,8 @@
 			};
 			formatBar.appendChild(h('button', { title: t(c[0]), 'aria-label': t(c[0]), html: icon(c[0]), onmousedown: press, ontouchstart: press }));
 		});
-		ui.floats.appendChild(formatBar);
+		if (touch) { formatBar.classList.add('docked'); ui.keys.appendChild(formatBar); }
+		else ui.floats.appendChild(formatBar);
 		formatBar.field = field;
 		placeFormatBar();
 	}
@@ -984,20 +998,10 @@
 	function formatBarHasFocus() { return formatBar && shadow.activeElement && formatBar.contains(shadow.activeElement); }
 	function hideFormatBar() { if (formatBar) { formatBar.remove(); formatBar = null; } }
 	function placeFormatBar() {
-		if (!formatBar) return;
 		// a phone draws its own Copy, Cut and Paste menu over the words chosen,
 		// where the bar would be, and a page can't turn that menu off: the bar
-		// goes to the bottom of what shows instead, just above the keyboard
-		if (touch) {
-			var vv = window.visualViewport || { offsetLeft: 0, offsetTop: 0, width: window.innerWidth, height: window.innerHeight };
-			var bottom = vv.offsetTop + vv.height;
-			// with no keyboard up, the dock may be down there
-			if (bottom >= window.innerHeight - 1) bottom -= 64;
-			formatBar.classList.add('docked');
-			formatBar.style.left = Math.max(8, vv.offsetLeft + (vv.width - formatBar.offsetWidth) / 2) + 'px';
-			formatBar.style.top = (bottom - formatBar.offsetHeight - 8) + 'px';
-			return;
-		}
+		// sits at the bottom of the keyboard box instead (see A phone's keyboard)
+		if (!formatBar || touch) return;
 		var r = formatBar.field.el.getBoundingClientRect();
 		formatBar.style.left = Math.max(8, Math.min(window.innerWidth - 240, r.left)) + 'px';
 		formatBar.style.top = (r.top > 60 ? r.top - 48 : r.bottom + 8) + 'px';
@@ -1094,11 +1098,61 @@
 		placeFormatBar();
 		if (floating && floating.anchor) anchorTo(floating, floating.anchor);
 	}
+	// ##A phone's keyboard
+	// iOS Safari leaves fixed things where they were when its keyboard opens,
+	// lets the part that shows (the visual viewport) slide over the page as a
+	// second scroll, and tells us where it went late. So while a field is typed
+	// in on a touch screen the dock steps aside, the format bar sits at the
+	// bottom of one box laid over what shows, and while anything moves that box
+	// fades out and comes back where it belongs once it has been still a moment
+	var typing = false, settleTimer = null;
+	function updateTyping() {
+		if (!ui.keys) return;
+		var field = fieldFor(document.activeElement);
+		var now = touch && editing && (formatBarHasFocus() || !!(field && (field.kind === 'text' || field.kind === 'rich')));
+		if (now === typing) return;
+		typing = now;
+		ui.layer.classList.toggle('typing', typing);
+		if (typing) keysMove(); else keysSettle();
+	}
+	function fitKeys() {
+		var vv = window.visualViewport, style = ui.keys.style;
+		// a keyboard counts as up only while a field is typed in and what shows
+		// is clearly shorter than the window: after the keyboard closes iOS 26
+		// can leave visualViewport.offsetTop off by 24px or so for a while
+		var up = typing && !!vv && window.innerHeight - vv.height > 150;
+		ui.keys.classList.toggle('up', up);
+		style.transform = up ? 'translate(' + vv.offsetLeft + 'px,' + vv.offsetTop + 'px)' : '';
+		style.width = up ? vv.width + 'px' : '';
+		style.height = up ? vv.height + 'px' : '';
+	}
+	function keysMove() {
+		if (!typing) return;
+		ui.keys.classList.add('moving');
+		clearTimeout(settleTimer);
+		settleTimer = setTimeout(keysSettle, 200);
+	}
+	function keysSettle() {
+		clearTimeout(settleTimer);
+		fitKeys();
+		ui.keys.classList.remove('moving');
+	}
+	window.addEventListener('scroll', keysMove, { passive: true });
+	window.addEventListener('resize', keysMove);
+	if (window.visualViewport) { visualViewport.addEventListener('resize', keysMove); visualViewport.addEventListener('scroll', keysMove); }
+	// Chrome and Firefox on Android can shrink the page itself above the
+	// keyboard, which puts the box there with nothing to measure. Only while
+	// editing, as it changes how the site lays out; Safari ignores it for now
+	var viewportMeta = document.querySelector('meta[name=viewport]'), viewportBefore = viewportMeta && viewportMeta.getAttribute('content');
+	function keyboardResizes(on) {
+		if (!touch || !viewportBefore || /interactive-widget/.test(viewportBefore)) return;
+		viewportMeta.setAttribute('content', on ? viewportBefore + ', interactive-widget=resizes-content' : viewportBefore);
+	}
+
 	var placing = false;
 	function schedulePlace() { if (placing) return; placing = true; requestAnimationFrame(function () { placing = false; place(); }); }
 	window.addEventListener('scroll', schedulePlace, { passive: true });
 	window.addEventListener('resize', schedulePlace);
-	// a phone's keyboard opening or closing changes only the visual viewport
 	if (window.visualViewport) { visualViewport.addEventListener('resize', schedulePlace); visualViewport.addEventListener('scroll', schedulePlace); }
 
 	function refreshBadges() {

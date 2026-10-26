@@ -3,6 +3,13 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.57
+
+Nothing for sites to do.
+
+- **On a phone, the in-page editor's bars stay put when the keyboard opens and closes.** iOS Safari leaves the page's fixed things where they were when its keyboard opens, slides what shows over the page as a second scroll, and says where it went late; after the keyboard closes iOS 26 can also report a leftover offset of 24px or so. The dock and the formatting bar each followed their own rule, so they could end up behind the keyboard, below the screen, or one on top of the other. Now, while a field is typed in on a touch screen, the dock steps aside and comes back when you leave the field, and the formatting bar sits at the bottom of one box laid over what shows. While the page or the keyboard moves, the bar fades out, and it comes back above the keyboard once everything has been still for a moment. A keyboard counts as up only while a field has focus and what shows is clearly shorter than the window, so a leftover offset moves nothing.
+- **Android browsers shrink the page above the keyboard while editing.** On a touch screen the editor adds `interactive-widget=resizes-content` to the page's viewport tag while edit mode is on, and puts the tag back as it was when it ends. Chrome and Firefox on Android then lay the page out above the keyboard, so the bar needs no measuring there. Safari ignores it for now. A page that sets `interactive-widget` itself, or has no viewport tag, is left alone.
+
 ## 2.2.56
 
 Nothing for sites to do. A site's own `i18n/<lang>/raster_editor.php` still wins over Raster's words.
