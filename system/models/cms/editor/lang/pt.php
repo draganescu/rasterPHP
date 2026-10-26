@@ -3,7 +3,7 @@
 return array(
 	'hello' => 'Olá, {name}', 'hello_anon' => 'Olá',
 	'welcome' => 'Tudo o que brilha pode ser alterado. Prime E ou toca em Editar para começar.',
-	'edit' => 'Editar', 'done' => 'Concluir', 'editing' => 'A editar', 'page' => 'Página', 'admin' => 'Administração', 'admin_pages' => 'Páginas de administração',
+	'edit' => 'Editar', 'done' => 'Concluir', 'editing' => 'A editar', 'page' => 'Página', 'admin' => 'Gestão', 'admin_pages' => 'Páginas de gestão',
 	'saved' => 'Guardado', 
 	'changed' => '{field} alterado', 'undo' => 'Desfazer', 'undone' => 'Desfeito', 'nothing_to_undo' => 'Nada para desfazer',
 	'added' => 'Adicionado a {list}', 'deleted' => '{name} eliminado', 'hidden_item' => '{name} ocultado', 'shown_item' => '{name} voltou a estar visível',
@@ -31,7 +31,7 @@ return array(
 	'problem_form_expired' => 'Esta página está desatualizada: recarrega-a e tenta de novo', 'problem_not_allowed' => 'Não podes fazer isto; se a sessão terminou, inicia sessão de novo',
 	'editing_lang' => 'a editar: {lang}', 'falls_back' => '(se faltar: {lang})', 'untranslated' => 'ainda sem tradução: aparece o texto em {lang}',
 	'every_language' => 'igual em todos os idiomas',
-	'restore_every' => 'Restaurar, em todos os idiomas', 'restored_every' => 'Todos os idiomas da versão de {when} restaurados',
+	'restore_every' => 'Restaurar tudo', 'restored_every' => 'Todos os idiomas da versão de {when} restaurados',
 	'problem_translation_columns_missing' => 'Este idioma ainda não tem lugar no site: executa php bin/raster schema --apply no servidor',
 	'problem_one_value' => '{field} chegou mais de uma vez: recarrega a página e tenta de novo', 'problem_unknown_page' => 'Esta página não pode ser editada daqui: recarrega-a',
 	'problem_unknown_field' => '{field} já não está nesta página: recarrega-a', 'problem_wrong_language' => 'Esta página está em {lang}: recarrega-a',

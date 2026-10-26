@@ -3,7 +3,7 @@
 return array(
 	'hello' => 'Hallo {name}', 'hello_anon' => 'Hallo',
 	'welcome' => 'Alles, was leuchtet, lässt sich ändern. Drück E oder tippe auf Bearbeiten, um loszulegen.',
-	'edit' => 'Bearbeiten', 'done' => 'Fertig', 'editing' => 'Bearbeiten', 'page' => 'Seite', 'admin' => 'Verwaltung', 'admin_pages' => 'Verwaltungsseiten',
+	'edit' => 'Bearbeiten', 'done' => 'Fertig', 'editing' => 'Bearbeiten', 'page' => 'Seite', 'admin' => 'Admin', 'admin_pages' => 'Verwaltungsseiten',
 	'saved' => 'Gespeichert', 
 	'changed' => '{field} geändert', 'undo' => 'Rückgängig', 'undone' => 'Rückgängig gemacht', 'nothing_to_undo' => 'Nichts zum Rückgängigmachen',
 	'added' => 'Zu {list} hinzugefügt', 'deleted' => '{name} gelöscht', 'hidden_item' => '{name} ausgeblendet', 'shown_item' => '{name} ist wieder sichtbar',
@@ -36,7 +36,7 @@ return array(
 	'keyboard' => 'E zum Bearbeiten · Esc zum Beenden · ⌘Z zum Rückgängigmachen', 'fields_changed' => '{fields}', 'page_fields' => 'Felder', 'nothing_here' => 'Nichts auf dieser Seite kommt aus dem CMS.',
 	'editing_lang' => 'Bearbeitung: {lang}', 'falls_back' => '(Ersatz: {lang})', 'untranslated' => 'noch nicht übersetzt: Es wird der Text auf {lang} angezeigt',
 	'every_language' => 'in jeder Sprache gleich',
-	'restore_every' => 'Wiederherstellen, alle Sprachen', 'restored_every' => 'Alle Sprachen der Version vom {when} sind wieder da',
+	'restore_every' => 'Alle wiederherstellen', 'restored_every' => 'Alle Sprachen der Version vom {when} sind wieder da',
 	'problem_translation_columns_missing' => 'Für diese Sprache gibt es auf der Website noch keinen Platz: Führe php bin/raster schema --apply auf dem Server aus',
 	'login_title' => 'Raster CMS Anmeldung', 'login_heading' => 'Raster CMS', 'login_lede' => 'Melde dich an, um diese Website zu bearbeiten.',
 	'login_no_database' => 'Für diese Umgebung ist keine Datenbank eingerichtet (application/config/db/).',

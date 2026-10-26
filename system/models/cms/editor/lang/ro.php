@@ -3,7 +3,7 @@
 return array(
 	'hello' => 'Salut, {name}', 'hello_anon' => 'Salut',
 	'welcome' => 'Tot ce strălucește se poate schimba. Apasă E sau Editează ca să începi.',
-	'edit' => 'Editează', 'done' => 'Gata', 'editing' => 'Editezi', 'page' => 'Pagina', 'admin' => 'Administrare', 'admin_pages' => 'Pagini de administrare',
+	'edit' => 'Editează', 'done' => 'Gata', 'editing' => 'Editezi', 'page' => 'Pagina', 'admin' => 'Admin', 'admin_pages' => 'Pagini de administrare',
 	'saved' => 'Salvat', 
 	'changed' => 'Ai schimbat {field}', 'undo' => 'Anulează', 'undone' => 'Anulat', 'nothing_to_undo' => 'Nimic de anulat',
 	'added' => 'Adăugat în {list}', 'deleted' => 'Ai șters {name}', 'hidden_item' => 'Ai ascuns {name}', 'shown_item' => '{name} se vede din nou',
@@ -31,7 +31,7 @@ return array(
 	'problem_form_expired' => 'Pagina e veche: reîncarc-o și mai încearcă', 'problem_not_allowed' => 'Nu poți face asta; dacă ai ieșit din cont, intră din nou',
 	'editing_lang' => 'editezi: {lang}', 'falls_back' => '(dacă lipsește: {lang})', 'untranslated' => 'netradus încă: se vede textul în {lang}',
 	'every_language' => 'la fel în toate limbile',
-	'restore_every' => 'Readu, în toate limbile', 'restored_every' => 'Ai readus toate limbile versiunii de {when}',
+	'restore_every' => 'Readu toate limbile', 'restored_every' => 'Ai readus toate limbile versiunii de {when}',
 	'problem_translation_columns_missing' => 'Limba asta nu are încă loc pe site: rulează php bin/raster schema --apply pe server',
 	'problem_one_value' => '{field} a venit de mai multe ori: reîncarcă pagina și mai încearcă', 'problem_unknown_page' => 'Pagina asta nu se poate edita de aici: reîncarc-o',
 	'problem_unknown_field' => '{field} nu mai e în pagina asta: reîncarc-o', 'problem_wrong_language' => 'Pagina asta e în {lang}: reîncarc-o',

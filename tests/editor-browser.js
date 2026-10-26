@@ -5,8 +5,9 @@
 // fresh database, logs in as an editor and uses the editor the way a person
 // would: edit mode, typing, undo, adding an item with a photo, hiding,
 // deleting and undoing, a keyboard-only pass, Enter in a paragraph field,
-// the page panel, and a multilingual site's /ro/ page (RASTER_TEST_ONLY=multilingual
-// runs only that one). Screenshots go to tests/screens/.
+// the page panel, a multilingual site's /ro/ page (RASTER_TEST_ONLY=multilingual
+// runs only that one), and the editor's words fitting its buttons in every
+// language (RASTER_TEST_ONLY=labels-fit). Screenshots go to tests/screens/.
 const { chromium } = require('playwright');
 const { spawn, execFileSync } = require('child_process');
 const fs = require('fs');
@@ -113,6 +114,201 @@ async function multilingual(browser) {
 	}
 }
 
+// The editor's words fit its controls, in every language it speaks
+// (RASTER_TEST_ONLY=labels-fit runs only this; RASTER_LABELS_LANGS=ro,de
+// only those languages, next to English). The editor was laid out with
+// English words, and a longer word in another language can be cut off,
+// wrap onto a second line or push a button off a phone's screen. For each
+// language, on a phone (390px) and a desktop (1280px), it opens every part
+// of the editor that has words on it and checks each label: it stays inside
+// its box, inside the part it is in and inside the screen, and it takes no
+// more lines than the English does there. Text that is meant to flow onto
+// more lines (messages, hints, the panel's notes) is not a label and isn't
+// checked; neither are words only screen readers and tooltips say.
+const FLOWING = '.hint, .toast > span, p.muted, .sub, .bubble, .bubble *';
+// the parts of the editor that have words, in its shadow root
+const PARTS = { dock: '.dock', menu: '.menu', panel: '.panel', handle: '.float.handle', popover: '.float.popover', dialog: '.dialog', ghost: '.ghost-label', badge: '.badge', photo: '.photo-button', drop: '.drop', toast: '.toast' };
+// in the page: each label of the parts open now, with where it is and how many lines it takes
+function measureLabels(h, { parts, flowing }) {
+	const out = [], vw = document.documentElement.clientWidth;
+	for (const [name, selector] of Object.entries(parts)) {
+		h.shadowRoot.querySelectorAll(selector).forEach((part, n) => {
+			const box = part.getBoundingClientRect();
+			if (!box.width || getComputedStyle(part).display === 'none') return;
+			const path = el => { const steps = []; for (; el && el !== part; el = el.parentElement) steps.unshift(el.tagName.toLowerCase() + ':' + [...el.parentElement.children].indexOf(el)); return name + n + '/' + steps.join('/'); };
+			if (box.left < -1 || box.right > vw + 1) out.push({ id: path(part), name, text: part.innerText.replace(/\s+/g, ' ').slice(0, 60), problem: 'goes past the screen\'s edge' });
+			for (const el of [part, ...part.querySelectorAll('*')]) {
+				const r = el.getBoundingClientRect();
+				if (!r.width || !el.getClientRects().length || el.closest('svg')) continue;
+				const words = [...el.childNodes].filter(c => c.nodeType === 3 && c.textContent.trim());
+				const text = words.map(c => c.textContent.trim()).join(' ');
+				// pushed out of the part, or off the screen (sideways: the panel scrolls down)
+				if (el !== part && (r.left < box.left - 1 || r.right > box.right + 1)) { out.push({ id: path(el), name, text: text || el.getAttribute('aria-label') || el.tagName, problem: 'is pushed out of its ' + name + ', by ' + Math.round(Math.max(box.left - r.left, r.right - box.right)) + 'px' }); continue; }
+				if (el !== part && (r.left < -1 || r.right > vw + 1)) { out.push({ id: path(el), name, text: text || el.tagName, problem: 'is pushed off the screen' }); continue; }
+				if (!words.length || el.matches(flowing)) continue;
+				const range = document.createRange();
+				const rects = words.flatMap(w => { range.selectNodeContents(w); return [...range.getClientRects()].filter(q => q.width > 0); });
+				const lines = new Set(rects.map(q => Math.round(q.top))).size;
+				const style = getComputedStyle(el);
+				const clipped = style.overflowX !== 'visible' && el.scrollWidth > el.clientWidth + 1 || rects.some(q => q.right > r.right + 1 || q.left < r.left - 1);
+				out.push({ id: path(el), name, text, lines, problem: clipped ? 'is cut off' : '' });
+			}
+		});
+	}
+	return out;
+}
+async function labelsFit(browser) {
+	const langs = ['en'].concat(fs.readdirSync(path.join(root, 'system/models/cms/editor/lang')).map(f => f.replace(/\.php$/, '')).sort())
+		.filter(l => l === 'en' || !process.env.RASTER_LABELS_LANGS || process.env.RASTER_LABELS_LANGS.split(',').includes(l));
+	const fitEnv = Object.assign({}, env, { RASTER_DB: path.join(tmp, 'labels.sqlite') });
+	execFileSync('php', [path.join(root, 'bin/raster'), 'user', 'lena@cafe.test', '--role=editor', '--password=lena password', '--name=Lena'], { env: fitEnv });
+	const p = await port();
+	const base = 'http://127.0.0.1:' + p;
+	const server = spawn('php', ['-S', '127.0.0.1:' + p, path.join(root, 'index.php')], { cwd: root, env: fitEnv, stdio: 'ignore' });
+	process.on('exit', () => server.kill());
+	try {
+		await new Promise(r => setTimeout(r, 600));
+		await fetch(base + '/menu');
+		// logged in once, in English: a page's history to restore, a hidden
+		// dish and one that goes live later, so their badges show
+		const setup = await browser.newContext({ viewport: { width: 1280, height: 860 }, reducedMotion: 'reduce' });
+		const page = await setup.newPage();
+		await page.goto(base + '/login');
+		await page.fill('input[name=login]', 'lena@cafe.test');
+		await page.fill('input[name=password]', 'lena password');
+		await Promise.all([page.waitForNavigation(), page.click('form button')]);
+		await page.goto(base + '/menu');
+		await page.waitForTimeout(400);
+		await page.keyboard.press('e');
+		await page.waitForTimeout(300);
+		for (const dish of ['Cortado', 'Espresso']) {
+			await page.locator('.raster-ghost').first().click();
+			await page.keyboard.type(dish);
+			await inShadow(page, h => h.shadowRoot.querySelector('.float.handle .text.primary').click());
+			await page.waitForTimeout(900);
+		}
+		// by name again: Cortado, Espresso, Flat white
+		await page.reload();
+		await page.waitForTimeout(400);
+		if (!await page.evaluate(() => document.documentElement.classList.contains('raster-editing'))) await page.keyboard.press('e');
+		for (const heading of ['Our menu', 'Menu']) {
+			await page.locator('h1').click();
+			await page.keyboard.press('Control+A');
+			await page.keyboard.type(heading);
+			await page.keyboard.press('Enter');
+			await page.waitForTimeout(700);
+		}
+		const handleOf = async n => { await page.mouse.move(2, 2); await page.locator('[data-raster-item]').nth(n).focus(); await page.keyboard.press('Enter'); await page.waitForTimeout(200); };
+		await handleOf(1);
+		await inShadow(page, h => h.shadowRoot.querySelectorAll('.handle button')[2].click());
+		await page.waitForTimeout(700);
+		await handleOf(2);
+		await inShadow(page, h => h.shadowRoot.querySelectorAll('.handle button')[3].click());
+		await page.waitForTimeout(200);
+		await inShadow(page, h => { const i = h.shadowRoot.querySelector('.popover input'); i.value = (new Date().getFullYear() + 1) + '-09-30T09:00'; h.shadowRoot.querySelector('.popover .btn.primary').click(); });
+		await page.waitForTimeout(700);
+		check(await inShadow(page, h => h.shadowRoot.querySelectorAll('.badge').length) === 2, 'labels-fit: a hidden dish and a later one, for their badges');
+		const login = await setup.storageState();
+		await setup.close();
+
+		const english = {};
+		for (const lang of langs) for (const phone of [true, false]) {
+			const width = phone ? 390 : 1280;
+			const context = await browser.newContext(Object.assign({ storageState: login, reducedMotion: 'reduce', extraHTTPHeaders: { 'Raster-Editor-Language': lang } },
+				phone ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } : { viewport: { width: 1280, height: 860 } }));
+			const tab = await context.newPage();
+			const errors = [];
+			tab.on('pageerror', e => errors.push(e.message));
+			tab.on('filechooser', () => {});
+			const seen = [];
+			// waits for a part of the editor to open (a check in the page, or a selector in its shadow root)
+			const waitFor = async test => {
+				const fn = typeof test === 'string' ? (h, sel) => !!h.shadowRoot.querySelector(sel) : test;
+				for (let t = 0; t < 40; t++) { if (await inShadow(tab, fn, typeof test === 'string' ? test : undefined)) return true; await tab.waitForTimeout(50); }
+				return false;
+			};
+			const look = async (...names) => {
+				for (const n of names) if (!['badge', 'ghost'].includes(n)) await waitFor(PARTS[n]);
+				await tab.waitForTimeout(60);
+				seen.push(...await inShadow(tab, measureLabels, { parts: Object.fromEntries(names.map(n => [n, PARTS[n]])), flowing: FLOWING }));
+			};
+			const click = async (selector, i) => {
+				await waitFor(selector);
+				const found = await inShadow(tab, (h, a) => { const el = h.shadowRoot.querySelectorAll(a.selector)[a.i || 0]; if (el) el.click(); return !!el; }, { selector, i });
+				if (!found) throw new Error('labels-fit: no ' + selector + ' to click (' + lang + ', ' + width + 'px); open: ' + await inShadow(tab, h => [...h.shadowRoot.querySelectorAll('.layer > *, .float')].map(e => e.className).join(', ')));
+			};
+			const item = tab.locator('[data-raster-item]').first();
+			// a press outside closes a popover and saves nothing
+			const shut = () => tab.evaluate(() => document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
+			const activate = async () => {
+				if (phone) await item.evaluate(el => el.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+				else { await tab.mouse.move(2, 2); await item.focus(); await tab.keyboard.press('Enter'); }
+				await waitFor('.float.handle');
+			};
+			await tab.goto(base + '/menu');
+			await tab.waitForTimeout(400);
+			check(await inShadow(tab, h => h.shadowRoot.querySelector('.dock .pill.primary').textContent.trim()) !== '' && (lang === 'en' || await inShadow(tab, h => h.shadowRoot.querySelector('.dock .pill.primary').textContent) !== 'Edit'), 'labels-fit: the editor speaks ' + lang);
+			// the dock, not editing and editing; the admin menu; the page panel
+			await look('dock');
+			await click('.dock [aria-haspopup]');
+			await look('menu');
+			await click('.dock [aria-haspopup]');
+			await tab.evaluate(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'e', bubbles: true })));
+			await look('dock', 'ghost', 'badge');
+			await click('.dock .pill:not(.primary):not([aria-haspopup])');
+			// the history comes after the panel opens
+			await waitFor(h => !!h.shadowRoot.querySelector('.panel') && !h.shadowRoot.querySelector('.panel').innerText.includes('…'));
+			await look('panel');
+			await click('.panel .close');
+			// an item's handle, its details and its schedule
+			await activate();
+			await look('handle');
+			await click('.handle button', 0);
+			await look('popover');
+			await shut();
+			await activate();
+			await click('.handle button', 3);
+			await look('popover');
+			await shut();
+			// hiding a dish says so, with an undo
+			await activate();
+			await click('.handle button', 2);
+			await waitFor('.toast .undo');
+			await look('toast');
+			await click('.toast .undo');
+			for (let t = 0; t < 100 && await item.getAttribute('data-raster-state') !== 'live'; t++) await tab.waitForTimeout(100);
+			check(await item.getAttribute('data-raster-state') === 'live', 'labels-fit: the undo shows the dish again (' + lang + ', ' + width + 'px)');
+			// a photo: its button (a mouse's), a picture dragged over it, framing a new one
+			const photo = tab.locator('img[data-raster-field]').first();
+			if (!phone) { await tab.mouse.move(2, 2); await photo.focus(); await look('photo'); }
+			await photo.evaluate(img => { const d = new DataTransfer(); d.items.add(new File(['x'], 'a.jpg', { type: 'image/jpeg' })); img.dispatchEvent(new DragEvent('dragover', { dataTransfer: d, bubbles: true, cancelable: true })); });
+			await look('drop');
+			await photo.evaluate(img => img.dispatchEvent(new DragEvent('dragleave', { bubbles: true })));
+			const [chooser] = await Promise.all([tab.waitForEvent('filechooser', { timeout: 5000 }).catch(() => null), photo.click({ force: true })]);
+			if (chooser) { await chooser.setFiles(path.join(root, 'demo/views/cafe/img/about.jpg')); await look('dialog'); await click('.dialog .btn', 0); }
+			check(!!chooser, 'labels-fit: the photo dialog opens (' + lang + ', ' + width + 'px)');
+			// a new item's Cancel and Add
+			await tab.locator('.raster-ghost').first().click();
+			await look('handle');
+			await click('.float.handle .text', 0);
+
+			for (const label of seen) {
+				const where = lang + ' at ' + width + 'px, ' + label.name + ': "' + label.text + '" ';
+				if (lang === 'en') english[width + label.id] = label.lines;
+				if (label.problem) check(false, where + label.problem);
+				else if (label.lines > (english[width + label.id] || 1)) check(false, where + 'takes ' + label.lines + ' lines, the English ' + (english[width + label.id] || 1));
+				else check(true);
+			}
+			if (process.env.RASTER_LABELS_DEBUG) console.log(lang, width, JSON.stringify(seen.reduce((n, l) => (n[l.name] = (n[l.name] || 0) + 1, n), {})));
+			check(seen.length > 30, 'labels-fit: the labels were found (' + lang + ', ' + width + 'px): ' + seen.length);
+			check(errors.length === 0, 'labels-fit: no script errors (' + lang + ', ' + width + 'px): ' + errors.join('; '));
+			await context.close();
+		}
+	} finally {
+		server.kill();
+	}
+}
+
 (async () => {
 	const p = await port();
 	const base = 'http://127.0.0.1:' + p;
@@ -134,9 +330,9 @@ async function multilingual(browser) {
 	const browser = await chromium.launch(process.env.CHROMIUM ? { executablePath: process.env.CHROMIUM } : {});
 	const errors = [];
 	try {
-		// the café, unless only the multilingual case runs
+		// the café, unless only one other part runs
 		cafe: {
-		if (process.env.RASTER_TEST_ONLY === 'multilingual') break cafe;
+		if (process.env.RASTER_TEST_ONLY) break cafe;
 		const context = await browser.newContext({ viewport: { width: 1280, height: 860 } });
 		const page = await context.newPage();
 		page.on('pageerror', e => errors.push(e.message));
@@ -587,7 +783,8 @@ async function multilingual(browser) {
 		await phoneContext.close();
 		check(errors.length === 0, 'no script errors: ' + errors.join('; '));
 		}
-		await multilingual(browser);
+		if (!process.env.RASTER_TEST_ONLY || process.env.RASTER_TEST_ONLY === 'multilingual') await multilingual(browser);
+		if (!process.env.RASTER_TEST_ONLY || process.env.RASTER_TEST_ONLY === 'labels-fit') await labelsFit(browser);
 	} finally {
 		await browser.close();
 		server.kill();
