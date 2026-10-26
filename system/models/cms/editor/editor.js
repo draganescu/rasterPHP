@@ -828,7 +828,7 @@
 			if (on && (f.kind === 'text' || f.kind === 'rich')) { f.el.setAttribute('spellcheck', 'true'); if (!f.el.hasAttribute('aria-label')) f.el.setAttribute('aria-label', human(f.info.field)); }
 		});
 		reachable(on);
-		keyboardResizes(on);
+		viewportForEditing(on);
 		updateTyping();
 		if (on) { glow(); addGhosts(); } else { removeGhosts(); clearFloats(); if (document.activeElement && document.activeElement.isContentEditable) document.activeElement.blur(); }
 		store('raster-editing', on ? '1' : null);
@@ -1140,13 +1140,21 @@
 	window.addEventListener('scroll', keysMove, { passive: true });
 	window.addEventListener('resize', keysMove);
 	if (window.visualViewport) { visualViewport.addEventListener('resize', keysMove); visualViewport.addEventListener('scroll', keysMove); }
-	// Chrome and Firefox on Android can shrink the page itself above the
-	// keyboard, which puts the box there with nothing to measure. Only while
-	// editing, as it changes how the site lays out; Safari ignores it for now
+	// The viewport tag while editing on a touch screen, put back after. Chrome
+	// and Firefox on Android can shrink the page itself above the keyboard,
+	// which puts the box there with nothing to measure; Safari ignores it for
+	// now. And iOS zooms into a field whose text is under 16px as it takes
+	// focus, and never back out: the page's fields keep the site's own type,
+	// so on iOS maximum-scale=1 stops that zoom. iOS still lets a person pinch
+	// to zoom past it; Android wouldn't, and doesn't zoom on focus anyway
 	var viewportMeta = document.querySelector('meta[name=viewport]'), viewportBefore = viewportMeta && viewportMeta.getAttribute('content');
-	function keyboardResizes(on) {
-		if (!touch || !viewportBefore || /interactive-widget/.test(viewportBefore)) return;
-		viewportMeta.setAttribute('content', on ? viewportBefore + ', interactive-widget=resizes-content' : viewportBefore);
+	var ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+	function viewportForEditing(on) {
+		if (!touch || !viewportBefore) return;
+		var add = [];
+		if (!/interactive-widget/.test(viewportBefore)) add.push('interactive-widget=resizes-content');
+		if (ios && !/maximum-scale/.test(viewportBefore)) add.push('maximum-scale=1');
+		if (add.length) viewportMeta.setAttribute('content', on ? viewportBefore + ', ' + add.join(', ') : viewportBefore);
 	}
 
 	var placing = false;

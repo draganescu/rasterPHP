@@ -794,11 +794,12 @@ async function labelsFit(browser) {
 		await phoneTab.screenshot({ path: path.join(screens, 'format-phone.png') });
 		check(await host(phoneTab).evaluate(h => getComputedStyle(h.shadowRoot.querySelector('.dock')).visibility === 'hidden'), 'on a phone the dock steps aside while a field is typed in');
 		check(/interactive-widget=resizes-content/.test(await phoneTab.locator('meta[name=viewport]').getAttribute('content')), 'while editing on a phone, Android browsers are asked to shrink the page above the keyboard');
+		check(!/maximum-scale/.test(await phoneTab.locator('meta[name=viewport]').getAttribute('content')), 'off iOS the viewport tag keeps pinch zoom (no maximum-scale)');
 		await formatContext.close();
 
 		// a phone's keyboard, faked: Chromium has none, so visualViewport is
 		// played by hand, as iOS Safari reports it
-		const keysContext = await browser.newContext({ viewport: { width: 390, height: 664 }, isMobile: true, hasTouch: true, storageState: await context.storageState() });
+		const keysContext = await browser.newContext({ viewport: { width: 390, height: 664 }, isMobile: true, hasTouch: true, userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1', storageState: await context.storageState() });
 		await keysContext.addInitScript(() => {
 			const vv = Object.assign(new EventTarget(), { offsetLeft: 0, offsetTop: 0, width: 390, height: 664, scale: 1 });
 			Object.defineProperty(window, 'visualViewport', { get: () => vv, configurable: true });
@@ -809,6 +810,10 @@ async function labelsFit(browser) {
 		await keysTab.goto(base + '/');
 		await keysTab.waitForTimeout(500);
 		await startEditing(keysTab);
+		// iOS zooms into a field with text under 16px as it takes focus: while
+		// editing, maximum-scale=1 stops it (iOS still lets a person pinch)
+		const viewportTag = () => keysTab.locator('meta[name=viewport]').getAttribute('content');
+		check(/maximum-scale=1/.test(await viewportTag()), 'on iOS, editing stops the zoom into a field as it takes focus: ' + await viewportTag());
 		await keysTab.locator('.lede').tap();
 		await keysTab.waitForTimeout(400);
 		const bar = p => host(p).evaluate(h => { const f = h.shadowRoot.querySelector('.format'), k = h.shadowRoot.querySelector('.keys'); return { bottom: f ? Math.round(f.getBoundingClientRect().bottom) : null, moving: k.classList.contains('moving'), dock: getComputedStyle(h.shadowRoot.querySelector('.dock')).visibility }; });
@@ -836,6 +841,9 @@ async function labelsFit(browser) {
 		await keysTab.waitForTimeout(400);
 		at = await bar(keysTab);
 		check(at.bottom === null && at.dock === 'visible', 'leaving the field takes the bar away and brings the dock back: ' + JSON.stringify(at));
+		await host(keysTab).evaluate(h => h.shadowRoot.querySelector('.dock .pill.primary').click());
+		await keysTab.waitForTimeout(300);
+		check(await viewportTag() === 'width=device-width, initial-scale=1', 'leaving edit mode puts the viewport tag back as it was: ' + await viewportTag());
 		await keysContext.close();
 		// on a phone: the link box is 16px, so iOS Safari doesn't zoom in on
 		// it, and the dock fits (no language badge, no save status)

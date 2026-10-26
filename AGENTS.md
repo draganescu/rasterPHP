@@ -2649,7 +2649,9 @@ of lists and filter pages come along; drafts and the editor don't.
   above the keyboard, clear of the phone's own Copy and Paste menu, which a
   page can't turn off. While a field is typed in on a phone the dock steps
   aside, and while the page or the keyboard moves the bar fades out and
-  comes back once they are still. Items get a handle to
+  comes back once they are still. On iOS edit mode adds `maximum-scale=1`
+  to the viewport tag, so tapping a field with small text doesn't zoom the
+  page (a person can still pinch to zoom). Items get a handle to
   edit details, duplicate, hide, schedule or delete them; each list ends with
   a card for a new item, made from the template's mock-up. Photos (`print.@src`)
   are replaced by choosing or dropping a picture, framed in the browser.
