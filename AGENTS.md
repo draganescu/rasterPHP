@@ -2644,7 +2644,10 @@ of lists and filter pages come along; drafts and the editor don't.
   inside one) takes Enter as a line break, and pasted paragraphs, lists,
   headings and quotes become lines, so what it stores fits where it prints (in a field that is a list,
   Enter still adds a bullet). A field that already holds paragraphs, say
-  in an `<li>` or an `<a>` card, keeps them. Items get a handle to
+  in an `<li>` or an `<a>` card, keeps them. A rich field's formatting bar
+  sits above the field; on a phone it sits at the bottom of the screen, just
+  above the keyboard, clear of the phone's own Copy and Paste menu, which a
+  page can't turn off. Items get a handle to
   edit details, duplicate, hide, schedule or delete them; each list ends with
   a card for a new item, made from the template's mock-up. Photos (`print.@src`)
   are replaced by choosing or dropping a picture, framed in the browser.
