@@ -176,28 +176,22 @@ test('updates are repeatable, never backwards', function () use ($tmp, $site, $r
 test('an app from Raster 1.x', function () use ($site) {
 	unlink("$site/CLAUDE.md");
 	file_put_contents("$site/application/models/sql.php", "<?php\n\$querries['all_users'] = \"SELECT * FROM user\";\n");
-	file_put_contents("$site/application/views/default/editor.html", "<html><body>\n<!-- render.cms.login --><form method=\"post\"><input name=\"login\"><input type=\"password\" name=\"password\"></form><!-- /render.cms.login -->\n</body></html>\n");
 	file_put_contents("$site/application/config/raster-version", "1.0.0\n");
 	list($code, $out) = raster($site, array('doctor'));
 	same(1, $code, $out);
 	has($out, 'application is at 1.0.0, the framework at 2.1.0');
-	has($out, 'render.cms.login is now render.authentication.login');
-	has($out, 'application/views/default/editor.html:2');
 	// $querries is no longer read, so nothing is said about it
 	lacks($out, '$querries', 'the $querries deprecation is gone');
 	lacks($out, 'name the array $queries', 'the $querries deprecation is gone');
 	list($code, $out) = raster($site, array('upgrade', '--dry-run'));
 	has($out, '2.0.0 agent-files');
-	has($out, '2.0.0 cms-login-region');
 	lacks($out, 'queries-name', 'the $querries step is gone');
+	lacks($out, 'cms-login-region', 'the render.cms.login step is gone');
 	lacks($out, 'private-folders', 'only the steps it needs');
 	lacks($out, '2.1.0 marker', 'already there');
 	list($code, $out) = raster($site, array('upgrade'));
 	same(0, $code, $out);
-	has($out, 'changed application/views/default/editor.html');
 	same("@AGENTS.md\n", file_get_contents("$site/CLAUDE.md"));
-	has(file_get_contents("$site/application/views/default/editor.html"), '<!-- render.authentication.login -->');
-	has(file_get_contents("$site/application/views/default/editor.html"), '<!-- /render.authentication.login -->');
 	list($code, $out) = raster($site, array('doctor'));
 	same(0, $code, $out);
 	lacks($out, 'deprecated');

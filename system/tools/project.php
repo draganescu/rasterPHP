@@ -336,11 +336,11 @@ class raster_project
 	// views, models and config: array(file, line, id, message, allowed).
 	//
 	// A site can say a use is on purpose, and `doctor` then counts it apart
-	// instead of warning about it — the demo café keeps the older validation
-	// regions so the test suite still covers them:
+	// instead of warning about it, for example old dictionaries in one
+	// language:
 	//
 	//   config::set('allow_deprecated')->to(array(
-	//       'legacy-validation-regions' => '#^views/(visit|password/new)\.html$#',
+	//       'i18n-lang-variable' => '#^i18n/ro/#',
 	//   ));
 	//
 	// The value is true for the whole app, or one or more patterns over the

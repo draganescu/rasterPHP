@@ -3,6 +3,21 @@
 Every release lists what sites need to do. `php bin/raster update` does the
 file changes for you; `php bin/raster doctor` shows what is left.
 
+## 2.2.55
+
+What sites need to do: a site that still uses `render.cms.login` or the validation regions `not_empty`, `email_format` or `are_the_same` changes them by hand (`raster lint` points at each one). A site that names a `404.html` (or `403`, `500`, `503`) view as its error page in config is unchanged; one that doesn't gets a lint warning.
+
+**Two deprecated features are gone (#24).** Both were deprecated in 2.0.0, and `raster doctor` has warned about them since.
+- `render.cms.login` was due in 2.2.0. Use `render.authentication.login`. The 2.0.0 upgrade step that renamed it is gone too, so an app coming from Raster 1.x renames it by hand. `raster lint` reports the old block as an error ("render.cms.login was removed in 2.2.55"), since without it the block would be read as a list named `login` and its form would never show.
+- The validation regions `not_empty`, `email_format` and `are_the_same` were due in 3.0.0. Put `required` and `type="email"` on the input and use `render.validation.field('email', 'required')` and `render.validation.field('email', 'email')` for one message per broken rule, and `render.validation.matches('password', 'password_again')` instead of `are_the_same`. `raster lint` reports any left as an unknown validation rule.
+- Their entries in `system/tools/deprecations.php` are gone. The file, `doctor`'s check and `allow_deprecated` stay, for the deprecations still listed. The demo café's contact and reset forms use the current rules, and its `allow_deprecated` setting is gone.
+
+**The sitemap leaves out the site's error pages (#209).** A view named in `error_document_403`, `_404`, `_500` or `_503` is no longer listed in `sitemap.xml`. A `404.html` (or `403`, `500`, `503`) without its setting is a page of its own: `/404` answers 200 and is listed, so `raster lint` now warns and says which setting to add.
+
+**`bin/raster` refuses a `RASTER_APP` that isn't an app folder (#41).** With a missing folder, the app base was `/` and the tools walked the disk until PHP gave up. Every command now stops at once with `error: <app>/ is not a Raster app folder. Check RASTER_APP.` and exit 1. `index.php` keeps falling back to `application`, as before.
+
+**`composer.phar` is gone from the repository (#48).** Nothing used it, and sites never got it (`raster new` and `raster update` copy only the framework and the starter). A `.phar` in a site folder is still refused by the server.
+
 ## 2.2.54
 
 Nothing for sites to do.

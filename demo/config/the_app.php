@@ -73,12 +73,6 @@ config::set('booking_max_people')->to(8);
 // /rsvp, and staff get an email for each guest's reply
 config::set('rsvp_staff_email')->to('staff@cafe.test');
 
-// the contact form on /visit and the reset form keep the older validation regions on purpose, so
-// the suite still covers them (D14). doctor counts them apart instead of warning.
-config::set('allow_deprecated')->to(array(
-	'legacy-validation-regions' => '#^views/cafe/(visit|password/new)\.html$#',
-));
-
 // text replaced in pages under /lab only (template::replace)
 template::instance()->replace('{{cafe}}', 'Raster Café', 'lab');
 
@@ -103,6 +97,6 @@ if ($knob('CAFE_API_FEED') === 'on') config::set('api_system_models')->to(array(
 if ($knob('CAFE_LOG') === 'on') log::enable();
 // template-only translation, deprecated, kept on purpose while this switch is off
 if ($knob('CAFE_MULTILINGUAL') === 'off') config::set('multilingual')->to(false);
-if ($knob('CAFE_MULTILINGUAL') === 'off') config::set('allow_deprecated')->to(config::get('allow_deprecated') + array('template-only-languages' => true));
+if ($knob('CAFE_MULTILINGUAL') === 'off') config::set('allow_deprecated')->to((array)config::get('allow_deprecated', array()) + array('template-only-languages' => true));
 if ($knob('CAFE_DOMAIN_LANGUAGE')) config::set('domain_language')->to(array($knob('CAFE_DOMAIN_LANGUAGE') => 'ro'));
 if ($knob('CAFE_ADMIN_PAGE')) config::set('protected')->to(config::get('protected') + array($knob('CAFE_ADMIN_PAGE') => 'admin'));

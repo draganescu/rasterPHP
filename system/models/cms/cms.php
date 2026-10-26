@@ -820,14 +820,6 @@ class cms
 		return true;
 	}
 
-	// the editor login page (system/views/cms_admin/login.html) uses
-	// render.authentication.login; this stays for older templates
-	public function login() {
-		if (cms::loggedin()) util::redirect();
-		$auth = new authentication();
-		return $auth->login();
-	}
-
 	// what the login page should say before anyone can log in: the alerts
 	// no_database (none is configured for this environment) and no_users
 	// (make one with php bin/raster user). It prints nothing itself.
