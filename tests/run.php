@@ -1659,10 +1659,12 @@ test('the engine renders only the full form', function () {
 // ## Deprecations a site keeps on purpose
 
 test('allow_deprecated counts a use apart instead of warning', function () use ($root) {
+	// the starter has no i18n/ folder: make it, and take away what was made
+	$top = is_dir("$root/application/i18n") ? "$root/application/i18n/zz" : "$root/application/i18n";
 	$dir = "$root/application/i18n/zz";
 	$file = "$dir/zz_deprecated.php";
-	test_fixture($dir);
-	mkdir($dir);
+	test_fixture($top);
+	mkdir($dir, 0775, true);
 	file_put_contents($file, "<?php\n\$lang['x'] = 'y';\n");
 	try {
 		$found = raster_project::deprecations($root, 'application');
@@ -1681,6 +1683,7 @@ test('allow_deprecated counts a use apart instead of warning', function () use (
 		config::set('allow_deprecated')->to(array());
 		unlink($file);
 		rmdir($dir);
+		if ($top !== $dir) rmdir($top);
 	}
 });
 
