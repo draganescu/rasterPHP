@@ -134,6 +134,14 @@ test('lint: reserved cms names', function () {
 	check(has_problem(lint_html('<!-- render.cms.users --><!-- print.username -->u<!-- /print.username --><!-- /render.cms.users -->'), 'reserved'));
 	same(array(), lint_html('<link href="<!-- print.cms.style /-->">'));
 });
+test('lint: features removed in 2.2.55 say so (#24)', function () {
+	check(has_problem(lint_html('<!-- render.cms.login --><form method="post"><input name="login"></form><!-- /render.cms.login -->'), 'render.cms.login was removed in 2.2.55: use render.authentication.login'));
+	check(has_problem(lint_html("<!-- render.authentication.login --><form method=\"post\"><input name=\"email\"><!-- render.validation.not_empty('email') -->x<!-- /render.validation.not_empty('email') --></form><!-- /render.authentication.login -->"), "Unknown validation rule 'not_empty'"));
+	check(!method_exists('cms', 'login'), 'cms::login is gone');
+	check(!method_exists('validation', 'not_empty') && !method_exists('validation', 'email_format') && !method_exists('validation', 'are_the_same'), 'the old regions are gone');
+	$ids = array_keys(require BASE.'tools/deprecations.php');
+	check(!in_array('cms-login-region', $ids) && !in_array('legacy-validation-regions', $ids), 'and their deprecation entries');
+});
 test('lint: crossing blocks', function () {
 	check(has_problem(lint_html('<!-- render.cms.a --><!-- remove --><!-- /render.cms.a --><!-- /remove -->'), 'blocks must nest'));
 });
@@ -1117,6 +1125,33 @@ test('the sitemap leaves out the items and pages that need an account, in any ca
 		R::exec('DROP TABLE IF EXISTS zzinsiderdata');
 	}
 });
+test('a 404.html is left out of the sitemap once it is the error page, and lint says so before (#209)', function () use ($root) {
+	$theme = "$root/application/views/default";
+	test_fixture("$theme/404.html");
+	file_put_contents("$theme/404.html", '<html><body><h1>Not here</h1></body></html>');
+	$setting = config::get('error_document_404');
+	try {
+		config::set('error_document_404')->to(false);
+		$urls = array_column((new feed())->pages(), 'url');
+		check(preg_grep('#/404$#', $urls), 'without the setting it is a page of its own: '.json_encode($urls));
+		$inspector = new raster_inspector();
+		$warned = array_filter($inspector->lint_address('404.html', 'default'), function ($p) { return strpos($p['message'], 'error_document_404') !== false; });
+		same(1, count($warned), 'lint says to set error_document_404');
+		config::set('error_document_404')->to('404');
+		$urls = array_column((new feed())->pages(), 'url');
+		same(array(), array_values(preg_grep('#/404$#', $urls)), 'with it the sitemap leaves it out');
+		same(array(), $inspector->lint_address('404.html', 'default'), 'and lint is quiet');
+	} finally {
+		config::set('error_document_404')->to($setting);
+		@unlink("$theme/404.html");
+	}
+});
+test('bin/raster refuses a RASTER_APP that is no app folder (#41)', function () use ($root) {
+	foreach (array('zz_missing', 'media', '../system') as $app) {
+		$out = (string)shell_exec('RASTER_APP='.escapeshellarg($app).' '.php_cmd().' '.escapeshellarg("$root/bin/raster").' describe 2>&1; echo "exit=$?"');
+		check(strpos($out, "$app/ is not a Raster app folder") !== false && strpos($out, 'exit=1') !== false && strpos($out, 'Warning') === false, "$app: $out");
+	}
+});
 test('one page has one address: a trailing slash and index.php/ redirect (#131)', function () use ($base) {
 	foreach (array('/about/' => '/about', '/index.php/about' => '/about', '/index.php/about/' => '/about', '/news/news_page/2/' => '/news/news_page/2',
 		'/about/?x=1&y=a%20b' => '/about?x=1&y=a%20b', '/news/news_items/headline/Filler%201/' => '/news/news_items/headline/Filler%201') as $asked => $address) {
@@ -1624,26 +1659,28 @@ test('the engine renders only the full form', function () {
 // ## Deprecations a site keeps on purpose
 
 test('allow_deprecated counts a use apart instead of warning', function () use ($root) {
-	$views = "$root/application/views/default";
-	$file = "$views/zz_deprecated.html";
-	test_fixture($file);
-	file_put_contents($file, '<!-- render.validation.not_empty(\'email\') -->x<!-- /render.validation.not_empty(\'email\') -->');
+	$dir = "$root/application/i18n/zz";
+	$file = "$dir/zz_deprecated.php";
+	test_fixture($dir);
+	mkdir($dir);
+	file_put_contents($file, "<?php\n\$lang['x'] = 'y';\n");
 	try {
 		$found = raster_project::deprecations($root, 'application');
 		$mine = array_values(array_filter($found, function ($d) { return strpos($d['file'], 'zz_deprecated') !== false; }));
 		same(1, count($mine), 'the use is found');
 		same(false, $mine[0]['allowed'], 'and is not allowed by default');
-		config::set('allow_deprecated')->to(array('legacy-validation-regions' => '#zz_deprecated#'));
+		config::set('allow_deprecated')->to(array('i18n-lang-variable' => '#zz_deprecated#'));
 		$found = raster_project::deprecations($root, 'application');
 		$mine = array_values(array_filter($found, function ($d) { return strpos($d['file'], 'zz_deprecated') !== false; }));
 		same(true, $mine[0]['allowed'], 'a pattern over the path allows it');
-		config::set('allow_deprecated')->to(array('legacy-validation-regions' => '#nothing-like-this#'));
+		config::set('allow_deprecated')->to(array('i18n-lang-variable' => '#nothing-like-this#'));
 		$found = raster_project::deprecations($root, 'application');
 		$mine = array_values(array_filter($found, function ($d) { return strpos($d['file'], 'zz_deprecated') !== false; }));
 		same(false, $mine[0]['allowed'], 'a pattern that does not match does not');
 	} finally {
 		config::set('allow_deprecated')->to(array());
 		unlink($file);
+		rmdir($dir);
 	}
 });
 

@@ -641,10 +641,10 @@ test(array('D13', 'C19', 'D25'), 'an application rule (its region runs before th
 	list(, $body) = http('POST', "$base/visit", array('raster_form' => 'contact.form', 'email' => 'bad', 'website' => 'not a url', 'message' => 'See www.spam.example'));
 	has($body, '<p class="error-count">3 problems</p>', 'validation::errors(): the email, the website and the link');
 });
-test(array('D14', 'D19', 'D23'), 'rule names from older Raster, two forms on one page', function () use ($base) {
+test(array('D14', 'D19', 'D23'), 'a message per rule, two forms on one page', function () use ($base) {
 	list(, $body) = http('POST', "$base/visit", array('raster_form' => 'contact.form', 'email' => '', 'message' => 'Hi'));
 	has($body, 'Your email, please.');
-	lacks($body, 'That email does not look right.', 'email_format passes on empty');
+	lacks($body, 'That email does not look right.', 'the email rule passes on empty');
 	lacks($body, 'We need a valid email to confirm.', 'the other form stays quiet');
 	lacks($body, 'Please enter a valid email address.', 'the footer form stays quiet');
 	list(, $body) = http('POST', "$base/visit", array('raster_form' => 'contact.form', 'email' => 'bad', 'message' => 'Hi', 'website' => 'not a url'));
@@ -1398,7 +1398,7 @@ test('M11', 'vocabulary: every name a template may call', function () use ($base
 	same(array('session', 'self', 'if'), $vocabulary['engine_models']);
 	check(in_array('raster_detail_link', $vocabulary['row_keys_from_raster']));
 	// names the CMS keeps
-	foreach (array('slug', 'id', 'enabled', 'published_at', 'style', 'login') as $name) {
+	foreach (array('slug', 'id', 'enabled', 'published_at', 'style', 'logout') as $name) {
 		check(in_array($name, $vocabulary['reserved']['fields']), "$name is reserved");
 	}
 	same(array('users', 'raster'), $vocabulary['reserved']['collections']);
@@ -1681,12 +1681,10 @@ test('N7', 'deploy prints the server configuration', function () use ($root) {
 	same(2, raster(array('deploy'))[0], 'no --config is a usage error');
 	same(1, raster(array('deploy', '--config=iis'))[0]);
 });
-test('N8', 'doctor: the rules on disk, and intentional deprecations', function () use ($root) {
+test('N8', 'doctor: the rules on disk', function () use ($root) {
 	list($code, $out) = raster(array('doctor'));
 	has($out, '.htaccess has every rule');
-	// the demo keeps the older validation regions on purpose (D14)
-	has($out, 'kept on purpose');
-	lacks($out, 'use(s) of deprecated features'."\n    regions", 'so they are not a warning');
+	lacks($out, 'use(s) of deprecated features', 'the demo uses none');
 	// a .htaccess from an older Raster is missing the newer rules
 	with_file("$root/.htaccess", "RewriteEngine on\nRewriteRule (^|/)\\. - [F,L]\n", function () {
 		has(raster(array('doctor'))[1], 'is missing');

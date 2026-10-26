@@ -720,11 +720,17 @@ class raster_inspector {
 			$problems[] = self::problem('error', $block, self::double_underscore($method, $block['keyword'] === 'print' ? 'field' : 'collection'));
 			return;
 		}
+		// removed in 2.2.55 (#24): the old block would be a list named login,
+		// and its login form would never show
+		if ($ref['model'] === 'cms' && $method === 'login' && $block['keyword'] === 'render') {
+			$problems[] = self::problem('error', $block, 'render.cms.login was removed in 2.2.55: use render.authentication.login');
+			return;
+		}
 		if ($ref['model'] === 'i18n' && !in_array($method, $info['methods']) && isset($arguments[0]) && is_string($arguments[0])) {
 			$this->lint_translation_key($block, $method, $arguments[0], $problems);
 		}
 		if ($ref['model'] === 'cms') {
-			$template_methods = array('style', 'login', 'login_message', 'login_word', 'login_lang', 'buttons');
+			$template_methods = array('style', 'login_message', 'login_word', 'login_lang', 'buttons');
 			// CMS helpers used by templates are written self-closing; a helper name
 			// wrapping default content is a field that would never be stored
 			$reserved = (in_array($method, $info['methods']) && (!in_array($method, $template_methods) || ($block['keyword'] === 'print' && $block['type'] !== 'self')))
@@ -1103,7 +1109,7 @@ class raster_inspector {
 				continue;
 			}
 			$fields = $call ? array_filter($call[1], 'is_string') : array();
-			$checked = $method === 'cant_be' ? array_slice($fields, 0, 1) : ($method === 'field' || $method === 'accepted' || $method === 'not_empty' || $method === 'email_format' ? array_slice($fields, 0, 1) : $fields);
+			$checked = $method === 'cant_be' ? array_slice($fields, 0, 1) : ($method === 'field' || $method === 'accepted' ? array_slice($fields, 0, 1) : $fields);
 			foreach ($checked as $field) {
 				if (!isset($form['fields'][$field])) {
 					$problems[] = self::problem_at('error', $html, $at, "validation.$method checks '$field' but the form has no input named $field");
@@ -1452,10 +1458,19 @@ class raster_inspector {
 		if (controller::is_partial($view)) return array();
 		// a feed (news.rss) is its file's own address
 		$url = cms::page_path($view, $this->ext) ?: '/'.$view;
+		$at = array('file' => self::short($this->theme_dir($theme).'/'.$view), 'line' => 1, 'column' => 1, 'severity' => 'warning');
+		$problems = array();
+		// a 404.html that isn't the site's error page is a page of its own:
+		// /404 answers 200 and the sitemap lists it
+		$name = substr($view, 0, -strlen($this->ext));
+		if (preg_match('/^(403|404|500|503)$/', $name) && (string)config::get('error_document_'.$name) !== $name) {
+			$problems[] = $at + array('message' => "$view answers 200 at /$name and is listed in the sitemap: set config error_document_$name to '$name' so the site answers $name with it");
+		}
 		require_once BASE.'private_paths.php';
-		if (!private_paths::blocked($url)) return array();
-		return array(array('file' => self::short($this->theme_dir($theme).'/'.$view), 'line' => 1, 'column' => 1, 'severity' => 'warning',
-			'message' => "$url is refused by the server (system/private_paths.php keeps config/, models/, data/ and i18n/ private under any folder), so nobody can open this page: give the view another name"));
+		if (private_paths::blocked($url)) {
+			$problems[] = $at + array('message' => "$url is refused by the server (system/private_paths.php keeps config/, models/, data/ and i18n/ private under any folder), so nobody can open this page: give the view another name");
+		}
+		return $problems;
 	}
 
 	// A site model with a bundled model's name replaces it whole: the

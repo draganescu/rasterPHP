@@ -164,7 +164,7 @@ RASTER_ENV=production php demo/seed.php                              # the Roman
 | D11 | cant_be |
 | D12 | accepted |
 | D13 | an application rule (`models/validation/rules/no_links.php`, on the contact form's message) |
-| D14 | not_empty and email_format from older Raster |
+| D14 | one message per broken rule: `field('email', 'required')` and `field('email', 'email')` |
 | D15 | matches |
 | D16 | form_state fills inputs, selects, radios, checkboxes, textareas, never passwords |
 | D17 | success redirects with ?done= and shows the alert |
@@ -333,7 +333,7 @@ RASTER_ENV=production php demo/seed.php                              # the Roman
 | N5 | raster annotations, and --json: the grammar as data |
 | N6 | raster lint --fix repairs spacing and short closing tags, and leaves typos and the rest |
 | N7 | raster deploy --config=apache\|nginx\|caddy |
-| N8 | raster doctor: .htaccess rules, `allow_deprecated` |
+| N8 | raster doctor: .htaccess rules |
 | N9 | `raster export`: pages, items, lists, feeds, the 404 page, assets and every language as static files; what needs PHP is reported |
 | N10 | `print.if.live` / `print.if.static`: forms on the live site, what shows instead in the export; an unwrapped form stops the export |
 | N11 | exporting again writes only files that changed, removes what the site no longer has, and does nothing when nothing changed; a new day always exports again |

@@ -29,7 +29,14 @@ if (PHP_SAPI !== 'cli') exit;
 
 $root = dirname(__DIR__);
 require_once $root.'/system/boot.php';
-boot::$appname = getenv('RASTER_APP') ?: 'application';
+// an app folder index.php would accept, else an error: with a folder that
+// isn't there the app base would be / and the tools would walk the disk (#41)
+$app = getenv('RASTER_APP') ?: 'application';
+if (getenv('RASTER_APP') && (!preg_match('/^[a-z0-9_]+$/', $app) || !is_dir($root.'/'.$app.'/config'))) {
+	fwrite(STDERR, "error: $app/ is not a Raster app folder. Check RASTER_APP.\n");
+	exit(1);
+}
+boot::$appname = $app;
 
 $args = array_slice($argv, 1);
 $command = array_shift($args) ?: 'help';

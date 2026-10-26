@@ -279,11 +279,6 @@ class validation
 		return $this->region(!self::is_empty(self::value($field)), $field, 'accepted');
 	}
 
-	// the names used by older Raster sites
-	function not_empty($field) { return $this->region(!self::is_empty(self::value($field)), $field, 'required'); }
-	function email_format($field) { $v = self::value($field); return $this->region(self::is_empty($v) || !is_array($v) && filter_var(trim((string)$v), FILTER_VALIDATE_EMAIL), $field, 'email'); }
-	function are_the_same($a, $b) { return $this->matches($a, $b); }
-
 	// application rules: application/models/validation/rules/<rule>.php
 	function __call($rule, $args) {
 		// tags inside form N arrive as rule__fN
