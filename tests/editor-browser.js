@@ -814,15 +814,21 @@ async function labelsFit(browser) {
 		// editing, maximum-scale=1 stops it (iOS still lets a person pinch)
 		const viewportTag = () => keysTab.locator('meta[name=viewport]').getAttribute('content');
 		check(/maximum-scale=1/.test(await viewportTag()), 'on iOS, editing stops the zoom into a field as it takes focus: ' + await viewportTag());
+		// off and on again, for a fresh "Editing…" toast
+		for (let i = 0; i < 2; i++) { await host(keysTab).evaluate(h => h.shadowRoot.querySelector('.dock .pill.primary').click()); await keysTab.waitForTimeout(150); }
 		await keysTab.locator('.lede').tap();
 		await keysTab.waitForTimeout(400);
-		const bar = p => host(p).evaluate(h => { const f = h.shadowRoot.querySelector('.format'), k = h.shadowRoot.querySelector('.keys'); return { bottom: f ? Math.round(f.getBoundingClientRect().bottom) : null, moving: k.classList.contains('moving'), dock: getComputedStyle(h.shadowRoot.querySelector('.dock')).visibility }; });
+		const bar = p => host(p).evaluate(h => { const f = h.shadowRoot.querySelector('.format'), k = h.shadowRoot.querySelector('.keys'), t = h.shadowRoot.querySelector('.toast:not(.out)'); return { bottom: f ? Math.round(f.getBoundingClientRect().bottom) : null, moving: k.classList.contains('moving'), dock: getComputedStyle(h.shadowRoot.querySelector('.dock')).visibility, toast: t ? Math.round(t.getBoundingClientRect().top) : null }; });
+		// a toast ("Editing…", "Changed … Undo") sits at the top, clear of the bar
+		const toastTop = await bar(keysTab);
+		check(toastTop.toast !== null && toastTop.toast <= 20, 'on a phone, toasts sit at the top of the screen: ' + JSON.stringify(toastTop));
 		// the keyboard opens and the part that shows has slid down the page
 		await keysTab.evaluate(() => fakeViewport(364, 120));
 		check((await bar(keysTab)).moving, 'while what shows moves, the format bar fades out');
 		await keysTab.waitForTimeout(400);
 		let at = await bar(keysTab);
 		check(!at.moving && Math.abs(at.bottom - (120 + 364 - 8)) <= 2, 'once still, the format bar sits just above the keyboard: ' + JSON.stringify(at));
+		check(at.toast !== null && Math.abs(at.toast - (120 + 10)) <= 2, 'with the keyboard up, a toast sits at the top of what shows: ' + JSON.stringify(at));
 		// the page scrolls under it: out, then back in the same place
 		await keysTab.evaluate(() => window.scrollBy(0, 200));
 		await keysTab.waitForTimeout(50);

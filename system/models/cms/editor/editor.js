@@ -497,6 +497,14 @@
 			'.keys.moving *{pointer-events:none!important}',
 			// a field being typed in on a phone: the dock steps aside
 			'.layer.typing .dock{opacity:0;visibility:hidden;pointer-events:none}',
+			// on a touch screen the toasts sit at the top of what shows, clear of
+			// the formatting bar at the bottom (under the dock when it is up there)
+			'.layer.touch .keys .toasts{left:10px;right:10px;top:calc(10px + env(safe-area-inset-top));bottom:auto;align-items:center}',
+			'.layer.touch.top:not(.typing) .keys .toasts{top:calc(72px + env(safe-area-inset-top))}',
+			'.layer.touch .keys.up .toasts{top:10px}',
+			'.layer.touch .keys .toast{animation-name:drop}',
+			'.layer.touch .keys .toast.out{transform:translateY(-6px)}',
+			'@keyframes drop{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:none}}',
 			'.format.docked button{width:44px;height:44px;border-radius:9px}',
 			'.format.docked input{width:min(220px,calc(100vw - 100px));font-size:16px}',
 			// iOS Safari zooms into a text box under 16px when it takes focus, and
@@ -552,14 +560,14 @@
 		shadow = host.attachShadow({ mode: 'open' });
 		chromeStyle = h('style', { text: chromeStyles(look) });
 		shadow.appendChild(chromeStyle);
-		ui.layer = h('div', { class: 'layer' });
+		ui.layer = h('div', { class: 'layer' + (touch ? ' touch' : '') });
 		shadow.appendChild(ui.layer);
 		ui.floats = h('div');
 		ui.layer.appendChild(ui.floats);
 		ui.keys = h('div', { class: 'keys' });
 		ui.layer.appendChild(ui.keys);
 		ui.toasts = h('div', { class: 'toasts', role: 'status', 'aria-live': 'polite' });
-		ui.layer.appendChild(ui.toasts);
+		(touch ? ui.keys : ui.layer).appendChild(ui.toasts);
 
 		var initial = (C.user.name || '?').trim().charAt(0).toUpperCase();
 		ui.who = h('span', { class: 'who', title: C.user.name, text: initial });
@@ -1113,7 +1121,8 @@
 		if (now === typing) return;
 		typing = now;
 		ui.layer.classList.toggle('typing', typing);
-		if (typing) keysMove(); else keysSettle();
+		// the hello bubble points at the dock, which has just stepped aside
+		if (typing) { closeBubble(); keysMove(); } else keysSettle();
 	}
 	function fitKeys() {
 		var vv = window.visualViewport, style = ui.keys.style;
